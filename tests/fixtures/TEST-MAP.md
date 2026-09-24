@@ -14,6 +14,14 @@
 | N18 连扫两次不造锚                                             | b-face.regressions@B1（部分轮两扫收敛）+recovery.two-pass@两遍式                        | ✅                                        |
 | N18b 新增身份证据才落锚（反面：新终答≠天然归属）               | n18b.evidence@歧义组完整轮不解锁+锚后组内仍歧义                                         | ✅                                        |
 | N18b 正向解除（二扫真证据落锚）                                | b-face.regressions@C1（首扫双暂定→补齐后双 delivered+I2 锚 e2）                         | ✅                                        |
+| N18b 全链正向（首扫产物→journal 重放→二扫，不手填）            | r2.regressions@全链正向样例（newConsumed 落 journal→replayIntents→同判 delivered）      | ✅（二审任务 3 修正：重放链真实衔接）      |
+| R2-01 既有锚同验证（assistant/错文本/跨组共享→unknown+untrusted） | r2.regressions@R2-01×2（三验+全局唯一）                                                | ✅                                        |
+| R2-02 终点更新行（首锚 append-only+新行承载终点）              | r2.regressions@两遍式（I1 双行同锚+最新终点收窄）+recovery.two-pass 同步               | ✅                                        |
+| R2-03 P 排他+区间排他+untrusted 拦水位                          | r2.regressions@R2-03×3（终答在 P 不作证据/候选落他人 C 不落锚/冲突锚不推水位）         | ✅                                        |
+| R2-04 clear 行重放+cancelled 恰一 verdict                      | r2.regressions@R2-04×2（journal 层+recovery 层）                                       | ✅                                        |
+| R2-05 缺 ID/坏行拒绝闭合                                       | protocol/src/session-file.ts（缺 toolCallId return false+corrupt 双表示统一）          | ✅（代码面；行为断言并入 B7/B8）          |
+| R2-06 通知两域（derived 可收口+expired 账本域 done）           | notification.monotonic@expired 独立终态+accountDomainClose（outbox expired→账本 done） | ✅                                        |
+| R2-07 前置条件门（不满足=全部暂定）                             | r2.regressions@R2-07×3（水位身份/外部闩/写者未静止）                                   | ✅                                        |
 | N19 两遍式收敛（A/B 同轮）                                     | recovery.two-pass@两遍式（单遍误拦修）                                                  | ✅                                        |
 | N19b 混合路径（A 自有锚+B 新匹配同轮；A 借不到 B 终答）        | b-face.regressions@N19b（provisional 标记）                                             | ✅                                        |
 | N1-N5/N7-N11/N13/N15-N17（账本行序/接收面/GC 后重投/幂等键等） | 待 journal/通知执行层实现（server 侧）                                                  | 🔴 缺测（服务端未建，非 protocol 面可测） |

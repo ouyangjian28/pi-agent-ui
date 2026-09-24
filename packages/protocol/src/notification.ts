@@ -19,12 +19,32 @@ export interface CloseVerdict {
   readonly reason: string;
 }
 
-/** 三 ACK 收口裁决：仅 started 态三 ACK 齐→done（received/derived 未开栓无收口面；执行终局不替代 ACK）。 */
+/** done 成因（两域口径，二审 R2-06）：acks=三 ACK 齐收口；expired=到期收口映射账本域 done(reason=expired)。 */
+export type DoneReason = "acks" | "expired";
+
+/** 接收账本域终态（二审 R2-06 两域拆分：outbox 域 expired 回执→账本域记 done(reason=expired)；迟到 ACK 不改到期原因）。 */
+export function accountDomainClose(
+  state: NotificationState,
+  doneReason: DoneReason,
+  lateAck: AckSet | null,
+): CloseVerdict {
+  if (state === "done")
+    return {
+      state,
+      closed: false,
+      reason: `terminal: done(reason 已定)——迟到 ACK（channel=${lateAck?.channelAck} present=${lateAck?.presentAck} effect=${lateAck?.effectAck}）不改成因`,
+    };
+  if (doneReason !== "expired") return { state, closed: false, reason: "非到期回执不映射账本域" };
+  if (state !== "expired") return { state, closed: false, reason: `无 expired 回执（现态 ${state}）不映射` };
+  return { state: "done", closed: true, reason: "outbox expired 回执→账本域 done(reason=expired)" };
+}
+
+/** 三 ACK 收口裁决（二审 R2-06：derived 与 started 均可收口——三 ACK 齐即 done；received 未派生无收口面；执行终局不替代 ACK）。 */
 export function closeWithAcks(state: NotificationState, acks: AckSet): CloseVerdict {
   if (state === "done" || state === "expired")
     return { state, closed: false, reason: `terminal: ${state} 已收口（单调，迟到 ACK 不改写）` };
-  if (state !== "started")
-    return { state, closed: false, reason: `未开栓（${state}）无收口面：derived/started 未到，done 需开栓后三 ACK 齐` };
+  if (state === "received")
+    return { state, closed: false, reason: "未派生（received）无收口面：done 需 derived/started 后三 ACK 齐" };
   const all = acks.channelAck && acks.presentAck && acks.effectAck;
   if (!all)
     return {
@@ -54,9 +74,9 @@ export function transition(from: NotificationState, to: NotificationState): stri
   const toIdx = order.indexOf(to);
   if (to === "expired") return null;
   if (to === "done")
-    return from === "started"
-      ? null // 正常收口路径（经 closeWithAcks 裁决三 ACK 齐后落）
-      : `${from} 不得直接 done：收口=开栓后三 ACK 齐（closeWithAcks）或到期（expireWithEvidence）`;
+    return from === "started" || from === "derived"
+      ? null // 正常收口路径（R2-06：derived/started 均可经 closeWithAcks 三 ACK 齐收口；expired 经 accountDomainClose 映射）
+      : `${from} 不得直接 done：收口=derived/started 三 ACK 齐（closeWithAcks）或到期（expireWithEvidence+accountDomainClose）`;
   if (toIdx > fromIdx && toIdx - fromIdx === 1) return null; // 相邻前进
   return `cannot go ${from}→${to}`; // 禁倒退（derived→received 等）+禁跳跃（received→started）
 }

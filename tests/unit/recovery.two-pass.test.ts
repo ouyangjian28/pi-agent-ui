@@ -100,8 +100,12 @@ describe("两遍式调度（十八审②：第一遍身份+消费，第二遍统
     const out = run(entries, [mkIntent("I1", t1, 0), mkIntent("I2", t2, 0)]);
     expect(verdictOf(out, "I1")?.state).toBe("delivered");
     expect(verdictOf(out, "I2")?.state).toBe("delivered");
-    // 双锚已落（十八审①：候选命中+唯一关联成立才落）
-    expect(out.newConsumed.map((c: JournalLine) => (c as { intentId: string }).intentId).sort()).toEqual(["I1", "I2"]);
+    // 双锚已落（十八审①：候选命中+唯一关联成立才落）+R2-02 终点更新行（I1 首扫区间到尾，I2 锚定后收窄→追加同锚新终点）
+    expect(out.newConsumed.map((c: JournalLine) => (c as { intentId: string }).intentId).sort()).toEqual(["I1", "I1", "I2"]);
+    const i1rows = out.newConsumed.filter((c: JournalLine) => (c as { intentId: string }).intentId === "I1") as Extract<JournalLine, { t: "consumed" }>[];
+    expect(i1rows[0]?.anchorEntryId).toBe("u1"); // 首锚不变（append-only）
+    expect(new Set(i1rows.map((r) => r.anchorEntryId)).size).toBe(1); // 同锚
+    expect(i1rows.at(-1)?.intervalEnd.entryId).toBe("a1"); // 最新终点=收窄后（I2 锚前一条）
   });
 
   it("②工具配对：区间内 toolCall 无 toolResult→unknown", () => {

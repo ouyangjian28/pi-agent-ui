@@ -23,6 +23,28 @@ import {
   type SessionEntry,
 } from "./session-file.ts";
 
+/** 恢复前置条件（二审 R2-07：显式输入边界——不得靠 alive=false 默契当终裁授权）。 */
+export interface RecoveryPreconditions {
+  /** 水位身份三元组验证过（会话身份+文件代次+边界 entry 身份匹配）。 */
+  readonly watermarkValid: boolean;
+  /** 文件代次与 journal 记录一致（换代/截短→旧水位作废）。 */
+  readonly fileGenerationMatch: boolean;
+  /** 写者静止（收割完成+静默窗口过；alive=true 时可 false=在飞）。 */
+  readonly writerQuiesced: boolean;
+  /** 外部写者闩（true=终裁永暂定——静默不解除）。 */
+  readonly externalWriterLatched: boolean;
+  /** 轮超时输入（true=在飞轮已超时，sending 可入歧义源判定）。 */
+  readonly roundTimedOut: boolean;
+}
+
+export const defaultPreconditions: RecoveryPreconditions = {
+  watermarkValid: true,
+  fileGenerationMatch: true,
+  writerQuiesced: true,
+  externalWriterLatched: false,
+  roundTimedOut: false,
+};
+
 export interface RecoveryInput {
   /** E：目标分支投影（自水位边界起，原始文件序）。 */
   readonly entries: readonly SessionEntry[];
@@ -32,6 +54,8 @@ export interface RecoveryInput {
   readonly permanentExclusions: ReadonlySet<string>;
   /** 进程活着（true=运行中对账：sending=在飞非歧义源；false=恢复对账：可出终裁）。 */
   readonly alive: boolean;
+  /** 前置条件（R2-07：缺省=全过——测试便利；生产 adapter 必须显式传入实测值，不满足=全部暂定）。 */
+  readonly preconditions?: RecoveryPreconditions;
 }
 
 export type VerdictState = "delivered" | "unknown" | "inflight" | "cancelled" | "pendingGate";
@@ -42,6 +66,8 @@ export interface IntentVerdict {
   readonly reason?: string;
   /** unknown 的暂定/终裁分立（一审 B3）：true=暂定（四联未过，下次扫描可重估——不推水位）；false/缺省=终裁（恢复态可推）。 */
   readonly provisional?: boolean;
+  /** 终裁但不可信（二审 R2-03：锚冲突/锚验证失败——身份证据破裂，禁推进水位禁作排他依据）。 */
+  readonly untrusted?: boolean;
 }
 
 export interface RecoveryOutput {
@@ -119,6 +145,26 @@ function assignIntervals(
 export function runRecovery(input: RecoveryInput): RecoveryOutput {
   const { entries, intents, permanentExclusions, alive } = input;
   const verdicts: IntentVerdict[] = [];
+  // R2-07 前置门：显式输入边界（水位身份/文件代次/写者静止/外部闩/轮超时）——任一不满足=全部暂定，终裁拒绝
+  const pre = input.preconditions ?? defaultPreconditions;
+  const preFailed: string[] = [];
+  if (!pre.watermarkValid) preFailed.push("水位身份验证失败");
+  if (!pre.fileGenerationMatch) preFailed.push("文件代次不匹配");
+  if (!pre.writerQuiesced) preFailed.push("写者未静止");
+  if (pre.externalWriterLatched) preFailed.push("外部写者闩生效");
+  if (pre.roundTimedOut) preFailed.push("轮超时");
+  if (preFailed.length > 0) {
+    return {
+      verdicts: intents.map((j) => ({
+        intentId: j.intentId,
+        state: "unknown" as const,
+        provisional: true,
+        reason: `前置不满足：${preFailed.join("；")}——全部暂定，终裁拒绝（R2-07）`,
+      })),
+      newConsumed: [],
+      watermarkAdvanceTo: null,
+    };
+  }
   const newConsumed: JournalLine[] = []; // 匹配命中即落（D8 身份证据先行耐久）；歧义意图禁落（十八审①）
   const extraAnchors = new Map<IntentId, string>(); // 第一遍新增锚（第二遍③/区间/水位用）
   const pendingFinalCheck: IntentRecord[] = []; // 第二遍待检集合（十八审②：命中/自有证据同入，第一遍不终检）
@@ -150,9 +196,35 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
         });
         continue;
       }
+      // R2-01 既有锚同验证（不绕身份门）：锚条目须=组内 user 条目（role+textHash+attachmentIdentity 三验）
+      // 且全局唯一（无其他意图跨组共享同锚）——失败=unknown+untrusted（终裁但身份证据破裂，禁推水位）
+      const anchorEntry = entries[anchorIdx]!;
+      const anchorOk =
+        anchorEntry.role === "user" &&
+        anchorEntry.textHash === j.matchKey.textHash &&
+        anchorEntry.attachmentIdentity === j.matchKey.attachmentIdentity;
+      const sharedGlobally = intents.some(
+        (m) => m.intentId !== j.intentId && m.consumed?.anchorEntryId === j.consumed!.anchorEntryId,
+      );
+      if (!anchorOk || sharedGlobally) {
+        verdicts.push({
+          intentId: j.intentId,
+          state: "unknown",
+          untrusted: true,
+          reason: !anchorOk
+            ? "既有锚非组内 user 条目（角色/文本/附件不一致）——身份证据破裂（R2-01）"
+            : "既有锚被跨意图共享——全局唯一性破裂（R2-01）",
+        });
+        continue;
+      }
       // B1：不再按 journal 旧终点预检终答——直接过身份门后交第二遍按最新 E 重算（部分轮补齐后可收敛）
       if (groupAmbiguous(group, members, alive)) {
-        verdicts.push({ intentId: j.intentId, state: "unknown", reason: "组内歧义：占用证据≠身份证明" });
+        verdicts.push({
+          intentId: j.intentId,
+          state: "unknown",
+          untrusted: true,
+          reason: "组内歧义：占用证据≠身份证明（身份冲突不推水位——R2-03）",
+        });
         continue;
       }
       pendingFinalCheck.push(j);
@@ -164,7 +236,8 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
       verdicts.push({
         intentId: j.intentId,
         state: "unknown",
-        reason: "组内歧义（数量相等亦查唯一关联）：不落耐久记录",
+        untrusted: true,
+        reason: "组内歧义（数量相等亦查唯一关联）：不落耐久记录（R2-03：身份冲突不推水位）",
       });
       continue;
     }
@@ -186,7 +259,16 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
       const a = extraAnchors.get(m.intentId) ?? m.consumed?.anchorEntryId;
       if (a) occupied.add(a);
     }
-    if (occupied.has(rawIdxK.entryId) || permanentExclusions.has(rawIdxK.entryId)) {
+    // R2-03 既有 C 区间排他：候选落在其他意图既有消费区间内→不得落新锚
+    const coveredByExisting = intents.some((m) => {
+      if (m.intentId === j.intentId || !m.consumed) return false;
+      const aIdx = entries.findIndex((e) => e.entryId === m.consumed!.anchorEntryId);
+      if (aIdx < 0) return false;
+      const cIdx = entries.findIndex((e) => e.entryId === m.consumed!.intervalEnd.entryId);
+      const last = cIdx >= aIdx ? cIdx : entries.length - 1;
+      return entries.slice(aIdx, last + 1).some((e) => e.entryId === rawIdxK.entryId);
+    });
+    if (coveredByExisting || occupied.has(rawIdxK.entryId) || permanentExclusions.has(rawIdxK.entryId)) {
       verdicts.push({
         intentId: j.intentId,
         state: alive ? "inflight" : "unknown",
@@ -246,7 +328,7 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
       });
       continue;
     }
-    const c1 = intervalClosedByFinalAnswer(entries, anchorId, iv.endId);
+    const c1 = intervalClosedByFinalAnswer(entries, anchorId, iv.endId, permanentExclusions);
     if (!c1) {
       verdicts.push({
         intentId: j.intentId,
@@ -277,6 +359,20 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
     }
     verdicts.push({ intentId: j.intentId, state: "delivered", reason: "四联⓪①②③全过（区间按最新 E 重算）" });
   }
+  // R2-02 终点更新行：第二遍 intervals 若与第一遍落行终点不同→追加同锚新终点行（首锚 append-only 不变；重放与终检同一结果）
+  for (const [iid, anchorId] of allAnchorIds) {
+    const first = newConsumed.find((c) => c.t === "consumed" && c.intentId === iid);
+    if (!first || first.t !== "consumed") continue;
+    const iv = intervals.get(anchorId);
+    if (iv && iv.endId !== first.intervalEnd.entryId) {
+      newConsumed.push({
+        t: "consumed",
+        intentId: iid,
+        anchorEntryId: anchorId, // 首锚不变
+        intervalEnd: { entryId: iv.endId, lengthHash: "" }, // 终点更新新行承载
+      });
+    }
+  }
   // 未进入终检的歧义/超界意图无 newConsumed（禁落耐久锚——十八审①）；自有证据意图不重复落行。
 
   // B9：clear 前置分派（第二遍后四分支——执行侧；通知侧独立按三 ACK/expired 判，不在此面）
@@ -289,15 +385,12 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
       verdicts.push({ intentId: j.intentId, state: "cancelled", reason: "clear 重放：身份确定+执行未终局→cancelled" });
       continue; // 分支②
     }
-    const groupKey = `${j.matchKey.textHash}|${j.matchKey.attachmentIdentity}`;
-    const members = membersByGroup.get(groupKey)!;
-    const ambiguous = members.filter((m) => !m.cancelled).length >= 2;
-    if (ambiguous) continue; // 分支①：身份不确定组——保留 unknown（已在第一遍落判），不落 cancelled
-    verdicts.push({
-      intentId: j.intentId,
-      state: "cancelled",
-      reason: "clear 重放：无锚且组内无歧义→执行未消费，取消有效",
-    });
+    if (existing) {
+      // R2-04 修：已有判决（锚验证失败/歧义）——保留原判（分支①身份不确定），执行侧取消另记，不覆盖身份结论
+      verdicts.push({ intentId: j.intentId, state: "cancelled", reason: "clear 重放：身份不确定保留原判（分支①），执行侧取消仍记" });
+      continue;
+    }
+    verdicts.push({ intentId: j.intentId, state: "cancelled", reason: "clear 重放：无锚（未消费）→取消有效" });
   }
 
   // 水位推进（B3）：逐意图序，delivered 或恢复态终裁 unknown（有锚）才推进；用重算终点；cancelled 跳过；遇未决停。
@@ -306,6 +399,7 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
     const v = verdicts.find((x) => x.intentId === j.intentId);
     if (!v) break; // 未判决=未决→停
     if (v.state === "cancelled") continue; // 跳过（无消费终点）
+    if (v.untrusted) break; // R2-03：身份证据破裂——禁推进（不可信终裁不越过）
     const a = anchorOf(j);
     const terminal =
       v.state === "delivered" || (v.state === "unknown" && !alive && a !== undefined && v.provisional !== true); // 恢复态终裁可推；暂定（四联未过/运行态）不推

@@ -74,6 +74,15 @@ export function replayIntents(lines: readonly JournalLine[], sessionId: SessionI
       enqueueOrder.push(line.intentId);
       continue;
     }
+    // clear 行（二审 R2-04：重放不可达修——clear_queue 响应行直接分派 cancelled，非预填布尔）
+    if (line.t === "clear") {
+      if (line.sessionId !== sessionId) continue;
+      for (const cid of line.cleared) {
+        const rec = byId.get(cid);
+        if (rec) byId.set(cid, { ...rec, cancelled: true });
+      }
+      continue;
+    }
     const rec = byId.get((line as { intentId?: IntentId }).intentId ?? "");
     if (!rec) continue;
     switch (line.t) {

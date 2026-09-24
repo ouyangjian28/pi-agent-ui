@@ -30,19 +30,27 @@ export function fileTailSatisfiesClauseZero(last: SessionEntry): boolean {
   return last.role === "assistant" && (last.stopReason === "stop" || last.stopReason === "length");
 }
 
+/** 判定 entry 是否终答（stop/length）。 */
+function isFinalAnswer(e: SessionEntry): boolean {
+  return e.role === "assistant" && (e.stopReason === "stop" || e.stopReason === "length");
+}
+
+function entryCorrupt(e: SessionEntry): boolean {
+  return e.corrupt === true || e.role === ("corrupt" as SessionEntry["role"]); // R2-05：双表示统一拦截
+}
+
 /** ①意图级区间闭合：意图区间（[锚,边界) 半开右排他——下一意图锚或文件尾）内存在终答 assistant。
  * 区间限定：不得借用下一意图的终答（八审场景：A 区间内只有 ua，B 的 ab 不得为 A 作证）。 */
 export function intervalClosedByFinalAnswer(
   entries: readonly SessionEntry[],
   userEntryId: string,
   intervalEndId: string,
+  excluded?: ReadonlySet<string>,
 ): boolean {
   const idx = entries.findIndex((e) => e.entryId === userEntryId);
   const end = entries.findIndex((e) => e.entryId === intervalEndId);
   if (idx < 0 || end < idx) return false;
-  return entries
-    .slice(idx + 1, end + 1)
-    .some((e) => e.role === "assistant" && (e.stopReason === "stop" || e.stopReason === "length"));
+  return entries.slice(idx + 1, end + 1).some((e) => isFinalAnswer(e) && !excluded?.has(e.entryId));
 }
 
 /** ②区间全配对：区间内全部 toolCall 按 toolCallId 与 toolResult 一一配对（开工轮一审 B7：多重集配对——重复 id 按次数消费，缺 id 不跳过，只 result 无 call=false）。
@@ -58,10 +66,13 @@ export function intervalToolCallsPaired(
   const calls: string[] = [];
   const results: string[] = [];
   for (const e of entries.slice(start, end + 1)) {
-    if (e.corrupt) return false; // 区间内坏行=归属证据不完整（一审 B8）
-    if (e.toolCallId === undefined) continue;
-    if (e.role === "toolCall") calls.push(e.toolCallId);
-    if (e.role === "toolResult") results.push(e.toolCallId);
+    if (entryCorrupt(e)) return false; // 区间内坏行=归属证据不完整（一审 B8；R2-05 双表示统一）
+    if (e.role === "toolCall" || e.role === "toolResult") {
+      if (e.toolCallId === undefined || e.toolCallId === "")
+        return false; // R2-05：缺有效 ID 的工具条目=不可判定，拒绝闭合
+      if (e.role === "toolCall") calls.push(e.toolCallId);
+      else results.push(e.toolCallId);
+    }
   }
   if (calls.length === 0 && results.length > 0) return false; // 孤立 result（一审 B 反例⑤）
   if (calls.length === 0) return true; // 无工具轮=空配对成立

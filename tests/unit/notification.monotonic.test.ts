@@ -1,6 +1,6 @@
 // 十九审开工首序④：通知终态单调性——done 先落迟到 started 不降回（§17 接收账本）
 import { describe, expect, it } from "vitest";
-import { closeWithAcks, expireWithEvidence, lateReplayAfterDone, transition } from "@pi-agent-ui/protocol";
+import { accountDomainClose, closeWithAcks, expireWithEvidence, lateReplayAfterDone, transition } from "@pi-agent-ui/protocol";
 
 describe("通知状态机跃迁合法性（三 ACK 分立+单调性）", () => {
   it("主线相邻前进合法：received→derived→started→done", () => {
@@ -36,8 +36,12 @@ describe("通知状态机跃迁合法性（三 ACK 分立+单调性）", () => {
       state: "done",
       closed: true,
     });
-    expect(closeWithAcks("derived", { channelAck: true, presentAck: true, effectAck: true }).closed).toBe(false); // 未开栓
+    expect(closeWithAcks("derived", { channelAck: true, presentAck: true, effectAck: true })).toMatchObject({ state: "done", closed: true }); // R2-06：derived 亦可收口（三 ACK 齐）
     expect(closeWithAcks("received", { channelAck: true, presentAck: true, effectAck: true }).closed).toBe(false); // 未派生
+    // R2-06 两域：outbox expired 回执→账本域 done(reason=expired)；迟到 ACK 不改成因
+    expect(accountDomainClose("expired", "expired", null)).toMatchObject({ state: "done", closed: true });
+    expect(accountDomainClose("done", "expired", { channelAck: true, presentAck: true, effectAck: true }).closed).toBe(false); // done 后迟到 ACK 不改成因
+    expect(accountDomainClose("started", "expired", null).closed).toBe(false); // 无 expired 回执不映射
     expect(closeWithAcks("done", { channelAck: true, presentAck: true, effectAck: true }).closed).toBe(false); // 终态单调
   });
 });
