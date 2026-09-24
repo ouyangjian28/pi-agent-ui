@@ -172,6 +172,11 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
     membersByGroup.set(k, arr);
   }
 
+  // 四审①+五审必修1：历史终局集合（delivered/settled 重放）——提前收集（第一遍引用：无 clear 的历史终局如数输出不入待终检；第二遍区间/水位隔离同用）
+  const finalizedIds = new Set(
+    intents.filter((j) => j.lastVerdict === "delivered" || j.lastVerdict === "settled").map((j) => j.intentId),
+  );
+
   // 四审③：预扫锚验证——第一遍排他/区间首算只使用可信既有证据（错锚不得挡住他人合法候选）
   const untrustedEarly = new Set<IntentId>();
   for (const j of intents) {
@@ -225,6 +230,16 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
           reason: !anchorOk
             ? "既有锚非组内 user 条目（角色/文本/附件不一致）——身份证据破裂（R2-01）"
             : "既有锚被跨意图共享——全局唯一性破裂（R2-01）",
+        });
+        continue;
+      }
+      // 五审必修1：无 clear 的历史终局（delivered/settled 重放）——如数输出历史终局，不进待终检队列
+      // （finalizedIds 已把该锚排除出区间重算/更新行/水位——若入队会因无区间映射降级 unknown=历史终局丢失）
+      if (finalizedIds.has(j.intentId)) {
+        verdicts.push({
+          intentId: j.intentId,
+          state: "delivered", // settled 蕴含执行终局——恢复面统一报 delivered
+          reason: `历史终局如数输出（${j.lastVerdict}，无 clear）——证据定格，不重算不更新不推水位`,
         });
         continue;
       }
@@ -317,11 +332,6 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
   // 反例Ⓒ：I2 未消费未取消→I1 不得 delivered）
   // 三审③：可信锚与不可信引用分立——untrusted（锚验证失败/歧义/冲突）意图的锚不进区间分割、不占排他位、不作静止依据
   const untrustedIds = new Set(verdicts.filter((v) => v.untrusted).map((v) => v.intentId));
-  // 四审①：历史终局（delivered/settled 重放）意图=证据定格——不参与区间重算/终点更新/水位推进
-  //（cancelled 意图跳过身份验证与终检，其区间扩展+水位授权=未经终检验证的新尾部被消费——反例：delivered+clear 后新增 x）
-  const finalizedIds = new Set(
-    intents.filter((j) => j.lastVerdict === "delivered" || j.lastVerdict === "settled").map((j) => j.intentId),
-  );
   const queueQuiesced = intents.every(
     (j) =>
       j.cancelled ||

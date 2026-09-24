@@ -7,7 +7,7 @@
 
 | 编号                                                           | 断言落点                                                                                | 状态                                      |
 | -------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------- |
-| N6 迟到重投墓碑                                                | notification.monotonic@迟到重投墓碑（done/derived 拒绝再派生）+r4.regressions@四审⑤（expired 经 accountDomainClose 收口后 closed=false 拒再派生） | ✅（四审⑤补 expired 面）|
+| N6 迟到重投墓碑                                                | notification.monotonic@迟到重投墓碑（done/derived 拒绝再派生；expired 终态拒绝再派生=lateReplayAfterDone 已断言）——注意：收口幂等≠重投拒绝，二者分立断言 | 🟡（expired 收口后重投直断未单列——挂 N6 补测）|
 | N12 三 ACK 分立                                                | notification.monotonic@done 收口裁决（零/二缺一/三齐/未开栓/终态单调）                  | ✅                                        |
 | N12b expired 独立收口                                          | notification.monotonic@expired 独立终态（证据驱动+迟到 ACK 不升 done）                  | ✅                                        |
 | N14 done 单调（迟到 started 不降）                             | notification.monotonic@主线跃迁+done 单调                                               | ✅                                        |
@@ -32,6 +32,7 @@
 | 四审① 历史 delivered+clear 不授权新增尾部（证据定格）          | r4.regressions@四审①（区间不扩展到 x+无更新行+水位 null）                            | ✅                                        |
 | 四审③ untrusted 不占候选排他位（预扫）                          | r4.regressions@四审③×2（[B,A]/[A,B] 双顺序：B 错锚不挡 A 落锚）                      | ✅                                        |
 | 四审④ 超时开终裁窗（终裁 vs 暂定区分）                          | r4.regressions@四审④（同文本组歧义→untrusted 终裁+单意图完整轮 delivered 正例）      | ✅                                        |
+| 五审① 无 clear 历史终局不降级                                  | r4.regressions@五审①×2（delivered/settled 无 clear：如数输出 delivered+无更新行+水位 null） | ✅                                        |
 | 变异验证（四审轮）                                              | 删 finalizedIds 隔离→四审①挂；删 untrustedEarly 占位过滤→四审③×2 挂；还原 68/68    | ✅                                        |
 | 三审⑥ R2-03 区间排他真命中（候选在他人既有 C 区间内不落锚）    | r3.regressions@三审⑥ 区间排他段（组内两 user 真命中——旧用例走超界分支已弃）          | ✅                                        |
 | N18b 防御断言（首扫落锚+重放锚存在+二扫不重落锚）              | r3.regressions@三审② 内嵌（newConsumed=1+锚存在+仅更新行）                           | ✅                                        |
@@ -54,7 +55,7 @@
 | 八审水位不吞未决               | identity-gate@水位不吞（A 未决 B 完成水位停）                                  | ✅   |
 | 十一审①原始序号禁重编          | identity-gate@原始序号（运行态取法 e2 非 e3）                                  | ✅   |
 | 十八审①数量相等歧义不落锚      | identity-gate@数量相等+组级 unknown                                            | ✅   |
-| clear 四分支（B9）             | recovery 两遍后分派+分支③不改写=r3.regressions@三审①（delivered+clear 保持 delivered 如数输出）；其余支代码面 | ✅（③有断言；①②④支断言 🟡 并入 N19 系）|
+| clear 四分支（B9）             | 分支③不改写=r3@三审①（delivered+clear 保持 delivered）✅；①身份不确定/②执行未终局取消/④通知独立支=代码面无逐支断言 🟡（并入 N19 系补测） | 🟡（③✅；①②④🟡）|
 
 ## 变异验证（二审建议：删保护后测试须失败）
 

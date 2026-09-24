@@ -81,6 +81,41 @@ describe("四审① 历史 delivered+clear 不授权新增尾部（证据定格�
   });
 });
 
+describe("五审① 无 clear 的历史终局不降级（如数输出+证据定格）", () => {
+  const t = "文本A";
+  const mkJournal = (): JournalLine[] => [
+    {
+      t: "enqueue",
+      intentId: "A",
+      sessionId: "s1",
+      generation: 1,
+      leafId: "l1",
+      matchKey: matchKeyOf(t, [], 0),
+      payload: { kind: "prompt", rawText: t, attachments: [], sentAt: "" },
+    },
+    { t: "consumed", intentId: "A", anchorEntryId: "u1", intervalEnd: { entryId: "a1", lengthHash: "" } },
+  ];
+  it("delivered 无 clear：保持 delivered，不进待终检（不降级 unknown）", () => {
+    const lines = [...mkJournal(), { t: "delivered", intentId: "A" } as JournalLine]; // 无 clear 行
+    const A = replayIntents(lines, "s1").get("A")!;
+    expect(A.lastVerdict).toBe("delivered");
+    expect(A.cancelled).toBe(false);
+    const out = run([e("u1", "user", t), e("a1", "assistant", "答", { stopReason: "stop" })], [A]);
+    expect(vOf(out, "A")?.state).toBe("delivered"); // 五审反例：此前被降级 unknown「区间分配失败」
+    expect(out.newConsumed).toHaveLength(0); // 无更新行
+    expect(out.watermarkAdvanceTo).toBeNull(); // 不推水位（证据定格）
+  });
+  it("settled 无 clear：统一报 delivered（settled 蕴含执行终局）", () => {
+    const lines = [...mkJournal(), { t: "settled", intentId: "A" } as JournalLine];
+    const A = replayIntents(lines, "s1").get("A")!;
+    expect(A.lastVerdict).toBe("settled");
+    const out = run([e("u1", "user", t), e("a1", "assistant", "答", { stopReason: "stop" })], [A]);
+    expect(vOf(out, "A")?.state).toBe("delivered"); // 恢复面统一口径
+    expect(out.newConsumed).toHaveLength(0);
+    expect(out.watermarkAdvanceTo).toBeNull();
+  });
+});
+
 describe("四审③ untrusted 不占候选排他位（第一遍预扫）", () => {
   const entries = [e("uA", "user", "文本A"), e("aA", "assistant", "答A", { stopReason: "stop" })];
   const mkBWrongAnchor = (): IntentRecord =>
