@@ -172,6 +172,22 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
     membersByGroup.set(k, arr);
   }
 
+  // 四审③：预扫锚验证——第一遍排他/区间首算只使用可信既有证据（错锚不得挡住他人合法候选）
+  const untrustedEarly = new Set<IntentId>();
+  for (const j of intents) {
+    if (!j.consumed) continue;
+    const aIdx = entries.findIndex((e) => e.entryId === j.consumed!.anchorEntryId);
+    if (aIdx < 0) {
+      untrustedEarly.add(j.intentId); // 锚缺失=引用破裂
+      continue;
+    }
+    const aEntry = entries[aIdx]!;
+    const ok =
+      aEntry.role === "user" && aEntry.textHash === j.matchKey.textHash && aEntry.attachmentIdentity === j.matchKey.attachmentIdentity;
+    const shared = intents.some((m) => m.intentId !== j.intentId && m.consumed?.anchorEntryId === j.consumed!.anchorEntryId);
+    if (!ok || shared) untrustedEarly.add(j.intentId);
+  }
+
   // 第一遍（身份与消费，逐意图串行；cancelled 意图参与身份门（占组员额）但不匹配——分派在第二遍后）
   for (const j of intents) {
     const groupKey = `${j.matchKey.textHash}|${j.matchKey.attachmentIdentity}`;
@@ -189,7 +205,7 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
           untrusted: true, // 三审③：锚缺失=引用破裂——不可信，禁作分区依据禁被水位跨越
           reason: "锚不在当前投影（水位/分支不一致）——降级待重估（untrusted）",
         });
-        continue;
+        continue; // 四审③：untrustedEarly 预扫已同步标记（排他不挡他人）
       }
       // R2-01 既有锚同验证（不绕身份门）：锚条目须=组内 user 条目（role+textHash+attachmentIdentity 三验）
       // 且全局唯一（无其他意图跨组共享同锚）——失败=unknown+untrusted（终裁但身份证据破裂，禁推水位）
@@ -251,12 +267,13 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
       continue;
     }
     for (const m of intents) {
+      if (untrustedEarly.has(m.intentId)) continue; // 四审③：不可信锚不占候选位
       const a = extraAnchors.get(m.intentId) ?? m.consumed?.anchorEntryId;
       if (a) occupied.add(a);
     }
     // R2-03 既有 C 区间排他：候选落在其他意图既有消费区间内→不得落新锚
     const coveredByExisting = intents.some((m) => {
-      if (m.intentId === j.intentId || !m.consumed) return false;
+      if (m.intentId === j.intentId || !m.consumed || untrustedEarly.has(m.intentId)) return false; // 四审③：不可信区间不排他
       const aIdx = entries.findIndex((e) => e.entryId === m.consumed!.anchorEntryId);
       if (aIdx < 0) return false;
       const cIdx = entries.findIndex((e) => e.entryId === m.consumed!.intervalEnd.entryId);
@@ -276,6 +293,7 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
     extraAnchors.set(j.intentId, rawIdxK.entryId);
     const curAnchors = new Map<IntentId, string>();
     for (const m of intents) {
+      if (untrustedEarly.has(m.intentId)) continue; // 四审③：首算区间只用可信锚
       const a = extraAnchors.get(m.intentId) ?? m.consumed?.anchorEntryId;
       if (a) curAnchors.set(m.intentId, a);
     }
@@ -299,6 +317,11 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
   // 反例Ⓒ：I2 未消费未取消→I1 不得 delivered）
   // 三审③：可信锚与不可信引用分立——untrusted（锚验证失败/歧义/冲突）意图的锚不进区间分割、不占排他位、不作静止依据
   const untrustedIds = new Set(verdicts.filter((v) => v.untrusted).map((v) => v.intentId));
+  // 四审①：历史终局（delivered/settled 重放）意图=证据定格——不参与区间重算/终点更新/水位推进
+  //（cancelled 意图跳过身份验证与终检，其区间扩展+水位授权=未经终检验证的新尾部被消费——反例：delivered+clear 后新增 x）
+  const finalizedIds = new Set(
+    intents.filter((j) => j.lastVerdict === "delivered" || j.lastVerdict === "settled").map((j) => j.intentId),
+  );
   const queueQuiesced = intents.every(
     (j) =>
       j.cancelled ||
@@ -307,7 +330,7 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
   // 区间重算（B4 同一函数）：既有锚+新增锚一起分配（仅 trusted）
   const allAnchorIds = new Map<IntentId, string>();
   for (const j of intents) {
-    if (untrustedIds.has(j.intentId)) continue;
+    if (untrustedIds.has(j.intentId) || finalizedIds.has(j.intentId)) continue; // 四审①：终局意图不进重算
     const a = extraAnchors.get(j.intentId) ?? j.consumed?.anchorEntryId;
     if (a) allAnchorIds.set(j.intentId, a);
   }
@@ -414,6 +437,7 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
   // 水位推进（B3）：逐意图序，delivered 或恢复态终裁 unknown（有锚）才推进；用重算终点；cancelled 跳过；遇未决停。
   let advanceTo: EntryIdentity | null = null;
   for (const j of intents) {
+    if (finalizedIds.has(j.intentId)) continue; // 四审①：历史终局水位已定格（本轮不推不拦）
     const v = verdicts.find((x) => x.intentId === j.intentId);
     if (!v) break; // 未判决=未决→停
     if (v.state === "cancelled") continue; // 跳过（无消费终点）

@@ -17,7 +17,7 @@ export interface CloseVerdict {
   readonly state: NotificationState;
   readonly closed: boolean;
   readonly reason: string;
-  /** 三审⑤：结构化收口成因（closed=true 时必带；acks=三 ACK 齐 / expired=到期映射账本域）——不靠 reason 字符串判。 */
+  /** 三审⑤：结构化收口成因——账本域 done 收口成功必带（acks=三 ACK 齐 / expired=到期映射）；expireWithEvidence 的 closed=true 是 outbox 域终态回执、不带 doneReason（跨域映射走 accountDomainClose）。不靠 reason 字符串判。 */
   readonly doneReason?: DoneReason;
 }
 
