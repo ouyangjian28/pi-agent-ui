@@ -1,28 +1,33 @@
-# pi-console
+# pi-agent-ui
 
-> Web console for the [pi coding agent](https://github.com/earendil-works/pi) — run multiple isolated agent sessions from your browser.
+**Unofficial** web interface for the [pi coding agent](https://github.com/earendil-works/pi-coding-agent) — not affiliated with the pi project.
 
-🚧 In active development — first release coming soon.
+A self-hosted web workspace that drives pi from your browser:
 
-## Highlights
+- **Desktop form**: multi-tab IDE-style workspace — session tree sidebar, status bar, command palette (rolling in)
+- **Mobile form**: Telegram-style two-level chat — phone is a first-class target, not an afterthought
+- **Every session spawns an isolated `pi --mode rpc` process** — RPC direct-drive over the official protocol; one process per session, so a crash in one never touches another
+- **Zero-silent-loss delivery** — every prompt is journaled to disk before dispatch; after a crash, the reconciliation pass tells you exactly what was sent, in-flight, or interrupted. Nothing is silently dropped
+- **Multi-writer safety** — sessions are visible to both the terminal and the web UI; view-then-takeover semantics prevent two writers from ever corrupting a session file
 
-- 🔒 **Isolated sessions** — each session spawns its own `pi --mode rpc` process; refreshes and crashes never lose your conversation
-- 🖥️ **Desktop workbench** — VS Code-style multi-tab UI with session tree, plus a Telegram-style mobile chat view
-- 👀 **Full-chain observability** — traces, token cost analytics, context assembly inspection
-- 🧩 **Plugin kernel** — TUI plugin slots with web-native panels
-- 🤝 **Interops with the TUI** — session files are the single source of truth; see and resume TUI sessions from the web
+> **Status: developing.** M1 (session core: list / resume / streaming / steer / interrupt / extension dialogs / mobile) is specced and under construction. See [ROADMAP.md](ROADMAP.md) and [docs/m1-design.md](docs/m1-design.md).
 
-## Roadmap
-
-- **v1**: web console (desktop workbench + mobile chat)
-- later: desktop app / VS Code extension attaching to the same server — the architecture is client-agnostic by design
-
-## Install (coming soon)
+## Install (when released)
 
 ```bash
-npm i -g pi-console
+npm i -g pi-agent-ui
 ```
 
----
+Currently pre-release; the design docs above describe what is being built.
 
-*Unofficial community project — not affiliated with the pi project.*
+## Why
+
+The pi ecosystem has strong web UIs already. This project exists because:
+
+1. **Mobile-first**: most existing options treat mobile as a shrink-to-fit desktop. This one is designed Telegram-first for phones.
+2. **Crash-honest architecture**: process supervision, journal reconciliation and single-writer semantics are first-class design pillars (see design doc), not best-effort flags.
+3. It's also a public engineering showcase: architecture decisions and trade-offs are documented in the open.
+
+## License
+
+MIT
