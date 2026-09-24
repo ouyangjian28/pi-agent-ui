@@ -14,9 +14,11 @@ export interface PiChildHandlers {
   onExit(code: number | null, signal: string | null): void;
 }
 
-/** spawn pi（--mode json：stdout=JSONL 事件流）。 */
+/** spawn pi（--mode json：stdout=JSONL 事件流；stdin 立即 EOF——否则 readPipedStdin 等 stdin 数据挂死零输出）。 */
 export function spawnPi(args: readonly string[], h: PiChildHandlers): ChildProcessWithoutNullStreams {
   const child = spawn("pi", [...args, "--mode", "json"], { stdio: ["pipe", "pipe", "pipe"] });
+  child.stdin.end(); // EOF 必给（main.ts readPipedStdin 等管道数据直到 EOF；不给=挂死）
+  // 超时保护=父进程自己 kill 计时器（勿用 shell timeout 包裹——pi 权限系统 wrapper floor 会拦）
   attachPumps(child, h);
   return child;
 }
