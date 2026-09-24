@@ -146,6 +146,8 @@ describe("六审① 历史终局+同组未收口 sending：歧义优先于直输
     const out = run([e("u1", "user", t), e("a1", "assistant", "答", { stopReason: "stop" })], [A, mkB()]);
     expect((vOf(out, "A") as { untrusted?: boolean }).untrusted).toBe(true);
     expect(vOf(out, "A")?.state).toBe("unknown");
+    expect(out.newConsumed).toHaveLength(0); // 七审建议：与 delivered 用例对齐
+    expect(out.watermarkAdvanceTo).toBeNull();
   });
 });
 
