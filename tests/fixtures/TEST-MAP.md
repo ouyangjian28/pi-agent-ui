@@ -37,6 +37,7 @@
 | W1a 在飞接管=转接（无双写者）                                   | writer-authority.test@W1a（进程存活转接：signal 未调用=不停进程不 spawn） | ✅（逻辑面）|
 | W1b SIGKILL 未退出（截止冻结+核验转正）                        | writer-authority.test@W1b×2（全链 frozen→核验→可接管+正常 confirmExit）+frozen 期命令拒 | ✅（逻辑面）|
 | opId 通用命令去重（占位/缓存/不同参拒/崩溃闭环）               | command-dedup.test@6（admitted/cached/different-args/unknown-effect 重放/24h sweep/无占位 settle） | ✅（逻辑面）|
+| 会话列表扫描（§6 查看≠接管：标题/排序/坏行/缺目录/watch）      | session-list.test@6（tmpdir 真测：倒序+首个 user 标题+撕裂尾跳过+(无标题)+空目录+titleMax 截断+fs.watch 新文件） | ✅（真 IO 面）|
 | 六审① 历史终局+同组 sending 歧义优先                           | r4.regressions@六审①×2（delivered/settled+B 同组 sending→unknown+untrusted 非直输出） | ✅（变异验证：换回旧顺序→两用例挂）      |
 | 变异验证（四审轮）                                              | 删 finalizedIds 隔离→四审①挂；删 untrustedEarly 占位过滤→四审③×2 挂；还原 68/68    | ✅                                        |
 | 三审⑥ R2-03 区间排他真命中（候选在他人既有 C 区间内不落锚）    | r3.regressions@三审⑥ 区间排他段（组内两 user 真命中——旧用例走超界分支已弃）          | ✅                                        |
