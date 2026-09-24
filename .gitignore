@@ -12,3 +12,7 @@ packages/protocol/src/*.js
 packages/protocol/src/*.js.map
 packages/protocol/src/*.d.ts
 packages/protocol/src/*.d.ts.map
+
+# 生成物（tsconfig.tsbuildinfo/apps 构建产物）
+*.tsbuildinfo
+apps/*/dist/

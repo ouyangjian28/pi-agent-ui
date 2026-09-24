@@ -15,10 +15,10 @@ export default tseslint.config(
   },
   ...tseslint.configs.recommended.map((c) => ({
     ...c,
-    files: ["**/*.ts"],
+    files: ["**/*.ts", "**/*.tsx"],
   })),
   {
-    files: ["**/*.ts"],
+    files: ["**/*.ts", "**/*.tsx"],
     rules: {
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
     },
