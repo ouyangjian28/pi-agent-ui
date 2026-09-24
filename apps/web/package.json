@@ -3,7 +3,21 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "scripts": { "build": "tsc --noEmit && vite build", "dev": "vite --host 127.0.0.1" },
-  "dependencies": { "react": "^19.2.0", "react-dom": "^19.2.0", "@tanstack/react-virtual": "^3.13.12" },
-  "devDependencies": { "vite": "^8.0.0", "@types/react": "^19.2.0", "@types/react-dom": "^19.2.0", "@testing-library/react": "^16.3.0", "@testing-library/user-event": "^14.6.1", "jsdom": "^27.0.0" }
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "dev": "vite --host 127.0.0.1"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "@tanstack/react-virtual": "^3.13.12"
+  },
+  "devDependencies": {
+    "vite": "^8.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "jsdom": "^27.0.0"
+  }
 }
