@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+.DS_Store
+# 独立测试数据目录（tests 不入 git 的是运行产物；fixtures 入 git）
+tests/data/
