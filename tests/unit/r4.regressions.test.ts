@@ -116,6 +116,39 @@ describe("五审① 无 clear 的历史终局不降级（如数输出+证据定�
   });
 });
 
+describe("六审① 历史终局+同组未收口 sending：歧义优先于直输出", () => {
+  const t = "文本A";
+  const histLines = (final: JournalLine): JournalLine[] => [
+    {
+      t: "enqueue",
+      intentId: "A",
+      sessionId: "s1",
+      generation: 1,
+      leafId: "l1",
+      matchKey: matchKeyOf(t, [], 0),
+      payload: { kind: "prompt", rawText: t, attachments: [], sentAt: "" },
+    },
+    { t: "consumed", intentId: "A", anchorEntryId: "u1", intervalEnd: { entryId: "a1", lengthHash: "" } },
+    final,
+  ];
+  const mkB = (): IntentRecord => mkIntent("B", t, 1, { sending: true }); // 同文本组未收口 sending（无 consumed）
+  it("delivered+B 同组 sending：A 不直输出，歧义判 unknown+untrusted", () => {
+    const A = replayIntents(histLines({ t: "delivered", intentId: "A" }), "s1").get("A")!;
+    const out = run([e("u1", "user", t), e("a1", "assistant", "答", { stopReason: "stop" })], [A, mkB()]);
+    const vA = vOf(out, "A") as { state: string; untrusted?: boolean };
+    expect(vA.state).toBe("unknown"); // 六审反例：此前直输出 delivered 绕过组歧义
+    expect(vA.untrusted).toBe(true);
+    expect(out.newConsumed).toHaveLength(0);
+    expect(out.watermarkAdvanceTo).toBeNull();
+  });
+  it("settled+B 同组 sending：同判 unknown+untrusted", () => {
+    const A = replayIntents(histLines({ t: "settled", intentId: "A" }), "s1").get("A")!;
+    const out = run([e("u1", "user", t), e("a1", "assistant", "答", { stopReason: "stop" })], [A, mkB()]);
+    expect((vOf(out, "A") as { untrusted?: boolean }).untrusted).toBe(true);
+    expect(vOf(out, "A")?.state).toBe("unknown");
+  });
+});
+
 describe("四审③ untrusted 不占候选排他位（第一遍预扫）", () => {
   const entries = [e("uA", "user", "文本A"), e("aA", "assistant", "答A", { stopReason: "stop" })];
   const mkBWrongAnchor = (): IntentRecord =>

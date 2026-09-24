@@ -233,6 +233,18 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
         });
         continue;
       }
+      // B1：不再按 journal 旧终点预检终答——直接过身份门后交第二遍按最新 E 重算（部分轮补齐后可收敛）
+      // 六审：组歧义检查在历史终局直输出**之前**——同组未收口 sending 共存时，历史终局同样降级 unknown+untrusted
+      //（占用证据≠身份证明：历史 delivered 的锚在歧义组内不构成唯一关联）
+      if (groupAmbiguous(group, members, alive)) {
+        verdicts.push({
+          intentId: j.intentId,
+          state: "unknown",
+          untrusted: true,
+          reason: "组内歧义：占用证据≠身份证明（身份冲突不推水位——R2-03）",
+        });
+        continue;
+      }
       // 五审必修1：无 clear 的历史终局（delivered/settled 重放）——如数输出历史终局，不进待终检队列
       // （finalizedIds 已把该锚排除出区间重算/更新行/水位——若入队会因无区间映射降级 unknown=历史终局丢失）
       if (finalizedIds.has(j.intentId)) {
@@ -240,16 +252,6 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
           intentId: j.intentId,
           state: "delivered", // settled 蕴含执行终局——恢复面统一报 delivered
           reason: `历史终局如数输出（${j.lastVerdict}，无 clear）——证据定格，不重算不更新不推水位`,
-        });
-        continue;
-      }
-      // B1：不再按 journal 旧终点预检终答——直接过身份门后交第二遍按最新 E 重算（部分轮补齐后可收敛）
-      if (groupAmbiguous(group, members, alive)) {
-        verdicts.push({
-          intentId: j.intentId,
-          state: "unknown",
-          untrusted: true,
-          reason: "组内歧义：占用证据≠身份证明（身份冲突不推水位——R2-03）",
         });
         continue;
       }
