@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { matchKeyOf, runRecovery, textHash, normalizeText, replayIntents } from "@pi-agent-ui/protocol";
 import type { IntentRecord, JournalLine, SessionEntry } from "@pi-agent-ui/protocol";
 
+const PRE_OK = { watermarkValid: true, fileGenerationMatch: true, writerQuiesced: true, externalWriterLatched: false, roundTimedOut: false } as const;
+
 function mkIntent(id: string, text: string, ordinal: number, opts: Partial<IntentRecord> = {}): IntentRecord {
   return {
     intentId: id,
@@ -14,6 +16,7 @@ function mkIntent(id: string, text: string, ordinal: number, opts: Partial<Inten
     cancelled: false,
     consumed: null,
     ...opts,
+    lastVerdict: opts.lastVerdict ?? null,
   };
 }
 function e(id: string, role: SessionEntry["role"], text: string, stopReason?: SessionEntry["stopReason"]): SessionEntry {
@@ -35,7 +38,7 @@ function run(
     intents,
     permanentExclusions: opts?.P ?? new Set(),
     alive: opts?.alive ?? false,
-    ...(opts?.pre ? { preconditions: opts.pre } : {}),
+    preconditions: opts?.pre ?? PRE_OK,
   } satisfies Parameters<typeof runRecovery>[0]);
 }
 function verdictOf(out: { readonly verdicts: readonly { intentId: string; state: string; reason?: string }[] }, id: string) {

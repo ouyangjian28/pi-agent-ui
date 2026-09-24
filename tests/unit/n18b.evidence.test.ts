@@ -1,6 +1,8 @@
 // 十九审开工首序③：N18b 身份证据样例——新终答≠天然归属证明；唯一映射演算（matchKey）
 import { describe, expect, it } from "vitest";
 import { attachmentIdentity, matchKeyOf, normalizeText, textHash, runRecovery } from "@pi-agent-ui/protocol";
+
+const PRE_OK = { watermarkValid: true, fileGenerationMatch: true, writerQuiesced: true, externalWriterLatched: false, roundTimedOut: false } as const;
 import type { IntentRecord, SessionEntry } from "@pi-agent-ui/protocol";
 
 describe("匹配键派生演算（三审定界冻结口径）", () => {
@@ -40,12 +42,14 @@ describe("N18b：新终答≠天然归属证明（身份证据样例）", () => 
       sending: true,
       consumed: null,
       cancelled: false,
+      lastVerdict: null,
     });
     const out = runRecovery({
       entries,
       intents: [mk("I1", 0, "prompt"), mk("I2", 1, "steer")],
       permanentExclusions: new Set(),
       alive: false,
+      preconditions: PRE_OK,
     });
     // 组内两 sending 未收口+锚缺失→唯一关联不成立→组级 unknown（两个完整轮也不能指认归属）
     expect(out.verdicts.every((v) => v.state === "unknown")).toBe(true);
@@ -80,9 +84,10 @@ describe("N18b：新终答≠天然归属证明（身份证据样例）", () => 
       sending: true,
       consumed: { anchorEntryId: "u1", intervalEnd: { entryId: "a1", lengthHash: "" } },
       cancelled: false,
-    };
-    const I2 = { ...I1, intentId: "I2", matchKey: matchKeyOf(t, [], 1), consumed: null };
-    const out = runRecovery({ entries, intents: [I1, I2], permanentExclusions: new Set(), alive: false });
+      lastVerdict: null,
+    } satisfies IntentRecord;
+    const I2: IntentRecord = { ...I1, intentId: "I2", matchKey: matchKeyOf(t, [], 1), consumed: null, lastVerdict: null };
+    const out = runRecovery({ entries, intents: [I1, I2], permanentExclusions: new Set(), alive: false , preconditions: PRE_OK});
     // I2 sending 无锚→组歧义→I1 自有证据也压为 unknown（占用证据≠身份证明）
     expect(out.verdicts.find((v) => v.intentId === "I1")?.state).toBe("unknown");
     expect(out.verdicts.find((v) => v.intentId === "I2")?.state).toBe("unknown");

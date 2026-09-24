@@ -2,6 +2,8 @@
 // 规格=TECH §5.5/§5.6；反例=验收用例，断言失败=规格或实现漂移，禁 skip。
 import { describe, expect, it } from "vitest";
 import { matchKeyOf, textHash, normalizeText } from "@pi-agent-ui/protocol";
+
+const PRE_OK = { watermarkValid: true, fileGenerationMatch: true, writerQuiesced: true, externalWriterLatched: false, roundTimedOut: false } as const;
 import { runRecovery, type RecoveryInput } from "@pi-agent-ui/protocol";
 import type { IntentRecord, JournalLine } from "@pi-agent-ui/protocol";
 import type { SessionEntry } from "@pi-agent-ui/protocol";
@@ -19,6 +21,7 @@ function mkIntent(id: string, text: string, ordinal: number, opts: Partial<Inten
     consumed: null,
     cancelled: false,
     ...opts,
+    lastVerdict: opts.lastVerdict ?? null,
   };
 }
 function e(
@@ -36,7 +39,13 @@ function e(
   };
 }
 function run(entries: SessionEntry[], intents: IntentRecord[], alive = false) {
-  return runRecovery({ entries, intents, permanentExclusions: new Set(), alive } satisfies RecoveryInput);
+  return runRecovery({
+    entries,
+    intents,
+    permanentExclusions: new Set(),
+    alive,
+    preconditions: PRE_OK,
+  } satisfies RecoveryInput);
 }
 function verdictOf(
   out: { readonly verdicts: readonly { intentId: string; state: string; reason?: string }[] },

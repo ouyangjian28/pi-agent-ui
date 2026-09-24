@@ -1,6 +1,8 @@
 // 开工轮一审 B 面五反例回归+N19b 混合路径+二扫正向解除（C1/C2 补缺）
 import { describe, expect, it } from "vitest";
 import { matchKeyOf, runRecovery, textHash, normalizeText } from "@pi-agent-ui/protocol";
+
+const PRE_OK = { watermarkValid: true, fileGenerationMatch: true, writerQuiesced: true, externalWriterLatched: false, roundTimedOut: false } as const;
 import type { IntentRecord, SessionEntry } from "@pi-agent-ui/protocol";
 
 let _seq = 0;
@@ -16,6 +18,7 @@ function mkIntent(id: string, text: string, ordinal: number, opts: Partial<Inten
     cancelled: false,
     consumed: null,
     ...opts,
+    lastVerdict: opts.lastVerdict ?? null,
   };
 }
 function e(
@@ -33,9 +36,13 @@ function e(
   };
 }
 function run(entries: SessionEntry[], intents: IntentRecord[], alive = false) {
-  return runRecovery({ entries, intents, permanentExclusions: new Set(), alive } satisfies Parameters<
-    typeof runRecovery
-  >[0]);
+  return runRecovery({
+    entries,
+    intents,
+    permanentExclusions: new Set(),
+    alive,
+    preconditions: PRE_OK,
+  } satisfies Parameters<typeof runRecovery>[0]);
 }
 function verdictOf(
   out: { readonly verdicts: readonly { intentId: string; state: string; reason?: string }[] },

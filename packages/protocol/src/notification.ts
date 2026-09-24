@@ -17,6 +17,8 @@ export interface CloseVerdict {
   readonly state: NotificationState;
   readonly closed: boolean;
   readonly reason: string;
+  /** 三审⑤：结构化收口成因（closed=true 时必带；acks=三 ACK 齐 / expired=到期映射账本域）——不靠 reason 字符串判。 */
+  readonly doneReason?: DoneReason;
 }
 
 /** done 成因（两域口径，二审 R2-06）：acks=三 ACK 齐收口；expired=到期收口映射账本域 done(reason=expired)。 */
@@ -24,19 +26,26 @@ export type DoneReason = "acks" | "expired";
 
 /** 接收账本域终态（二审 R2-06 两域拆分：outbox 域 expired 回执→账本域记 done(reason=expired)；迟到 ACK 不改到期原因）。 */
 export function accountDomainClose(
-  state: NotificationState,
-  doneReason: DoneReason,
+  accountState: NotificationState, // 账本域现态（接收账本侧）
+  outboxState: NotificationState | null, // outbox 域证据（null=无 outbox 记录）
   lateAck: AckSet | null,
 ): CloseVerdict {
-  if (state === "done")
+  if (accountState === "done")
     return {
-      state,
+      state: accountState,
       closed: false,
       reason: `terminal: done(reason 已定)——迟到 ACK（channel=${lateAck?.channelAck} present=${lateAck?.presentAck} effect=${lateAck?.effectAck}）不改成因`,
     };
-  if (doneReason !== "expired") return { state, closed: false, reason: "非到期回执不映射账本域" };
-  if (state !== "expired") return { state, closed: false, reason: `无 expired 回执（现态 ${state}）不映射` };
-  return { state: "done", closed: true, reason: "outbox expired 回执→账本域 done(reason=expired)" };
+  if (outboxState !== "expired")
+    return { state: accountState, closed: false, reason: `无 outbox expired 回执（outbox=${outboxState ?? "无记录"}）不映射账本域` };
+  if (accountState === "expired")
+    return { state: "done", closed: true, doneReason: "expired", reason: "账本 expired+outbox expired 回执→账本域 done(reason=expired)" };
+  return {
+    state: "done",
+    closed: true,
+    doneReason: "expired",
+    reason: `outbox expired 回执→账本域 done(reason=expired)（账本现态 ${accountState}——跨域映射非同域跃迁）`,
+  };
 }
 
 /** 三 ACK 收口裁决（二审 R2-06：derived 与 started 均可收口——三 ACK 齐即 done；received 未派生无收口面；执行终局不替代 ACK）。 */
@@ -52,7 +61,7 @@ export function closeWithAcks(state: NotificationState, acks: AckSet): CloseVerd
       closed: false,
       reason: `三 ACK 未齐（channel=${acks.channelAck} present=${acks.presentAck} effect=${acks.effectAck}）——任一缺失不收口`,
     };
-  return { state: "done", closed: true, reason: "三 ACK 齐（通道送达+用户阅读+agent 受理）→通知义务收口 done" };
+  return { state: "done", closed: true, doneReason: "acks", reason: "三 ACK 齐（通道送达+用户阅读+agent 受理）→通知义务收口 done" };
 }
 
 /** 到期收口裁决：deadline 到期证据驱动（独立终态 expired）；执行侧完成不触发 expired。 */
@@ -67,7 +76,10 @@ export function expireWithEvidence(state: NotificationState, deadlinePassed: boo
 export function transition(from: NotificationState, to: NotificationState): string | null {
   if (from === to) return null; // 幂等重放
   if (from === "done") return `monotonic: done 已收口（三 ACK 或 expired 成因），拒 ${to}`; // done 后迟到 started/一切降级拒
-  if (from === "expired") return `monotonic: expired 已收口（超时终局），拒 ${to}（迟到 ACK 不升 done）`;
+  if (from === "expired")
+    return to === "done"
+      ? "跨域映射非同域跃迁：expired→done 须走 accountDomainClose（outbox expired 回执→账本域 done），不经 transition"
+      : `monotonic: expired 已收口（超时终局），拒 ${to}（迟到 ACK 不升 done）`;
   // received→derived→started 主线；expired=未终态可入（经 expireWithEvidence 裁决后落）
   const order: NotificationState[] = ["received", "derived", "started"];
   const fromIdx = order.indexOf(from);

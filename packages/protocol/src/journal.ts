@@ -46,6 +46,7 @@ export interface IntentRecord {
   readonly sending: boolean; // sending 行存在（撕裂行按存在处理）
   readonly consumed: ConsumedEvidence | null; // 最新有效 consumed 行（锚=最早，终点=最新；撕裂整行拒收）
   readonly cancelled: boolean;
+  readonly lastVerdict: "delivered" | "settled" | "unknown" | null; // 三审①：终态行重放保留——clear 分派须保留原判不得改写
 }
 
 /** 消费证据（重放重建）：锚 append-only 保留，区间终点按最新重算承载。 */
@@ -70,6 +71,7 @@ export function replayIntents(lines: readonly JournalLine[], sessionId: SessionI
         sending: false,
         consumed: null,
         cancelled: false,
+        lastVerdict: null,
       });
       enqueueOrder.push(line.intentId);
       continue;
@@ -101,8 +103,15 @@ export function replayIntents(lines: readonly JournalLine[], sessionId: SessionI
       case "cancelled":
         byId.set(rec.intentId, { ...rec, cancelled: true });
         break;
+      case "delivered":
+      case "settled":
+        byId.set(rec.intentId, { ...rec, lastVerdict: line.t });
+        break;
+      case "unknown":
+        byId.set(rec.intentId, { ...rec, lastVerdict: "unknown" });
+        break;
       default:
-        break; // 终态行由对账重判，不在重放时固化
+        break; // consumed/sending/cancelled 已在上方处理
     }
   }
   return byId;

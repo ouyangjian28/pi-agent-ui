@@ -37,13 +37,7 @@ export interface RecoveryPreconditions {
   readonly roundTimedOut: boolean;
 }
 
-export const defaultPreconditions: RecoveryPreconditions = {
-  watermarkValid: true,
-  fileGenerationMatch: true,
-  writerQuiesced: true,
-  externalWriterLatched: false,
-  roundTimedOut: false,
-};
+// 三审④：前置条件必填（无缺省全过——调用方默契从接口上消除）；roundTimedOut 不在阻断列（超时=开终裁窗：在飞 sending 可入歧义源判定，非全体暂定）。
 
 export interface RecoveryInput {
   /** E：目标分支投影（自水位边界起，原始文件序）。 */
@@ -54,8 +48,8 @@ export interface RecoveryInput {
   readonly permanentExclusions: ReadonlySet<string>;
   /** 进程活着（true=运行中对账：sending=在飞非歧义源；false=恢复对账：可出终裁）。 */
   readonly alive: boolean;
-  /** 前置条件（R2-07：缺省=全过——测试便利；生产 adapter 必须显式传入实测值，不满足=全部暂定）。 */
-  readonly preconditions?: RecoveryPreconditions;
+  /** 前置条件（三审④：必填——四项不满足任一=全部暂定终裁拒绝；roundTimedOut 非阻断仅开终裁窗）。 */
+  readonly preconditions: RecoveryPreconditions;
 }
 
 export type VerdictState = "delivered" | "unknown" | "inflight" | "cancelled" | "pendingGate";
@@ -143,17 +137,17 @@ function assignIntervals(
 }
 
 export function runRecovery(input: RecoveryInput): RecoveryOutput {
-  const { entries, intents, permanentExclusions, alive } = input;
+  const { entries, intents, permanentExclusions } = input;
+  const alive = input.alive && !input.preconditions.roundTimedOut; // 三审④：轮超时=终裁窗口（等同恢复态：sending 可入歧义源）
   const verdicts: IntentVerdict[] = [];
   // R2-07 前置门：显式输入边界（水位身份/文件代次/写者静止/外部闩/轮超时）——任一不满足=全部暂定，终裁拒绝
-  const pre = input.preconditions ?? defaultPreconditions;
+  const pre = input.preconditions;
   const preFailed: string[] = [];
   if (!pre.watermarkValid) preFailed.push("水位身份验证失败");
   if (!pre.fileGenerationMatch) preFailed.push("文件代次不匹配");
   if (!pre.writerQuiesced) preFailed.push("写者未静止");
   if (pre.externalWriterLatched) preFailed.push("外部写者闩生效");
-  if (pre.roundTimedOut) preFailed.push("轮超时");
-  if (preFailed.length > 0) {
+  if (preFailed.length > 0) { // roundTimedOut 非阻断（三审④：超时开终裁窗，与 :36 注释语义统一）
     return {
       verdicts: intents.map((j) => ({
         intentId: j.intentId,
@@ -192,7 +186,8 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
         verdicts.push({
           intentId: j.intentId,
           state: "unknown",
-          reason: "锚不在当前投影（水位/分支不一致）——降级待重估",
+          untrusted: true, // 三审③：锚缺失=引用破裂——不可信，禁作分区依据禁被水位跨越
+          reason: "锚不在当前投影（水位/分支不一致）——降级待重估（untrusted）",
         });
         continue;
       }
@@ -302,10 +297,17 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
   // ③队列静止（TECH:169 恢复伪代码第二遍③原文：此时范围内全部可判定意图已过②′，
   // enqueue 行均有 consumed 或 clear 终局——超界/歧义意图无 consumed=队列不静止→全部暂定，不误终局；
   // 反例Ⓒ：I2 未消费未取消→I1 不得 delivered）
-  const queueQuiesced = intents.every((j) => j.cancelled || extraAnchors.has(j.intentId) || j.consumed !== null);
-  // 区间重算（B4 同一函数）：既有锚+新增锚一起分配
+  // 三审③：可信锚与不可信引用分立——untrusted（锚验证失败/歧义/冲突）意图的锚不进区间分割、不占排他位、不作静止依据
+  const untrustedIds = new Set(verdicts.filter((v) => v.untrusted).map((v) => v.intentId));
+  const queueQuiesced = intents.every(
+    (j) =>
+      j.cancelled ||
+      (!untrustedIds.has(j.intentId) && (extraAnchors.has(j.intentId) || j.consumed !== null)),
+  ); // 三审③：untrusted 意图的 consumed 不作静止依据
+  // 区间重算（B4 同一函数）：既有锚+新增锚一起分配（仅 trusted）
   const allAnchorIds = new Map<IntentId, string>();
   for (const j of intents) {
+    if (untrustedIds.has(j.intentId)) continue;
     const a = extraAnchors.get(j.intentId) ?? j.consumed?.anchorEntryId;
     if (a) allAnchorIds.set(j.intentId, a);
   }
@@ -359,34 +361,50 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
     }
     verdicts.push({ intentId: j.intentId, state: "delivered", reason: "四联⓪①②③全过（区间按最新 E 重算）" });
   }
-  // R2-02 终点更新行：第二遍 intervals 若与第一遍落行终点不同→追加同锚新终点行（首锚 append-only 不变；重放与终检同一结果）
+  // R2-02+三审② 终点更新行：区间重算终点若≠耐久已知终点（本轮落行 or 重放 consumed——历史证据同样更新）→追加同锚新终点行
   for (const [iid, anchorId] of allAnchorIds) {
-    const first = newConsumed.find((c) => c.t === "consumed" && c.intentId === iid);
-    if (!first || first.t !== "consumed") continue;
+    const j = intents.find((x) => x.intentId === iid);
+    const thisRound = newConsumed.filter((c) => c.t === "consumed" && c.intentId === iid);
+    const knownEnd = thisRound.length > 0
+      ? thisRound[thisRound.length - 1]!.t === "consumed" && (thisRound[thisRound.length - 1] as { intervalEnd: { entryId: string } }).intervalEnd.entryId
+      : j?.consumed?.intervalEnd.entryId; // 重放来的历史终点（首扫无 newConsumed 场景——三审②反例）
+    if (knownEnd === undefined) continue;
     const iv = intervals.get(anchorId);
-    if (iv && iv.endId !== first.intervalEnd.entryId) {
+    if (iv && iv.endId !== knownEnd) {
       newConsumed.push({
         t: "consumed",
         intentId: iid,
-        anchorEntryId: anchorId, // 首锚不变
-        intervalEnd: { entryId: iv.endId, lengthHash: "" }, // 终点更新新行承载
+        anchorEntryId: anchorId, // 首锚不变（append-only）
+        intervalEnd: { entryId: iv.endId, lengthHash: "" }, // 终点更新新行承载（耐久已知终点漂移必须落账本）
       });
     }
   }
   // 未进入终检的歧义/超界意图无 newConsumed（禁落耐久锚——十八审①）；自有证据意图不重复落行。
 
-  // B9：clear 前置分派（第二遍后四分支——执行侧；通知侧独立按三 ACK/expired 判，不在此面）
+  // B9+三审①：clear 前置分派（第二遍后四分支——执行侧；通知侧独立按三 ACK/expired 判，不在此面）
   for (const j of intents) {
     if (!j.cancelled) continue;
+    // 分支③：历史终局（journal 终态行重放）不改写——delivered/settled 保持原判并如数输出（三审①反例修）
+    if (j.lastVerdict === "delivered" || j.lastVerdict === "settled") {
+      verdicts.push({
+        intentId: j.intentId,
+        state: "delivered", // settled（通知侧收口）蕴含执行终局——恢复面统一报 delivered
+        reason: "clear 重放：历史终局不改写（执行侧取消不覆盖已终局——分支③）",
+      });
+      continue;
+    }
     const existing = verdicts.find((x) => x.intentId === j.intentId);
     const a = anchorOf(j);
-    if (a && intervals.has(a) && existing?.state === "delivered") continue; // 分支③：执行已终局——不改写（delivered 保持）
-    if (a) {
-      verdicts.push({ intentId: j.intentId, state: "cancelled", reason: "clear 重放：身份确定+执行未终局→cancelled" });
-      continue; // 分支②
+    if (a && intervals.has(a) && existing?.state === "delivered") continue; // 分支③（本轮终检）：同上
+    if (j.lastVerdict === "unknown") {
+      verdicts.push({ intentId: j.intentId, state: "cancelled", reason: "clear 重放：历史身份不明（分支①）——取消终局，身份待重估" });
+      continue;
+    }
+    if (a && !untrustedIds.has(j.intentId)) {
+      verdicts.push({ intentId: j.intentId, state: "cancelled", reason: "clear 重放：身份确定+执行未终局→cancelled（分支②）" });
+      continue;
     }
     if (existing) {
-      // R2-04 修：已有判决（锚验证失败/歧义）——保留原判（分支①身份不确定），执行侧取消另记，不覆盖身份结论
       verdicts.push({ intentId: j.intentId, state: "cancelled", reason: "clear 重放：身份不确定保留原判（分支①），执行侧取消仍记" });
       continue;
     }

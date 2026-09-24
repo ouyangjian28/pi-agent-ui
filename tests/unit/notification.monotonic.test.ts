@@ -41,7 +41,9 @@ describe("通知状态机跃迁合法性（三 ACK 分立+单调性）", () => {
     // R2-06 两域：outbox expired 回执→账本域 done(reason=expired)；迟到 ACK 不改成因
     expect(accountDomainClose("expired", "expired", null)).toMatchObject({ state: "done", closed: true });
     expect(accountDomainClose("done", "expired", { channelAck: true, presentAck: true, effectAck: true }).closed).toBe(false); // done 后迟到 ACK 不改成因
-    expect(accountDomainClose("started", "expired", null).closed).toBe(false); // 无 expired 回执不映射
+    expect(accountDomainClose("started", "expired", null)).toMatchObject({ state: "done", closed: true, doneReason: "expired" }); // 三审⑤：outbox expired 回执即可映射账本域（账本态非 expired 也收——双域证据驱动）
+    expect(accountDomainClose("started", null, null).closed).toBe(false); // 无 outbox 记录不映射
+    expect(accountDomainClose("started", "started", null).closed).toBe(false); // outbox 非 expired 不映射
     expect(closeWithAcks("done", { channelAck: true, presentAck: true, effectAck: true }).closed).toBe(false); // 终态单调
   });
 });
