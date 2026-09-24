@@ -60,15 +60,18 @@ function buildGroups(entries: readonly SessionEntry[], intents: readonly IntentR
 /** 组内歧义判定（十八审①全口径：唯一关联检查——数量相等亦查）。
  * 歧义成立 ⟺ 组内存在 sending 未收口意图 且（条目数<意图数 或 唯一关联不成立）。
  * 唯一关联成立 ⟺ 组内意图全部有唯一 consumed 锚（锚互不冲突），或组内仅单意图。 */
-function groupAmbiguous(group: GroupInfo, members: readonly IntentRecord[]): boolean {
-  const sendingUnclosed = members.some((m) => m.sending && !m.cancelled && !m.consumed);
-  if (!sendingUnclosed) {
-    // 组内无 sending 未收口意图：唯一关联可经序号成立（队列静止后的正常匹配）
-    return false;
+function groupAmbiguous(group: GroupInfo, members: readonly IntentRecord[], alive: boolean): boolean {
+  if (members.length < 2) return false; // 单意图组：无归属指认问题，序号自明（k=0）
+  // 歧义源=sending 后未收口意图。运行态（alive）sending=在飞，非歧义（五审：不进入情形①）；
+  // 恢复态（崩溃后）sending 未收口=中断/未证实=歧义源。
+  const hasSource = members.some((m) => !alive && m.sending && !m.cancelled && !m.consumed);
+  if (!hasSource) {
+    // 无歧义源：序号↔出现序一一对应可执行（十一审①取法场景）
+    return group.groupEntries.length < members.filter((m) => !m.cancelled).length;
   }
   const countShort = group.groupEntries.length < members.length;
   if (countShort) return true;
-  // 数量相等：查唯一关联——consumed 锚缺失/冲突=唯一关联不成立（D10 队列消费身份）
+  // 数量相等：查唯一关联——consumed 锚缺失/冲突=唯一关联不成立（D10 队列消费身份；十八审①：数量相等亦查）
   const anchors = members.filter((m) => m.consumed).map((m) => m.consumed!.anchorEntryId);
   const allAnchored = anchors.length === members.length;
   const unique = new Set(anchors).size === anchors.length;
@@ -128,7 +131,7 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
         continue;
       }
       // 尾含终答 → 先过身份门（十三审③：所有 delivered 出口统一）
-      if (groupAmbiguous(group, members)) {
+      if (groupAmbiguous(group, members, alive)) {
         verdicts.push({ intentId: j.intentId, state: "unknown", reason: "组内歧义：同 hash 组无法唯一锚定归属（占用证据≠身份证明）" });
         continue;
       }
@@ -137,7 +140,7 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
     }
 
     // 第二步·候选匹配（仅无自有证据；减法排他）
-    if (groupAmbiguous(group, members)) {
+    if (groupAmbiguous(group, members, alive)) {
       verdicts.push({ intentId: j.intentId, state: "unknown", reason: "组内歧义（数量相等亦查唯一关联）：不落耐久记录，候选不占用不排他" });
       continue;
     }
@@ -168,14 +171,25 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
   // 第二遍（统一四联终检——第一遍全部完成后执行，B 落 consumed 后 A 的③不再被误拦）
   const clauseZeroOk = entries.length > 0 && fileTailSatisfiesClauseZero(entries[entries.length - 1]!) && !entries[entries.length - 1]!.corrupt;
   const queueQuiesced = intents.every((j) => j.cancelled || extraAnchors.has(j.intentId) || j.consumed !== null);
+  // 区间终点重算（十二审①：每次恢复扫描按最新 E 重算；规格：意图区间=[锚,边界)半开右排他=下一意图锚前一条或文件尾）
+  const allAnchorIds = intents
+    .map((j) => extraAnchors.get(j.intentId) ?? j.consumed?.anchorEntryId ?? null)
+    .filter((x): x is string => x !== null);
+  const anchorPositions = new Map(allAnchorIds.map((id) => [id, entries.findIndex((e) => e.entryId === id)]));
+  function recalcIntervalEnd(anchorId: string): string {
+    const myPos = anchorPositions.get(anchorId) ?? -1;
+    let nextAnchorPos = entries.length; // 默认=文件尾
+    for (const pos of anchorPositions.values()) if (pos > myPos && pos < nextAnchorPos) nextAnchorPos = pos;
+    return entries[Math.max(0, nextAnchorPos - 1)]!.entryId; // 半开：下一锚前一条
+  }
   for (const j of pendingFinalCheck) {
     const anchorId = extraAnchors.get(j.intentId) ?? j.consumed!.anchorEntryId;
-    const endId = j.consumed ? j.consumed.intervalEnd.entryId : anchorId;
+    const endId = recalcIntervalEnd(anchorId); // 不用 journal 旧终点：按最新 E 重算
     if (!clauseZeroOk) {
       verdicts.push({ intentId: j.intentId, state: "unknown", reason: "⓪不满足：文件尾非终答边界（续跑中/截断）→整个归组 unknown（反例Ⓔ）" });
       continue;
     }
-    const c1 = intervalClosedByFinalAnswer(entries, anchorId);
+    const c1 = intervalClosedByFinalAnswer(entries, anchorId, endId);
     if (!c1) {
       verdicts.push({ intentId: j.intentId, state: "unknown", reason: "①不满足：意图区间未闭合（user 后无终答）" });
       continue;

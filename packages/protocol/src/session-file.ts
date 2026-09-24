@@ -30,11 +30,13 @@ export function fileTailSatisfiesClauseZero(last: SessionEntry): boolean {
   return last.role === "assistant" && (last.stopReason === "stop" || last.stopReason === "length");
 }
 
-/** ①意图级区间闭合：user entry 之后同分支存在终答 assistant。 */
-export function intervalClosedByFinalAnswer(entries: readonly SessionEntry[], userEntryId: string): boolean {
+/** ①意图级区间闭合：意图区间（[锚,边界) 半开右排他——下一意图锚或文件尾）内存在终答 assistant。
+ * 区间限定：不得借用下一意图的终答（八审场景：A 区间内只有 ua，B 的 ab 不得为 A 作证）。 */
+export function intervalClosedByFinalAnswer(entries: readonly SessionEntry[], userEntryId: string, intervalEndId: string): boolean {
   const idx = entries.findIndex((e) => e.entryId === userEntryId);
-  if (idx < 0) return false;
-  return entries.slice(idx + 1).some((e) => e.role === "assistant" && (e.stopReason === "stop" || e.stopReason === "length"));
+  const end = entries.findIndex((e) => e.entryId === intervalEndId);
+  if (idx < 0 || end < idx) return false;
+  return entries.slice(idx + 1, end + 1).some((e) => e.role === "assistant" && (e.stopReason === "stop" || e.stopReason === "length"));
 }
 
 /** ②区间全配对：区间内全部 toolCall 按 toolCallId 与 toolResult 一一配对。 */
