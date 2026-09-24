@@ -217,6 +217,9 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
     entries.length > 0 &&
     fileTailSatisfiesClauseZero(entries[entries.length - 1]!) &&
     !entries[entries.length - 1]!.corrupt;
+  // ③队列静止（TECH:169 恢复伪代码第二遍③原文：此时范围内全部可判定意图已过②′，
+  // enqueue 行均有 consumed 或 clear 终局——超界/歧义意图无 consumed=队列不静止→全部暂定，不误终局；
+  // 反例Ⓒ：I2 未消费未取消→I1 不得 delivered）
   const queueQuiesced = intents.every((j) => j.cancelled || extraAnchors.has(j.intentId) || j.consumed !== null);
   // 区间重算（B4 同一函数）：既有锚+新增锚一起分配
   const allAnchorIds = new Map<IntentId, string>();
@@ -268,7 +271,7 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
         intentId: j.intentId,
         state: "unknown",
         provisional: true,
-        reason: "③不满足：范围内存在未消费未取消 enqueue（反例Ⓒ）",
+        reason: "③不满足：范围内存在未消费未取消 enqueue（反例Ⓒ；TECH:169 第二遍③）",
       });
       continue;
     }

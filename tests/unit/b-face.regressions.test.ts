@@ -147,7 +147,7 @@ describe("N19b 混合路径+C1 二扫正向解除", () => {
       [e("e1", "user", t), e("a1", "assistant", "答", "stop")],
       [mkIntent("I1", t, 0), mkIntent("I2", t, 1)],
     );
-    expect(verdictOf(first, "I1")?.state).toBe("delivered");
+    expect(verdictOf(first, "I1")?.state).toBe("unknown"); // I2 无 consumed→③不静止→I1 亦暂定（反例Ⓒ口径）
     expect(verdictOf(first, "I2")?.state).toBe("unknown"); // 超界（恢复态）
     // 二扫：宿主补写了 e2+终答（真身份证据=新条目出现）
     const second = run(
