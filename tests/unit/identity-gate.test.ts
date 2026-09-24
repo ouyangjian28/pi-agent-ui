@@ -16,8 +16,19 @@ function mkIntent(id: string, text: string, ordinal: number, opts: Partial<Inten
     ...opts,
   };
 }
-function e(id: string, role: SessionEntry["role"], text: string, stopReason?: SessionEntry["stopReason"]): SessionEntry {
-  return { entryId: id, role, textHash: textHash(normalizeText(text)), attachmentIdentity: "", stopReason };
+function e(
+  id: string,
+  role: SessionEntry["role"],
+  text: string,
+  stopReason?: SessionEntry["stopReason"],
+): SessionEntry {
+  return {
+    entryId: id,
+    role,
+    textHash: textHash(normalizeText(text)),
+    attachmentIdentity: "",
+    ...(stopReason !== undefined ? { stopReason } : {}),
+  };
 }
 const consumedAnchor = (entryId: string): { anchorEntryId: string; intervalEnd: EntryIdentity } => ({
   anchorEntryId: entryId,
@@ -46,14 +57,16 @@ describe("十一审①：原始序号禁候选内重编", () => {
     const B = mkIntent("B", t, 1);
     const C = mkIntent("C", t, 2);
     const out = runRecovery({ entries, intents: [A, B, C], permanentExclusions: new Set(), alive: true });
-    const bAnchor = out.newConsumed.find((c) => (c as { intentId: string }).intentId === "B") as { anchorEntryId: string } | undefined;
+    const bAnchor = out.newConsumed.find((c) => (c as { intentId: string }).intentId === "B") as
+      { anchorEntryId: string } | undefined;
     expect(bAnchor?.anchorEntryId).toBe("e2"); // 原始序号第 2=e2；候选重编会错取 e3
   });
 });
 
 describe("八审：水位不吞未决意图的恢复证据", () => {
   it("A 未决 B 完成：B 可 delivered，水位停（advanceTo=null），A 证据不被吞", () => {
-    const t1 = "问A", t2 = "问B";
+    const t1 = "问A",
+      t2 = "问B";
     // A 的轮只有 user（续跑中），B 完整
     const entries = [e("ua", "user", t1), e("ub", "user", t2), e("ab", "assistant", "答B", "stop")];
     const A = mkIntent("A", t1, 0);
@@ -70,7 +83,8 @@ describe("八审：水位不吞未决意图的恢复证据", () => {
 
 describe("clear 前置分派与 cancelled 水位跳过", () => {
   it("cancelled 意图不阻塞后续 delivered 判定（十七审②：跳过直接推进）", () => {
-    const t1 = "被取消", t2 = "正常";
+    const t1 = "被取消",
+      t2 = "正常";
     const entries = [e("u2", "user", t2), e("a2", "assistant", "答", "stop")];
     const C1 = mkIntent("C1", t1, 0, { cancelled: true });
     const I2 = mkIntent("I2", t2, 0);

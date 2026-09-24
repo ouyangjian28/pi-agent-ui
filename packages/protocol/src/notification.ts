@@ -20,15 +20,22 @@ export function transition(from: NotificationState, to: NotificationState): stri
   const fromIdx = order.indexOf(from);
   const toIdx = order.indexOf(to);
   if (to === "expired") return null;
-  if (to === "done") return from === "started" || from === "derived" ? null : `received cannot jump to done (需经过派生/开栓), reject done from ${from}`;
+  if (to === "done")
+    return from === "started" || from === "derived"
+      ? null
+      : `received cannot jump to done (需经过派生/开栓), reject done from ${from}`;
   if (toIdx > fromIdx && toIdx - fromIdx === 1) return null; // 相邻前进
   return `cannot go ${from}→${to}`; // 禁倒退（derived→received 等）
 }
 
 /** 迟到重投守卫：done 后同 notificationId 再投（旧通知查无记录→再派生）必须被墓碑拦下，不重新执行。 */
-export function lateReplayAfterDone(last: NotificationState, event: "redeliver"): { accepted: boolean; state: NotificationState; reason?: string } {
+export function lateReplayAfterDone(
+  last: NotificationState,
+  event: "redeliver",
+): { accepted: boolean; state: NotificationState; reason?: string } {
   if (event === "redeliver") {
-    if (last === "done") return { accepted: false, state: "done", reason: "tombstone: done 不降回不重开义务（迟到重投拒绝再派生）" };
+    if (last === "done")
+      return { accepted: false, state: "done", reason: "tombstone: done 不降回不重开义务（迟到重投拒绝再派生）" };
     return { accepted: true, state: last, reason: "未终态重投=按未决恢复扫描处理" };
   }
   return { accepted: false, state: last, reason: "unknown event" };

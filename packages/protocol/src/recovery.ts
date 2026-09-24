@@ -5,7 +5,12 @@
 
 import type { EntryIdentity, IntentId, IntentMatchKey } from "./identity.ts";
 import type { IntentRecord, JournalLine } from "./journal.ts";
-import { fileTailSatisfiesClauseZero, intervalClosedByFinalAnswer, intervalToolCallsPaired, type SessionEntry } from "./session-file.ts";
+import {
+  fileTailSatisfiesClauseZero,
+  intervalClosedByFinalAnswer,
+  intervalToolCallsPaired,
+  type SessionEntry,
+} from "./session-file.ts";
 
 export interface RecoveryInput {
   /** E：目标分支投影（自水位边界起，原始文件序）。 */
@@ -106,7 +111,12 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
 
   // ⓪ clear 前置分派（四分支：执行侧。通知侧独立按三 ACK/expired 判——§17.2，不在此面）
   for (const j of intents) {
-    if (j.cancelled) verdicts.push({ intentId: j.intentId, state: "cancelled", reason: "clear 行重放：身份确定+执行未终局→cancelled" });
+    if (j.cancelled)
+      verdicts.push({
+        intentId: j.intentId,
+        state: "cancelled",
+        reason: "clear 行重放：身份确定+执行未终局→cancelled",
+      });
   }
 
   // 第一遍（身份与消费，逐意图串行）
@@ -121,18 +131,32 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
       const anchorIdx = entries.findIndex((e) => e.entryId === j.consumed!.anchorEntryId);
       const endIdx = entries.findIndex((e) => e.entryId === j.consumed!.intervalEnd.entryId);
       if (anchorIdx < 0 || endIdx < anchorIdx) {
-        verdicts.push({ intentId: j.intentId, state: "unknown", reason: "锚不在当前投影（水位/分支不一致）——降级待重估" });
+        verdicts.push({
+          intentId: j.intentId,
+          state: "unknown",
+          reason: "锚不在当前投影（水位/分支不一致）——降级待重估",
+        });
         continue;
       }
-      const hasFinalAnswer = entries.slice(anchorIdx, endIdx + 1).some((e) => e.role === "assistant" && (e.stopReason === "stop" || e.stopReason === "length"));
+      const hasFinalAnswer = entries
+        .slice(anchorIdx, endIdx + 1)
+        .some((e) => e.role === "assistant" && (e.stopReason === "stop" || e.stopReason === "length"));
       if (!hasFinalAnswer) {
         // 部分轮：锚点回退上一完整轮边界，残缺轮不作起点；每次恢复扫描按最新 E 重算重估（十二审①）
-        verdicts.push({ intentId: j.intentId, state: "unknown", reason: "部分轮：尾含 user 无终答，锚点回退，按新尾部重估" });
+        verdicts.push({
+          intentId: j.intentId,
+          state: "unknown",
+          reason: "部分轮：尾含 user 无终答，锚点回退，按新尾部重估",
+        });
         continue;
       }
       // 尾含终答 → 先过身份门（十三审③：所有 delivered 出口统一）
       if (groupAmbiguous(group, members, alive)) {
-        verdicts.push({ intentId: j.intentId, state: "unknown", reason: "组内歧义：同 hash 组无法唯一锚定归属（占用证据≠身份证明）" });
+        verdicts.push({
+          intentId: j.intentId,
+          state: "unknown",
+          reason: "组内歧义：同 hash 组无法唯一锚定归属（占用证据≠身份证明）",
+        });
         continue;
       }
       pendingFinalCheck.push(j); // 十九轮：登记第二遍待检集合，不立即终检
@@ -141,20 +165,34 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
 
     // 第二步·候选匹配（仅无自有证据；减法排他）
     if (groupAmbiguous(group, members, alive)) {
-      verdicts.push({ intentId: j.intentId, state: "unknown", reason: "组内歧义（数量相等亦查唯一关联）：不落耐久记录，候选不占用不排他" });
+      verdicts.push({
+        intentId: j.intentId,
+        state: "unknown",
+        reason: "组内歧义（数量相等亦查唯一关联）：不落耐久记录，候选不占用不排他",
+      });
       continue;
     }
     const occupied = occupiedEntryIds(intents, extraAnchors);
-    const candidates = group.groupEntries.filter((e) => !occupied.has(e.entryId) && !permanentExclusions.has(e.entryId));
+    const candidates = group.groupEntries.filter(
+      (e) => !occupied.has(e.entryId) && !permanentExclusions.has(e.entryId),
+    );
     // 序号语义（十一审①）：k=原始文件序列序号（恒定），「原始序列第 k 个 entry，且该 entry 仍在候选集中」——禁候选内重编
     const k = j.matchKey.ordinal;
     const rawIdxK = group.groupEntries[k];
     if (rawIdxK === undefined) {
-      verdicts.push({ intentId: j.intentId, state: alive ? "inflight" : "unknown", reason: "原始序号超界（组内条目不足）" });
+      verdicts.push({
+        intentId: j.intentId,
+        state: alive ? "inflight" : "unknown",
+        reason: "原始序号超界（组内条目不足）",
+      });
       continue;
     }
     if (!candidates.includes(rawIdxK)) {
-      verdicts.push({ intentId: j.intentId, state: alive ? "inflight" : "unknown", reason: "原始序号条目已被消费/排除，本轮不匹配" });
+      verdicts.push({
+        intentId: j.intentId,
+        state: alive ? "inflight" : "unknown",
+        reason: "原始序号条目已被消费/排除，本轮不匹配",
+      });
       continue;
     }
     // 命中：身份门已在上方过（歧义不落记录）→ 立即占用：写 C[j]+双字段 consumed 同 fsync（十七审②；首次仅匹配 user 也落，D8）
@@ -169,7 +207,10 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
   }
 
   // 第二遍（统一四联终检——第一遍全部完成后执行，B 落 consumed 后 A 的③不再被误拦）
-  const clauseZeroOk = entries.length > 0 && fileTailSatisfiesClauseZero(entries[entries.length - 1]!) && !entries[entries.length - 1]!.corrupt;
+  const clauseZeroOk =
+    entries.length > 0 &&
+    fileTailSatisfiesClauseZero(entries[entries.length - 1]!) &&
+    !entries[entries.length - 1]!.corrupt;
   const queueQuiesced = intents.every((j) => j.cancelled || extraAnchors.has(j.intentId) || j.consumed !== null);
   // 区间终点重算（十二审①：每次恢复扫描按最新 E 重算；规格：意图区间=[锚,边界)半开右排他=下一意图锚前一条或文件尾）
   const allAnchorIds = intents
@@ -186,7 +227,11 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
     const anchorId = extraAnchors.get(j.intentId) ?? j.consumed!.anchorEntryId;
     const endId = recalcIntervalEnd(anchorId); // 不用 journal 旧终点：按最新 E 重算
     if (!clauseZeroOk) {
-      verdicts.push({ intentId: j.intentId, state: "unknown", reason: "⓪不满足：文件尾非终答边界（续跑中/截断）→整个归组 unknown（反例Ⓔ）" });
+      verdicts.push({
+        intentId: j.intentId,
+        state: "unknown",
+        reason: "⓪不满足：文件尾非终答边界（续跑中/截断）→整个归组 unknown（反例Ⓔ）",
+      });
       continue;
     }
     const c1 = intervalClosedByFinalAnswer(entries, anchorId, endId);
@@ -200,7 +245,11 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
       continue;
     }
     if (!queueQuiesced) {
-      verdicts.push({ intentId: j.intentId, state: "unknown", reason: "③不满足：范围内存在未消费未取消 enqueue（反例Ⓒ）" });
+      verdicts.push({
+        intentId: j.intentId,
+        state: "unknown",
+        reason: "③不满足：范围内存在未消费未取消 enqueue（反例Ⓒ）",
+      });
       continue;
     }
     verdicts.push({ intentId: j.intentId, state: "delivered", reason: "四联⓪①②③全过" });
@@ -214,7 +263,11 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
     if (v.state === "cancelled") continue; // 无消费终点=跳过
     if (v.state !== "delivered") break; // 规格口径：水位推进=终态（delivered/settled/unknown 终裁）才推进；inflight/未判=停
     const anchorId = extraAnchors.get(j.intentId);
-    advanceTo = j.consumed ? j.consumed.intervalEnd : anchorId !== undefined ? { entryId: anchorId, lengthHash: "" } : advanceTo;
+    advanceTo = j.consumed
+      ? j.consumed.intervalEnd
+      : anchorId !== undefined
+        ? { entryId: anchorId, lengthHash: "" }
+        : advanceTo;
   }
 
   return { verdicts, newConsumed, watermarkAdvanceTo: advanceTo };

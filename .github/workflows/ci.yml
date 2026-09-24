@@ -13,7 +13,7 @@ jobs:
           cache: npm
       # 最小 CI：冻结安装→类型→lint→测试→构建（开工集⑤）
       - run: npm ci
-      - run: npm run typecheck --if-present
-      - run: npm run lint --if-present
-      - run: npm test --if-present
-      - run: npm run build --if-present
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build

@@ -13,10 +13,23 @@ export interface EnqueuePayload {
 
 /** 账本行类型判别（三标记制：written→sending→stdin 首字节；自动补发唯一判据=sending 标记不存在）。 */
 export type JournalLine =
-  | { readonly t: "enqueue"; readonly intentId: IntentId; readonly sessionId: SessionId; readonly generation: number; readonly leafId: string; readonly matchKey: IntentMatchKey; readonly payload: EnqueuePayload } // ≡written 行（同一硬序第一写）
+  | {
+      readonly t: "enqueue";
+      readonly intentId: IntentId;
+      readonly sessionId: SessionId;
+      readonly generation: number;
+      readonly leafId: string;
+      readonly matchKey: IntentMatchKey;
+      readonly payload: EnqueuePayload;
+    } // ≡written 行（同一硬序第一写）
   | { readonly t: "sending"; readonly intentId: IntentId } // 发送通道开栓（fsync 先于 stdin 首字节，机械硬序）
   | { readonly t: "engaged"; readonly intentId: IntentId } // 呈现增强证据（永不作处置依据）
-  | { readonly t: "consumed"; readonly intentId: IntentId; readonly anchorEntryId: string; readonly intervalEnd: EntryIdentity } // 一行双字段：消费锚（append-only 不改写）+区间终点（新行承载）
+  | {
+      readonly t: "consumed";
+      readonly intentId: IntentId;
+      readonly anchorEntryId: string;
+      readonly intervalEnd: EntryIdentity;
+    } // 一行双字段：消费锚（append-only 不改写）+区间终点（新行承载）
   | { readonly t: "clear"; readonly sessionId: SessionId; readonly cleared: readonly IntentId[] } // clear_queue 响应到达时写被清清单（层2 逐意图身份）
   | { readonly t: "cancelled"; readonly intentId: IntentId } // 执行侧取消终态（身份确定且已 written；由 clear 行分派落）
   | { readonly t: "delivered"; readonly intentId: IntentId }

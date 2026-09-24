@@ -6,9 +6,9 @@ import { runRecovery, type RecoveryInput } from "@pi-agent-ui/protocol";
 import type { IntentRecord, JournalLine } from "@pi-agent-ui/protocol";
 import type { SessionEntry } from "@pi-agent-ui/protocol";
 
-let seq = 0;
+let _seq = 0;
 function mkIntent(id: string, text: string, ordinal: number, opts: Partial<IntentRecord> = {}): IntentRecord {
-  seq += 1;
+  _seq += 1;
   return {
     intentId: id,
     sessionId: "s1",
@@ -21,19 +21,34 @@ function mkIntent(id: string, text: string, ordinal: number, opts: Partial<Inten
     ...opts,
   };
 }
-function e(id: string, role: SessionEntry["role"], text: string, stopReason?: SessionEntry["stopReason"]): SessionEntry {
-  return { entryId: id, role, textHash: textHash(normalizeText(text)), attachmentIdentity: "", stopReason };
+function e(
+  id: string,
+  role: SessionEntry["role"],
+  text: string,
+  stopReason?: SessionEntry["stopReason"],
+): SessionEntry {
+  return {
+    entryId: id,
+    role,
+    textHash: textHash(normalizeText(text)),
+    attachmentIdentity: "",
+    ...(stopReason !== undefined ? { stopReason } : {}),
+  };
 }
 function run(entries: SessionEntry[], intents: IntentRecord[], alive = false) {
   return runRecovery({ entries, intents, permanentExclusions: new Set(), alive } satisfies RecoveryInput);
 }
-function verdictOf(out: { verdicts: { intentId: string; state: string; reason?: string }[] }, id: string) {
+function verdictOf(
+  out: { readonly verdicts: readonly { intentId: string; state: string; reason?: string }[] },
+  id: string,
+) {
   return out.verdicts.find((v) => v.intentId === id);
 }
 
 describe("四联终检五反例（D8 锚点）", () => {
   it("Ⓔ 已消费未生成回答：文件尾=user（续跑中）→整个归组 unknown（即使 I1 区间完整）", () => {
-    const t1 = "跑测试", t2 = "继续";
+    const t1 = "跑测试",
+      t2 = "继续";
     const entries = [e("u1", "user", t1), e("a1", "assistant", "答", "stop"), e("u2", "user", t2)];
     const out = run(entries, [mkIntent("I1", t1, 0)]);
     expect(verdictOf(out, "I1")?.state).toBe("unknown");
@@ -57,7 +72,8 @@ describe("四联终检五反例（D8 锚点）", () => {
   });
 
   it("Ⓒ 本轮完成但队列未静止（enqueue 未 consumed/clear）→③不满足→unknown", () => {
-    const t1 = "第一问", t2 = "第二问";
+    const t1 = "第一问",
+      t2 = "第二问";
     const entries = [e("u1", "user", t1), e("a1", "assistant", "答1", "stop")];
     // I1 可匹配，I2 尚未消费（队列不静止）
     const out = run(entries, [mkIntent("I1", t1, 0), mkIntent("I2", t2, 0)]);
@@ -73,8 +89,14 @@ describe("四联终检五反例（D8 锚点）", () => {
 
 describe("两遍式调度（十八审②：第一遍身份+消费，第二遍统一终检）", () => {
   it("A 落 consumed 后终检时 B 已有 consumed——两遍式让 A/B 同轮 delivered（单遍会把 A 误拦）", () => {
-    const t1 = "问一", t2 = "问二";
-    const entries = [e("u1", "user", t1), e("a1", "assistant", "答1", "stop"), e("u2", "user", t2), e("a2", "assistant", "答2", "stop")];
+    const t1 = "问一",
+      t2 = "问二";
+    const entries = [
+      e("u1", "user", t1),
+      e("a1", "assistant", "答1", "stop"),
+      e("u2", "user", t2),
+      e("a2", "assistant", "答2", "stop"),
+    ];
     const out = run(entries, [mkIntent("I1", t1, 0), mkIntent("I2", t2, 0)]);
     expect(verdictOf(out, "I1")?.state).toBe("delivered");
     expect(verdictOf(out, "I2")?.state).toBe("delivered");

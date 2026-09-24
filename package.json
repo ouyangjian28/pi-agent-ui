@@ -12,16 +12,20 @@
     "packages/*"
   ],
   "scripts": {
-    "typecheck": "tsc -b",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p packages/protocol --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
+    "typecheck:tests": "tsc -p tests --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "build": "npm run build --workspaces --if-present"
+    "build": "npm run build -w apps/web -w apps/server"
   },
   "devDependencies": {
-    "@types/node": "^26.6.2",
-    "typescript": "^7.0.2",
+    "@types/node": "^24.13.6",
+    "eslint": "^9.39.4",
+    "prettier": "^3.9.9",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.1",
     "vitest": "^5.0.1"
   }
 }

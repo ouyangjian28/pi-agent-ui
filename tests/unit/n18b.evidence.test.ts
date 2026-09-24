@@ -1,6 +1,6 @@
 // 十九审开工首序③：N18b 身份证据样例——新终答≠天然归属证明；唯一映射演算（matchKey）
 import { describe, expect, it } from "vitest";
-import { attachmentIdentity, matchKeyOf, normalizeText, textHash, runRecovery, transition } from "@pi-agent-ui/protocol";
+import { attachmentIdentity, matchKeyOf, normalizeText, textHash, runRecovery } from "@pi-agent-ui/protocol";
 import type { IntentRecord, SessionEntry } from "@pi-agent-ui/protocol";
 
 describe("匹配键派生演算（三审定界冻结口径）", () => {
@@ -25,11 +25,11 @@ describe("匹配键派生演算（三审定界冻结口径）", () => {
 describe("N18b：新终答≠天然归属证明（身份证据样例）", () => {
   it("歧义组内即使出现完整轮（U+A stop），无锚意图仍 unknown——新终答不解锁归属", () => {
     const t = "同文本";
-    const entries = [
-      { entryId: "u1", role: "user", textHash: textHash(t), attachmentIdentity: "", stopReason: undefined } as SessionEntry,
-      { entryId: "a1", role: "assistant", textHash: textHash(""), attachmentIdentity: "", stopReason: "stop" } as SessionEntry,
-      { entryId: "u2", role: "user", textHash: textHash(t), attachmentIdentity: "", stopReason: undefined } as SessionEntry,
-      { entryId: "a2", role: "assistant", textHash: textHash(""), attachmentIdentity: "", stopReason: "stop" } as SessionEntry,
+    const entries: SessionEntry[] = [
+      { entryId: "u1", role: "user", textHash: textHash(t), attachmentIdentity: "" },
+      { entryId: "a1", role: "assistant", textHash: textHash(""), attachmentIdentity: "", stopReason: "stop" },
+      { entryId: "u2", role: "user", textHash: textHash(t), attachmentIdentity: "" },
+      { entryId: "a2", role: "assistant", textHash: textHash(""), attachmentIdentity: "", stopReason: "stop" },
     ];
     const mk = (id: string, ordinal: number, kind: "prompt" | "steer"): IntentRecord => ({
       intentId: id,
@@ -41,7 +41,12 @@ describe("N18b：新终答≠天然归属证明（身份证据样例）", () => 
       consumed: null,
       cancelled: false,
     });
-    const out = runRecovery({ entries, intents: [mk("I1", 0, "prompt"), mk("I2", 1, "steer")], permanentExclusions: new Set(), alive: false });
+    const out = runRecovery({
+      entries,
+      intents: [mk("I1", 0, "prompt"), mk("I2", 1, "steer")],
+      permanentExclusions: new Set(),
+      alive: false,
+    });
     // 组内两 sending 未收口+锚缺失→唯一关联不成立→组级 unknown（两个完整轮也不能指认归属）
     expect(out.verdicts.every((v) => v.state === "unknown")).toBe(true);
     expect(out.newConsumed.length).toBe(0);
@@ -50,12 +55,26 @@ describe("N18b：新终答≠天然归属证明（身份证据样例）", () => 
     const t = "同文本";
     const entries = [
       { entryId: "u1", role: "user", textHash: textHash(t), attachmentIdentity: "" } as SessionEntry,
-      { entryId: "a1", role: "assistant", textHash: textHash(""), attachmentIdentity: "", stopReason: "stop" } as SessionEntry,
+      {
+        entryId: "a1",
+        role: "assistant",
+        textHash: textHash(""),
+        attachmentIdentity: "",
+        stopReason: "stop",
+      } as SessionEntry,
       { entryId: "u2", role: "user", textHash: textHash(t), attachmentIdentity: "" } as SessionEntry,
-      { entryId: "a2", role: "assistant", textHash: textHash(""), attachmentIdentity: "", stopReason: "stop" } as SessionEntry,
+      {
+        entryId: "a2",
+        role: "assistant",
+        textHash: textHash(""),
+        attachmentIdentity: "",
+        stopReason: "stop",
+      } as SessionEntry,
     ];
     const I1 = {
-      intentId: "I1", sessionId: "s1", generation: 1,
+      intentId: "I1",
+      sessionId: "s1",
+      generation: 1,
       matchKey: matchKeyOf(t, [], 0),
       payload: { kind: "prompt" as const, rawText: t, attachments: [] as string[], sentAt: "" },
       sending: true,
