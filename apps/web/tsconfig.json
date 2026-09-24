@@ -21,6 +21,7 @@
   },
   "include": [
     "src/**/*",
-    "../../../tests/unit/web/**"
+    "../../../tests/unit/web/**/*.ts",
+    "../../../tests/unit/web/*.ts"
   ]
 }
