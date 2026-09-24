@@ -1,6 +1,6 @@
 # pi-agent-ui
 
-**Unofficial** web interface for the [pi coding agent](https://github.com/earendil-works/pi-coding-agent) — not affiliated with the pi project.
+**Unofficial** web UI / web console / dashboard for the [pi coding agent](https://github.com/earendil-works/pi-coding-agent) — not affiliated with the pi project.
 
 A self-hosted web workspace that drives pi from your browser:
 
@@ -14,7 +14,13 @@ A self-hosted web workspace that drives pi from your browser:
 
 ## Install (when released)
 
+Published on npm: [pi-agent-ui](https://www.npmjs.com/package/pi-agent-ui)
+
 ```bash
+# quick try — no global install (always pin @latest: bare npx reuses stale cache)
+npx pi-agent-ui@latest
+
+# or install globally
 npm i -g pi-agent-ui
 ```
 
