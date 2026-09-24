@@ -10,7 +10,6 @@ export default tseslint.config(
       "**/*.d.ts",
       "**/*.js.map",
       "**/*.tsbuildinfo",
-      "apps/web/**", // UI 切片（GPT）自帶檢查，合入后再纳管
     ],
   },
   ...tseslint.configs.recommended.map((c) => ({
