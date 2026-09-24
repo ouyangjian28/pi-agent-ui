@@ -45,7 +45,8 @@ export function intervalClosedByFinalAnswer(
     .some((e) => e.role === "assistant" && (e.stopReason === "stop" || e.stopReason === "length"));
 }
 
-/** ②区间全配对：区间内全部 toolCall 按 toolCallId 与 toolResult 一一配对。 */
+/** ②区间全配对：区间内全部 toolCall 按 toolCallId 与 toolResult 一一配对（开工轮一审 B7：多重集配对——重复 id 按次数消费，缺 id 不跳过，只 result 无 call=false）。
+ * 区间内坏行（corrupt）=证据不完整→不配对（B8）。 */
 export function intervalToolCallsPaired(
   entries: readonly SessionEntry[],
   userEntryId: string,
@@ -54,13 +55,22 @@ export function intervalToolCallsPaired(
   const start = entries.findIndex((e) => e.entryId === userEntryId);
   const end = entries.findIndex((e) => e.entryId === intervalEndId);
   if (start < 0 || end < start) return false;
-  const calls = new Set<string>();
-  const results = new Set<string>();
+  const calls: string[] = [];
+  const results: string[] = [];
   for (const e of entries.slice(start, end + 1)) {
+    if (e.corrupt) return false; // 区间内坏行=归属证据不完整（一审 B8）
     if (e.toolCallId === undefined) continue;
-    if (e.role === "toolCall") calls.add(e.toolCallId);
-    if (e.role === "toolResult") results.add(e.toolCallId);
+    if (e.role === "toolCall") calls.push(e.toolCallId);
+    if (e.role === "toolResult") results.push(e.toolCallId);
   }
-  if (calls.size === 0) return true; // 无工具轮=空配对成立
-  return calls.size === results.size && [...calls].every((id) => results.has(id));
+  if (calls.length === 0 && results.length > 0) return false; // 孤立 result（一审 B 反例⑤）
+  if (calls.length === 0) return true; // 无工具轮=空配对成立
+  if (calls.length !== results.length) return false;
+  const pool = [...results];
+  for (const id of calls) {
+    const i = pool.indexOf(id);
+    if (i < 0) return false; // 有 call 无 result
+    pool.splice(i, 1); // 按次数消费（重复 id 不共享）
+  }
+  return true;
 }

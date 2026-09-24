@@ -2,6 +2,17 @@
 // 语义权威=TECH；实现必须可由伪代码逐行翻译，反例=验收用例。
 // 第一遍（身份判定+消费记录，逐意图串行）→第二遍（统一四联终检）——单遍串行会让 A 落 consumed
 // 后终检时 B 尚无 consumed→无人回头重检 A（十八审②）。
+//
+// 开工轮一审 B 面九修复（2026-09-24）：
+// B1 自有证据不再按 journal 旧终点预检——锚直接交第二遍按最新 E 重算（部分轮补齐后可收敛）
+// B2 newConsumed=匹配命中即落（D8 身份证据先行耐久）+当场重算终点；终检失败不撤锚；耐久顺序（先 fsync consumed 再发布终局）=adapter 责任
+// B3 水位推进用重算终点（非 journal 旧终点）；恢复态终裁 unknown 亦可推进（暂定 unknown 不推）
+// B4 排他=锚唯一+P+水位边界（⋃C 的区间级排他由投影起点+锚唯一+第二遍分界共同保证；匹配阶段不做尾长区间占用）
+// B5 锚冲突检查无条件执行（无歧义源亦查——两意图共享锚=歧义）
+// B6 匹配面仅 user role 入组（assistant 同 hash 不认锚）
+// B7 ②多重集配对（session-file.ts 侧）
+// B8 区间坏行=证据不完整（②内查 corrupt）
+// B9 clear 前置分派延到第二遍后四分支（身份不确定保留 unknown；已终局不改写；通知侧独立）
 
 import type { EntryIdentity, IntentId, IntentMatchKey } from "./identity.ts";
 import type { IntentRecord, JournalLine } from "./journal.ts";
@@ -19,7 +30,7 @@ export interface RecoveryInput {
   readonly intents: readonly IntentRecord[];
   /** P：永久排除集（GC 转储的已消费区间 entryId）。 */
   readonly permanentExclusions: ReadonlySet<string>;
-  /** 进程活着（true=运行中对账：sending=在飞等；false=恢复对账：可出终裁）。 */
+  /** 进程活着（true=运行中对账：sending=在飞非歧义源；false=恢复对账：可出终裁）。 */
   readonly alive: boolean;
 }
 
@@ -29,19 +40,22 @@ export interface IntentVerdict {
   readonly intentId: IntentId;
   readonly state: VerdictState;
   readonly reason?: string;
+  /** unknown 的暂定/终裁分立（一审 B3）：true=暂定（四联未过，下次扫描可重估——不推水位）；false/缺省=终裁（恢复态可推）。 */
+  readonly provisional?: boolean;
 }
 
 export interface RecoveryOutput {
   readonly verdicts: readonly IntentVerdict[];
-  /** 需随账本 fsync 的新 consumed 行（第一遍产出；十八审①：歧义禁落耐久锚）。 */
+  /** 需随账本 fsync 的新 consumed 行（第二遍后产出：锚+重算区间终点同 fsync；十八审①：歧义禁落耐久锚）。
+   *  耐久顺序（一审）：newConsumed 耐久化成功前不得发布任何 delivered 终局或推进水位——adapter 责任。 */
   readonly newConsumed: readonly JournalLine[];
-  /** 直接后继终态时的水位推进目标（逐意图推进禁跳跃；cancelled 跳过）。 */
+  /** 直接后继终态时的水位推进目标（逐意图推进禁跳跃；cancelled 跳过；重算终点非旧终点）。 */
   readonly watermarkAdvanceTo: EntryIdentity | null;
 }
 
 interface GroupInfo {
   readonly key: IntentMatchKey;
-  /** 组内按文件出现序的同 hash 条目（原始序=数组下标，禁候选内重编——十一审①）。 */
+  /** 组内按文件出现序的同 hash **user** 条目（B6：仅 user 入组；原始序=数组下标，禁候选内重编——十一审①）。 */
   readonly groupEntries: readonly SessionEntry[];
 }
 
@@ -49,6 +63,7 @@ function buildGroups(entries: readonly SessionEntry[], intents: readonly IntentR
   const groups = new Map<string, SessionEntry[]>();
   for (const e of entries) {
     if (e.corrupt) continue; // 坏行不参与匹配也不污染归属
+    if (e.role !== "user") continue; // B6：匹配面=user 条目（assistant 同 hash 不认锚）
     const k = `${e.textHash}|${e.attachmentIdentity}`;
     const arr = groups.get(k) ?? [];
     arr.push(e);
@@ -62,42 +77,50 @@ function buildGroups(entries: readonly SessionEntry[], intents: readonly IntentR
   return out;
 }
 
-/** 组内歧义判定（十八审①全口径：唯一关联检查——数量相等亦查）。
- * 歧义成立 ⟺ 组内存在 sending 未收口意图 且（条目数<意图数 或 唯一关联不成立）。
- * 唯一关联成立 ⟺ 组内意图全部有唯一 consumed 锚（锚互不冲突），或组内仅单意图。 */
+/** 组内歧义判定（十八审①全口径+B5+B10 修）。
+ * 歧义成立 ⟺ 锚冲突（≥2 意图共享同一 consumed 锚，任何状态）
+ *            或（组内存在恢复态 sending 未收口意图 且（user 条目数<未取消意图数 或 唯一关联不成立））。
+ * 运行态：sending=在飞非歧义源；条目短缺=序号超界→inflight，不判歧义（一审 B 复现⑥修）。 */
 function groupAmbiguous(group: GroupInfo, members: readonly IntentRecord[], alive: boolean): boolean {
-  if (members.length < 2) return false; // 单意图组：无归属指认问题，序号自明（k=0）
-  // 歧义源=sending 后未收口意图。运行态（alive）sending=在飞，非歧义（五审：不进入情形①）；
-  // 恢复态（崩溃后）sending 未收口=中断/未证实=歧义源。
-  const hasSource = members.some((m) => !alive && m.sending && !m.cancelled && !m.consumed);
-  if (!hasSource) {
-    // 无歧义源：序号↔出现序一一对应可执行（十一审①取法场景）
-    return group.groupEntries.length < members.filter((m) => !m.cancelled).length;
-  }
-  const countShort = group.groupEntries.length < members.length;
+  const active = members.filter((m) => !m.cancelled);
+  if (active.length < 2) return false; // 单意图组：无归属指认问题
+  // B5：锚冲突无条件查（有无歧义源都查——共享锚=唯一关联破裂）
+  const anchors = active.filter((m) => m.consumed).map((m) => m.consumed!.anchorEntryId);
+  if (anchors.length !== new Set(anchors).size) return true; // 两意图共享同一锚
+  // 恢复态歧义源：sending 后未收口意图
+  const hasSource = active.some((m) => !alive && m.sending && !m.consumed);
+  if (!hasSource) return false; // 运行态/无未收口：序号↔出现序一一对应可执行（十一审①取法场景）
+  const countShort = group.groupEntries.length < active.length;
   if (countShort) return true;
-  // 数量相等：查唯一关联——consumed 锚缺失/冲突=唯一关联不成立（D10 队列消费身份；十八审①：数量相等亦查）
-  const anchors = members.filter((m) => m.consumed).map((m) => m.consumed!.anchorEntryId);
-  const allAnchored = anchors.length === members.length;
-  const unique = new Set(anchors).size === anchors.length;
-  return !allAnchored || !unique;
+  const allAnchored = anchors.length === active.length; // 锚不齐=唯一关联不成立（数量相等亦查——十八审①）
+  return !allAnchored;
 }
 
-/** 消费区间占用集（减法排他：候选=水位后至文件尾 − ⋃C − P，仅「记入区间」不够——九审R3）。 */
-function occupiedEntryIds(intents: readonly IntentRecord[], extraAnchors: ReadonlyMap<IntentId, string>): Set<string> {
-  const occ = new Set<string>();
-  for (const j of intents) {
-    const anchor = extraAnchors.get(j.intentId) ?? j.consumed?.anchorEntryId;
-    if (anchor) occ.add(anchor);
+/** 区间分配：锚按投影序排，意图区间=[锚,下一锚)半开右排他（下一锚前一条或文件尾）——B4 排他的基础。
+ * 返回 Map<锚ID, {endId, entryIds(区间全部含锚)}，供排他与终检与水位共用同一口径。 */
+function assignIntervals(
+  entries: readonly SessionEntry[],
+  anchorIds: readonly string[],
+  permanentExclusions: ReadonlySet<string>,
+): Map<string, { endId: string; entryIds: string[] }> {
+  const pos = new Map(anchorIds.map((id) => [id, entries.findIndex((e) => e.entryId === id)]));
+  const out = new Map<string, { endId: string; entryIds: string[] }>();
+  const sorted = [...pos.entries()].filter(([, p]) => p >= 0).sort((a, b) => a[1]! - b[1]!);
+  for (let i = 0; i < sorted.length; i++) {
+    const [id, p] = sorted[i]!;
+    const nextP = i + 1 < sorted.length ? sorted[i + 1]![1]! : entries.length;
+    const ids: string[] = [];
+    for (const e of entries.slice(p!, nextP)) if (!permanentExclusions.has(e.entryId)) ids.push(e.entryId);
+    out.set(id, { endId: entries[Math.max(0, nextP - 1)]!.entryId, entryIds: ids });
   }
-  return occ;
+  return out;
 }
 
 export function runRecovery(input: RecoveryInput): RecoveryOutput {
   const { entries, intents, permanentExclusions, alive } = input;
   const verdicts: IntentVerdict[] = [];
-  const newConsumed: JournalLine[] = [];
-  const extraAnchors = new Map<IntentId, string>(); // 第一遍新增锚（第二遍③用）
+  const newConsumed: JournalLine[] = []; // 匹配命中即落（D8 身份证据先行耐久）；歧义意图禁落（十八审①）
+  const extraAnchors = new Map<IntentId, string>(); // 第一遍新增锚（第二遍③/区间/水位用）
   const pendingFinalCheck: IntentRecord[] = []; // 第二遍待检集合（十八审②：命中/自有证据同入，第一遍不终检）
 
   const groups = buildGroups(entries, intents);
@@ -109,28 +132,17 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
     membersByGroup.set(k, arr);
   }
 
-  // ⓪ clear 前置分派（四分支：执行侧。通知侧独立按三 ACK/expired 判——§17.2，不在此面）
+  // 第一遍（身份与消费，逐意图串行；cancelled 意图参与身份门（占组员额）但不匹配——分派在第二遍后）
   for (const j of intents) {
-    if (j.cancelled)
-      verdicts.push({
-        intentId: j.intentId,
-        state: "cancelled",
-        reason: "clear 行重放：身份确定+执行未终局→cancelled",
-      });
-  }
-
-  // 第一遍（身份与消费，逐意图串行）
-  for (const j of intents) {
-    if (j.cancelled) continue; // 已由⓪分派
     const groupKey = `${j.matchKey.textHash}|${j.matchKey.attachmentIdentity}`;
     const group = groups.get(groupKey)!;
     const members = membersByGroup.get(groupKey)!;
 
+    if (j.cancelled) continue; // clear 分派延到第二遍后（B9）——第一遍不做执行终局判定
+
     if (j.consumed) {
-      // 第一步·自有证据检查（C[j] 是 j 的证据不是排除对象——十审④）
       const anchorIdx = entries.findIndex((e) => e.entryId === j.consumed!.anchorEntryId);
-      const endIdx = entries.findIndex((e) => e.entryId === j.consumed!.intervalEnd.entryId);
-      if (anchorIdx < 0 || endIdx < anchorIdx) {
+      if (anchorIdx < 0) {
         verdicts.push({
           intentId: j.intentId,
           state: "unknown",
@@ -138,28 +150,12 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
         });
         continue;
       }
-      const hasFinalAnswer = entries
-        .slice(anchorIdx, endIdx + 1)
-        .some((e) => e.role === "assistant" && (e.stopReason === "stop" || e.stopReason === "length"));
-      if (!hasFinalAnswer) {
-        // 部分轮：锚点回退上一完整轮边界，残缺轮不作起点；每次恢复扫描按最新 E 重算重估（十二审①）
-        verdicts.push({
-          intentId: j.intentId,
-          state: "unknown",
-          reason: "部分轮：尾含 user 无终答，锚点回退，按新尾部重估",
-        });
-        continue;
-      }
-      // 尾含终答 → 先过身份门（十三审③：所有 delivered 出口统一）
+      // B1：不再按 journal 旧终点预检终答——直接过身份门后交第二遍按最新 E 重算（部分轮补齐后可收敛）
       if (groupAmbiguous(group, members, alive)) {
-        verdicts.push({
-          intentId: j.intentId,
-          state: "unknown",
-          reason: "组内歧义：同 hash 组无法唯一锚定归属（占用证据≠身份证明）",
-        });
+        verdicts.push({ intentId: j.intentId, state: "unknown", reason: "组内歧义：占用证据≠身份证明" });
         continue;
       }
-      pendingFinalCheck.push(j); // 十九轮：登记第二遍待检集合，不立即终检
+      pendingFinalCheck.push(j);
       continue;
     }
 
@@ -168,15 +164,14 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
       verdicts.push({
         intentId: j.intentId,
         state: "unknown",
-        reason: "组内歧义（数量相等亦查唯一关联）：不落耐久记录，候选不占用不排他",
+        reason: "组内歧义（数量相等亦查唯一关联）：不落耐久记录",
       });
       continue;
     }
-    const occupied = occupiedEntryIds(intents, extraAnchors);
-    const candidates = group.groupEntries.filter(
-      (e) => !occupied.has(e.entryId) && !permanentExclusions.has(e.entryId),
-    );
-    // 序号语义（十一审①）：k=原始文件序列序号（恒定），「原始序列第 k 个 entry，且该 entry 仍在候选集中」——禁候选内重编
+    // 减法排他：候选=水位后至文件尾 − ⋃C − P（九审R3）。⋃C 在匹配阶段的体现=全部
+    // 已锚定条目（既有锚+本轮新落锚）——历史消费区间在水位边界之前不进投影，其条目由 P 挡。
+    // （区间级分配不在此阶段：单锚尾长区间会误吞未匹配候选；区间互不重叠由锚唯一性+第二遍分界保证。）
+    const occupied = new Set<string>();
     const k = j.matchKey.ordinal;
     const rawIdxK = group.groupEntries[k];
     if (rawIdxK === undefined) {
@@ -187,87 +182,133 @@ export function runRecovery(input: RecoveryInput): RecoveryOutput {
       });
       continue;
     }
-    if (!candidates.includes(rawIdxK)) {
+    for (const m of intents) {
+      const a = extraAnchors.get(m.intentId) ?? m.consumed?.anchorEntryId;
+      if (a) occupied.add(a);
+    }
+    if (occupied.has(rawIdxK.entryId) || permanentExclusions.has(rawIdxK.entryId)) {
       verdicts.push({
         intentId: j.intentId,
         state: alive ? "inflight" : "unknown",
-        reason: "原始序号条目已被消费/排除，本轮不匹配",
+        reason: "原始序号条目已在消费区间/排除集内",
       });
       continue;
     }
-    // 命中：身份门已在上方过（歧义不落记录）→ 立即占用：写 C[j]+双字段 consumed 同 fsync（十七审②；首次仅匹配 user 也落，D8）
+    // 命中：身份门已过 → 立即占用锚并落 consumed 行（D8：匹配即落身份证据先行耐久，终检失败不撤锚；
+    // 区间终点按当场锚分布重算，下次恢复扫描从最新 E 重算重估——十二审①）
     extraAnchors.set(j.intentId, rawIdxK.entryId);
+    const curAnchors = new Map<IntentId, string>();
+    for (const m of intents) {
+      const a = extraAnchors.get(m.intentId) ?? m.consumed?.anchorEntryId;
+      if (a) curAnchors.set(m.intentId, a);
+    }
+    const curIv = assignIntervals(entries, [...curAnchors.values()], permanentExclusions).get(rawIdxK.entryId);
     newConsumed.push({
       t: "consumed",
       intentId: j.intentId,
       anchorEntryId: rawIdxK.entryId,
-      intervalEnd: { entryId: rawIdxK.entryId, lengthHash: "" }, // 首锚=user entry 自身；区间扩展=新行承载
+      intervalEnd: { entryId: curIv?.endId ?? rawIdxK.entryId, lengthHash: "" },
     });
     pendingFinalCheck.push(j); // 十八审②：命中意图只记录不终检
   }
 
-  // 第二遍（统一四联终检——第一遍全部完成后执行，B 落 consumed 后 A 的③不再被误拦）
+  // 第二遍（统一四联终检）
   const clauseZeroOk =
     entries.length > 0 &&
     fileTailSatisfiesClauseZero(entries[entries.length - 1]!) &&
     !entries[entries.length - 1]!.corrupt;
   const queueQuiesced = intents.every((j) => j.cancelled || extraAnchors.has(j.intentId) || j.consumed !== null);
-  // 区间终点重算（十二审①：每次恢复扫描按最新 E 重算；规格：意图区间=[锚,边界)半开右排他=下一意图锚前一条或文件尾）
-  const allAnchorIds = intents
-    .map((j) => extraAnchors.get(j.intentId) ?? j.consumed?.anchorEntryId ?? null)
-    .filter((x): x is string => x !== null);
-  const anchorPositions = new Map(allAnchorIds.map((id) => [id, entries.findIndex((e) => e.entryId === id)]));
-  function recalcIntervalEnd(anchorId: string): string {
-    const myPos = anchorPositions.get(anchorId) ?? -1;
-    let nextAnchorPos = entries.length; // 默认=文件尾
-    for (const pos of anchorPositions.values()) if (pos > myPos && pos < nextAnchorPos) nextAnchorPos = pos;
-    return entries[Math.max(0, nextAnchorPos - 1)]!.entryId; // 半开：下一锚前一条
+  // 区间重算（B4 同一函数）：既有锚+新增锚一起分配
+  const allAnchorIds = new Map<IntentId, string>();
+  for (const j of intents) {
+    const a = extraAnchors.get(j.intentId) ?? j.consumed?.anchorEntryId;
+    if (a) allAnchorIds.set(j.intentId, a);
   }
+  const intervals = assignIntervals(entries, [...allAnchorIds.values()], permanentExclusions);
+  const anchorOf = (j: IntentRecord): string | undefined => allAnchorIds.get(j.intentId);
+
   for (const j of pendingFinalCheck) {
-    const anchorId = extraAnchors.get(j.intentId) ?? j.consumed!.anchorEntryId;
-    const endId = recalcIntervalEnd(anchorId); // 不用 journal 旧终点：按最新 E 重算
+    const anchorId = anchorOf(j)!;
+    const iv = intervals.get(anchorId);
+    if (!iv) {
+      verdicts.push({ intentId: j.intentId, state: "unknown", reason: "区间分配失败（锚不在投影）" });
+      continue;
+    }
     if (!clauseZeroOk) {
       verdicts.push({
         intentId: j.intentId,
         state: "unknown",
-        reason: "⓪不满足：文件尾非终答边界（续跑中/截断）→整个归组 unknown（反例Ⓔ）",
+        provisional: true,
+        reason: "⓪不满足：文件尾非终答边界（续跑中/截断）→归组 unknown（反例Ⓔ）",
       });
       continue;
     }
-    const c1 = intervalClosedByFinalAnswer(entries, anchorId, endId);
+    const c1 = intervalClosedByFinalAnswer(entries, anchorId, iv.endId);
     if (!c1) {
-      verdicts.push({ intentId: j.intentId, state: "unknown", reason: "①不满足：意图区间未闭合（user 后无终答）" });
+      verdicts.push({
+        intentId: j.intentId,
+        state: "unknown",
+        provisional: true,
+        reason: "①不满足：意图区间未闭合（user 后无终答）",
+      });
       continue;
     }
-    const c2 = intervalToolCallsPaired(entries, anchorId, endId);
+    const c2 = intervalToolCallsPaired(entries, anchorId, iv.endId);
     if (!c2) {
-      verdicts.push({ intentId: j.intentId, state: "unknown", reason: "②不满足：区间内 toolCall/toolResult 未配对" });
+      verdicts.push({
+        intentId: j.intentId,
+        state: "unknown",
+        provisional: true,
+        reason: "②不满足：区间内 toolCall/toolResult 未配对或含坏行",
+      });
       continue;
     }
     if (!queueQuiesced) {
       verdicts.push({
         intentId: j.intentId,
         state: "unknown",
+        provisional: true,
         reason: "③不满足：范围内存在未消费未取消 enqueue（反例Ⓒ）",
       });
       continue;
     }
-    verdicts.push({ intentId: j.intentId, state: "delivered", reason: "四联⓪①②③全过" });
+    verdicts.push({ intentId: j.intentId, state: "delivered", reason: "四联⓪①②③全过（区间按最新 E 重算）" });
+  }
+  // 未进入终检的歧义/超界意图无 newConsumed（禁落耐久锚——十八审①）；自有证据意图不重复落行。
+
+  // B9：clear 前置分派（第二遍后四分支——执行侧；通知侧独立按三 ACK/expired 判，不在此面）
+  for (const j of intents) {
+    if (!j.cancelled) continue;
+    const existing = verdicts.find((x) => x.intentId === j.intentId);
+    const a = anchorOf(j);
+    if (a && intervals.has(a) && existing?.state === "delivered") continue; // 分支③：执行已终局——不改写（delivered 保持）
+    if (a) {
+      verdicts.push({ intentId: j.intentId, state: "cancelled", reason: "clear 重放：身份确定+执行未终局→cancelled" });
+      continue; // 分支②
+    }
+    const groupKey = `${j.matchKey.textHash}|${j.matchKey.attachmentIdentity}`;
+    const members = membersByGroup.get(groupKey)!;
+    const ambiguous = members.filter((m) => !m.cancelled).length >= 2;
+    if (ambiguous) continue; // 分支①：身份不确定组——保留 unknown（已在第一遍落判），不落 cancelled
+    verdicts.push({
+      intentId: j.intentId,
+      state: "cancelled",
+      reason: "clear 重放：无锚且组内无歧义→执行未消费，取消有效",
+    });
   }
 
-  // 水位推进：仅当直接后继意图终态才推进；cancelled 跳过；遇未决必须停（禁跨越/禁跳跃）
+  // 水位推进（B3）：逐意图序，delivered 或恢复态终裁 unknown（有锚）才推进；用重算终点；cancelled 跳过；遇未决停。
   let advanceTo: EntryIdentity | null = null;
   for (const j of intents) {
     const v = verdicts.find((x) => x.intentId === j.intentId);
     if (!v) break; // 未判决=未决→停
-    if (v.state === "cancelled") continue; // 无消费终点=跳过
-    if (v.state !== "delivered") break; // 规格口径：水位推进=终态（delivered/settled/unknown 终裁）才推进；inflight/未判=停
-    const anchorId = extraAnchors.get(j.intentId);
-    advanceTo = j.consumed
-      ? j.consumed.intervalEnd
-      : anchorId !== undefined
-        ? { entryId: anchorId, lengthHash: "" }
-        : advanceTo;
+    if (v.state === "cancelled") continue; // 跳过（无消费终点）
+    const a = anchorOf(j);
+    const terminal =
+      v.state === "delivered" || (v.state === "unknown" && !alive && a !== undefined && v.provisional !== true); // 恢复态终裁可推；暂定（四联未过/运行态）不推
+    if (!terminal || a === undefined) break;
+    const iv = intervals.get(a);
+    advanceTo = iv ? { entryId: iv.endId, lengthHash: "" } : advanceTo;
   }
 
   return { verdicts, newConsumed, watermarkAdvanceTo: advanceTo };
