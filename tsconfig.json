@@ -9,5 +9,6 @@
     "allowImportingTsExtensions": true,
     "types": ["node"]
   },
-  "include": ["packages/protocol/src/**/*.ts", "tests/unit/**/*.ts", "tests/fixtures/**/*.ts"]
+  "include": ["packages/protocol/src/**/*.ts", "tests/unit/**/*.ts", "tests/fixtures/**/*.ts"],
+  "exclude": ["tests/unit/web/**"]
 }
