@@ -692,6 +692,29 @@ describe("RpcSession（受控替身）", () => {
     await until(() => audits.some((l) => l.includes("idle-reap-done kind=confirmed")), "回收确认");
   });
 
+  it("S5-R1：采样间短登记（经包装面 register/complete）→闲置起点后移到活动时刻（不沿用旧起点）", async () => {
+    const { session, host, audits } = await makeSession({ idleMs: 120, eofGraceMs: 400 });
+    const p0 = session.start();
+    await until(() => host.frames.some((f) => f.includes('"type":"get_state"')), "探针写出");
+    host.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true });
+    expect((await p0).kind).toBe("ready");
+    await runTurn(host, session, "前置轮", 1);
+    await until(() => audits.some((l) => l.includes("idle-timer-start")), "闲置起点已计");
+    // 起点后 60ms（idleMs=120 的中段）经包装面完成一次短登记——两 tick 间完整发生的活动
+    await new Promise((r) => setTimeout(r, 60));
+    session.idleRegistry.register("short-bg", "短任务");
+    session.idleRegistry.complete("short-bg");
+    // 再等 90ms：自旧起点已过 150>120——若吸收失效此刻应已触发；吸收生效则自活动时刻（~60）起算到期点 ≈180
+    await new Promise((r) => setTimeout(r, 90));
+    expect(audits.some((l) => l.includes("idle-reap-start"))).toBe(false);
+    expect(host.closedStdinCount).toBe(0); // 未发起回收
+    await until(() => audits.some((l) => l.includes("idle-reap-start")), "活动重计后到期触发", 5_000);
+    await until(() => host.closedStdinCount > 0, "EOF 已发");
+    host.emitExit(0, null);
+    await until(() => audits.some((l) => l.includes("idle-reap-done kind=confirmed")), "回收确认");
+    expect(audits.some((l) => l.includes("idle-timer-reset-by-activity"))).toBe(true); // 吸收留痕
+  });
+
   it("切片5①：EOF 宽限超时→升级 SIGTERM（优雅链降级）", async () => {
     const { session, host, audits } = await makeSession({ idleMs: 60, eofGraceMs: 60 });
     const p0 = session.start();
