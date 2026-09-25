@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.86.1",
-    "@pi-agent-ui/protocol": "*"
+    "@pi-agent-ui/protocol": "*",
+    "ws": "^8.18.0"
   }
 }
