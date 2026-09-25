@@ -3,11 +3,11 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DurabilityPort, ProcessHandle, ProcessHostPort, ProcessSpawnHandlers } from "@pi-agent-ui/protocol";
 import { FileDurability } from "../../../apps/server/src/runtime/file-durability.js";
 import { RpcSession } from "../../../apps/server/src/runtime/rpc-session.js";
-import { MapRegistry } from "../../../apps/server/src/runtime/idle-reaper.js";
+import { IdleReaper, MapRegistry } from "../../../apps/server/src/runtime/idle-reaper.js";
 
 /** 假 pi 进程宿主：记录写出的 stdin 帧；测试用 emitEvent/emitExit 注入进程输出。
  *  writeMode：ok=正常受理；fail=write reject（S4-03 写入失败）；hang=write 永不兑现（S4-03 挂起窗口）。 */
@@ -881,5 +881,139 @@ describe("RpcSession（受控替身）", () => {
       "耐久失败审计可见",
     );
     void cmd;
+  });
+
+  // ===== s5c 外审反例正式化（GPT s5c 报告 §3 探针；假 host 自动响应+performance.now 受控时钟+手动 tick） =====
+  // 白盒接缝=手动驱动内部 reaper.tick()（去掉真实 interval 抖动）；业务刺激全走公开 start/send/idleRegistry/dispose。
+  describe("闲置回收定时边界（s5c 外审反例正式化）", () => {
+    async function setupS5c(audit?: (line: string) => void): Promise<{
+      s: RpcSession;
+      r: IdleReaper;
+      eof: () => number;
+      settled: () => number;
+      exit: () => void;
+    }> {
+      let handler!: ProcessSpawnHandlers;
+      let eof = 0;
+      let settled = 0;
+      const s = new RpcSession({
+        sessionFile: "/tmp/unused-s5c-session",
+        journalPath: "/tmp/unused-s5c-journal",
+        sessionId: "s5c",
+        timeoutPollMs: 1_000_000,
+        idleMs: 100,
+        ...(audit ? { audit } : {}),
+        onSettled: () => {
+          settled += 1;
+        },
+        durability: { append: async () => undefined },
+        host: {
+          spawn: (_args: readonly string[], h: ProcessSpawnHandlers) => {
+            handler = h;
+            return { id: "h" };
+          },
+          writeStdin: async (_handle: ProcessHandle, text: string) => {
+            const frame = JSON.parse(text) as { id: string; type: string };
+            handler.onEvent({ type: "response", id: frame.id, success: true });
+            if (frame.type === "prompt") {
+              handler.onEvent({ type: "agent_settled" });
+            }
+          },
+          closeStdin: () => {
+            eof += 1;
+          },
+          stop: () => handler.onExit(0, null),
+        },
+      });
+      sessions.push(s);
+      await s.start();
+      return {
+        s,
+        r: (s as unknown as { reaper: IdleReaper }).reaper,
+        eof: () => eof,
+        settled: () => settled,
+        exit: () => handler.onExit(0, null),
+      };
+    }
+
+    for (const kind of ["short-turn", "generation", "spaced-task"] as const) {
+      it(`s5c-正例：${kind}——活动后旧期限不沿用，自活动时刻满期才回收`, async () => {
+        let now = 0;
+        const spy = vi.spyOn(performance, "now").mockImplementation(() => now);
+        const h = await setupS5c();
+        try {
+          h.r.tick(); // 起点=0
+          now = 90;
+          if (kind === "short-turn") {
+            await h.s.send("短轮");
+            for (let i = 0; i < 20; i += 1) await Promise.resolve();
+            expect(h.settled()).toBe(1); // 短轮已完整结算（受理+settled 都在两 tick 间）
+          } else if (kind === "generation") {
+            h.exit(); // 旧代退出+新代 ready 全在两 tick 之间
+            await h.s.start();
+          } else {
+            h.s.idleRegistry.register("x"); // 公开包装面登记（经 wrapper note）
+            now = 95;
+            h.s.idleRegistry.complete("x"); // 错开完成时刻：complete 的 note 语义（wrapc 有独立载荷）
+          }
+          const end = now;
+          now = 100; // 旧起点满 100——但活动刚发生，不得回收
+          h.r.tick();
+          expect(h.eof()).toBe(0);
+          now = end + 99; // 自活动时刻起 99——仍未满
+          h.r.tick();
+          expect(h.eof()).toBe(0);
+          now = end + 100; // 恰满
+          h.r.tick();
+          expect(h.eof()).toBe(1);
+        } finally {
+          h.exit();
+          await h.s.dispose();
+          spy.mockRestore();
+        }
+      });
+    }
+
+    it("s5c-B1：audit 回调内公开 wrapper 短活动对（register+complete）→到期判定被活动复核取消", async () => {
+      let now = 0;
+      const spy = vi.spyOn(performance, "now").mockImplementation(() => now);
+      const h = await setupS5c((line: string) => {
+        if (line.startsWith("idle-reap-start")) {
+          h.s.idleRegistry.register("x"); // 公开面（经 wrapper：activeCount 先 1 后 0+同步 note）
+          h.s.idleRegistry.complete("x");
+        }
+      });
+      try {
+        h.r.tick();
+        now = 100;
+        h.r.tick(); // 到期判定+audit 回调内短活动→最终复核吸收→取消
+        expect(h.eof()).toBe(0);
+      } finally {
+        h.exit();
+        await h.s.dispose();
+        spy.mockRestore();
+      }
+    });
+
+    it("s5c-B2：到期 tick 的 audit 回调里同步调用公开 dispose（不 await）→尚未开始的回收作废", async () => {
+      let now = 0;
+      const spy = vi.spyOn(performance, "now").mockImplementation(() => now);
+      let disposed: Promise<void> | undefined;
+      const h = await setupS5c((line: string) => {
+        if (line.startsWith("idle-reap-start")) disposed = h.s.dispose();
+      });
+      try {
+        h.r.tick();
+        now = 100;
+        h.r.tick();
+        expect(h.eof()).toBe(0); // 在当前同步 tick 完成时检查（不先 await dispose）
+        expect(disposed).toBeDefined();
+        await disposed;
+      } finally {
+        h.exit();
+        await h.s.dispose();
+        spy.mockRestore();
+      }
+    });
   });
 });

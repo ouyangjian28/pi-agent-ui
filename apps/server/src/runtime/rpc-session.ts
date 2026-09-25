@@ -238,8 +238,10 @@ export class RpcSession {
   async dispose(): Promise<void> {
     if (this.disposeP !== null) return this.disposeP;
     // s5c B2：同步急停——公开 dispose 调用返回前 tick 通道立即失效（interval 清+回收器置废）。
-    // 此前清停排在未来微任务（F3 先发布后运行），让渡窗口内 interval 回调仍可 fire 一次 tick
-    // 并发起回收（对真进程发 EOF/SIGTERM）——dispose 语义=此后不得再有任何回收外部作用。
+    // 此前清停排在未来微任务（F3 先发布后运行），而到期 tick 的 audit 同步重入 dispose 后
+    // 当前 tick 仍会继续执行并发起回收（对真进程发 EOF/SIGTERM）。
+    // 契约范围（s5c 报告收窄）：只保证取消「尚未开始」的回收——不得新发起；已置 stopping 并
+    // 已发 EOF 的在途退役不撤回（其完成审计仍可能出现）。
     // 幂等：runDispose 再清一次（pollTimer 已 null / reaper 已 null 均无害）。
     if (this.pollTimer !== null) {
       clearInterval(this.pollTimer);

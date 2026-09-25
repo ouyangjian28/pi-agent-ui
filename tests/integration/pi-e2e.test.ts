@@ -479,6 +479,15 @@ describe("assistantBodyText 命中谓词（受控）", () => {
     // s5 首审补强：gen2 仍接同一 --session 文件（持久身份）且历史继续增长（原上下文未被丢）
     const sizeAfterGen2 = (await stat(sessionFile)).size;
     expect(sizeAfterGen2).toBeGreaterThan(sizeAfterGen1);
+    // s5c 报告 §7 补强：第一代唯一标记在回收+冷启动后仍完整存在于会话文件（持久历史保存）。
+    // 口径注意：这是持久历史证据，不等同于「第二代内存上下文确已加载」——后者须等②只读
+    // 历史读取口（get_messages 面）接入后方可断言；本例不冒充该结论。
+    const gen1Marker = "OK-GEN1";
+    const l1m = await s.send(`请只回复这个标记：${gen1Marker}`);
+    expect(l1m.kind).toBe("launched");
+    await until(() => settledGens.length === 3, "标记轮 settled", 120_000);
+    const sessionText = await readFile(sessionFile, "utf8");
+    expect(sessionText).toContain(`请只回复这个标记：${gen1Marker}`); // 用户指令原文入会话历史（第一代上下文留痕）
     const rep = await recoverFromJournal(join(dir, "journal.jsonl"), "e2e");
     expect(rep.bad).toEqual([]);
     expect(rep.intents).toHaveLength(2);
