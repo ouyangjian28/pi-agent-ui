@@ -105,4 +105,18 @@
 | 通用命令占位先行（placeholder fsync→send→result fsync→settle；占位失败=未发送+内存留置（同 opId=unknown-effect，新 opId 重发）；send 失败=效果未知留置；结果耐久失败=内存占位态+同通道重试 unknown-effect（s1b 补）；cached 不重发；同键不同参拒+审计；send 返回 null=违规留置+审计） | command-channel.test@12（含写前/写后两替身+A1-05 null+同通道重试补断言+结果写后重放=cached 非洗白） | 🟡（逻辑面；耐久等待窗口未挂起锁；变异：占位序倒置→3 挂、回滚内存退化→2 挂、去 null 防御→1 挂） |
 | opId 通用命令去重（admit/缓存/同键不同参拒/崩溃重放重建；rollback 已删 A1-03） | command-dedup.test@6 | ✅（逻辑面；公开危险接口已移除） |
 
+### adapter 切片 2（风险序 2：带身份乱序协调层；TECH §169④ 事件归属屏障；纯逻辑）
+
+| 编号 | 断言落点 | 状态 |
+| --- | --- | --- |
+| 事件归属先于回调（TurnKey=intentId+commandId+generation；send 许可后才登记；带 id settled 精确归因；未登记回执=ignored-unknown） | dispatch-coordinator.test@正常序+反例6（close 插入 enqueue 挂起窗口=invalidated 无登记+晚到 response=ignored-unknown） | 🟡（逻辑面；「stdin 首字节前完成登记」的机械序归发送器接线验收） |
+| settled 先到保留缓冲（prompt 在途+settled 先到=回绑时消费不丢不等第二个；回绑即结算 accepted-and-settled；重复=duplicate 丢弃） | dispatch-coordinator.test@反例1（settled 先到 buffered→success 回绑即结算+缓冲 drain 交付）+反例3 | ✅（逻辑面；变异：去缓冲直接结算→反例1/3 挂） |
+| 响应超时协议（先耐久 response-timeout 行再移出在途；移出后晚到 success 不回绑不开 run+审计；晚到 settled 结算记录解屏障；记录 fsync 失败=fail-closed 不移出） | dispatch-coordinator.test@反例2+记录 fsync 失败 | ✅（逻辑面；变异：跳过耐久记录直接移出→2 挂；晚到 success 仍回绑→反例2 挂） |
+| 带缓冲 settled 的超时分派（记录+结算一次=recorded-and-settled；清记录/缓冲+解屏障；不再等第二个 settled） | dispatch-coordinator.test@反例3 | ✅（逻辑面） |
+| 终态耐久失败保持关闭（settled 行 fsync 失败→gate closed；重复 settled 再呈现不改写；旧轮 late 事件不改写新轮） | dispatch-coordinator.test@反例4（settle-durability-failed 重复不改写）+反例5（A 晚到带 id settled 不得结算 B） | ✅（逻辑面；与 TurnGate A1-01 epoch 复核互补） |
+| 事件缓冲有界（awaiting 期事件按代次缓冲有界；溢出=gate closed(buffer-overflow)+审计+已缓冲保留呈现不静默丢；run-open 直交；旧代次丢弃） | dispatch-coordinator.test@溢出+run-open 直交 | ✅（逻辑面；变异：溢出静默丢不关闭→挂） |
+| 迟到 settled 四联丢弃（无开启 run+无在途命令+无未结算记录+缓冲空→丢弃+审计；不满足=保留） | dispatch-coordinator.test@四联空丢弃 | ✅（逻辑面；四联全空才丢） |
+| 进程换代隔离（onGenerationRetired 清登记+计数审计；旧代次晚到事件全丢弃；新代次轮不受影响；屏障解除=宿主换代手续 close+reopen 非协调器自动） | dispatch-coordinator.test@反例7（含宿主 close+reopen 手续演示） | 🟡（逻辑面；退出确认/换代手续本体=进程面后续切片；「旧 timer/旧 Promise 失效」同归接线验收） |
+| 响应失败（ok=false）与整轮超时分立（response-failure 屏障不动宿主处置；turn-timeout 委托 gate checkTimeout） | dispatch-coordinator.test@ok=false+整轮超时委托 | ✅（逻辑面；§169④ 两类超时分立已落） |
+
 端到端面（真 spawn+真文件系统+乱序压力+连续派发）待 adapter 后续切片，仍 🔴。
