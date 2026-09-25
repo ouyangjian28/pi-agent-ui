@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import type { IntentId, JournalLine, SessionId } from "@pi-agent-ui/protocol";
 import { DispatchCoordinator, TurnGate, replayIntents } from "@pi-agent-ui/protocol";
-import type { CoordinatorDeps, TurnIntentInput } from "@pi-agent-ui/protocol";
+import type { CoordinatorDeps, LaunchOutcome, TurnIntentInput } from "@pi-agent-ui/protocol";
 
 const T0 = "2026-09-25T00:00:00Z";
 const t = (ms: number) => new Date(Date.parse(T0) + ms).toISOString();
@@ -589,6 +589,89 @@ describe("派发协调层（DispatchCoordinator，§169④）", () => {
       expect(h.audits).toContain("drain-callback-failed events=1");
       expect(h.coord.getState().command).toBeNull(); // 结算照常完成（回调责任归宿主）
       expect(h.gate.getState().kind).toBe("idle");
+    });
+  });
+
+  describe("S2-C1 正常收口=槽位释放边界（挂起超时不占位新轮）", () => {
+    it("A 挂起超时→success+settled 正常收口→B 超时可自行发起；双挂起旧 A finally 不动 B 槽", async () => {
+      const h = makeHarness();
+      await h.coord.submitTurn(intent("i-1"), 101); // 调用 1/2
+      h.dur.holdAt = 3; // A 的 response-timeout 记录挂起
+      h.clock.iso = t(120_000);
+      const pendingA = h.coord.checkResponseTimeout(); // 调用 3 挂起
+      await untilHeld(h.dur);
+      expect((await h.coord.onRpcResponse(101, 1, true)).kind).toBe("accepted"); // 等待期 success 回绑→run-open
+      expect((await h.coord.onSettledEvent({ generation: 1, commandId: 101 })).kind).toBe("settled"); // 调用 4：正常收口（C1：同步释放槽位）
+      const lb = await h.coord.submitTurn(intent("i-2"), 202); // 调用 5/6：无 retire 更替，登记位已空
+      expect(lb).toMatchObject({ kind: "launched" });
+      h.dur.holdAt2 = 7; // B 的 response-timeout 记录也挂起（双挂起窗口）
+      h.clock.iso = t(240_000);
+      const pendingB = h.coord.checkResponseTimeout(); // 调用 7：槽位已释放→B 自行发起（修复前=pending(A) 永久占位）
+      await untilCalls(h.dur, 7);
+      h.dur.releaseHold(0); // 旧 A 完成：then 侧 key-mismatch=invalidated；finally 不清 B 槽
+      expect(await pendingA).toMatchObject({ kind: "invalidated", key: { commandId: 101 } });
+      expect(h.audits).toContain("response-timeout-invalidated commandId=101 key-mismatch"); // 成功侧：记录已在盘，旧登记不拥有新轮
+      expect(h.coord.getState().command?.key).toMatchObject({ commandId: 202 }); // B 不动
+      h.dur.releaseHold(0); // 现在首槽=B
+      expect(await pendingB).toMatchObject({ kind: "recorded", key: { commandId: 202 } });
+      expect(h.coord.getState().command?.phase).toBe("response-timed-out");
+      expect(h.dur.lines.filter((l) => l.t === "response-timeout").map((l) => l.commandId)).toEqual([101, 202]);
+    });
+
+    it("bufferedSettled 合并式结算→recorded-and-settled 也释放槽位；B 超时可自行发起", async () => {
+      const h = makeHarness();
+      await h.coord.submitTurn(intent("i-1"), 101);
+      h.dur.holdAt = 3;
+      h.clock.iso = t(120_000);
+      const pendingA = h.coord.checkResponseTimeout(); // 调用 3 挂起
+      await untilHeld(h.dur);
+      h.coord.onPiEvent({ i: 0 }, 1); // 缓冲 e0
+      h.coord.onSettledEvent({ generation: 1, commandId: 101 }); // awaiting→bufferedSettled（不结算）
+      h.dur.releaseHold(0); // A 超时记录完成→合并式结算：settled 行=调用 4→recorded-and-settled
+      expect(await pendingA).toMatchObject({ kind: "recorded-and-settled", key: { commandId: 101 } });
+      expect(h.drained).toEqual([[{ i: 0 }]]);
+      expect(h.coord.getState().command).toBeNull();
+      await h.coord.submitTurn(intent("i-2"), 202); // 调用 5/6
+      h.clock.iso = t(240_000);
+      const outB = await h.coord.checkResponseTimeout(); // 调用 7：槽位已释放，B 自行发起
+      expect(outB).toMatchObject({ kind: "recorded", key: { commandId: 202 } });
+    });
+  });
+
+  describe("S2-C3 许可交接窗口（send 返回后登记前失效）", () => {
+    it("sending 完成微任务窗口 close→invalidated/post-send：不登记不 launched", async () => {
+      const h = makeHarness();
+      h.dur.holdAt = 2; // sending 行挂起
+      const p = h.coord.submitTurn(intent("i-1"), 101);
+      await untilHeld(h.dur);
+      h.dur.releaseHold();
+      queueMicrotask(() => {
+        h.gate.close("manual"); // 插在 send 解析与协调器续跑之间
+      });
+      expect(await p).toEqual({ kind: "invalidated", stage: "post-send" });
+      expect(h.coord.getState().command).toBeNull(); // 未登记
+      expect(h.gate.getState()).toEqual({ kind: "closed", reason: "manual" });
+      expect(h.audits.some((l) => l.startsWith("launch-invalidated-post-send intentId=i-1 gate="))).toBe(true);
+    });
+
+    it("close+reopen 后 B 在飞：旧 A 续跑=invalidated 不覆盖 B 登记", async () => {
+      const h = makeHarness();
+      h.dur.holdAt = 2;
+      const pA = h.coord.submitTurn(intent("i-1"), 101);
+      await untilHeld(h.dur);
+      h.dur.releaseHold();
+      let pB: Promise<LaunchOutcome> | undefined;
+      queueMicrotask(() => {
+        h.gate.close("manual");
+        h.gate.reopen();
+        pB = h.coord.submitTurn(intent("i-2"), 202); // 抢先提交 B（调用 3/4）
+      });
+      expect(await pA).toEqual({ kind: "invalidated", stage: "post-send" }); // 旧许可不复用：Gate 已属 B
+      const outB = await pB!;
+      expect(outB).toMatchObject({ kind: "launched", key: { commandId: 202 } });
+      expect(h.coord.getState().command?.key).toMatchObject({ intentId: "i-2", commandId: 202 }); // 只登记 B
+      expect(h.gate.getState()).toMatchObject({ kind: "in-flight", intentId: "i-2" });
+      expect(h.audits.some((l) => l.startsWith("launch-invalidated-post-send intentId=i-1 gate="))).toBe(true);
     });
   });
 });

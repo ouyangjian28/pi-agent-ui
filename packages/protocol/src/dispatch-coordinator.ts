@@ -12,6 +12,14 @@
 // - 前提固化（Y3）：submit 的 await 窗口内协调器 opEpoch 不变——retire 无匹配登记/槽位=no-op、
 //   abandonHeld 无登记=null；submit 失效由宿主配套 close 使 Gate 侧 epoch 失效承担（接线验收项）。
 //
+// s2c 修复（gpt-adapter-s2c-review）：
+// - C1 正常收口=槽位释放边界：finishSettle 释放登记时同步释放同 key 超时槽位——旧 timeout append
+//   永不返回也不得占位新轮（其续体由 epoch+key 复核自归 invalidated，不改新状态）。
+// - C2 失效身份分立：opEpoch 仅表达登记生命周期；退役时仅登记匹配才递增（槽位单独匹配=只清槽
+//   不取消当前命令）。注：C1 修复后「仅槽位匹配」在公开 API 下不可达，分支留作不变量固化防复发。
+// - C3 跨层许可交接：Gate 返回 send 到协调器续跑之间存在宿主 close/换代微任务窗口——登记前复核
+//   Gate 现态（须仍 in-flight 且 intentId 同），否则 invalidated 不登记不 launched（旧许可不外泄）。
+//
 // S2-05 归因前提：无 id settled 的「唯一在途」归因依赖上游按代次顺序+轮边界投递（接线时验证）。
 
 import type { IntentId } from "./identity.ts";
@@ -51,7 +59,8 @@ export interface CoordinatorDeps {
   readonly maxBufferedEvents?: number;
   /** 同步审计钩子（C1-02：只收同步函数；async 拒绝不在隔离范围，宿主自消费）。 */
   audit?(line: string): void;
-  /** 缓冲交付面（run 开启时事件转发；结算成功时缓冲 drain）。 */
+  /** 缓冲交付面（run 开启时事件转发；结算成功时缓冲 drain）。仅同步契约：传入 async 函数时其
+   *  reject 不被 drain 的 try/catch 捕获（TS void 返回类型不阻止 async 传入）；可靠交付=宿主回调自证责任。 */
   onBufferDrain?(events: readonly unknown[]): void;
 }
 
@@ -63,7 +72,7 @@ export type LaunchOutcome =
   | { kind: "busy" } // 协调层在飞（旧登记未收口：宿主走恢复手续）
   | { kind: "gate-rejected"; reason: "busy" | "closed" }
   | { kind: "gate-failed"; stage: "enqueue" | "sending"; error: unknown }
-  | { kind: "invalidated"; stage: "enqueue" | "sending" }; // 许可过程中生命周期失效（close/换代），未登记未发送
+  | { kind: "invalidated"; stage: "enqueue" | "sending" | "post-send" }; // 生命周期失效（close/换代），未登记未发送；post-send=Gate 已返 send 但续跑前失效（C3，未首字节）
 
 export type ResponseOutcome =
   | { kind: "accepted"; key: TurnKey } // success 回绑：run 开启，缓冲已交付
@@ -117,6 +126,13 @@ export class DispatchCoordinator {
     if (this.command !== null) return { kind: "busy" };
     const verdict = await this.opts.gate.submit(intent);
     if (verdict.kind === "send") {
+      // C3：Gate 返回 send 到本续跑之间存在宿主 close/换代微任务窗口——登记前复核许可新鲜度
+      // （Gate 内部 epoch 校验不覆盖外层续体）。复核到登记之间为同步代码，无交错窗口。
+      const gs = this.opts.gate.getState();
+      if (gs.kind !== "in-flight" || gs.intentId !== intent.intentId) {
+        this.audit(`launch-invalidated-post-send intentId=${intent.intentId} gate=${gs.kind}`);
+        return { kind: "invalidated", stage: "post-send" }; // 旧许可不登记不 launched（首字节前失效，未发送）
+      }
       this.command = {
         key: { intentId: intent.intentId, commandId, generation: intent.generation },
         phase: "awaiting-response",
@@ -318,7 +334,8 @@ export class DispatchCoordinator {
   /**
    * 换代退役：旧代次登记/缓冲全部失效（计数审计不静默）；pending 协调操作由 opEpoch 失效。
    * Y1：无关代次（无登记+无槽位匹配）退役=no-op 无副作用（不递增全局 epoch，不失效在飞操作）。
-   * 屏障处置归宿主（退出确认/换代手续）。
+   * C2：opEpoch 只表达登记生命周期——仅登记匹配才递增；仅槽位匹配=只清槽，不取消当前命令的
+   * 等待操作（其归属由旧 append 续体的 epoch+key 复核自失效）。屏障处置归宿主（退出确认/换代手续）。
    */
   onGenerationRetired(generation: number): { clearedCommands: number; clearedEvents: number } {
     const cur = this.command;
@@ -328,7 +345,14 @@ export class DispatchCoordinator {
       this.audit(`generation-retired generation=${generation} clearedCommands=0 clearedEvents=0 no-op`);
       return { clearedCommands: 0, clearedEvents: 0 };
     }
-    this.opEpoch += 1; // S2-02：等待中的超时记录/结算不得再改任何状态
+    if (!cmdMatch && slotMatch) {
+      // C2：仅旧槽匹配（当前命令属其他代次）——只释放槽位，不递增 epoch、不清当前登记。
+      // C1 修复后此分支在公开 API 下不可达（登记释放路径均同步清同 key 槽位），留作不变量固化。
+      this.timeoutPendingKey = null;
+      this.audit(`generation-retired generation=${generation} clearedCommands=0 clearedEvents=0 droppedSettled=false releasedPendingTimeout=true slot-only`);
+      return { clearedCommands: 0, clearedEvents: 0 };
+    }
+    this.opEpoch += 1; // S2-02：等待中的超时记录/结算不得再改任何状态；C2：仅登记匹配递增
     if (slotMatch) this.timeoutPendingKey = null; // B2：按拥有者释放槽位（新轮超时可自行发起）
     let clearedEvents = 0;
     if (cmdMatch && cur !== null) {
@@ -351,10 +375,11 @@ export class DispatchCoordinator {
     const gs = this.opts.gate.getState().kind;
     if (gs !== "closed" && gs !== "idle") return null;
     this.opEpoch += 1; // 本登记上一切 pending 协调操作失效
-    if (this.timeoutPendingKey !== null && sameKey(this.timeoutPendingKey, cur.key)) this.timeoutPendingKey = null; // B2：释放本登记槽位
+    const releasedSlot = this.timeoutPendingKey !== null && sameKey(this.timeoutPendingKey, cur.key);
+    if (releasedSlot) this.timeoutPendingKey = null; // B2/C1：释放本登记槽位（弃置=登记释放边界）
     this.command = null;
     this.audit(
-      `abandon-held reason=${reason} commandId=${cur.key.commandId} droppedEvents=${cur.bufferedEvents.length} droppedSettled=${cur.bufferedSettled}`,
+      `abandon-held reason=${reason} commandId=${cur.key.commandId} droppedEvents=${cur.bufferedEvents.length} droppedSettled=${cur.bufferedSettled} releasedPendingTimeout=${releasedSlot}`,
     );
     return { droppedEvents: cur.bufferedEvents.length, droppedSettled: cur.bufferedSettled };
   }
@@ -381,6 +406,11 @@ export class DispatchCoordinator {
     }
     const latest = cur.bufferedEvents; // B1：结算等待窗口内新增事件在登记上，取最新
     this.command = null; // 解除登记（解锁有证据：settled 结果即本轮）
+    if (this.timeoutPendingKey !== null && sameKey(this.timeoutPendingKey, key)) {
+      // C1：正常收口=槽位释放边界——旧 timeout append 续体由 epoch+key 复核自归 invalidated，
+      // 其 finally 因槽位已不属于它而不再清除；不得让永不返回的旧 append 占位新轮超时。
+      this.timeoutPendingKey = null;
+    }
     this.drain(latest);
     return "released";
   }
