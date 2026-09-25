@@ -47,6 +47,8 @@ export interface ConnMeta {
   readonly origin?: string; // 缺失=默认拒（非浏览器入口也须带）
   readonly loopback: boolean;
   readonly tls: boolean;
+  /** 有效客户端地址（传输层派生；缺省="unknown"）。per-IP 认证失败限流（R6/3b-1）以此为键。 */
+  readonly clientIp?: string;
 }
 
 /** 订阅数据入口（W1-04）：宿主提供安全读+观察。load=null→4402；observe 可选（无观察=只读快照）。 */
@@ -99,6 +101,8 @@ export interface WsGatewayOpts {
   /** 服务准入（W1-02）：连接上限默认 LIMITS.connectionsPerServer；60s 握手滑窗默认 10。 */
   readonly maxConnections?: number;
   readonly handshakePerMinute?: number;
+  /** R6（3b-1）：per-IP 认证失败限速+退避（键=传输层 clientIp；受控测试可注入小窗）。 */
+  readonly authRate?: { limit?: number; windowMs?: number; baseBlockMs?: number; maxBlockMs?: number };
 }
 
 interface SubEntry {
@@ -159,6 +163,10 @@ export class WsGateway {
   private readonly watchers = new Map<string, { refs: Set<ConnState>; unobserve: (() => void) | null }>();
   private readonly pendingPumps = new Set<string>();
   private readonly handshakeTimes: number[] = []; // 单调时钟滑窗（W1-02）
+  /** R6（3b-1）：per-IP 认证失败限速+退避（滑窗计数+指数退避封顶；hello 成功即清户）。 */
+  private readonly authRateCfg: { limit: number; windowMs: number; baseBlockMs: number; maxBlockMs: number };
+  private readonly authFailures = new Map<string, { fails: number[]; strikes: number; blockedUntil: number }>();
+  private static readonly AUTH_RATE_MAP_MAX = 1024; // 防护表上界（超出=淘汰最旧非封锁项）
   private seq = 0;
   private listVersion = 0;
   private listFingerprint = ""; // 目录内容指纹（W1-11）
@@ -191,6 +199,13 @@ export class WsGateway {
     this.maxLifetimeMs = opts.maxLifetimeMs ?? LIMITS.connectionLifetimeMs;
     this.maxConnections = opts.maxConnections ?? LIMITS.connectionsPerServer;
     this.handshakePerMinute = opts.handshakePerMinute ?? 10;
+    // R6（3b-1）：per-IP 认证失败限速（默认 10 次/60s→封 60s，指数退避封顶 10min）
+    this.authRateCfg = {
+      limit: opts.authRate?.limit ?? 10,
+      windowMs: opts.authRate?.windowMs ?? 60_000,
+      baseBlockMs: opts.authRate?.baseBlockMs ?? 60_000,
+      maxBlockMs: opts.authRate?.maxBlockMs ?? 600_000,
+    };
   }
 
   /** 审计隔离（W1-08）：回调异常不得阻断状态机。 */
@@ -269,7 +284,7 @@ export class WsGateway {
   private inbound(st: ConnState, data: string, isBinary: boolean): void {
     if (st.closed || this.disposed) return;
     st.lastFrameAt = this.now();
-    if (isBinary) { this.errFrame(st, 4404, "二进制帧拒绝（JSON 文本帧）", ""); return; }
+    if (isBinary) { this.errFrame(st, 4403, "二进制帧拒绝（JSON 文本帧）", ""); return; } // 契约§5.1 冻结映射（R4/3b-1）：协议违规=4403+close 1003
     if (utf8Bytes(data) > LIMITS.frameMaxBytes) { this.errFrame(st, 4404, "帧超字节上限", ""); return; }
     let msg: unknown;
     try { msg = JSON.parse(data); } catch { this.errFrame(st, 4404, "非 JSON", ""); return; }
@@ -310,6 +325,13 @@ export class WsGateway {
   private handleHello(st: ConnState, frame: Extract<ClientFrame, { t: "hello" }>): void {
     if (st.authed) { this.errFrame(st, 4404, "重复 hello", ""); return; }
     st.preAuthFrames++;
+    const ip = st.meta.clientIp ?? "unknown";
+    const rate = this.authFailures.get(ip);
+    if (rate !== undefined && this.now() < rate.blockedUntil) {
+      this.audit(`hello-auth-rate-blocked conn=${st.id} ip=${ip} until=${Math.round(rate.blockedUntil)}`);
+      this.rejectAuth(st, "认证失败限速中");
+      return;
+    }
     if (st.preAuthFrames > (this.opts.helloMaxFrames ?? 3)) { this.rejectAuth(st, "认证窗口帧数超限"); return; }
     // Origin 门：精确集合（缺失默认拒；全等匹配）
     const origin = st.meta.origin;
@@ -329,21 +351,50 @@ export class WsGateway {
     }
     st.tokenDigest = sha256Hex(frame.token);
     st.authed = true;
+    this.authFailures.delete(ip); // 认证达成即清户（正常客户端不受限速面影响）
     const tm = this.connTimers.get(st.id);
     if (tm && tm.auth !== null) { this.clr(tm.auth); tm.auth = null; } // 认证达成即撤截止 timer
-    this.enqueue(st, { t: "welcome", serverBootId: BOOT_ID, protocolVersion: 1 });
+    this.enqueue(st, { t: "welcome", serverBootId: BOOT_ID, serverBuildId: SERVER_BUILD_ID, protocolVersion: 1 });
   }
 
   private rejectAuth(st: ConnState, reason: string): void {
+    this.recordAuthFailure(st);
     this.enqueue(st, { t: "error", code: 4401, message: `未认证或令牌无效（${reason}）`, retryable: false, requestId: "" });
     this.closeConn(st, 1008, "auth");
+  }
+
+  /** R6（3b-1）：认证失败记账（滑窗+指数退避封顶；防护表有上界）。 */
+  private recordAuthFailure(st: ConnState): void {
+    const ip = st.meta.clientIp ?? "unknown";
+    const now = this.now();
+    const cfg = this.authRateCfg;
+    let e = this.authFailures.get(ip);
+    if (e === undefined) {
+      if (this.authFailures.size >= WsGateway.AUTH_RATE_MAP_MAX) {
+        // 淘汰最旧非封锁项（保守：封锁户保留，新观测照常记账）
+        for (const [k, v] of [...this.authFailures]) {
+          if (now >= v.blockedUntil) { this.authFailures.delete(k); break; }
+        }
+      }
+      e = { fails: [], strikes: 0, blockedUntil: 0 };
+      this.authFailures.set(ip, e);
+    }
+    e.fails = e.fails.filter((t) => now - t < cfg.windowMs);
+    e.fails.push(now);
+    if (e.fails.length >= cfg.limit) {
+      e.strikes += 1;
+      const backoff = Math.min(cfg.baseBlockMs * 2 ** (e.strikes - 1), cfg.maxBlockMs);
+      e.blockedUntil = now + backoff;
+      e.fails = [];
+      this.audit(`auth-rate-blocked ip=${ip} strikes=${e.strikes} backoffMs=${backoff}`);
+    }
   }
 
   /** 协议错误帧统一出口（W1-01 错误矩阵：4403→close 1003、4405→close 1008、4404 计数 3→close 1002）。
    *  D2（w1d）：4402 容量错 retryable=true（契约 §5.3 错误矩阵——换流/冷凉后可重订阅）；其余 false。 */
   private errFrame(st: ConnState, code: 4401 | 4402 | 4403 | 4404 | 4405, message: string, requestId: string): void {
     this.enqueue(st, { t: "error", code, message, retryable: code === 4402, requestId });
-    if (code === 4403) { this.closeConn(st, 1003, "protocol-version"); return; }
+    if (code === 4403) { this.closeConn(st, 1003, "protocol"); return; }
     if (code === 4405) { this.closeConn(st, 1008, "write-frozen"); return; }
     if (code === 4404) {
       st.err4404Count++;
@@ -976,3 +1027,5 @@ function unknownStatus(_file: string): SessionStatus {
 }
 
 const BOOT_ID = `boot-${Math.random().toString(36).slice(2, 10)}`;
+/** 代码/构建身份（区别于 BOOT_ID 进程身份；R6/3b-1 兼容条款：客户端可凭此识别跨重启不变的服务身份）。 */
+const SERVER_BUILD_ID = "pi-agent-ui/ws-gateway@3b";

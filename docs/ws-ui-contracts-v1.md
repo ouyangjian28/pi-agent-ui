@@ -296,7 +296,7 @@ type ClientFrame =
   | { t: "ping"; nonce: string };
 ```
 
-JSON 文本帧（UTF-8）；拒二进制；禁 permessage-deflate；单帧 ≤262_144B→4404。
+JSON 文本帧（UTF-8）；拒二进制（→4403+close 1003，协议违规非帧错误）；禁 permessage-deflate；单帧 ≤262_144B→4404。
 
 **传输接收硬门（3b-1 兼容性条款，GPT 3b-0 对齐裁定=有界双门）**：传输层接收器（ws 库）设 `maxPayload=1,048,576B` 重组兜底——超限由**接收器直接 close 1009**，畸形 UTF-8 close 1007、协议帧畸形 close 1002；这些传输层关闭**可能先于任何应用 error 帧发生（契约例外：接收器先拒可无应用 error）**。262,145B..1MiB 的合法重组文本仍走网关 4404 门（第 2 级有界包络）——应用帧上限 262,144B 不变，1MiB 绝非业务接受上限。
 
@@ -304,7 +304,7 @@ JSON 文本帧（UTF-8）；拒二进制；禁 permessage-deflate；单帧 ≤26
 
 ```ts
 type ServerFrame =
-  | { t: "welcome"; serverBootId: string; protocolVersion: 1 }
+  | { t: "welcome"; serverBootId: string; serverBuildId: string; protocolVersion: 1 } // serverBuildId=代码/构建身份（R6/3b-1 兼容条款；旧客户端忽略未知字段不受影响）
   | { t: "sessions"; requestId: string; sessions: SessionSummaryDTO[]; total: number; offset: number; hasMore: boolean; listVersion: number; listReliability: "full" | "partial" } // C6-06：页级聚合（目录级输入与条目级保守聚合：任一 partial→partial）
   | { t: "snapshot"; } & SnapshotFrame
   | { t: "events"; subscriptionId: SubscriptionId; origin: "history";
@@ -365,6 +365,7 @@ type ServerFrame =
 ### 5.5 认证与授权
 
 - 静态令牌+热轮换（mtime/SIGHUP；**重载失败=保守沿用旧基准**+审计）；不匹配既有连接立即 4401 close。**初始无 token 文件=拒绝启动（fail-closed，Y04）**。24h 有效期；hello 前窗口 10s/3 帧。
+- **per-IP 认证失败限速+退避（R6/3b-1）**：键=传输层派生的有效 clientIp（无 trustProxy 时=socket 对端）；滑窗内认证失败达限（默认 10 次/60s）→封锁该 IP 的后续 hello（4401+close 1008，不延长封锁）；封锁时长指数退避（60s 起、封顶 10min）；认证成功即清户；防护表有上界（超出淘汰最旧非封锁项）。正常客户端无感知。
 - 授权域=双根目录；file 命名域+O_NOFOLLOW 等价校验；Origin 白名单（配置）；缺失 Origin=拒绝（非浏览器客户端显式配置放行列表）；非 loopback 必须 TLS；连接 16/服务、握手 10/min；token 不入日志/URL/前端持久化。
 
 ### 5.6 背压与资源预算（C3-R08/R10 修订：连接级统一+计算并发）

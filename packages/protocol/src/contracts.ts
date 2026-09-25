@@ -252,7 +252,7 @@ export type ClientFrame =
 export type ResyncReason = "server-side-gap" | "stream-replaced";
 
 export type ServerFrame =
-  | { readonly t: "welcome"; readonly serverBootId: string; readonly protocolVersion: 1 }
+  | { readonly t: "welcome"; readonly serverBootId: string; readonly serverBuildId: string; readonly protocolVersion: 1 }
   | { readonly t: "sessions"; readonly requestId: string; readonly sessions: readonly SessionSummaryDTO[]; readonly total: number; readonly offset: number; readonly hasMore: boolean; readonly listVersion: number;
       /** 页级可靠性（c6 C5-07）：本页含任一条目 partial→partial；条目级仍见 SessionSummaryDTO.listReliability */
       readonly listReliability: "full" | "partial" }

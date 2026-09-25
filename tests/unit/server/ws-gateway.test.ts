@@ -128,7 +128,7 @@ function makeRows(n: number): ScanRow[] {
 
 interface Rig {
   gw: WsGateway;
-  conn(): { c: FakeConn; handle: { id: string } };
+  conn(meta?: Partial<ConnMeta>): { c: FakeConn; handle: { id: string } };
   roots: string;
   scanDir: string;
   evidence: Map<string, RecoveryEvidenceSnapshot | null>;
@@ -154,9 +154,9 @@ async function makeRig(over: Partial<WsGatewayOpts> = {}): Promise<Rig> {
     audit: () => {},
     ...over,
   });
-  const conn = () => {
+  const conn = (meta?: Partial<ConnMeta>) => {
     const c = new FakeConn();
-    const handle = gw.attach(c, c.hooks(), { origin: "http://localhost:5173", loopback: true, tls: false } satisfies ConnMeta);
+    const handle = gw.attach(c, c.hooks(), { origin: "http://localhost:5173", loopback: true, tls: false, ...meta } satisfies ConnMeta);
     return { c, handle };
   };
   return { gw, conn, roots: d, scanDir: d, evidence, history, dispose: async () => { gw.dispose(); await rm(d, { recursive: true, force: true }); } };
@@ -177,6 +177,8 @@ describe("ws-gateway w1：A 认证入站（W1-01/02）", () => {
     try {
       const c = await authed(r);
       expect(c.frames().some((f) => f.t === "welcome")).toBe(true);
+      const w = c.frames().find((f) => f.t === "welcome") as { serverBuildId?: string };
+      expect(typeof w?.serverBuildId === "string" && w.serverBuildId.length > 0).toBe(true); // R6/3b-1：代码/构建身份
       const { c: c2 } = r.conn();
       await c2.say({ t: "hello", protocolVersion: 1, token: "bad" });
       expect(c2.frames().some((f) => f.code === 4401)).toBe(true);
@@ -236,22 +238,52 @@ describe("ws-gateway w1：A 认证入站（W1-01/02）", () => {
     }
   });
 
-  it("A5 入站管线：二进制/非 JSON/未知 t→4404；写类→4405+close 1008；3×4404→close 1002；错误消息固定不回显", async () => {
+  it("A6 R6/3b-1：per-IP 认证失败限速——同 IP 达限→正确令牌也拒；不同 IP 不受累（键控非全局）；审计可观测", async () => {
+    const audits: string[] = [];
+    const r = await makeRig({ authRate: { limit: 2, windowMs: 10_000, baseBlockMs: 5_000, maxBlockMs: 10_000 }, audit: (l) => audits.push(l) });
+    try {
+      for (let i = 0; i < 2; i++) {
+        const { c } = r.conn({ clientIp: "1.1.1.1" });
+        await c.say({ t: "hello", protocolVersion: 1, token: "bad" });
+      }
+      expect(audits.some((l) => l.includes("auth-rate-blocked ip=1.1.1.1"))).toBe(true);
+      // 同 IP 第三次：正确令牌也拒（封锁内不查令牌）
+      const c3 = r.conn({ clientIp: "1.1.1.1" }).c;
+      await c3.say({ t: "hello", protocolVersion: 1, token: "tok-ok" });
+      const err = c3.frames().find((f) => f.t === "error") as { code?: number; message?: string };
+      expect(err?.code).toBe(4401);
+      expect(String(err?.message)).toContain("限速");
+      expect(lastClose(c3)?.[0]).toBe(1008);
+      // 不同 IP：不受累（per-IP 键控非全局封锁）
+      const other = r.conn({ clientIp: "2.2.2.2" }).c;
+      await other.say({ t: "hello", protocolVersion: 1, token: "tok-ok" });
+      expect(other.frames().some((f) => f.t === "welcome")).toBe(true);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("A5 入站管线：二进制→4403+close 1003（R4/3b-1 契约冻结映射）；非 JSON/未知 t→4404；写类→4405+close 1008；3×4404→close 1002；错误消息固定不回显", async () => {
     const r = await makeRig();
     try {
       const c = await authed(r);
       await c.sayBinary();
-      await c.sayRaw("{nope");
-      await c.say({ t: "totally-unknown", requestId: "x".repeat(300) }); // 恶意超长 t 不回显
-      const errs = errFrames(c);
-      expect(errs.length).toBe(3);
-      expect(errs.every((f) => !String(f.message).includes("totally-unknown"))).toBe(true); // 固定消息
-      expect(lastClose(c)?.[0]).toBe(1002); // 累计 3
-      // 写类（新连接）
+      expect(c.frames().some((f) => f.code === 4403)).toBe(true); // R4：协议违规非帧错误
+      expect(lastClose(c)?.[0]).toBe(1003); // 4403→close 1003
+      // 新连接：非 JSON/未知 t 两式 4404（不叠加二进制）
       const c2 = await authed(r);
-      await c2.say({ t: "prompt", requestId: "r1", message: "hi" });
-      expect(c2.frames().some((f) => f.code === 4405)).toBe(true);
-      expect(lastClose(c2)?.[0]).toBe(1008); // 4405→close 1008
+      await c2.sayRaw("{nope");
+      await c2.say({ t: "totally-unknown", requestId: "x".repeat(300) }); // 恶意超长 t 不回显
+      const errs = errFrames(c2);
+      expect(errs.length).toBe(2);
+      expect(errs.every((f) => !String(f.message).includes("totally-unknown"))).toBe(true); // 固定消息
+      await c2.sayRaw("{nope2"); // 第三式 4404→计数 3→close 1002
+      expect(lastClose(c2)?.[0]).toBe(1002);
+      // 写类（新连接）
+      const c3 = await authed(r);
+      await c3.say({ t: "prompt", requestId: "r1", message: "hi" });
+      expect(c3.frames().some((f) => f.code === 4405)).toBe(true);
+      expect(lastClose(c3)?.[0]).toBe(1008); // 4405→close 1008
     } finally {
       await r.dispose();
     }

@@ -2,12 +2,17 @@
 // 监听（WsTransportPort）与连接（WsConnectionPort）分立；网关面向端口编程，ws 库类型不进网关。
 // - send(text, done)：done 绑定 ws.send 完成回调（禁止 send 返回即兑现）；未抛出时回调至多一次；连接故障走终止清理。
 // - bufferedAmount/readyState：透传 ws 实时值，不缓存不伪造。
-// - close(code,reason)：控制帧走 ws.close；reason 固定短文本（≤123B，不回显输入）；close 握手有截止（超时 terminate）。
+// - close(code,reason)：控制帧走 ws.close；reason 固定短文本（≤123 字节，UTF-8 字节界安全截断）；close 握手有截止（超时 terminate）。
 // - transport ping/pong：连接活性控制帧（与应用 ping 请求应答分层，§IV.D：无新增独立杀手 timer——活性判定归网关 lastFrameAt）。
 // - upgrade 前拒绝=HTTP 403（Origin 白名单/安全元数据不合格在 handleUpgrade 前；GPT §IV.B）——不是 WebSocket close，无应用帧。
-// - 接收硬门：maxPayload=LIMITS.transportMaxPayloadBytes（1MiB 重组兜底，超限 ws close 1009；契约例外条款=docs §5.1/§5.3）。
+// - 接收硬门：maxPayload 固定=LIMITS.transportMaxPayloadBytes（1MiB 重组兜底，超限 ws close 1009；契约例外条款=docs §5.1/§5.3）。
+//   R03（GPT 3b-1）：公开构造不可放宽/收窄接收门——上限属冻结契约常量，非部署参数。
 // - permessage-deflate 禁用（压缩面另审）。
 // - 资源释放恰一次：主动 close/远端 close/RST/error/send 回调失败/dispose 可竞争；dispose 停新 upgrade+存量 1001 有界收口。
+// - R01（GPT 3b-1）：全部向宿主回调的出口（message/pong/error/close/send-done/onConnection）异常隔离——
+//   宿主回调抛错不得退进程，只产生审计行；连接终局与注册表回收不受影响。
+// - R02（GPT 3b-1）：dispose 整体有界——自建 server 管 request（404 Connection:close）+全部 socket（含未升级），收口截止后强制销毁；
+//   listen() 终态后拒绝（不得复活监听）；ws closeTimeout 与 closeHandshakeMs 统一（接收器自启关闭同截止）。
 // - 外部注入 HTTP server 的关闭所有权归调用方（dispose 只摘 upgrade 监听）；自建 server（port 模式）由 dispose 关闭。
 // - trustProxy 默认 false：不采信 X-Forwarded-*；启用须给可信代理精确来源，仅当 socket 对端在列时按头派生有效 clientIp/tls（§IV.B）。
 import type { IncomingMessage } from "node:http";
@@ -63,8 +68,7 @@ export interface WsServerAdapterOpts {
   readonly host?: string;
   /** 可信代理精确来源（IP 列表）；非空才采信 X-Forwarded-For/Proto（默认 []=不采信任何转发头）。 */
   readonly trustedProxies?: readonly string[];
-  readonly maxPayload?: number;
-  readonly closeHandshakeMs?: number; // close 握手截止（默认 5000；超时 terminate）
+  readonly closeHandshakeMs?: number; // close 握手截止（默认 5000；超时 terminate；同时作为 ws closeTimeout）
   readonly disposeWaitMs?: number; // dispose 存量收口等待（默认 5000）
   readonly audit?: (line: string) => void;
 }
@@ -83,6 +87,16 @@ function headerSingle(v: string | string[] | undefined): string | null {
   return t.length === 0 ? null : t;
 }
 
+/** UTF-8 字节界安全截断（🟡GPT 3b-1：slice(0,123) 是 UTF-16 代码单元，多字节字符会劈开抛错/替换符）。 */
+function byteTruncate(text: string, maxBytes: number): string {
+  const buf = Buffer.from(text, "utf8");
+  if (buf.byteLength <= maxBytes) return text;
+  let end = maxBytes;
+  // 回退到合法 UTF-8 序列边界（10xxxxxx 前缀字节不得作起点）
+  while (end > 0 && (buf[end]! & 0xc0) === 0x80) end -= 1;
+  return buf.subarray(0, end).toString("utf8");
+}
+
 /** 从真实请求派生安全元数据（§IV.B：Origin/远端地址/TLS 都来自请求事实；代理头仅在可信来源时生效）。 */
 export function deriveConnMeta(req: IncomingMessage, socket: Duplex, trustedProxies: readonly string[] = []): TransportConnMeta {
   const rawOrigin = headerSingle(req.headers.origin);
@@ -93,12 +107,12 @@ export function deriveConnMeta(req: IncomingMessage, socket: Duplex, trustedProx
   if (!trusted) {
     return { origin, loopback: isLoopbackIp(remote), tls: sockTls, clientIp: remote, remoteAddress: remote, proxied: false };
   }
-  // 可信代理：XFF 左端=有效客户端；XFP=https 才抬升 tls（头缺失则保守 false）
+  // 可信代理：XFF 左端=有效客户端；XFP 决定有效协议（回程 TLS 与外部协议分立：proxied=true 时 tls=XFP 事实，头缺失保守 false）
   const xff = headerSingle(req.headers["x-forwarded-for"]);
   const clientIp = xff !== null ? (xff.split(",")[0] ?? "").trim() : remote;
   const effectiveIp = clientIp.length > 0 ? clientIp : remote;
   const xfp = headerSingle(req.headers["x-forwarded-proto"]);
-  return { origin, loopback: isLoopbackIp(effectiveIp), tls: sockTls || xfp?.toLowerCase() === "https", clientIp: effectiveIp, remoteAddress: remote, proxied: true };
+  return { origin, loopback: isLoopbackIp(effectiveIp), tls: xfp?.toLowerCase() === "https", clientIp: effectiveIp, remoteAddress: remote, proxied: true };
 }
 
 /** 单连接适配：ws.WebSocket → WsConnectionPort（生命周期错误吸收；释放恰一次）。 */
@@ -107,13 +121,17 @@ class WsConnectionAdapter implements WsConnectionPort {
   private closeTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly closeCallbacks: Array<(code: number) => void> = [];
   private closedFired = false;
+  private lastCloseCode = 1006;
 
   constructor(private readonly ws: WebSocket, private readonly meta: TransportConnMeta, private readonly connId: string, private readonly audit: (l: string) => void, private readonly closeHandshakeMs: number) {
     this.ws.on("close", (code: number) => {
       if (this.closedFired) return;
       this.closedFired = true;
+      this.lastCloseCode = code;
       this.clearCloseTimer();
-      for (const cb of [...this.closeCallbacks]) {
+      const cbs = [...this.closeCallbacks];
+      this.closeCallbacks.length = 0; // 终态清理（🟡5：触发后清空；晚到注册=立即回放）
+      for (const cb of cbs) {
         try { cb(code); } catch (err) { this.audit(`ws-transport conn-close-cb-error conn=${this.connId} err=${String(err)}`); }
       }
     });
@@ -128,23 +146,24 @@ class WsConnectionAdapter implements WsConnectionPort {
 
   send(text: string, done: SendDone): void {
     if (this.closedFired || this.ws.readyState !== 1) {
-      done(new Error("连接已关闭，拒绝发送"));
+      try { done(new Error("连接已关闭，拒绝发送")); } catch (err) { this.audit(`ws-transport send-done-cb-error conn=${this.connId} err=${String(err)}`); }
       return;
     }
     try {
       this.ws.send(text, { fin: true }, (err) => {
         // ws 完成回调（错误=未交付/连接故障）；至多一次
-        try { done(err ?? null); } catch { /* 调用方回调异常不回流传输层 */ }
+        try { done(err ?? null); } catch (cbErr) { this.audit(`ws-transport send-done-cb-error conn=${this.connId} err=${String(cbErr)}`); }
       });
     } catch (err) {
-      done(err instanceof Error ? err : new Error(String(err)));
+      const e = err instanceof Error ? err : new Error(String(err));
+      try { done(e); } catch (cbErr) { this.audit(`ws-transport send-done-cb-error conn=${this.connId} err=${String(cbErr)}`); }
     }
   }
 
   close(code?: number, reason?: string): void {
     if (this.disposed || this.closedFired) return;
     this.disposed = true;
-    try { this.ws.close(code, reason !== undefined ? reason.slice(0, 123) : undefined); } catch { this.ws.terminate(); }
+    try { this.ws.close(code, reason !== undefined ? byteTruncate(reason, 123) : undefined); } catch { this.ws.terminate(); }
     this.armCloseDeadline(code ?? 1000);
   }
 
@@ -163,21 +182,32 @@ class WsConnectionAdapter implements WsConnectionPort {
 
   onMessage(cb: (text: string, isBinary: boolean) => void): Off {
     const h = (data: unknown, isBinary: boolean): void => {
-      if (isBinary) { cb("", true); return; } // binary 不解码文本（网关按协议违规拒）
-      const text = typeof data === "string" ? data : Buffer.from(data as ArrayBufferLike).toString("utf8");
-      cb(text, false);
+      try {
+        if (isBinary) { cb("", true); return; } // binary 不解码文本（网关按协议违规拒）
+        const text = typeof data === "string" ? data : Buffer.from(data as ArrayBufferLike).toString("utf8");
+        cb(text, false);
+      } catch (err) {
+        // R01：宿主消息回调异常隔离——不退进程；连接由宿主语义（网关计数/心跳）自行处置
+        this.audit(`ws-transport message-cb-error conn=${this.connId} err=${String(err)}`);
+      }
     };
     this.ws.on("message", h);
     return () => { this.ws.off("message", h); };
   }
 
   onPong(cb: () => void): Off {
-    const h = (): void => { cb(); };
+    const h = (): void => {
+      try { cb(); } catch (err) { this.audit(`ws-transport pong-cb-error conn=${this.connId} err=${String(err)}`); }
+    };
     this.ws.on("pong", h);
     return () => { this.ws.off("pong", h); };
   }
 
   onClose(cb: (code: number) => void): Off {
+    if (this.closedFired) {
+      try { cb(this.lastCloseCode); } catch (err) { this.audit(`ws-transport conn-close-cb-error conn=${this.connId} err=${String(err)}`); }
+      return () => { /* 终态后注册=立即回放一次，无挂载 */ };
+    }
     this.closeCallbacks.push(cb);
     return () => {
       const i = this.closeCallbacks.indexOf(cb);
@@ -186,7 +216,9 @@ class WsConnectionAdapter implements WsConnectionPort {
   }
 
   onError(cb: (err: Error) => void): Off {
-    const h = (err: Error): void => { cb(err); };
+    const h = (err: Error): void => {
+      try { cb(err); } catch (cbErr) { this.audit(`ws-transport error-cb-error conn=${this.connId} err=${String(cbErr)}`); }
+    };
     this.ws.on("error", h);
     return () => { this.ws.off("error", h); };
   }
@@ -217,11 +249,14 @@ export class WsServerAdapter implements WsTransportPort {
   private disposed = false;
   private readonly wss: WebSocketServer;
   private readonly ownServer: HttpServer | null;
+  /** 自建模式：本适配器管理的全部 socket（含未升级 HTTP 连接）——dispose 整体有界的依据（R02）。 */
+  private readonly ownedSockets = new Set<Socket>();
   private readonly upgradeHandler: (req: IncomingMessage, socket: Duplex, head: Buffer) => void;
   private readonly listeners = new Set<(conn: WsConnectionPort, meta: TransportConnMeta) => void>();
   private readonly audit: (l: string) => void;
   private readonly trustedProxies: readonly string[];
   private readonly requireTlsOffLoopback: boolean;
+  private readonly closeHandshakeMs: number;
   private disposePromise: Promise<void> | null = null;
   /** 测试/受控注入：server 实际监听地址（port 模式 listen 后可读）。 */
   readonly address: () => { port: number; host: string } | null;
@@ -230,11 +265,16 @@ export class WsServerAdapter implements WsTransportPort {
     this.audit = (l) => { try { opts.audit?.(l); } catch { /* 审计异常不阻断 */ } };
     this.trustedProxies = opts.trustedProxies ?? [];
     this.requireTlsOffLoopback = opts.requireTlsOffLoopback ?? true;
+    this.closeHandshakeMs = opts.closeHandshakeMs ?? DEFAULT_CLOSE_HANDSHAKE_MS;
     this.wss = new WebSocketServer({
       noServer: true,
-      maxPayload: opts.maxPayload ?? LIMITS.transportMaxPayloadBytes,
+      // R03：接收硬门=冻结契约常量，公开构造无放宽/收窄入口
+      maxPayload: LIMITS.transportMaxPayloadBytes,
       perMessageDeflate: false,
-    });
+      // R02：接收器自启关闭（超限/畸形后 ws 主动 close）与主动 close 同截止，替代 ws 默认 30s
+      //（ws≥8.18 运行时支持 closeTimeout；@types/ws 8.18.1 尚未收录——运行时验证见集成测试）
+      closeTimeout: this.closeHandshakeMs,
+    } as ConstructorParameters<typeof WebSocketServer>[0]);
     this.wss.on("error", (err: Error) => this.audit(`ws-transport server-error name=${err.name}`));
     this.upgradeHandler = (req, socket, head) => { void this.handleUpgrade(req, socket, head); };
     if (opts.server !== undefined) {
@@ -246,6 +286,18 @@ export class WsServerAdapter implements WsTransportPort {
       };
     } else {
       this.ownServer = createServer();
+      // R02：自建 server 必须应答普通 HTTP 请求（否则裸 GET 挂住 dispose——server.close 等全部连接结束）
+      this.ownServer.on("request", (req, res) => {
+        try {
+          res.writeHead(404, { "Content-Type": "text/plain", "Content-Length": "0", Connection: "close" });
+          res.end();
+        } catch { /* 已销毁 */ }
+        this.audit(`ws-transport http-rejected path=${req.url ?? "?"}`);
+      });
+      this.ownServer.on("connection", (socket: Socket) => {
+        this.ownedSockets.add(socket);
+        socket.on("close", () => { this.ownedSockets.delete(socket); });
+      });
       this.ownServer.on("upgrade", this.upgradeHandler);
       this.ownServer.on("clientError", (err: Error, socket: Socket) => {
         // 非 upgrade 的 HTTP 客户端错误：吸收并关 socket（自建模式下防句柄悬挂）
@@ -259,9 +311,10 @@ export class WsServerAdapter implements WsTransportPort {
     }
   }
 
-  /** 自建模式：显式启动监听（默认 host=127.0.0.1，port=0 随机）。 */
+  /** 自建模式：显式启动监听（默认 host=127.0.0.1，port=0 随机）。终态后拒绝（R02：dispose 后不得复活监听）。 */
   listen(port: number = 0, host: string = "127.0.0.1"): Promise<{ port: number; host: string }> {
     if (this.ownServer === null) throw new Error("外部 server 模式无 listen 所有权");
+    if (this.disposed) return Promise.reject(new Error("适配器已 dispose，拒绝重新监听"));
     return new Promise((resolve, reject) => {
       const onErr = (err: Error): void => reject(err);
       this.ownServer!.once("error", onErr);
@@ -274,11 +327,20 @@ export class WsServerAdapter implements WsTransportPort {
   }
 
   onConnection(cb: (conn: WsConnectionPort, meta: TransportConnMeta) => void): Off {
+    if (this.disposed) {
+      this.audit("ws-transport on-connection-ignored rule=disposed");
+      return () => { /* 终态后注册=无操作 */ };
+    }
     this.listeners.add(cb);
     return () => { this.listeners.delete(cb); };
   }
 
   private async handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
+    // 🟡2：socket 一到手即挂 error 吸收器（拒绝路径/handleUpgrade 前的早期 RST 无监听会退进程）
+    const socketRef = socket as Socket;
+    socketRef.on("error", (err: Error) => {
+      this.audit(`ws-transport upgrade-socket-error name=${err.name} remote=${socketRef.remoteAddress ?? "unknown"}`);
+    });
     if (this.disposed) { this.rejectHttp(socket, 503, "shutting-down"); return; }
     const meta = deriveConnMeta(req, socket, this.trustedProxies);
     // upgrade 前安全门（§IV.B）：拒绝=HTTP 403，无 WS close 无应用帧
@@ -297,7 +359,7 @@ export class WsServerAdapter implements WsTransportPort {
     this.wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
       socket.off("close", closeGuard);
       const id = `t-${++this.connSeq}`;
-      const adapter = new WsConnectionAdapter(ws, meta, id, this.audit, this.opts.closeHandshakeMs ?? DEFAULT_CLOSE_HANDSHAKE_MS);
+      const adapter = new WsConnectionAdapter(ws, meta, id, this.audit, this.closeHandshakeMs);
       this.conns.set(id, adapter);
       ws.on("close", () => { this.conns.delete(id); });
       this.audit(`upgrade-accepted conn=${id} origin=${meta.origin} clientIp=${meta.clientIp} remote=${meta.remoteAddress} proxied=${meta.proxied} tls=${meta.tls}`);
@@ -307,10 +369,17 @@ export class WsServerAdapter implements WsTransportPort {
     });
   }
 
+  /** HTTP 级拒绝（🟡3：end() 等写出 flush 再 FIN；1s 截截止防慢消费者拖住 socket——destroy 后内核清缓冲）。 */
   private rejectHttp(socket: Duplex, code: number, reason: string): void {
     try {
-      socket.write(`HTTP/1.1 ${code} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
-      socket.destroy();
+      const payload = `HTTP/1.1 ${code} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`;
+      const s = socket as Socket;
+      const kill = (): void => { try { s.destroy(); } catch { /* 已销毁 */ } };
+      const t = setTimeout(kill, 1_000);
+      t.unref?.();
+      socket.once("error", () => { clearTimeout(t); kill(); });
+      socket.once("close", () => { clearTimeout(t); });
+      socket.end(payload, () => { clearTimeout(t); try { s.destroy(); } catch { /* 已销毁 */ } });
     } catch { /* 已销毁 */ }
   }
 
@@ -322,22 +391,38 @@ export class WsServerAdapter implements WsTransportPort {
 
   private async doDispose(): Promise<void> {
     this.disposed = true;
-    // 存量连接先收口：1001 优雅关闭+截止 terminate；有界等待（terminate 销毁 socket → server.close 才能返回）
     const waitMs = this.opts.disposeWaitMs ?? DEFAULT_DISPOSE_WAIT_MS;
+    // 存量 WS 连接：1001 优雅关闭+closeHandshakeMs 截止 terminate；轮询 timer 全部 unref（🟡5）
     const open = [...this.conns.values()].filter((c) => c.isOpen);
     for (const c of open) c.close(1001, "server-shutdown");
     const deadline = Date.now() + waitMs;
     while (this.conns.size > 0 && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 25));
+      await new Promise((r) => { const t = setTimeout(r, 25); t.unref?.(); });
     }
     for (const c of [...this.conns.values()]) c.terminate();
-    // 再关监听：外部 server 摘监听（所有权归调用方不关 server）；自建 server 关闭（upgraded socket 已毁，close 可返回）
+    // 自建 server：整体有界关闭（R02）——close() 等全部连接结束，但未升级 HTTP/慢消费者由 socket 强制销毁兜底
     if (this.ownServer !== null) {
-      await new Promise<void>((resolve) => { this.ownServer!.close(() => resolve()); });
+      const server = this.ownServer;
+      await new Promise<void>((resolve) => {
+        let done = false;
+        const finish = (): void => { if (!done) { done = true; resolve(); } };
+        const guard = setTimeout(() => {
+          // 截止后强制销毁本适配器管理的全部 socket（含未升级 HTTP/升级后连接——同源 TCP 连接集）
+          for (const s of [...this.ownedSockets]) { try { s.destroy(); } catch { /* 已销毁 */ } }
+          finish();
+        }, waitMs);
+        guard.unref?.();
+        server.close(() => { clearTimeout(guard); finish(); });
+      });
     } else if (this.opts.server !== undefined) {
       this.opts.server.off("upgrade", this.upgradeHandler);
     }
-    await new Promise<void>((resolve) => { this.wss.close(() => resolve()); });
+    await new Promise<void>((resolve) => {
+      const t = setTimeout(() => resolve(), waitMs);
+      t.unref?.();
+      this.wss.close(() => { clearTimeout(t); resolve(); });
+    });
+    this.listeners.clear(); // 终态清理（🟡5）：dispose 后不再派发新连接
     this.audit(`ws-transport disposed remaining=${this.conns.size}`);
   }
 }
