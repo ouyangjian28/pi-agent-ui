@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   readJournalFile, buildRecoverReport, recoverFromJournal,
-  captureRecoveryEvidence, recoverFromSnapshot, snapshotEvidenceHash,
+  captureRecoveryEvidence, recoverFromSnapshot, snapshotEvidenceHash, withRepair, recoveryAvailability,
 } from "../../../apps/server/src/runtime/recover.js";
 import type { RecoveryEvidenceSnapshot } from "../../../apps/server/src/runtime/recover.js";
 import type { BadJournalEntry } from "../../../apps/server/src/runtime/recover.js";
@@ -594,24 +594,33 @@ describe("恢复证据快照（c5 B03：结论只对快照负责）", () => {
     const p = await writeJournal([enq("i-1"), '{"t":"sending","intentId":"i-1"}', '{"t":"settled","intentId":"i-1"}', enq("i-2"), '{"t":"sending","intentId":"i-2"']);
     const snap = await captureRecoveryEvidence(p, "s1");
     expect(snap.bad).toHaveLength(1);
-    const r0 = recoverFromSnapshot(snap);
-    expect(r0.diskBlocked).toBe(false); // 快照语义=修复后裁决
+    expect(snap.repaired).toBe(false);
+    // c6 C5-01：未修复快照=盘面阻断证据——恒 diskBlocked+resumable 恒空（禁一切重发授权）
+    const rBefore = recoverFromSnapshot(snap);
+    expect(rBefore.diskBlocked).toBe(true);
+    expect(rBefore.resumable).toEqual([]);
+    // 宿主修复盘面（截尾）+标记修复（withRepair）后：进入残片证据裁决
+    const { writeFile } = await import("node:fs/promises");
+    const raw = await (await import("node:fs/promises")).readFile(p, "utf8");
+    const cut = raw.lastIndexOf("\n") + 1;
+    await writeFile(p, raw.slice(0, cut), "utf8");
+    const snapR = withRepair(snap);
+    const r0 = recoverFromSnapshot(snapR);
+    expect(r0.diskBlocked).toBe(false); // 修复后（快照标记）：由残片证据决定
     expect(r0.resumeBlocked).toBe(false); // 残片可靠关联 i-2→已并入 unknown，无未裁决残片
-    expect(r0.unknownEffect).toEqual(["i-2"]); // sending 残片证据仍在（不因修复灭失）
+    expect(r0.unknownEffect).toEqual(["i-2"]); // B03 核心：残片证据不因修复灭失
     expect(r0.resumable).toEqual([]);
     // perIntent 穷尽：i-1 settled 非 provisional；i-2 unknown 且 provisional（残片派生）
     expect(r0.perIntent).toEqual([
       { intentId: "i-1", verdict: "settled", provisional: false },
       { intentId: "i-2", verdict: "unknown", provisional: true },
     ]);
-    // 修复盘面（截尾）后裸读会得 resumable=[i-2] 假安全——但经快照路径结论不变
-    const { writeFile } = await import("node:fs/promises");
-    const raw = await (await import("node:fs/promises")).readFile(p, "utf8");
-    const cut = raw.lastIndexOf("\n") + 1;
-    await writeFile(p, raw.slice(0, cut), "utf8");
-    const rAfter = recoverFromSnapshot(snap); // 同一快照
-    expect(rAfter.unknownEffect).toEqual(["i-2"]); // B03 核心：证据不随盘面修复消失
-    expect(rAfter.resumable).toEqual([]);
+    // 未修复原快照结论不受修复影响（幂等；宿主不得拿旧快照绕过阻断解锁）
+    const rBefore2 = recoverFromSnapshot(snap);
+    expect(rBefore2.diskBlocked).toBe(true);
+    expect(rBefore2.resumable).toEqual([]);
+    // 同一修复后快照两次裁决输出相同（幂等）
+    expect(recoverFromSnapshot(snapR)).toEqual(r0);
   });
 
   it("冷启动无快照：宿主规则=unavailable(no-evidence-snapshot)——裸读当前盘面得 resumable 是假安全（反例固化）", async () => {
@@ -620,7 +629,19 @@ describe("恢复证据快照（c5 B03：结论只对快照负责）", () => {
     const naive = await recoverFromJournal(p2, "s1");
     // 裸读（无快照输入）确实给出 resumable——这正是 B03 要拦的调用面：
     expect(naive.resumable).toEqual(["i-2"]);
-    // 宿主契约：曾修复过又无快照→不得用该结论（接线层呈现 unavailable）；此处固化裸读出口的存在与风险注释。
+    // c6 C5-01：可执行门=纯选择器 recoveryAvailability——快照缺位恒 unavailable(no-evidence-snapshot)，
+    // 不靠注释/接线自觉；宿主（含 get-recovery 投影器）必须经此门。
+    const av = recoveryAvailability(null);
+    expect(av.availability).toBe("unavailable");
+    expect(av.resumeBlocked).toBeNull();
+    expect(av.evidenceHash).toBeNull();
+    expect(recoveryAvailability(undefined)).toEqual(av); // 卸载重建同冷启动
+    // 有快照→available+摘要（裁决与 recoverFromSnapshot 一致）
+    const snap = await captureRecoveryEvidence(p2, "s1");
+    const av2 = recoveryAvailability(snap);
+    expect(av2.availability).toBe("available");
+    expect(av2.diskBlocked).toBe(false); // p2 无坏行
+    expect(av2.evidenceHash).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("归因修订入快照：消耗残片+unknown 保留+evidenceHash 随修订变化（输入域含 attributedFragments）", async () => {

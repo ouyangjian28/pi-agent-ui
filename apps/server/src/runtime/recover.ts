@@ -25,7 +25,7 @@
 //   宿主必须呈现 unavailable(no-evidence-snapshot)，不得以 resumable 假安全替代。
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { replayIntents, type IntentId, type IntentRecord, type JournalLine, type SessionId } from "@pi-agent-ui/protocol";
+import { replayIntents, type IntentId, type IntentRecord, type JournalLine, type RecoverySummary, type SessionId } from "@pi-agent-ui/protocol";
 
 /** 坏行/撕裂尾记录：raw=原始文本（撕裂尾可能是不完整 UTF-8→以 utf8 读入后含替换符，字节面由宿主另行核对）。 */
 export interface BadJournalEntry {
@@ -517,19 +517,55 @@ export async function captureRecoveryEvidence(path: string, sessionId: SessionId
   return { version: 1, file: path, sessionId, lines, bad, attributedFragments: [], repaired: false, createdAt: now() };
 }
 
-/** 快照证据哈希（完整权威输入域：版本+边界+行+残片+归因修订+修复标记）。 */
+/** 快照证据哈希（身份摘要；c6 C5-07 冻结编码：attributedFragments 排序后参与，
+ *  对象按其序列化字节做身份摘要——不承诺与构造顺序无关的规范化）。 */
 export function snapshotEvidenceHash(snap: RecoveryEvidenceSnapshot): string {
+  const attributed = [...snap.attributedFragments].sort((a, b) =>
+    a.raw < b.raw ? -1 : a.raw > b.raw ? 1 : a.intentId < b.intentId ? -1 : a.intentId > b.intentId ? 1 : 0);
   const canonical = JSON.stringify([
-    snap.version, snap.file, snap.sessionId, snap.lines, snap.bad, snap.attributedFragments, snap.repaired,
+    snap.version, snap.file, snap.sessionId, snap.lines, snap.bad, attributed, snap.repaired,
   ]);
   return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 
-/** 由快照出恢复结论（B03 唯一合法入口：盘面修复后仍保留残片证据；归因修订随快照输入）。 */
+/** 可执行恢复可用性选择器（c6 C5-01）：快照缺位（冷启动/未捕获/LRU 卸载重建）→
+ *  unavailable(no-evidence-snapshot)——不得以裸读盘面出恢复结论（防洗白）；
+ *  有快照→available+摘要（完整裁决走 recoverFromSnapshot）。
+ *  宿主（含未来 get-recovery 投影器）必须经此门，不得绕过。 */
+export function recoveryAvailability(snap: RecoveryEvidenceSnapshot | null | undefined): RecoverySummary {
+  if (!snap) {
+    return {
+      availability: "unavailable",
+      resumeBlocked: null, diskBlocked: null,
+      unknownEffectCount: null, unattributableFragments: null,
+      intentsCount: null, settledCount: null, evidenceHash: null,
+    };
+  }
+  const r = recoverFromSnapshot(snap);
+  return {
+    availability: "available",
+    resumeBlocked: r.resumeBlocked, diskBlocked: r.diskBlocked,
+    unknownEffectCount: r.unknownEffect.length, unattributableFragments: r.unattributableFragments.length,
+    intentsCount: r.intents.length, settledCount: r.settledCount,
+    evidenceHash: snapshotEvidenceHash(snap),
+  };
+}
+
+/** 宿主修复盘面后标记快照（返回 repaired=true 的新快照；原快照不可变）。
+ *  修复前快照=盘面阻断证据（diskBlocked）；修复标记后=残片裁决证据。 */
+export function withRepair(snap: RecoveryEvidenceSnapshot): RecoveryEvidenceSnapshot {
+  return { ...snap, repaired: true };
+}
+
+/** 由快照出恢复结论（B03 唯一合法入口）。
+ *  c6 C5-01：盘面阻断按快照事实分派——未修复快照（repaired=false 且有坏行）恒 diskBlocked=true
+ *  （禁一切重发授权，含 resumable 恒空）；修复后（withRepair 标记）才进入残片证据裁决。
+ *  残片保留与盘面阻断是两个独立维度：修复不灭失残片，未修复不得解锁。 */
 export function recoverFromSnapshot(snap: RecoveryEvidenceSnapshot): RecoverReport {
+  const diskBlocked = !snap.repaired && snap.bad.length > 0;
   const report = buildRecoverReport(snap.lines, snap.sessionId, {
     fragments: snap.bad,
-    blocked: false, // 快照语义=修复后裁决；盘面阻断由残片证据决定
+    blocked: diskBlocked,
     attributedFragments: snap.attributedFragments,
   });
   return report;

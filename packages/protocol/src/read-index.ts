@@ -4,13 +4,15 @@
 // B02（c4 审定）不变量：
 // 1. 坐标统一——编入分得的 seq 是事件在流内的唯一权威坐标；append 以分配值覆盖
 //    event.seq（宿主侧历史序号不进入读索引坐标系，防「索引 seq=1 而 event.seq=99」分裂）。
-// 2. 内容校验——换流判定不只比位置：每条编入事件保存内容摘要（FNV-1a64 over
-//    规范化 JSON）；重扫时同位同 locator 但内容改写 → 摘要不匹配 → 换流。
-//    诚实语义：任何已观测位置的内容变化都触发换流（不做部分续读）。
+// 2. 原始证据校验（c6 C5-02）——换流判定不只比位置：每条编入事件保存**原始行字节摘要**
+//    （FNV-1a64 over 宿主提供的原始行文本，非投影后事件）。投影（脱敏/截断/规范化）会
+//    抹平原文差异（同 locator 原文改写但脱敏后相同 → 投影摘要相同），原始摘要不会。
+//    诚实语义：任何已观测位置的原始内容变化都触发换流（不做部分续读）。
 // 3. 流身份注入——streamId 由注入的 newId 生成（boot 内唯一随机 16B base64url；
 //    无注入源时用 crypto.getRandomValues，再退化为进程内计数器）。
-// 4. 超限出口有限——get() 发现流超预算即废弃（下次 get 重扫生成新流）；无内部循环。
-//    超过预算的会话文件每次触顶都换流重扫，宿主应按游标→扫描映射分页（契约 §1.3）。
+// 4. 超限出口有限（c6 C5-02 收紧）——同文件**至多一次**触顶换流宽容；再次触顶=文件
+//    本身超出索引预算 → registry 拒绝该文件（FileOverBudgetError，宿主转 4402 会话不可读）。
+//    无内部循环；反复重扫被显式拒绝而非用空流掩盖。内存预算数字=理论估算（非实测）。
 import { fnv1a64Hex } from "./sanitizer.ts";
 import type { HistoryEvent, StreamId } from "./contracts.ts";
 
@@ -21,20 +23,22 @@ export interface IndexedEvent {
   readonly source: EventSource;
   /** 源定位：journal 行号（1 基）或 session 条目字节偏移（稳定身份） */
   readonly locator: string;
-  /** 内容摘要（编入时刻计算；换流判定用） */
+  /** 原始行字节摘要（编入时刻对宿主提供的 raw 计算；换流判定主证据——防投影抹平改写） */
   readonly digest: string;
   readonly event: HistoryEvent;
 }
 
-/** 扫描行（宿主重扫产出；digest 与编入时同算法） */
+/** 扫描行（宿主重扫产出；digest 与编入时同算法——对 raw 原文） */
 export interface ScanRow {
   readonly source: EventSource;
   readonly locator: string;
+  /** 原始行文本（journal 行原文 / session 条目原文；宿主重扫时提供） */
+  readonly raw: string;
   readonly event: HistoryEvent;
 }
 
 export function scanDigest(row: ScanRow): string {
-  return fnv1a64Hex(JSON.stringify([row.source, row.locator, row.event]));
+  return fnv1a64Hex(JSON.stringify([row.source, row.locator, row.raw]));
 }
 
 export interface ReadIndexLimits {
@@ -58,11 +62,12 @@ export class ReadIndex {
 
   get waterMark(): number { return this.events.length; }
 
-  /** 追加事件（append-only；返回分得的 seq=水位+1）。禁止插入。seq 覆盖=坐标统一（B02）。 */
-  append(source: EventSource, locator: string, event: HistoryEvent): number {
+  /** 追加事件（append-only；返回分得的 seq=水位+1）。禁止插入。seq 覆盖=坐标统一（B02）。
+   *  raw=原始行文本（换流判定主证据，C5-02）。 */
+  append(source: EventSource, locator: string, raw: string, event: HistoryEvent): number {
     const seq = this.events.length + 1;
     const unified: HistoryEvent = { ...event, seq };
-    this.events.push({ seq, source, locator, digest: fnv1a64Hex(JSON.stringify([source, locator, event])), event: unified });
+    this.events.push({ seq, source, locator, digest: fnv1a64Hex(JSON.stringify([source, locator, raw])), event: unified });
     return seq;
   }
 
@@ -86,7 +91,7 @@ export class ReadIndex {
       const a = this.events[i], b = currentScan[i];
       if (a === undefined || b === undefined) return false;
       if (a.source !== b.source || a.locator !== b.locator) return false;
-      if (a.digest !== scanDigest(b)) return false; // 同位同 locator 但内容改写 → 换流
+      if (a.digest !== scanDigest(b)) return false; // 同位同 locator 但原文改写（含投影抹平型）→ 换流
     }
     return true;
   }
@@ -102,9 +107,15 @@ export interface ReadIndexRegistryLimits {
 export const DEFAULT_REGISTRY_LIMITS: ReadIndexRegistryLimits = { maxStreams: 32 };
 
 /** 流注册表（LRU ≤maxStreams；命中/活动刷新；超限卸载最久未访问→换流） */
+/** 文件超出索引预算（同文件两次触顶）：宿主应转 4402 会话不可读——不再以空流掩盖反复重扫。 */
+export class FileOverBudgetError extends Error {
+  constructor(readonly file: string) { super(`read-index: file over budget (twice): ${file}`); this.name = "FileOverBudgetError"; }
+}
+
 export class ReadIndexRegistry {
   private readonly map = new Map<string, ReadIndex>(); // Map 迭代序=插入序；重插=LRU 刷新
-  private counter = 0;
+  /** 已触顶过一次的文件（第二次触顶→拒绝，有限出口） */
+  private readonly overBudgetFiles = new Set<string>();
 
   constructor(
     private readonly newId: () => StreamId = defaultStreamId,
@@ -112,12 +123,15 @@ export class ReadIndexRegistry {
     private readonly indexLimits: ReadIndexLimits = DEFAULT_READ_INDEX_LIMITS,
   ) {}
 
-  /** 取流：超预算的流即时废弃换新（出口有限；见类头注 4）。 */
+  /** 取流：超预算的流即时废弃换新（**同文件仅一次**宽容；再次触顶→FileOverBudgetError，见类头注 4）。 */
   get(file: string): ReadIndex {
+    if (this.overBudgetFiles.has(file)) throw new FileOverBudgetError(file);
     const hit = this.map.get(file);
     if (hit) {
-      if (hit.overBudget) { this.map.delete(file); } // 触顶换流：新流从空开始
-      else { this.map.delete(file); this.map.set(file, hit); return hit; }
+      if (hit.overBudget) {
+        this.map.delete(file); // 触顶换流：新流从空开始（唯一一次宽容）
+        this.overBudgetFiles.add(file); // 若新流再触顶 → 下次 get 拒绝
+      } else { this.map.delete(file); this.map.set(file, hit); return hit; }
     }
     const idx = new ReadIndex(file, this.newId(), this.indexLimits);
     this.map.set(file, idx);

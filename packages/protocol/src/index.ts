@@ -13,3 +13,5 @@ export * from "./contracts.ts";
 export * from "./sanitizer.ts";
 export * from "./read-index.ts";
 export * from "./subscription-engine.ts";
+export * from "./session-attribution.ts";
+export * from "./projection-frames.ts";

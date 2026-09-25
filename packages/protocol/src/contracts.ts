@@ -6,6 +6,11 @@
 // 限额常量（§5.7 逐字段表；contracts.ts=冻结源）
 // ---------------------------------------------------------------------------
 export const LIMITS = {
+  /** 信封预留（快照/events 帧固定字段+JSON 结构开销；C5-03 整帧预算域） */
+  envelopeOverheadBytes: 256,
+  /** 订阅内部积压上限（paging 缓冲+live outbox 合计；C5-04 慢客户端门） */
+  subscriptionBacklogMax: 1_024,
+  subscriptionBacklogBytes: 262_144,
   frameMaxBytes: 262_144,
   pageMaxEvents: 200,
   pageFrameBudgetBytes: 200_000,
@@ -31,7 +36,7 @@ export const LIMITS = {
   snapshotTailGraceMs: 60_000,
   snapshotBufferMax: 1024,
   liveFramesPerDrain: 16,
-  maxEventsPerLiveFrame: 8,   // 8×singleEventBytes(32k)=256k < frameMaxBytes(262k)，批帧恒在预算内（B04）
+  maxEventsPerLiveFrame: 7,   // 7×32k=229,376B + 信封预留 256B < 262,144B（C5-03：严格小于且留信封余量；旧值 8×32k=262,144 恰等上限不严格）
   filePattern: /^[\w.-]{1,114}\.jsonl$/,
   requestIdPattern: /^[\w-]{1,64}$/,
   idPattern: /^[\w:.-]{1,128}$/,
@@ -246,7 +251,9 @@ export type ResyncReason = "server-side-gap" | "stream-replaced";
 
 export type ServerFrame =
   | { readonly t: "welcome"; readonly serverBootId: string; readonly protocolVersion: 1 }
-  | { readonly t: "sessions"; readonly requestId: string; readonly sessions: readonly SessionSummaryDTO[]; readonly total: number; readonly offset: number; readonly hasMore: boolean; readonly listVersion: number }
+  | { readonly t: "sessions"; readonly requestId: string; readonly sessions: readonly SessionSummaryDTO[]; readonly total: number; readonly offset: number; readonly hasMore: boolean; readonly listVersion: number;
+      /** 页级可靠性（c6 C5-07）：本页含任一条目 partial→partial；条目级仍见 SessionSummaryDTO.listReliability */
+      readonly listReliability: "full" | "partial" }
   | ({ readonly t: "snapshot" } & SnapshotFrame)
   | { readonly t: "events"; readonly subscriptionId: SubscriptionId; readonly origin: "history"; readonly refSeq: number; readonly events: readonly HistoryEvent[] }
   | { readonly t: "events"; readonly subscriptionId: SubscriptionId; readonly origin: "live"; readonly liveSeq: number; readonly refSeq: null; readonly events: readonly LiveEvent[] }

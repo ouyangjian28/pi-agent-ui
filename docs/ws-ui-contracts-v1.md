@@ -127,7 +127,7 @@ interface SessionStatus {
 | clear | `clear` | `{ clearedCount: number }`（intentId=null） |
 | response-timeout | `response-timeout` | `{ commandId: number }` |
 
-- `ts: number|null`+`timeSource:"server-read"`；不投宿主 sentAt。未知 t/坏行→`unknown-line`/`journal-corrupt` 独立位置投影（恢复仍阻断，不洗白）。
+- `ts: number|null`（服务器读取时刻；不投宿主 sentAt；无独立 timeSource 字段——判别由读取器出口统一保证=c6 C5-07 单模型清理）。未知 t/坏行→`unknown-line`/`journal-corrupt` 独立位置投影（恢复仍阻断，不洗白）。
 
 ### 3.3 HistoryEvent
 
@@ -158,10 +158,10 @@ type ProgressNote = "thinking" | "tool-start" | "tool-end" | "compacting" | "mes
 - 只读解析 session JSONL（完整行边界=末 `\n`；半行不判坏不发布）；消息正文投影（role/content 块）；**工具调用=宿主消息内内容块**，块键=`entryId:blockIndex`（多 toolCall 共用 entryId 时块索引分立——C3-R04）；异常行占位 `corrupt-entry`（entryId=`corrupt-<byteOffset>`）；零副作用。
 - **归因规则（冻结）**：
   - **用户条目**：hash+attachmentIdentity+ordinal 三元组匹配 journal enqueue（`matchKeyOf` 同构）→携带 intentId+generation。
-  - **assistant/toolResult 条目（可执行定义，c5 B06）**：归属锚=**consumed 行的宿主锚**（`anchorEntryId`： RpcSession 写 consumed 时记录的 session 侧行号/字节偏移；`intervalEnd` 同构）。判定=「同 generation 且 session 条目序 ∈ (上一意图锚, consumed 锚]」→归该 intentId。**不得用跨文件扫描先后当归属**（session 先扫/journal 后扫/B 已 enqueue 等待都会错归属——扫描序是读取时序非事实时序）。锚缺失（写链未接/旧 journal 无锚字段/外部写者）→`intentId:null` 照常输出，不猜；**迟到更正不回改已发布事件**（发布后归属固定；更正只影响后续编入=延迟编入或永久 null）。
+  - **assistant/toolResult 条目（c6 C5-06 方向修正）**：归因区间=**[本意图 user 锚（consumed.anchorEntryId 的 entryId 字符串身份）, intervalEnd{entryId,lengthHash}]，从锚向后含两端**（`session-attribution.ts` 纯投影已落地：区间内归该 intentId；user-A/assistant-A/user-B/assistant-B 中 assistant-A 归 A——旧「向前到下一锚」方向反了）。锚=entryId 身份非行号/扫描序；终点=entryId+lengthHash 双身份（防同 id 改写伪造终点）。**不得用跨文件扫描先后当归属**（置换不敏感=纯集合关系，fixture 已证）。区间无效（锚/终点不可见、哈希不符、终点在锚前）→`intentId:null` 不猜；重叠区间=最近锚（内层）优先；同意图多次 consumed=journal 序最新生效。**迟到更正不回改已发布事件**（发布后归属固定；更正只影响后续编入=延迟编入或永久 null）。
   - **多 toolCall 块**：同 entryId 的第 n 个 toolCall 块=块键 `entryId:blockIndex`（0 起，编入序）；toolResult 以其 toolCallId 回链（无 toolCallId 的孤儿 toolResult→`intentId:null`）。
   - **分支口径（声明）**：v1 投影=当前文件全量；分支切换=文件替换→换流（§1.3）。
-- **final 逐项映射（冻结）**：stop→`final:true`；length→`final:true`（截断终局，previewTruncated 标注）；aborted→`final:true`（终局非成功）；toolUse→`final:false`（等待工具结果）；无 stopReason 的 user/toolCall→按角色（user 终局 true；toolCall false）。
+- **final 逐项映射（冻结）**：stop→`final:true`；length→`final:true`（截断终局，`textPreview.truncated` 标注——SanitizedText 结构体内字段，无独立 previewTruncated 顶层字段=c6 单模型）；aborted→`final:true`（终局非成功）；toolUse→`final:false`（等待工具结果）；无 stopReason 的 user/toolCall→按角色（user 终局 true；toolCall false）。
 - 消息 DTO：
 
 ```ts
@@ -239,6 +239,7 @@ interface RecoverySummary {
   readonly evidenceHash: string | null;
 }
 interface AvailableRecovery {
+  readonly availability: "available";       // 判别字段必带（c6 单模型：contracts.ts AvailableRecovery 同构）
   readonly evidenceHash: string;
   readonly resumeBlocked: boolean;          // = diskBlocked || unattributableFragments>0（权威公式原样）
   readonly diskBlocked: boolean;
@@ -260,15 +261,17 @@ interface RecoveryIntentRow { readonly intentId: string; readonly verdict: "sett
 
 | IntentRecord 状态 | verdict | provisional |
 | --- | --- | --- |
-| lastVerdict=settled/delivered/unknown | 对应值 | true 若 id∈unknownEffect（残片证据动摇终裁）；否则 false |
-| 无 lastVerdict 且 sending 或 responseTimeoutRecorded===true | unknown | true |
+| lastVerdict=settled/delivered/unknown | 对应值 | false（终态行是耐久事实；unknown 终裁行同） |
+| 无 lastVerdict 且 sending 或 responseTimeoutRecorded===true（含 sending 残片可靠关联） | unknown | true（provisional=残片/超时记录派生，非耐久终态行） |
 | 无 lastVerdict 且 cancelled | cancelled | false |
 | enqueue 后无 sending（未发起） | not-evaluated | false |
 | id∈unknownEffect 但无 sending 无 verdict | unknown | true |
+（c6 C5-07 对齐 recover.ts 实装：provisional=true 仅当 unknown 由残片可靠关联或人工裁决派生——consumedVerdictIds 在裁决主循环记录；settled/delivered 行恒 false）
 
 - short-fragment 无源端分类：blockedReasons 保持计数分类（归因分类归写链，读侧不造）。
-- **修复后残片（修订）**：宿主修复盘面后残片证据在 journal 侧被消耗——②投影**不落新裁决**；若读索引曾编入 journal-corrupt/unknown-line 证据事件而盘面重读已无对应坏行（指纹变化+前缀投影不符该证据）→`availability:"unavailable"; reason:"concurrent-modification"`（不输出 resumable 假安全；须宿主走写链确认后重置读索引=换流）。
-- **evidenceHash 输入域（冻结）**：SHA-256 over `journalFileSha256 ‖ sessionFingerprint ‖ normalizedJSON(RecoverReport 含 attributedFragments 修订集)`——**完整权威输入**（非字节偏移）；跨页固定（get-recovery 首次调用冻结，页缓存同版本）。
+- **残片证据口径（c6 单模型）**：坏行残片不随盘面修复消失——权威载体=**RecoveryEvidenceSnapshot**（captureRecoveryEvidence 修复前捕获；recoverFromSnapshot 唯一合法出口；冷启动无快照→unavailable(no-evidence-snapshot)，`recoveryAvailability` 纯选择器可执行门）。旧「索引见过坏行/journal 侧消耗」表述作废。
+- **修复后残片（c6 C5-01/C5-07 单模型修订）**：宿主修复盘面**不消耗**残片证据——权威载体=RecoveryEvidenceSnapshot（修复前捕获，bad 永久保留）；`recoverFromSnapshot` 按快照事实分派（未修复快照=diskBlocked 恒阻断+resumable 恒空；`withRepair` 标记后才进残片证据裁决）。若读索引曾编入 journal-corrupt/unknown-line 证据事件而盘面重读已无对应坏行（原始行摘要前缀不符）→`availability:"unavailable"; reason:"concurrent-modification"`（不输出 resumable 假安全；须宿主走写链确认后重置读索引=换流）。旧「journal 侧消耗」表述作废。
+- **evidenceHash 输入域（c6 对齐实现）**：`snapshotEvidenceHash`（recover.ts）=SHA-256 over `JSON.stringify([version, file, sessionId, lines, bad, attributedFragments(按 排序后), repaired])`——**完整权威快照输入域**（非字节偏移、非 journal 裸 SHA；attributedFragments 排序=冻结编码，归因集合顺序不影响哈希）；跨页固定（get-recovery 首次调用冻结，页缓存同版本）。
 - **恢复分页版本（修订）**：get-recovery 首次响应冻结证据版本（evidenceHash+内容页缓存）；续页带 `evidenceHash` 参数→不符→`error 4409 retryable`（证据已变更，客户端重拉）；不带→按当前版本新快照。恢复投影读取有界（§5.6）。
 
 ---
@@ -371,7 +374,7 @@ type ServerFrame =
 
 - 排序=lastActiveMs 倒序，**次键=file 字典序**（稳定）；offset/limit（默认 0/50，≤200）；total/hasMore/listVersion。
 - **弱一致声明**：分页间目录变化可能漏/重；listVersion 变化→UI 丢弃旧页重拉首屏（收敛）；不承诺跨页强一致。
-- SessionSummaryDTO：sessionId/file/title(SanitizedText)/lastActiveMs/entryCount/sizeBytes/hasRecoveryNotice+`listReliability:"full"|"partial"`（**页级与条目级分立**：页级=目录枚举截断；条目级=单文件读取失败→该条目 listReliability:"partial" 其余正常）。
+- SessionSummaryDTO：sessionId/file/title(SanitizedText)/lastActiveMs/entryCount/sizeBytes/hasRecoveryNotice+条目级 `listReliability:"full"|"partial"`（单文件读取失败→该条目 partial 其余正常）；**sessions 帧另有页级 `listReliability` 字段**（c6 C5-07 实装：本页含任一 partial 条目→"partial"；纯投影=buildSessionsFrame 字节+条数装页，单条超限→null 宿主转错误帧）。
 
 ---
 
@@ -391,12 +394,12 @@ type ServerFrame =
 
 | 红项 | 闭合条款 |
 | --- | --- |
-| C3-R01 指纹 | §1.3 整文件 SHA-256+前缀投影比对+LRU 32×20k≈32MB 超限换流+时序③口径修正（编排保证后编入必>H） |
+| C3-R01 指纹 | §1.3 原始行字节摘要（c6 C5-02 升级：投影抹平型改写也触发换流）+前缀投影比对+LRU 32×20k（≈几十 MB 级**理论估算非实测**；触顶=同文件至多一次换流、二次=4402 拒绝）+时序③口径修正（编排保证后编入必>H） |
 | C3-R02 快照幂等 | §3.6 完整 SnapshotFrame+状态机+最近 2 页缓存幂等+末页 60s 宽限+4409 出口 |
 | C3-R03 线协议 | §5.2 events 判别联合（history 无 liveSeq/live 无 refSeq）+origin 统一字面量+note 受控枚举+turn-state 带 statusVersion+快照后落盘走 history 帧 |
 | C3-R04 归因/块 | §3.5 三元组匹配（用户）+代次边界邻接（assistant）+blockIndex 块键+分支口径声明+final 逐项映射 |
 | C3-R05 残片证据 | §4 concurrent-modification 不可用出口+evidenceHash 完整输入域+perIntent 穷尽表（含 cancelled/not-evaluated/unknownEffect-only 行）+不落新裁决 |
-| C3-R06 恢复分页 | §4 evidenceHash 参数续页+4409 证据变更+PageOf 五字段+§5.6 字节装页（不甩 4404）+recovery 帧保 unavailable；**恢复三 PageOf（unknownEffect/resumable/perIntent）各自独立 next 驱动**（一次请求返回同 offset 切片的三页，续页按各页 next 分别请求——不做全局 offset，c5 B04） |
+| C3-R06 恢复分页 | §4 evidenceHash 参数续页+4409 证据变更+PageOf 五字段+§5.6 字节装页（不甩 4404）+recovery 帧保 unavailable；**单 offset 只驱动 perIntent**（unknownEffect/resumable 恒整表自然有界、truncated=false、next=null——c6 C5-07 实装口径，替代旧「三 next 独立驱动」） |
 | C3-R07 脱敏 | §5.4 单段路径允许透出声明+PEM 整块/截断遮蔽+先凭据后白名单+`~` 前缀撞键消除+number 澄清+精确 Unicode 集+SanitizedText 结构化+人工 golden |
 | C3-R08 请求预算 | §5.6 连接级统一队列+在途 4+计算并发 2+5s 排队超时+有界读取 8MB/1000 文件 |
 | C3-R09 错误矩阵 | §5.3 版本层 4403（合法整数≠1）+有界包络先识别 t+写类不论字段 4405+4432 close 1000+requestId 缺失不回显+file 正则统一 |
