@@ -6,6 +6,8 @@
 import { describe, expect, it, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
 import { createServer as createHttpsServer } from "node:https";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -82,6 +84,9 @@ function rawUpgrade(port: number, origin: string | null): Promise<number> {
   return new Promise((resolve, reject) => {
     const s = new Socket();
     let head = "";
+    // 🟡6：超时 timer 所有路径清理（成功/错误/超时）
+    const to = setTimeout(() => { s.destroy(); reject(new Error("upgrade 探测超时")); }, 5_000);
+    to.unref?.();
     s.connect(port, "127.0.0.1", () => {
       const lines = ["GET /ws HTTP/1.1", `Host: 127.0.0.1:${port}`, "Upgrade: websocket", "Connection: Upgrade",
         "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Version: 13"];
@@ -91,10 +96,10 @@ function rawUpgrade(port: number, origin: string | null): Promise<number> {
     s.on("data", (d) => {
       head += d.toString("latin1");
       const m = /HTTP\/1\.1 (\d{3})/.exec(head);
-      if (m) { resolve(Number(m[1])); s.destroy(); }
+      if (m) { clearTimeout(to); resolve(Number(m[1])); s.destroy(); }
     });
-    s.on("error", reject);
-    setTimeout(() => { s.destroy(); reject(new Error("upgrade 探测超时")); }, 5_000);
+    s.on("error", (e) => { clearTimeout(to); reject(e); });
+    s.on("close", () => clearTimeout(to));
   });
 }
 
@@ -251,6 +256,9 @@ function rawHandshake(port: number, origin: string): Promise<Socket> {
   return new Promise((resolve, reject) => {
     const s = new Socket();
     let head = "";
+    // 🟡6：超时 timer 所有路径清理——成功路径必须 clear（旧版 5s 后会销毁已返回给调用方的 socket）
+    const to = setTimeout(() => { s.destroy(); reject(new Error("握手超时")); }, 5_000);
+    to.unref?.();
     s.connect(port, "127.0.0.1", () => {
       s.write(["GET /ws HTTP/1.1", `Host: 127.0.0.1:${port}`, "Upgrade: websocket", "Connection: Upgrade",
         `Origin: ${origin}`, "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Version: 13"].join("\r\n") + "\r\n\r\n");
@@ -258,12 +266,11 @@ function rawHandshake(port: number, origin: string): Promise<Socket> {
     s.on("data", (d) => {
       head += d.toString("latin1");
       if (head.includes("\r\n\r\n")) {
-        if (head.startsWith("HTTP/1.1 101")) resolve(s);
-        else { s.destroy(); reject(new Error(`upgrade 失败: ${head.split("\r\n")[0]}`)); }
+        if (head.startsWith("HTTP/1.1 101")) { clearTimeout(to); resolve(s); }
+        else { clearTimeout(to); s.destroy(); reject(new Error(`upgrade 失败: ${head.split("\r\n")[0]}`)); }
       }
     });
-    s.on("error", reject);
-    setTimeout(() => { s.destroy(); reject(new Error("握手超时")); }, 5_000);
+    s.on("error", (e) => { clearTimeout(to); reject(e); });
   });
 }
 
@@ -300,7 +307,7 @@ describe("3b-1 真网络：③continuation+多字节 UTF-8 分界+控制帧", ()
     const c = connect(h.url(), { headers: { Origin: ORIGIN } });
     await c.opened;
     (await connP).ping(); // 服务端主动控制帧 ping → ws 客户端自动回 pong → onPong 触发
-    await Promise.race([ponged, new Promise((_, rej) => setTimeout(() => rej(new Error("pong 未触发")), 5_000))]);
+    await Promise.race([ponged, new Promise((_, rej) => { const t = setTimeout(() => rej(new Error("pong 未触发")), 5_000); t.unref?.(); })]);
     c.ws.close();
     await c.closed;
   });
@@ -391,7 +398,7 @@ describe("3b-1 真网络：⑤真 send 回调+清理", () => {
     await new Promise<void>((r) => setTimeout(r, 800));
     expect(doneCount).toBeLessThan(sentCount); // 存在未 flush 的发送：立即返回型实现在此暴露
     sock.resume();
-    await Promise.race([sendP, new Promise((_, rej) => setTimeout(() => rej(new Error("恢复读后 done 未兑现")), 5_000))]);
+    await Promise.race([sendP, new Promise((_, rej) => { const t = setTimeout(() => rej(new Error("恢复读后 done 未兑现")), 5_000); t.unref?.(); })]);
     expect(doneCount).toBeGreaterThanOrEqual(1);
     c.ws.close();
     await c.closed;
@@ -443,11 +450,12 @@ describe("3b-1 真网络：⑤真 send 回调+清理", () => {
     await c.closed;
   });
 
-  it("R01/3b-1 超限触发接收器 error：error 回调抛错隔离不退进程，连接达终局（1009）", async () => {
+  it("R01/3b-1 超限触发接收器 error：error 回调抛错隔离不退进程，连接达终局（1009）；审计+触发计数可观测（3b1b 强化）", async () => {
     const audits: string[] = [];
+    let errorCbFired = 0;
     const adapter = new WsServerAdapter({ allowedOrigins: [ORIGIN], audit: (l) => audits.push(l) });
     adapter.onConnection((conn) => {
-      conn.onError(() => { throw new Error("error-cb-boom"); }); // 接收器 error 后的错误回调抛错也须隔离
+      conn.onError(() => { errorCbFired += 1; throw new Error("error-cb-boom"); }); // 接收器 error 后的错误回调抛错也须隔离
     });
     const { port } = await adapter.listen(0, "127.0.0.1");
     harnesses.push(async () => { await adapter.dispose(); });
@@ -456,6 +464,44 @@ describe("3b-1 真网络：⑤真 send 回调+清理", () => {
     c.ws.send("z".repeat(LIMITS.transportMaxPayloadBytes + 1));
     const info = await c.closed; // 超限→接收器 close 1009（回调抛错不得阻断终局）
     expect(info.code).toBe(1009);
+    // 3b1b：不能只断终局——隔离审计与宿主回调触发本身也要可观测（防「删宿主 error 通知后仍存活」变异）
+    expect(errorCbFired).toBeGreaterThanOrEqual(1);
+    expect(audits.some((l) => l.includes("error-cb-error"))).toBe(true);
+  });
+
+  it("B3/3b1b 同轮交错：listen 启动中 dispose → 启动 Promise 显式拒绝，两 Promise 均收敛，无残留监听", async () => {
+    const adapter = new WsServerAdapter({ allowedOrigins: [ORIGIN], disposeWaitMs: 200, audit: () => {} });
+    const starting = adapter.listen(0, "127.0.0.1");
+    const stopping = adapter.dispose();
+    await expect(starting).rejects.toThrow(/监听启动中止|dispose/);
+    await stopping; // dispose 正常收敛
+    await expect(adapter.listen(0, "127.0.0.1")).rejects.toThrow(/dispose/); // 终态不复活
+  });
+
+  it("B3/3b1b 启动失败后 dispose：监听撞端口→拒绝；dispose 仍正常收敛；重复 dispose 幂等", async () => {
+    const blocker = createServer();
+    await new Promise<void>((r) => blocker.listen(0, "127.0.0.1", () => r()));
+    const bp = (blocker.address() as AddressInfo).port;
+    try {
+      const adapter = new WsServerAdapter({ allowedOrigins: [ORIGIN], disposeWaitMs: 200, audit: () => {} });
+      await expect(adapter.listen(bp, "127.0.0.1")).rejects.toThrow(/EADDRINUSE/);
+      await adapter.dispose();
+      await adapter.dispose(); // 幂等（同一 promise）
+    } finally {
+      blocker.close();
+    }
+  });
+
+  it("R4/3b1b binary 真网络回归（真 adapter+真 gateway 组合）：已认证连接发二进制→error 4403+close 1003", async () => {
+    const h = await makeHarness();
+    const c = connect(h.url(), { headers: { Origin: ORIGIN } });
+    await c.opened;
+    c.ws.send(JSON.stringify({ t: "hello", protocolVersion: 1, token: TOKEN }));
+    await until(() => c.frames.some((f) => f.t === "welcome"));
+    c.ws.send(Buffer.from([0x01, 0x02, 0x03])); // 二进制帧→4403+close 1003（R4 冻结映射）
+    await until(() => c.frames.some((f) => f.code === 4403));
+    const info = await c.closed;
+    expect(info.code).toBe(1003);
   });
 });
 
@@ -610,36 +656,27 @@ describe("3b-1 真网络：⑦关闭竞态+无句柄悬挂", () => {
     await expect(adapter.listen(port, "127.0.0.1")).rejects.toThrow(/dispose/);
   });
 
-  it("R02/3b-1 接收器自启关闭同截止：不回 close 握手的裸客户端在 closeHandshakeMs 内被 terminate", async () => {
+  it("R02/3b-1 接收器自启关闭同截止：真暂停读的客户端在 closeHandshakeMs 内被 terminate（服务端终局时延）", async () => {
     const h = await makeHarness({ closeHandshakeMs: 400 });
-    // 裸客户端：手造超限掩码帧后不读不应答 close → 服务端接收器 close(1009) 后 ws closeTimeout 到点 terminate
-    const closed = await new Promise<{ at: number; byClose: boolean }>((resolve, reject) => {
-      const s = new Socket();
-      const t0 = Date.now();
-      const to = setTimeout(() => { s.destroy(); reject(new Error("裸客户端未被截止")); }, 5_000);
-      to.unref?.();
-      s.connect(h.port, "127.0.0.1", () => {
-        const req = ["GET /ws HTTP/1.1", `Host: 127.0.0.1:${h.port}`, "Upgrade: websocket", "Connection: Upgrade",
-          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Version: 13", `Origin: ${ORIGIN}`].join("\r\n") + "\r\n\r\n";
-        s.write(req);
-        s.once("data", () => {
-          // 101 已回：发超限掩码二进制帧（1MiB+1；客户端→服务端必须掩码）
-          const len = LIMITS.transportMaxPayloadBytes + 1;
-          const mask = Buffer.from([0x11, 0x22, 0x33, 0x44]);
-          const payload = Buffer.alloc(len, 0x61);
-          for (let i = 0; i < len; i++) payload[i] ^= mask[i % 4];
-          const head = Buffer.alloc(14);
-          head[0] = 0x82; // FIN+binary
-          head[1] = 0x80 | 127; // MASK+64 位长度
-          head.writeBigUInt64BE(BigInt(len), 2);
-          s.write(Buffer.concat([head, mask, payload]));
-          // 此后不读不应答任何 close——等服务端截止 terminate
-        });
-      });
-      s.once("close", () => { clearTimeout(to); resolve({ at: Date.now() - t0, byClose: true }); });
-      s.once("error", (e) => { clearTimeout(to); reject(e); });
-    });
-    expect(closed.byClose).toBe(true); // 被服务端强制断（非客户端自断）
+    // GPT 3b1b B4：旧裸 socket 例的客户端会正常应答 FIN，TCP 层自然收口——不经过 ws closeTimeout，假绿。
+    // 正确夹具：真 ws 客户端建立后暂停底层读（close 帧永远得不到应答），观测服务端终局时延与关闭码。
+    let serverClosed: ((v: { at: number; code: number }) => void) | null = null;
+    const serverClosedP = new Promise<{ at: number; code: number }>((r) => { serverClosed = r; });
+    h.adapter.onConnection((conn) => { conn.onClose((code) => { serverClosed?.({ at: Date.now(), code }); }); });
+    const c = connect(h.url(), { headers: { Origin: ORIGIN } });
+    await c.opened;
+    const sock = (c.ws as unknown as { _socket: Socket })._socket; // ws 客户端底层 socket
+    sock.pause(); // 暂停读：服务端 close(1009) 握手永完不成，只能靠截止 terminate
+    const t0 = Date.now();
+    c.ws.send(Buffer.alloc(LIMITS.transportMaxPayloadBytes + 1, 0x61)); // 超限→服务端接收器 error→自启 close
+    const fin = await serverClosedP; // 服务端终局（closeTimeout 到点 terminate→close 1006）
+    expect(fin.code).toBe(1006); // 异常关闭（terminate），非优雅握手收口
+    const elapsed = fin.at - t0;
+    // closeHandshakeMs=400：须在截止+余量内完成（30s 回归变异会在此超限被杀）
+    expect(elapsed).toBeLessThan(2_400);
+    expect(elapsed).toBeGreaterThan(300); // 不是瞬时 TCP 收口（排除假绿路径：正常 FIN 应答会在毫秒级完成）
+    sock.resume();
+    await c.closed.catch(() => {}); // terminate 后客户端异常关闭=预期
   });
 
   it("upgrade 握手中途 socket 早关 → 无泄漏无崩溃（审计记录）", async () => {

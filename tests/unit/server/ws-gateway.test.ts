@@ -289,6 +289,78 @@ describe("ws-gateway w1：A 认证入站（W1-01/02）", () => {
     }
   });
 
+  it("A6 B1/3b1b：封锁期不记账不延长（跨窗正确/错误令牌均不改 blockedUntil/strikes）；到期后恢复", async () => {
+    let t = 0;
+    const audits: string[] = [];
+    const r = await makeRig({
+      now: () => t,
+      handshakePerMinute: 1000,
+      authRate: { limit: 2, windowMs: 10_000, baseBlockMs: 60_000, maxBlockMs: 600_000 },
+      audit: (l) => audits.push(l),
+    });
+    try {
+      const bad = (ip: string): void => { void r.conn({ clientIp: ip }).c.say({ t: "hello", protocolVersion: 1, token: "bad" }); };
+      t = 0; bad("1.1.1.1"); bad("1.1.1.1"); // 首轮：strikes=1 → blockedUntil=60000
+      expect(audits.some((l) => l.includes("auth-rate-blocked ip=1.1.1.1 strikes=1"))).toBe(true);
+      t = 60_001; bad("1.1.1.1"); bad("1.1.1.1"); // 跨窗二轮：strikes=2 → blockedUntil=180001
+      expect(audits.some((l) => l.includes("auth-rate-blocked ip=1.1.1.1 strikes=2"))).toBe(true);
+      // 封锁期内（t=120002<180001）：正确令牌也拒，但不得再记账/延长（旧实现在此推到 strikes=3/blockedUntil=360002）
+      t = 120_002;
+      for (let i = 0; i < 10; i++) {
+        const ok = r.conn({ clientIp: "1.1.1.1" }).c;
+        await ok.say({ t: "hello", protocolVersion: 1, token: "tok-ok" });
+        expect(ok.frames().some((f) => f.t === "error" && (f as { code?: number }).code === 4401)).toBe(true);
+      }
+      const blockedAudits = audits.filter((l) => l.includes("auth-rate-blocked ip=1.1.1.1 strikes="));
+      expect(blockedAudits.length).toBe(2); // 无 strikes=3（封锁内不记账）
+      const untilAudits = audits.filter((l) => l.includes("hello-auth-rate-blocked"));
+      expect(untilAudits.every((l) => !l.includes("until=360002"))).toBe(true); // blockedUntil 未被延长
+      // 到期后（t=180002）：正确令牌恢复 welcome
+      t = 180_002;
+      const rec = r.conn({ clientIp: "1.1.1.1" }).c;
+      await rec.say({ t: "hello", protocolVersion: 1, token: "tok-ok" });
+      expect(rec.frames().some((f) => f.t === "welcome")).toBe(true);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("A6 B2/3b1b：满表硬上界——全封锁时按最早到期显式淘汰+审计（不静默丢也不无界增长）", async () => {
+    let t = 0;
+    const audits: string[] = [];
+    const r = await makeRig({
+      now: () => t,
+      handshakePerMinute: 5000,
+      maxConnections: 5000,
+      authRate: { limit: 1, windowMs: 10_000, baseBlockMs: 600_000, maxBlockMs: 600_000 },
+      audit: (l) => audits.push(l),
+    });
+    try {
+      // 1024 个不同 IP 各一次失败（limit=1：首败即封锁）→ 全表封锁
+      for (let i = 1; i <= 1024; i++) {
+        const c = r.conn({ clientIp: `10.0.${Math.floor(i / 250)}.${(i % 250) + 1}` }).c;
+        await c.say({ t: "hello", protocolVersion: 1, token: "bad" });
+      }
+      expect(audits.filter((l) => l.includes("auth-rate-blocked")).length).toBe(1024);
+      expect(audits.some((l) => l.includes("auth-rate-table-evict-blocked"))).toBe(false); // 未满表前不淘汰
+      // 第 1025 个新 IP：满表+全封锁 → 显式淘汰最早到期者+审计（容量是 set 前硬条件）
+      const c25 = r.conn({ clientIp: "20.0.0.1" }).c;
+      await c25.say({ t: "hello", protocolVersion: 1, token: "bad" });
+      const evict = audits.find((l) => l.includes("auth-rate-table-evict-blocked"));
+      expect(evict).toBeDefined();
+      expect(evict).toMatch(/size=1024/);
+      expect(audits.some((l) => l.includes("auth-rate-blocked ip=20.0.0.1"))).toBe(true); // 新观测照常记账
+      // 部分过期路径：时间推进过封锁期（全部解封）→ 新 IP 记账走非封锁淘汰分支（无 evict-blocked 审计新增）
+      t = 600_001;
+      const c26 = r.conn({ clientIp: "30.0.0.1" }).c;
+      await c26.say({ t: "hello", protocolVersion: 1, token: "bad" });
+      expect(audits.some((l) => l.includes("auth-rate-table-evict-blocked") && l.includes("ip=30"))).toBe(false);
+      expect(audits.some((l) => l.includes("auth-rate-blocked ip=30.0.0.1"))).toBe(true);
+    } finally {
+      await r.dispose();
+    }
+  });
+
   it("A6 ping 无 requestId（校验器接受）→pong；带 requestId 的 ping→4404", async () => {
     const r = await makeRig();
     try {

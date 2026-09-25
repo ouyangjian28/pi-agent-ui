@@ -329,7 +329,9 @@ export class WsGateway {
     const rate = this.authFailures.get(ip);
     if (rate !== undefined && this.now() < rate.blockedUntil) {
       this.audit(`hello-auth-rate-blocked conn=${st.id} ip=${ip} until=${Math.round(rate.blockedUntil)}`);
-      this.rejectAuth(st, "认证失败限速中");
+      // B1（3b1b）：封锁期拒绝不得记账（不推 fails/strikes，不延长 blockedUntil；正确/错误令牌同口径）
+      this.enqueue(st, { t: "error", code: 4401, message: "未认证或令牌无效（认证失败限速中）", retryable: false, requestId: "" });
+      this.closeConn(st, 1008, "auth");
       return;
     }
     if (st.preAuthFrames > (this.opts.helloMaxFrames ?? 3)) { this.rejectAuth(st, "认证窗口帧数超限"); return; }
@@ -363,7 +365,9 @@ export class WsGateway {
     this.closeConn(st, 1008, "auth");
   }
 
-  /** R6（3b-1）：认证失败记账（滑窗+指数退避封顶；防护表有上界）。 */
+  /** R6（3b-1）：认证失败记账（滑窗+指数退避封顶；防护表有上界）。
+   *  B2（3b1b）：容量是 set 前硬条件——满表时先淘汰非封锁项（丢的是失败史，活动封锁不丢）；
+   *  全封锁时按最早到期的封锁项显式淘汰+审计（有界优先，不静默也不无界增长）。 */
   private recordAuthFailure(st: ConnState): void {
     const ip = st.meta.clientIp ?? "unknown";
     const now = this.now();
@@ -371,10 +375,20 @@ export class WsGateway {
     let e = this.authFailures.get(ip);
     if (e === undefined) {
       if (this.authFailures.size >= WsGateway.AUTH_RATE_MAP_MAX) {
-        // 淘汰最旧非封锁项（保守：封锁户保留，新观测照常记账）
-        for (const [k, v] of [...this.authFailures]) {
-          if (now >= v.blockedUntil) { this.authFailures.delete(k); break; }
+        // 先淘汰最旧非封锁项（保守：活动封锁户优先保留）
+        let victim: string | null = null;
+        for (const [k, v] of this.authFailures) {
+          if (now >= v.blockedUntil) { victim = k; break; }
         }
+        if (victim === null) {
+          // 全表封锁：淘汰最早到期的封锁项（防护面最弱的），显式审计（不静默丢活动封锁）
+          let minUntil = Infinity;
+          for (const [k, v] of this.authFailures) {
+            if (v.blockedUntil < minUntil) { minUntil = v.blockedUntil; victim = k; }
+          }
+          this.audit(`auth-rate-table-evict-blocked ip=${victim} until=${Math.round(minUntil)} size=${this.authFailures.size}`);
+        }
+        if (victim !== null) this.authFailures.delete(victim);
       }
       e = { fails: [], strikes: 0, blockedUntil: 0 };
       this.authFailures.set(ip, e);

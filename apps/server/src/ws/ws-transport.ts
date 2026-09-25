@@ -258,6 +258,8 @@ export class WsServerAdapter implements WsTransportPort {
   private readonly requireTlsOffLoopback: boolean;
   private readonly closeHandshakeMs: number;
   private disposePromise: Promise<void> | null = null;
+  /** B3（3b1b）：启动中的 listen 结算钩子——dispose 同轮交错时显式拒绝，防悬空启动 Promise。 */
+  private pendingListen: { settle: () => void } | null = null;
   /** 测试/受控注入：server 实际监听地址（port 模式 listen 后可读）。 */
   readonly address: () => { port: number; host: string } | null;
 
@@ -315,11 +317,27 @@ export class WsServerAdapter implements WsTransportPort {
   listen(port: number = 0, host: string = "127.0.0.1"): Promise<{ port: number; host: string }> {
     if (this.ownServer === null) throw new Error("外部 server 模式无 listen 所有权");
     if (this.disposed) return Promise.reject(new Error("适配器已 dispose，拒绝重新监听"));
+    // B3（3b1b）：启动中的 listen 可被同轮 dispose 结算——Node 在 bind 完成前 close() 不会触发
+    // listening 回调也不触发 error，若不显式结算，调用方的启动 Promise 将悬空（监听器残留）。
     return new Promise((resolve, reject) => {
-      const onErr = (err: Error): void => reject(err);
+      let settled = false;
+      const onErr = (err: Error): void => {
+        if (settled) return; settled = true;
+        this.pendingListen = null;
+        reject(err);
+      };
+      this.pendingListen = {
+        settle: () => {
+          if (settled) return; settled = true;
+          this.pendingListen = null;
+          reject(new Error("适配器已 dispose，监听启动中止"));
+        },
+      };
       this.ownServer!.once("error", onErr);
       this.ownServer!.listen(port, host, () => {
         this.ownServer!.off("error", onErr);
+        if (settled) return; settled = true;
+        this.pendingListen = null;
         const a = this.ownServer!.address();
         resolve(typeof a === "object" && a !== null ? { port: a.port, host: a.address } : { port, host });
       });
@@ -391,6 +409,8 @@ export class WsServerAdapter implements WsTransportPort {
 
   private async doDispose(): Promise<void> {
     this.disposed = true;
+    // B3（3b1b）：同轮交错的启动中 listen 显式结算（否则 Node bind 前 close 不触发任何回调，调用方永远 pending）
+    this.pendingListen?.settle();
     const waitMs = this.opts.disposeWaitMs ?? DEFAULT_DISPOSE_WAIT_MS;
     // 存量 WS 连接：1001 优雅关闭+closeHandshakeMs 截止 terminate；轮询 timer 全部 unref（🟡5）
     const open = [...this.conns.values()].filter((c) => c.isOpen);
