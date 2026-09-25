@@ -466,6 +466,46 @@ describe("recover（恢复入口受控面）", () => {
     }
   });
 
+  it("K-Y1/K-Y2（s4k 加固）：数组第二及后续元素容器不再保守误拒；裸控制字符拒绝；尾逗号门不回归", () => {
+    const lines: JournalLine[] = [JSON.parse(enq("i-1")), JSON.parse(enq("i-2"))];
+    const head = '{"t":"sending","intentId":"i-1"';
+    // K-Y1 三例：value-required 位置的容器是合法尾截断前缀，应归因 i-1（旧版保守误拒）
+    for (const [label, raw] of [
+      ["数组第二元素对象", head + ',"a":[1,{}]'],
+      ["数组第二元素数组+完整行", head + ',"a":[{},[]]'],
+      ["数组首元素对象截断", head + ',"a":[1,{}'],
+    ] as Array<[string, string]>) {
+      const r = buildRecoverReport(lines, "s1", { fragments: [{ raw, error: "撕裂尾", partialTail: true }], blocked: false });
+      expect(r.unknownEffect).toEqual(["i-1"]);
+      expect(r.resumeBlocked).toBe(false);
+      expect(r.resumable).toEqual(["i-2"]);
+      void label;
+    }
+    // K-Y2：值字符串含裸控制字符（真 NUL/制表符）拒绝；转义形态 \t/\n 照过
+    const bads: Array<[string, string]> = [
+      ["裸 NUL", head + ',"note":"a\u0000b"'],
+      ["裸制表符", head + ',"note":"a\tb"'],
+    ];
+    for (const [label, raw] of bads) {
+      const r = buildRecoverReport(lines, "s1", { fragments: [{ raw, error: "撕裂尾", partialTail: true }], blocked: false });
+      expect(r.unknownEffect).toEqual([]);
+      expect(r.resumeBlocked).toBe(true);
+      expect(r.resumable).toEqual([]);
+      void label;
+    }
+    for (const raw of [head + ',"note":"a\\tb"', head + ',"note":"a\\nb"']) {
+      const r = buildRecoverReport(lines, "s1", { fragments: [{ raw, error: "撕裂尾", partialTail: true }], blocked: false });
+      expect(r.unknownEffect).toEqual(["i-1"]);
+      expect(r.resumeBlocked).toBe(false);
+    }
+    // 尾逗号门不回归：[1,] 与 ,} 仍拒
+    for (const raw of [head + ',"a":[1,]', head + ',}']) {
+      const r = buildRecoverReport(lines, "s1", { fragments: [{ raw, error: "撕裂尾", partialTail: true }], blocked: false });
+      expect(r.resumeBlocked).toBe(true);
+      expect(r.resumable).toEqual([]);
+    }
+  });
+
   it("F1k2（I1 正常面）：转义键解码后同等识别——顶层唯一转义 intentId 键+完整值仍归因；数字段截断保持", () => {
     const lines: JournalLine[] = [JSON.parse(enq("i-1")), JSON.parse(enq("i-2"))];
     // GPT s4i 观察例：顶层 "intent\u0049d"（解码=intentId）+完整值→接受归因（解码后同等识别，非一律拒绝转义）

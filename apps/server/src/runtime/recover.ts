@@ -203,6 +203,11 @@ function scanTopLevelIntentId(raw: string): TopLevelIdScan {
   const HEX = "0123456789abcdefABCDEF";
   /** 字面量转义校验（Y1）：\ 后仅限 JSON 合法转义（"\/bfnrt 或 \u+4hex）；返回 false=非法转义。 */
   const validEscapes = (literal: string): boolean => {
+    // K-Y2：裸控制字符（U+0000-U+001F 原始字符非转义形态）拒绝；合法转义（\t/\n 等）照过。键名经 JSON.parse 归一（天然拒绝裸控制字符）。
+    for (let p = 0; p < literal.length; p++) {
+      const cc = literal.charCodeAt(p);
+      if (cc < 0x20) return false;
+    }
     for (let j = 1; j < literal.length; j += 1) {
       if (literal[j] !== "\\") continue;
       const nxt = literal[j + 1];
@@ -247,8 +252,8 @@ function scanTopLevelIntentId(raw: string): TopLevelIdScan {
         const top = stack[stack.length - 1] as Ctx;
         if (top.type === "obj") {
           if (top.expect !== "value") return { kind: "conflict" }; // key/colon/member-end 位置开容器
-        } else if (top.expect !== "value-or-end") {
-          return { kind: "conflict" }; // element-end/value-required 位置开容器
+        } else if (top.expect !== "value-or-end" && top.expect !== "value-required") {
+          return { kind: "conflict" }; // element-end 位置开容器；K-Y1：value-required（逗号后第二及后续元素）允许容器
         }
       }
       stack.push(ch === "{" ? { type: "obj", expect: "key-or-end" } : { type: "arr", expect: "value-or-end" });
