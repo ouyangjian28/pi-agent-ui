@@ -4,13 +4,15 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { ProcessHandle, ProcessHostPort, ProcessSpawnHandlers } from "@pi-agent-ui/protocol";
+import type { DurabilityPort, ProcessHandle, ProcessHostPort, ProcessSpawnHandlers } from "@pi-agent-ui/protocol";
 import { FileDurability } from "../../../apps/server/src/runtime/file-durability.js";
 import { RpcSession } from "../../../apps/server/src/runtime/rpc-session.js";
 
-/** 假 pi 进程宿主：记录写出的 stdin 帧；测试用 emitEvent/emitExit 注入进程输出。 */
+/** 假 pi 进程宿主：记录写出的 stdin 帧；测试用 emitEvent/emitExit 注入进程输出。
+ *  writeMode：ok=正常受理；fail=write reject（S4-03 写入失败）；hang=write 永不兑现（S4-03 挂起窗口）。 */
 class FakeRpcHost implements ProcessHostPort {
   readonly frames: string[] = [];
+  writeMode: "ok" | "fail" | "hang" = "ok";
   private handler: ProcessSpawnHandlers | null = null;
   private stopped: string[] = [];
   handle: ProcessHandle | null = null;
@@ -24,6 +26,8 @@ class FakeRpcHost implements ProcessHostPort {
   async writeStdin(h: ProcessHandle, text: string): Promise<void> {
     void h;
     this.frames.push(text);
+    if (this.writeMode === "fail") throw new Error("stdin 写入失败（探针）");
+    if (this.writeMode === "hang") await new Promise<void>(() => undefined); // 永不兑现
   }
 
   stop(h: ProcessHandle, signal: "SIGTERM" | "SIGKILL"): void {
@@ -56,6 +60,28 @@ function until(f: () => boolean, what: string, ms = 2000): Promise<void> {
     };
     tick();
   });
+}
+
+/** 受控耐久替身（S4-05）：可挂起第 N 次 append（行已计入）→release() 手动结算。 */
+class HoldDurability {
+  readonly lines: unknown[] = [];
+  calls = 0;
+  holdAt = 0;
+  private releasers: Array<(err?: Error) => void> = [];
+  append(line: unknown): Promise<void> {
+    this.calls += 1;
+    const n = this.calls;
+    this.lines.push(line);
+    if (this.holdAt === n) {
+      return new Promise<void>((res, rej) => {
+        this.releasers.push((err) => (err ? rej(err) : res()));
+      });
+    }
+    return Promise.resolve();
+  }
+  release(err?: Error): void {
+    this.releasers.shift()?.(err);
+  }
 }
 
 const dirs: string[] = [];
@@ -205,7 +231,7 @@ describe("RpcSession（受控替身）", () => {
     expect((session.getState().gate as { kind: string }).kind).not.toBe("in-flight");
   });
 
-  it("FileDurability：JSONL 逐行落盘；失败后 fail-closed 直到 close 重置", async () => {
+  it("FileDurability：JSONL 逐行落盘；失败后 fail-closed；close 不解锁（S4-06：拒绝续写，不复位）", async () => {
     const { dir } = await makeSession();
     const dur = new FileDurability(join(dir, "d.jsonl"));
     await dur.append({ t: "enqueue" } as never);
@@ -217,6 +243,157 @@ describe("RpcSession（受控替身）", () => {
     const bad = new FileDurability(dir); // 目录：open("a") 在 Linux 上 EISDIR
     await expect(bad.append({ t: "enqueue" } as never)).rejects.toThrow();
     await expect(bad.append({ t: "sending" } as never)).rejects.toThrow(/未修复失败态/);
-    await bad.close();
+    await bad.close(); // 关闭≠修复授权：不解锁（S4-06）
+    await expect(bad.append({ t: "settled" } as never)).rejects.toThrow(/已关闭|失败态/);
+    // 换段语义：新实例+新路径可继续落盘（尾部修复归恢复流程，非 close）
+    const fresh = new FileDurability(join(dir, "d2.jsonl"));
+    await fresh.append({ t: "enqueue" } as never);
+    await fresh.close();
+  });
+
+  // ---- S4-03：readiness 写入/响应/超时=同一有界启动操作；无孤立 rejection ----
+  it("S4-03a 探针 write reject：启动失败→退役收口→readiness-timeout（无 unhandled）", async () => {
+    const { session, host } = await makeSession();
+    host.writeMode = "fail";
+    const r = session.start();
+    await until(() => host.stopSignals.includes("SIGTERM"), "写失败→自动退役 SIGTERM");
+    host.emitExit(null, "SIGTERM");
+    expect((await r)).toMatchObject({ kind: "readiness-timeout", generation: 1 });
+    expect(session.getState().supervisor).toMatchObject({ phase: "idle" });
+  });
+
+  it("S4-03b 探针 write 挂起：超时能结束启动等待→退役；重试第二代 ready（GPT P4）", async () => {
+    const { session, host } = await makeSession({ readinessTimeoutMs: 100 });
+    host.writeMode = "hang";
+    const r = session.start(); // write 永不兑现+探针无响应→超时必须终止等待
+    await until(() => host.stopSignals.includes("SIGTERM"), "超时→SIGTERM（不等 write）");
+    host.emitExit(null, "SIGTERM");
+    expect((await r).kind).toBe("readiness-timeout");
+    expect(session.getState().supervisor).toMatchObject({ phase: "idle" });
+    host.writeMode = "ok"; // 重试：第二代正常
+    const p2 = session.start();
+    await until(() => host.frames.filter((f) => f.includes('"get_state"')).length === 2, "重试探针");
+    host.emitEvent({ id: "ready-2", type: "response", command: "get_state", success: true });
+    expect((await p2).kind).toBe("ready");
+  });
+
+  // ---- S4-04：成败续体绑定代次所有权；旧代不得退役/污染新代 ----
+  it("S4-04a 旧 start 超时续体不退役新代（GPT P5）：A 挂起→退出→B ready→A=superseded 且 B 不收信号", async () => {
+    const { session, host } = await makeSession({ readinessTimeoutMs: 120 });
+    host.writeMode = "hang";
+    const startA = session.start(); // gen1 探针挂起
+    await until(() => host.frames.some((f) => f.includes('"get_state"')), "A 探针写出");
+    host.emitExit(1, null); // A 意外退出→idle（gen1 收口）
+    host.writeMode = "ok";
+    const startB = session.start(); // gen2 正常就绪
+    await until(() => host.frames.filter((f) => f.includes('"get_state"')).length === 2, "B 探针");
+    host.emitEvent({ id: "ready-2", type: "response", command: "get_state", success: true });
+    expect((await startB)).toMatchObject({ kind: "ready", generation: 2 });
+    expect(host.stopSignals.length).toBe(0); // B 未被旧续体打扰
+    const ra = await startA; // A 旧超时续体恢复（~120ms）
+    expect(ra).toMatchObject({ kind: "superseded", generation: 1 });
+    expect(host.stopSignals.length).toBe(0); // 关键：没把 SIGTERM 打到 gen2
+    const stopP = session.stop();
+    await until(() => host.stopSignals.includes("SIGTERM"), "B 正常退役");
+    host.emitExit(0, null);
+    expect((await stopP).kind).toBe("confirmed");
+  });
+
+  it("S4-04b 同步段窗口（GPT P6）：探针回执后同段退出→start 不得返回 ready（superseded）", async () => {
+    const { session, host } = await makeSession();
+    const startA = session.start();
+    await until(() => host.frames.length === 1, "探针写出");
+    // 同一同步段：回执后立即退出（探针续体还没跑）
+    host.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true });
+    host.emitExit(0, null);
+    expect((await startA)).toMatchObject({ kind: "superseded", generation: 1 });
+    expect(session.getState().supervisor).toMatchObject({ phase: "idle" });
+  });
+
+  it("S4-04c 启动中 stop：取消挂起探针→stop confirmed；旧 start=superseded 不双退", async () => {
+    const { session, host } = await makeSession({ readinessTimeoutMs: 5_000 });
+    host.writeMode = "hang";
+    const startA = session.start();
+    await until(() => host.frames.some((f) => f.includes('"get_state"')), "探针写出");
+    const stopP = session.stop(); // 取消 readiness+退役
+    await until(() => host.stopSignals.includes("SIGTERM"), "SIGTERM");
+    host.emitExit(null, "SIGTERM");
+    expect((await stopP).kind).toBe("confirmed");
+    expect((await startA)).toMatchObject({ kind: "superseded", generation: 1 });
+    expect(host.stopSignals.length).toBe(1); // 恰一次（旧 start 不再补一发）
+  });
+
+  // ---- S4-05：完成通知只从协调器确认路径发出；恰好一次 ----
+  it("S4-05a 耐久挂起不提前通知：settled 行 fsync 挂起→onSettled 不触发；释放→结算→恰好一次；重复 settled 不再触发", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "rpc-s405-"));
+    dirs.push(dir);
+    const host = new FakeRpcHost();
+    const audits: string[] = [];
+    const dur = new HoldDurability();
+    const settledCalls: number[] = [];
+    const session = new RpcSession({
+      piArgs: ["--mode", "rpc", "--no-session"],
+      journalPath: join(dir, "journal.jsonl"),
+      sessionId: "s-test",
+      host,
+      durability: dur as unknown as DurabilityPort,
+      readinessTimeoutMs: 500,
+      responseTimeoutMs: 5_000,
+      timeoutPollMs: 20,
+      audit: (l) => audits.push(l),
+      onSettled: (g) => settledCalls.push(g),
+    });
+    sessions.push(session);
+    dur.holdAt = 3; // 第 3 次 append=settled 行：挂起
+    const p = session.start();
+    await until(() => host.frames.length === 1, "探针");
+    host.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true });
+    await p;
+    const cmd = session.send("挂起结算");
+    await until(() => host.frames.some((f) => f.includes('"prompt"')), "prompt 写出");
+    host.emitEvent({ id: "c1", type: "response", command: "prompt", success: true });
+    host.emitEvent({ type: "agent_settled" }); // settled 行 append 挂起中
+    await until(() => (session.getState().gate as { kind: string }).kind === "settling", "进入 settling");
+    expect(settledCalls).toEqual([]); // 不提前通知（S4-05/P7）
+    dur.release(); // 耐久兑现→结算完成
+    await cmd;
+    await until(() => settledCalls.length === 1, "结算确认后通知");
+    expect(settledCalls).toEqual([1]);
+    await until(() => (session.getState().gate as { kind: string }).kind === "idle", "gate idle");
+    host.emitEvent({ type: "agent_settled" }); // idle 后重复 settled：discard，不重复通知
+    await new Promise((r) => setTimeout(r, 60));
+    expect(settledCalls.length).toBe(1); // 恰好一次
+  });
+
+  it("S4-05b 超时记录收口路径：response 超时→settled 到→通知恰一次", async () => {
+    const dir2 = await mkdtemp(join(tmpdir(), "rpc-s405b-"));
+    dirs.push(dir2);
+    const host2 = new FakeRpcHost();
+    const dur2 = new FileDurability(join(dir2, "journal.jsonl"));
+    const settledCalls: number[] = [];
+    const s2 = new RpcSession({
+      piArgs: ["--mode", "rpc", "--no-session"],
+      journalPath: join(dir2, "journal.jsonl"),
+      sessionId: "s-test",
+      host: host2,
+      durability: dur2,
+      readinessTimeoutMs: 500,
+      responseTimeoutMs: 60,
+      timeoutPollMs: 20,
+      onSettled: (g) => settledCalls.push(g),
+    });
+    sessions.push(s2);
+    const p = s2.start();
+    await until(() => host2.frames.length === 1, "探针");
+    host2.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true });
+    await p;
+    const cmd = s2.send("慢响应");
+    await until(() => host2.frames.some((f) => f.includes('"prompt"')), "prompt 写出");
+    await new Promise((r) => setTimeout(r, 140)); // response 超时（60ms，poll 20ms）→recorded
+    host2.emitEvent({ type: "agent_settled" }); // 超时后 settled→结算
+    await cmd;
+    await until(() => settledCalls.length === 1, "超时记录收口路径通知");
+    expect(settledCalls).toEqual([1]);
+    await until(() => (s2.getState().gate as { kind: string }).kind === "idle", "gate idle");
   });
 });
