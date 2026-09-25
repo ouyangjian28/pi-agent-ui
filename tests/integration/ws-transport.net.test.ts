@@ -590,15 +590,17 @@ describe("3b-1 真网络：⑦关闭竞态+无句柄悬挂", () => {
     });
     expect(got).toContain("404");
     expect(got.toLowerCase()).toContain("connection: close");
-    // 故意不读不关的裸连接（发半截请求后挂着）：dispose 不得被它拖住
+    // 故意不读不关的裸连接（发半截请求后挂着）：dispose 不得被它拖住，且截止后须被强制销毁（不能只是忽略它）
     const hold = new Socket();
     await new Promise<void>((resolve) => { hold.connect(h.port, "127.0.0.1", () => resolve()); });
     hold.write("GET / HTTP/1.1\r\nHost: x\r\n"); // 不发完，也不关
+    const holdClosed = new Promise<void>((resolve) => { hold.once("close", resolve); hold.once("error", resolve); });
     const t0 = Date.now();
     await h.dispose();
     const elapsed = Date.now() - t0;
     expect(elapsed).toBeLessThan(3_000); // 有界（300ms 预算+余量）；无管理时 server.close() 会永久 pending
-    hold.destroy();
+    // 截止后 socket 被强制销毁（防「返回了但句柄泄着」：否则端口/连接泄漏仍在）
+    await Promise.race([holdClosed, new Promise((_, rej) => { const t = setTimeout(() => rej(new Error("截止后未销毁持有的 socket")), 3_000); t.unref?.(); })]);
   });
 
   it("R02/3b-1 dispose 后 listen() 拒绝（终态不复活）", async () => {
