@@ -58,6 +58,11 @@ export class CommandDedup {
     this.records.set(opId, { ...prev, result });
   }
 
+  /** 滚动清除前的占位回滚：仅限「占位耐久失败且未发送」（副作用通道从未开栓）——对齐盘上事实源；已发送命令禁用（效果未知态必须留置）。 */
+  rollback(opId: OpId): boolean {
+    return this.records.delete(opId);
+  }
+
   /** 重启重放重建（占位行+完整行都进表）。 */
   replay(records: readonly OpRecord[]): void {
     for (const r of records) this.records.set(r.opId, r);

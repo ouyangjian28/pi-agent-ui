@@ -5,3 +5,5 @@ export * from "./notification.ts";
 export * from "./recovery.ts";
 export * from "./writer-authority.ts";
 export * from "./command-dedup.ts";
+export * from "./command-channel.ts";
+export * from "./turn-gate.ts";
