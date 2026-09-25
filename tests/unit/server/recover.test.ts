@@ -419,6 +419,53 @@ describe("recover（恢复入口受控面）", () => {
     expect(r.resumable).toEqual([]);
   });
 
+  it("F1l（J1 表驱动）：非法结构残片（多根/member-end 开容器/key 位置开容器/数组根/尾逗号闭合）全阻断", () => {
+    const lines: JournalLine[] = [JSON.parse(enq("i-1")), JSON.parse(enq("i-2"))];
+    const head = '{"t":"sending","intentId":"i-1"';
+    const cases: Array<[string, string]> = [
+      ["多顶层对象·根闭合后再开空对象", head + '}{}'],
+      ["多根·第二根截断在键", head + '}{"other":'],
+      ["member-end 处开对象", head + '{}'],
+      ["member-end 处开数组", head + '[]'],
+      ["key 期待态开对象", head + ',{}'],
+      ["数组根后再对象", '[{},{"x":0}]' + head],
+      ["对象尾逗号闭合", head + ',}'],
+      ["数组尾逗号闭合", head + ',"a":[1,]'],
+    ];
+    for (const [label, raw] of cases) {
+      const r = buildRecoverReport(lines, "s1", { fragments: [{ raw, error: "audit", partialTail: true }], blocked: false });
+      expect(r.unknownEffect).toEqual([]); // 不得自动归属 i-1
+      expect(r.unattributableFragments).toHaveLength(1);
+      expect(r.resumeBlocked).toBe(true);
+      expect(r.resumable).toEqual([]); // 旧版全部误放 ["i-2"]
+      void label;
+    }
+  });
+
+  it("F1m（Y1 词法）：非标量前缀垃圾/值与元素非法转义拒绝；合法标量截断与嵌入身份文本正常面保持", () => {
+    const lines: JournalLine[] = [JSON.parse(enq("i-1")), JSON.parse(enq("i-2"))];
+    const head = '{"t":"sending","intentId":"i-1"';
+    const bad: Array<[string, string]> = [
+      ["标量垃圾词", head + ',"n":nonsense'],
+      ["值字符串非法转义", head + ',"note":"\\q"'],
+      ["数组元素字符串非法转义", head + ',"attachments":["\\q"]'],
+    ];
+    for (const [label, raw] of bad) {
+      const r = buildRecoverReport(lines, "s1", { fragments: [{ raw, error: "撕裂尾", partialTail: true }], blocked: false });
+      expect(r.unknownEffect).toEqual([]);
+      expect(r.resumeBlocked).toBe(true);
+      expect(r.resumable).toEqual([]);
+      void label;
+    }
+    // 正常面：数字段截断（1e-）/合法转义嵌入身份文本（attachments 内含 "intentId":"i-2" 文本）仍唯一归因 i-1
+    for (const raw of [head + ',"n":1e-', head + ',"attachments":["x","intentId\\":\\"i-2"]']) {
+      const r = buildRecoverReport(lines, "s1", { fragments: [{ raw, error: "撕裂尾", partialTail: true }], blocked: false });
+      expect(r.unknownEffect).toEqual(["i-1"]);
+      expect(r.resumeBlocked).toBe(false);
+      expect(r.resumable).toEqual(["i-2"]);
+    }
+  });
+
   it("F1k2（I1 正常面）：转义键解码后同等识别——顶层唯一转义 intentId 键+完整值仍归因；数字段截断保持", () => {
     const lines: JournalLine[] = [JSON.parse(enq("i-1")), JSON.parse(enq("i-2"))];
     // GPT s4i 观察例：顶层 "intent\u0049d"（解码=intentId）+完整值→接受归因（解码后同等识别，非一律拒绝转义）

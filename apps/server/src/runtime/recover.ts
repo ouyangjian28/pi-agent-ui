@@ -170,25 +170,60 @@ function isUnknownEffect(rec: IntentRecord): boolean {
  *  ——保守阻断；unique=唯一完整可解码且无其它候选。 */
 type TopLevelIdScan = { kind: "none" } | { kind: "conflict" } | { kind: "unique"; id: IntentId };
 
-/** s4h H1+s4i I1：受限结构扫描——**栈状态机**（对象/数组上下文+期待态转移），
- *  只接受「顶层（栈长 1）恰一个 intentId 键且其值为完整可解码非空字符串，且全 raw 无其它
- *  任何身份形态/非法转移」的残片。期待态：obj=[key→colon→value→member-end]，arr=[value-or-end→
- *  element-end]；撕裂前缀可以停在任意期待态（截断在字段边界内=合法前缀），但**任何非法转移**
- *  （键闭合后下一个非空白字符不是冒号（含 EOF）=等待冒号的未完成键 I1、字符串出现在 member-end/
- *  colon 位置、非字符串 intentId 值、括号错配、栈空裸字符）→conflict。
+/** s4h H1+s4i I1+s4j J1/Y1：受限结构扫描——**栈状态机**（对象/数组上下文+期待态转移），
+ *  只接受「唯一对象根、顶层（栈长 1）恰一个 intentId 键且其值为完整可解码非空字符串，且全 raw
+ *  无其它任何身份形态/非法转移」的残片。
+ *  期待态：obj=[key-or-end→colon→value→member-end→（逗号后）key-required]，arr=[value-or-end→
+ *  element-end→（逗号后）value-required]——初始可空与逗号后必有成员/元素分立（尾逗号闭合拒绝）。
+ *  容器开符号（{/[）只允许出现在：栈空开唯一对象根（数组根=非生产形态拒绝），或父 obj value/
+ *  arr value-or-end 期待态（member-end/key 等位置开容器=非法转移 J1）；根对象闭合后再出现任何
+ *  容器=多根（J1）；pop 时校验类型匹配与期待态合法。
+ *  撕裂前缀可以停在任意期待态（截断在字段边界内=合法前缀），**例外：身份键闭引号后冒号未现
+ *  （含 EOF）=未完成键拒绝（I1）；身份值未写/截断拒绝**。「结构前缀语法可成立」不等于「可用于
+ *  安全归因」——归因另须完整身份证明。**任何非法转移**（上述各条、字符串出现在 colon/member-end/
+ *  element-end 位置、非字符串 intentId 值、括号错配、栈空裸字符、标量词法越界）→conflict。
+ *  标量词法（Y1）：只接受 JSON 标量前缀语言——数字字符集 [-+.0-9eE] 词（截断在数字段无法判完整，
+ *  宽容；非语义完整数字验证）或 true/false/null 的字母前缀（"nonsense" 等拒绝）；任意垃圾不可
+ *  充当标量。非身份字符串值/数组元素须通过转义校验（完整字面量内 \ 后仅限 "\/bfnrt 或 \u+4hex，
+ *  非法转义如 \q 拒绝——键名经 JSON.parse 归一天然校验）。
  *  生产 journal 行是「顶层对象」的 JSON 前缀（截断只发生在尾部），故栈空出现任何字符=非生产形态。
  *  身份键识别：键名 JSON.parse 归一（"intent\\u0049d" 转义变体解码后**同等识别**再检查层级/重复，
  *  不是一律拒绝）；嵌套（栈长≥2）或顶层外出现 intentId 键→conflict；第二次顶层键→conflict。 */
 function scanTopLevelIntentId(raw: string): TopLevelIdScan {
-  type ObjExpect = "key" | "colon" | "value" | "member-end";
-  type ArrExpect = "value-or-end" | "element-end";
+  type ObjExpect = "key-or-end" | "key-required" | "colon" | "value" | "member-end";
+  type ArrExpect = "value-or-end" | "value-required" | "element-end";
   type Ctx = { type: "obj"; expect: ObjExpect } | { type: "arr"; expect: ArrExpect };
   const stack: Ctx[] = [];
+  let rootClosed = false; // J1：唯一对象根生命周期——闭合后再开容器=多根
   let sawTopKey = false;
   let topValue: IntentId | null = null;
   let i = 0;
   const N = raw.length;
   const isWs = (c: string): boolean => c === " " || c === "\t" || c === "\r" || c === "\n";
+  const HEX = "0123456789abcdefABCDEF";
+  /** 字面量转义校验（Y1）：\ 后仅限 JSON 合法转义（"\/bfnrt 或 \u+4hex）；返回 false=非法转义。 */
+  const validEscapes = (literal: string): boolean => {
+    for (let j = 1; j < literal.length; j += 1) {
+      if (literal[j] !== "\\") continue;
+      const nxt = literal[j + 1];
+      if (nxt === undefined) return false; // 字面量以 \ 结尾=未闭合（readLiteral 已拦，双保险）
+      if (nxt === "u") {
+        if (j + 5 >= literal.length) return false;
+        for (let h = j + 2; h <= j + 5; h += 1) if (!HEX.includes(literal[h] as string)) return false;
+        j += 4;
+      } else if (!'"\\/bfnrt'.includes(nxt)) {
+        return false; // \q 等非法转义
+      }
+      j += 1;
+    }
+    return true;
+  };
+  /** 标量词法（Y1）：数字字符集词或 true/false/null 字母前缀；任意垃圾不可充当标量。 */
+  const isScalarWord = (word: string): boolean => {
+    if (/^[-+.0-9eE]+$/.test(word)) return true; // 数字态宽容前缀（截断在数字段无法判完整）
+    const kw = ["t", "tr", "tru", "true", "f", "fa", "fal", "fals", "false", "n", "nu", "nul", "null"];
+    return kw.includes(word);
+  };
   /** 从 i（开引号处）读一个完整字符串字面量；返回 [闭引号后一位置, 字面量] 或 null=未闭合。 */
   const readLiteral = (start: number): readonly [number, string] | null => {
     let j = start + 1;
@@ -202,13 +237,30 @@ function scanTopLevelIntentId(raw: string): TopLevelIdScan {
   while (i < N) {
     const ch = raw[i] as string;
     if (isWs(ch)) { i += 1; continue; }
-    if (ch === "{") { stack.push({ type: "obj", expect: "key" }); i += 1; continue; }
-    if (ch === "[") { stack.push({ type: "arr", expect: "value-or-end" }); i += 1; continue; }
+    if (ch === "{" || ch === "[") {
+      // J1：容器开符号须通过父期待态与根生命周期检查——栈空只允许开唯一对象根（rootClosed/数组根拒绝）；
+      // 容器内只允许出现在 value/value-or-end 期待态（member-end/key/colon 等位置开容器=非法转移）。
+      if (stack.length === 0) {
+        if (rootClosed) return { kind: "conflict" }; // 多根：根已闭合再开容器
+        if (ch === "[") return { kind: "conflict" }; // 数组根=非生产形态（生产行是顶层对象前缀）
+      } else {
+        const top = stack[stack.length - 1] as Ctx;
+        if (top.type === "obj") {
+          if (top.expect !== "value") return { kind: "conflict" }; // key/colon/member-end 位置开容器
+        } else if (top.expect !== "value-or-end") {
+          return { kind: "conflict" }; // element-end/value-required 位置开容器
+        }
+      }
+      stack.push(ch === "{" ? { type: "obj", expect: "key-or-end" } : { type: "arr", expect: "value-or-end" });
+      i += 1; continue;
+    }
     if (ch === "}" || ch === "]") {
       const top = stack.pop();
       if (top === undefined || (ch === "}" ? top.type !== "obj" : top.type !== "arr")) return { kind: "conflict" }; // 非法配对/栈空
-      const ok = ch === "}" ? top.expect === "key" || top.expect === "member-end" : top.expect === "value-or-end" || top.expect === "element-end";
-      if (!ok) return { kind: "conflict" }; // 在 colon/value 期待态闭合=非合法前缀
+      // J1：初始可空（key-or-end/value-or-end）与完成后（member-end/element-end）可闭合；逗号后必有成员/元素（key-required/value-required）拒绝=尾逗号闭合拒绝
+      const ok = ch === "}" ? top.expect === "key-or-end" || top.expect === "member-end" : top.expect === "value-or-end" || top.expect === "element-end";
+      if (!ok) return { kind: "conflict" };
+      if (stack.length === 0) rootClosed = true; // 根闭合
       const parent = stack[stack.length - 1];
       if (parent !== undefined) parent.expect = parent.type === "obj" ? "member-end" : "element-end";
       i += 1; continue;
@@ -218,10 +270,10 @@ function scanTopLevelIntentId(raw: string): TopLevelIdScan {
       if (top === undefined) return { kind: "conflict" };
       if (top.type === "obj") {
         if (top.expect !== "member-end") return { kind: "conflict" };
-        top.expect = "key";
+        top.expect = "key-required"; // 逗号后必须有键（`{,}`/尾逗号 `,"}` 均非法）
       } else {
         if (top.expect !== "element-end") return { kind: "conflict" };
-        top.expect = "value-or-end";
+        top.expect = "value-required"; // 逗号后必须有元素（`[1,]` 非法）
       }
       i += 1; continue;
     }
@@ -240,14 +292,14 @@ function scanTopLevelIntentId(raw: string): TopLevelIdScan {
       let k = after;
       while (k < N && isWs(raw[k] as string)) k += 1;
       if (top.type === "obj") {
-        if (top.expect === "key") {
+        if (top.expect === "key-or-end" || top.expect === "key-required") {
           // I1：键已闭合，冒号必须紧随（下一个非空白字符）——EOF/其它字符=等待冒号的未完成键/非法转移
           if (k >= N || raw[k] !== ":") return { kind: "conflict" };
           let keyName: string;
           try {
-            keyName = JSON.parse(literal) as string; // 键名转义变体（"intent\\u0049d"）解码后同等识别
+            keyName = JSON.parse(literal) as string; // 键名转义变体（"intent\\u0049d"）解码后同等识别（非法转义 throw→conflict）
           } catch {
-            return { kind: "conflict" }; // 键转义中断
+            return { kind: "conflict" }; // 键转义中断/非法
           }
           top.expect = "colon";
           if (keyName === "intentId") {
@@ -263,7 +315,7 @@ function scanTopLevelIntentId(raw: string): TopLevelIdScan {
               if (typeof decoded !== "string" || decoded.length === 0) return { kind: "conflict" };
               topValue = decoded;
             } catch {
-              return { kind: "conflict" }; // 值转义中断
+              return { kind: "conflict" }; // 值转义中断/非法
             }
             top.expect = "member-end";
             i = val[0];
@@ -273,32 +325,34 @@ function scanTopLevelIntentId(raw: string): TopLevelIdScan {
           continue;
         }
         if (top.expect === "value") {
+          if (!validEscapes(literal)) return { kind: "conflict" }; // Y1：值字符串非法转义（\q 等）
           i = after;
           top.expect = "member-end";
           continue; // 值位置字符串（含转义内嵌文本如 payload.rawText）
         }
         return { kind: "conflict" }; // colon（已由键分支确认）/member-end 位置出现字符串=非法转移
       }
-      if (top.expect === "value-or-end") {
+      if (top.expect === "value-or-end" || top.expect === "value-required") {
+        if (!validEscapes(literal)) return { kind: "conflict" }; // Y1：数组元素字符串非法转义
         i = after;
         top.expect = "element-end";
         continue; // 数组元素字符串（如 payload.attachments）
       }
       return { kind: "conflict" }; // element-end 位置字符串=非法转移
     }
-    // 数字/true/false/null 标量：只在 value/value-or-end 位置合法；读到下一个结构边界（数字截断无法判完整，
-    // 宽容接受——撕裂尾常截在数字段，标量不是身份候选）。
+    // 标量（数字/true/false/null）：词法受限前缀（Y1）；只在 value/value-or-end/value-required 位置合法。
     const top = stack[stack.length - 1];
     if (top === undefined) return { kind: "conflict" };
     if (top.type === "obj") {
       if (top.expect !== "value") return { kind: "conflict" }; // key/colon/member-end 位置标量=非法前缀
       top.expect = "member-end";
     } else {
-      if (top.expect !== "value-or-end") return { kind: "conflict" };
+      if (top.expect !== "value-or-end" && top.expect !== "value-required") return { kind: "conflict" };
       top.expect = "element-end";
     }
     let j = i;
-    while (j < N && !",}]\"".includes(raw[j] as string)) j += 1;
+    while (j < N && !",}]\"".includes(raw[j] as string) && !isWs(raw[j] as string)) j += 1; // 词=连续非结构非空白字符
+    if (!isScalarWord(raw.slice(i, j))) return { kind: "conflict" }; // 词法越界（nonsense 等）
     i = j; continue;
   }
   if (!sawTopKey || topValue === null) return sawTopKey ? { kind: "conflict" } : { kind: "none" };
