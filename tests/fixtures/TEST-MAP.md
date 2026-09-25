@@ -163,6 +163,18 @@
 | 帧渲染（send→{id:"c<N>",type:"prompt"}JSON 行；matchKey=matchKeyOf(text,[],ordinal)；commandId/intentId 递增） | rpc-session.test@两轮（帧 id 递增，runTurn 帧计数基准） | 🟡（steer/followUp streamingBehavior 归消费接线；attachments 归 UI 层） |
 | **真 pi 进程 E2E（4c+s4e 补轮：PI_BIN 绝对路径+**exact 版本锁 0.86.1**；--no-extensions 受控环境（扩展 UI 面归后续 UI 接线）；真管道 readiness 往返/SIGTERM 退出确认；连续两轮+journal 耐久+通知恰一次+真实事件流；SIGKILL 意外退出→同会话重组装（持久 --session）+**会话历史恢复断言（口令化 TOKEN=PENGUIN-42，**限定 assistant 正文**（message_end+role=assistant+content[].type=text 段，谓词受控负例×4 在本文件）：gen1 捕获 assistant 正文答案+gen2 回同一口令=--session 历史恢复直接证据）**+恢复重放（打断轮=效果未知）+撕裂尾识别→截尾修复（**truncate 后 fsync 文件**）→续写；目录耐久 ensureDirDurable=dir+parent 两层 fsync（更深新建祖先条目归宿主部署，非任意递归））** | **tests/integration/pi-e2e.test.ts 6 it（PI_E2E=1 npm run test:e2e 显式跑，不进默认 npm test——防每跑真调 LLM；e2e-4/5/6=受控 node 子进程真管道无 LLM）** | ✅（六项对照实际证据口径：①exact 版本②真背压（4MB 写挂起到子进程读）+双管道排空（两路各 4×64KB）+readiness 往返③连续两轮+耐久④SIGTERM/SIGKILL+EOF 未接（另明确不假装）⑤恢复重放+历史断言⑥dir+parent 两层目录 fsync+旧代迟到输出不污染新代（e2e-6 强制迟到：SIGTERM handler 写完回调才退，gen1-late 必达 toContain 断言非 best-effort；e2e-5 分通道：stdout 泵恰 4+stderr 泵恰 4+长度恒定；e2e-4/5/6 均补失败清理 stop/retire（e2e-6 清理注册提前到首次 spawn 前，覆盖等首事件超时窗口））；字节陷阱：撕裂尾修复 truncate 须用字节索引；spawn-exited 分支受控已证，真 spawn 失败=运维面；背压实测：128KB 一写即交（内核管道+libuv 队列），不足以证背压，4MB 才成） |
 
+### adapter 切片 5①（闲置回收；idle-reaper.test 8 it+rpc-session 集成 3 it+e2e-7 真 pi；2026-09-26 GLM 实现）
+
+| 面 | 覆盖 |
+| --- | --- |
+| 双条件连续计时 | **F-timer**（settled+登记表空才开始；断开清零；重新满足从新起点）+**F-registry**（活跃阻断/完成恢复；MapRegistry 幂等+未知 complete 无害）+集成「登记表活跃阻断→完成后回收」 |
+| 优雅回收链 | **retireCurrentGraceful=EOF 优先**（closeStdin→EOF 宽限→自然退出；宽限超时升级 SIGTERM→SIGKILL→总截止，startMs 不重置 EOF 段计入总预算）+集成「EOF 优雅回收无信号」「EOF 宽限超时升级 SIGTERM」+**e2e-7 真 pi**（闲置 2.5s→真 EOF code 0 退出→journal 保留→send 冷启动 gen2 原会话续跑+两组 settled） |
+| 派发竞争闭合 | **F-recheck**（到期触发前同步复核：条件翻假→取消；M-b 落点）——send 先受理→isSessionIdle 断开不触发；回收先成立→send 撞 idle 分支冷启动或 not-ready |
+| 防重入/时钟 | **F-reaping**（挂起期 tick 跳过+idle-timer-start 审计恰一条；M-c 落点）+**F-clock**（非有限不设起点不触发；恢复有限从新起点计；M-a 落点） |
+| send 冷启动 | 集成「EOF 回收→send 自动冷启动 gen2（journal 续写证明 durability 未关；回收≠销毁）」（M-d 落点）；查看不拉起（getState 无副作用） |
+| 非 running 不回收 | **F-phase**（idle 无进程/stopping 均不触发） |
+| 变异注 | M-a（时钟检查废→审计差异杀）/M-b（复核废）/M-c（防重入废→新起点审计杀）/M-d（冷启动分支废）/M-e（EOF 优先废→三集成例挂）全杀 |
+
 ### adapter 切片 4c（恢复入口+黄项收口；recover.ts 受控 30 it；E2E 10 it 见上（含谓词负例×4）；s4f/s4g/s4h/s4i 补轮：F1/F2/F3+G1/G2+H1/H2+I1 已修）
 
 | 编号 | 断言落点 | 状态 |
