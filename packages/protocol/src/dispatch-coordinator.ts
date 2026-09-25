@@ -2,14 +2,17 @@
 // 职责：受理响应（success）回绑、事件/settled 归因与有界缓冲、响应超时协议（先耐久记录再移出在途）、
 // 换代失效。屏障解除证据=TurnGate.onTurnSettled() === "settled"（不以 idle 推测）。
 //
-// S2 修复（gpt-adapter-s2-review）：
-// - S2-01/S2-02 协调器操作身份（opEpoch）：retire/abandonHeld 递增；一切 await 返回后复核，
-//   失效操作不得覆盖新登记、不得关新 Gate、不得结算新轮、不得交付旧缓冲。
-//   等待期间同轮新增的事件/settled 用「合并式更新」保留（不用旧快照整对象覆盖）。
-// - S2-03 结算失败缓冲保留：bufferedEvents 挂在登记上，结算成功才交付；失败保留呈现；
-//   弃置走 abandonHeld（丢弃计数审计，不静默丢）。
-// - S2-04（部分）held 恢复手续=gate.reopen → coordinator.abandonHeld(reason) → 方可 submit。
-// - S2-05 归因前提：无 id settled 的「唯一在途」归因依赖上游按代次顺序+轮边界投递（接线时验证）。
+// S2 修复（gpt-adapter-s2-review）：S2-01/02 opEpoch+合并式更新；S2-03 结算失败缓冲保留；S2-04 abandonHeld；S2-06 重放标记。
+//
+// s2b 修复（gpt-adapter-s2b-review）：
+// - B1 结算等待窗口：finishSettle 验证通过后从当前登记取最新缓冲交付（不用进入 await 前的旧数组）。
+// - B2 超时槽位所有权：timeoutPending 由布尔改 key 槽位；退役/弃置按拥有者释放；旧 finally 仅在槽位仍属自己时清除。
+// - B3 失败侧所有权：超时记录 append reject 后除 epoch 外另验当前登记 key，不匹配=invalidated 不关后继轮。
+// - Y1 无关代次退役无副作用（不递增全局 epoch）；Y3 finishSettle key 防御覆盖交付与释放；Y4 drain 回调隔离。
+// - 前提固化（Y3）：submit 的 await 窗口内协调器 opEpoch 不变——retire 无匹配登记/槽位=no-op、
+//   abandonHeld 无登记=null；submit 失效由宿主配套 close 使 Gate 侧 epoch 失效承担（接线验收项）。
+//
+// S2-05 归因前提：无 id settled 的「唯一在途」归因依赖上游按代次顺序+轮边界投递（接线时验证）。
 
 import type { IntentId } from "./identity.ts";
 import type { TurnIntentInput, TurnGate, TurnSettleResult } from "./turn-gate.ts";
@@ -97,10 +100,15 @@ export interface CoordinatorStateView {
   readonly maxBufferedEvents: number;
 }
 
+/** 键相等（B2/B3：槽位与登记所有权判定）。 */
+function sameKey(a: TurnKey, b: TurnKey): boolean {
+  return a.intentId === b.intentId && a.commandId === b.commandId && a.generation === b.generation;
+}
+
 export class DispatchCoordinator {
   private command: TrackedCommand | null = null;
   private opEpoch = 0; // 协调器操作身份（S2-01/S2-02）：retire/abandonHeld 递增；await 返回后复核
-  private timeoutPending = false; // response-timeout 记录追加在途（防重入）
+  private timeoutPendingKey: TurnKey | null = null; // response-timeout 追加在途槽位（B2：绑定拥有者 key）
 
   constructor(private readonly opts: CoordinatorDeps) {}
 
@@ -147,7 +155,7 @@ export class DispatchCoordinator {
     }
     this.opts.gate.onAccepted();
     if (cur.bufferedSettled) {
-      // S2-03：缓冲保留在登记上（不清空）——结算成功才交付；失败保留呈现
+      // S2-03：缓冲保留在登记上（不清空）——结算成功才交付；失败保留呈现；成功侧取最新缓冲（B1）
       this.command = { ...cur, phase: "run-open", acceptedAt: this.opts.now() };
       const myEpoch = this.opEpoch;
       const result = await this.opts.gate.onTurnSettled();
@@ -155,13 +163,13 @@ export class DispatchCoordinator {
         this.audit(`settle-invalidated commandId=${cur.key.commandId} droppedEvents=${cur.bufferedEvents.length}`);
         return { kind: "invalidated", key: cur.key }; // 旧操作不改新状态（缓冲随登记退役由 retire/abandon 计数呈现）
       }
-      return this.finishSettle(result, cur.key, cur.bufferedEvents) === "released"
+      return this.finishSettle(result, cur.key) === "released"
         ? { kind: "accepted-and-settled", key: cur.key }
         : { kind: "accepted-settle-failed", key: cur.key };
     }
     const buffered = cur.bufferedEvents;
     this.command = { ...cur, phase: "run-open", acceptedAt: this.opts.now(), bufferedEvents: [] };
-    this.drain(buffered); // run 开启：等待期事件交付
+    this.drain(buffered); // run 开启：等待期事件交付（此路径无 await，无等待窗口）
     return { kind: "accepted", key: cur.key };
   }
 
@@ -207,7 +215,7 @@ export class DispatchCoordinator {
       this.audit(`settle-invalidated commandId=${cur.key.commandId} droppedEvents=${cur.bufferedEvents.length}`);
       return { kind: "invalidated", key: cur.key };
     }
-    return this.finishSettle(result, cur.key, cur.bufferedEvents) === "released"
+    return this.finishSettle(result, cur.key) === "released"
       ? { kind: "settled", key: cur.key }
       : { kind: "settle-durability-failed", key: cur.key };
   }
@@ -242,9 +250,9 @@ export class DispatchCoordinator {
     const limit = this.opts.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS;
     if (!Number.isFinite(nowMs) || !Number.isFinite(sentMs)) return { kind: "none" }; // 判据坏=不裁决（保守）
     if (nowMs - sentMs <= limit) return { kind: "none" };
-    if (this.timeoutPending) return { kind: "pending", key: cur.key }; // 追加在途：不重复追加
+    if (this.timeoutPendingKey !== null) return { kind: "pending", key: this.timeoutPendingKey }; // 追加在途：不重复追加（key=槽位拥有者，B2）
     const myEpoch = this.opEpoch;
-    this.timeoutPending = true;
+    this.timeoutPendingKey = cur.key;
     try {
       await this.opts.durability.append({
         t: "response-timeout",
@@ -257,12 +265,18 @@ export class DispatchCoordinator {
         this.audit(`response-timeout-record-invalidated commandId=${cur.key.commandId}`); // S2-02：旧操作失败不得关新轮
         return { kind: "invalidated", key: cur.key };
       }
+      const latest = this.command;
+      if (latest === null || !sameKey(latest.key, cur.key)) {
+        // B3：正常收口/更替后旧登记不拥有 append——失败不得关后继轮
+        this.audit(`response-timeout-record-invalidated commandId=${cur.key.commandId} key-mismatch`);
+        return { kind: "invalidated", key: cur.key };
+      }
       this.opts.gate.close("durability-failure"); // append reject 不证明无行（写入结果不确定）：未移出，恢复以实际重放裁决
       this.audit(`response-timeout-record-failed commandId=${cur.key.commandId}`);
       void error;
       return { kind: "durability-failure", key: cur.key };
     } finally {
-      this.timeoutPending = false;
+      if (this.timeoutPendingKey !== null && sameKey(this.timeoutPendingKey, cur.key)) this.timeoutPendingKey = null; // B2：仅拥有者清除
     }
     if (this.opEpoch !== myEpoch) {
       // 记录行已在盘：恢复按「行在+无 settled=效果未知」（journal.responseTimeoutRecorded）
@@ -270,12 +284,7 @@ export class DispatchCoordinator {
       return { kind: "invalidated", key: cur.key };
     }
     const latest = this.command;
-    if (
-      latest === null ||
-      latest.key.intentId !== cur.key.intentId ||
-      latest.key.commandId !== cur.key.commandId ||
-      latest.key.generation !== cur.key.generation
-    ) {
+    if (latest === null || !sameKey(latest.key, cur.key)) {
       this.audit(`response-timeout-invalidated commandId=${cur.key.commandId} key-mismatch`); // 防御：新登记不受旧操作影响
       return { kind: "invalidated", key: cur.key };
     }
@@ -294,7 +303,7 @@ export class DispatchCoordinator {
         this.audit(`settle-invalidated commandId=${merged.key.commandId} droppedEvents=${merged.bufferedEvents.length}`);
         return { kind: "invalidated", key: merged.key };
       }
-      return this.finishSettle(result, merged.key, merged.bufferedEvents) === "released"
+      return this.finishSettle(result, merged.key) === "released"
         ? { kind: "recorded-and-settled", key: merged.key }
         : { kind: "recorded-settle-failed", key: merged.key };
     }
@@ -306,20 +315,30 @@ export class DispatchCoordinator {
     this.opts.gate.checkTimeout(now);
   }
 
-  /** 换代退役：旧代次登记/缓冲全部失效（计数审计不静默）；pending 协调操作由 opEpoch 失效。屏障处置归宿主（退出确认/换代手续）。 */
+  /**
+   * 换代退役：旧代次登记/缓冲全部失效（计数审计不静默）；pending 协调操作由 opEpoch 失效。
+   * Y1：无关代次（无登记+无槽位匹配）退役=no-op 无副作用（不递增全局 epoch，不失效在飞操作）。
+   * 屏障处置归宿主（退出确认/换代手续）。
+   */
   onGenerationRetired(generation: number): { clearedCommands: number; clearedEvents: number } {
-    this.opEpoch += 1; // S2-02：等待中的超时记录/结算不得再改任何状态
     const cur = this.command;
-    if (cur === null) return { clearedCommands: 0, clearedEvents: 0 };
+    const cmdMatch = cur !== null && cur.key.generation === generation;
+    const slotMatch = this.timeoutPendingKey !== null && this.timeoutPendingKey.generation === generation;
+    if (!cmdMatch && !slotMatch) {
+      this.audit(`generation-retired generation=${generation} clearedCommands=0 clearedEvents=0 no-op`);
+      return { clearedCommands: 0, clearedEvents: 0 };
+    }
+    this.opEpoch += 1; // S2-02：等待中的超时记录/结算不得再改任何状态
+    if (slotMatch) this.timeoutPendingKey = null; // B2：按拥有者释放槽位（新轮超时可自行发起）
     let clearedEvents = 0;
-    if (cur.key.generation === generation) {
+    if (cmdMatch && cur !== null) {
       clearedEvents = cur.bufferedEvents.length;
       this.command = null;
     }
     this.audit(
-      `generation-retired generation=${generation} clearedCommands=${cur.key.generation === generation ? 1 : 0} clearedEvents=${clearedEvents} droppedSettled=${cur.bufferedSettled}`,
+      `generation-retired generation=${generation} clearedCommands=${cmdMatch ? 1 : 0} clearedEvents=${clearedEvents} droppedSettled=${cmdMatch && cur !== null ? cur.bufferedSettled : false} releasedPendingTimeout=${slotMatch}`,
     );
-    return { clearedCommands: cur.key.generation === generation ? 1 : 0, clearedEvents };
+    return { clearedCommands: cmdMatch ? 1 : 0, clearedEvents };
   }
 
   /**
@@ -332,6 +351,7 @@ export class DispatchCoordinator {
     const gs = this.opts.gate.getState().kind;
     if (gs !== "closed" && gs !== "idle") return null;
     this.opEpoch += 1; // 本登记上一切 pending 协调操作失效
+    if (this.timeoutPendingKey !== null && sameKey(this.timeoutPendingKey, cur.key)) this.timeoutPendingKey = null; // B2：释放本登记槽位
     this.command = null;
     this.audit(
       `abandon-held reason=${reason} commandId=${cur.key.commandId} droppedEvents=${cur.bufferedEvents.length} droppedSettled=${cur.bufferedSettled}`,
@@ -348,21 +368,31 @@ export class DispatchCoordinator {
     };
   }
 
-  /** 结算收尾（S2-04）：仅 settled 释放；缓冲成功才交付。 */
-  private finishSettle(result: TurnSettleResult, key: TurnKey, buffered: readonly unknown[]): "released" | "held" {
-    if (result === "settled") {
-      const cur = this.command;
-      if (cur !== null && cur.key.intentId === key.intentId && cur.key.commandId === key.commandId && cur.key.generation === key.generation) {
-        this.command = null; // 解除登记（解锁有证据：settled 结果即本轮）
-      }
-      this.drain(buffered);
-      return "released";
+  /**
+   * 结算收尾（S2-04/B1/Y3）：仅 settled 释放；交付取当前登记上的最新缓冲（等待窗口新增事件不丢）；
+   * key 不匹配=不交付不清登记（旧操作不触碰新状态）；失败/失效=登记保留（缓冲保留呈现）。
+   */
+  private finishSettle(result: TurnSettleResult, key: TurnKey): "released" | "held" {
+    if (result !== "settled") return "held"; // not-in-flight/invalidated/durability-failure：登记保留（缓冲保留呈现）
+    const cur = this.command;
+    if (cur === null || !sameKey(cur.key, key)) {
+      this.audit(`settle-key-mismatch commandId=${key.commandId}`); // Y3：不 drain 不 released（正常 epoch 管理下应不可达的防御）
+      return "held";
     }
-    return "held"; // not-in-flight/invalidated/durability-failure：登记保留（缓冲保留呈现）
+    const latest = cur.bufferedEvents; // B1：结算等待窗口内新增事件在登记上，取最新
+    this.command = null; // 解除登记（解锁有证据：settled 结果即本轮）
+    this.drain(latest);
+    return "released";
   }
 
   private drain(events: readonly unknown[]): void {
-    if (events.length > 0) this.opts.onBufferDrain?.(events);
+    if (events.length === 0) return;
+    try {
+      this.opts.onBufferDrain?.(events);
+    } catch {
+      // Y4：回调抛错隔离（不中断协调）；交付责任契约=宿主回调自证可靠，失败审计不重试
+      this.audit(`drain-callback-failed events=${events.length}`);
+    }
   }
 
   private audit(line: string): void {

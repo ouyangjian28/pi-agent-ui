@@ -1,6 +1,7 @@
 // 派发协调层测试（切片 2；TECH §169④ 事件归属屏障语义权威）
 // 反例集=s1b §九 7 条+溢出+四联丢弃+超时分派表分支；纯逻辑注入（FakeDurability 三模式+受控时钟）。
 // S2 修复组：S2-01 超时等待窗口合并/superseded/重入；S2-02 旧超时跨换代失效；S2-03 结算失败缓冲保留+abandonHeld。
+// s2b 修复组：B1 结算等待窗口最新缓冲交付；B2 超时槽位所有权；B3 失败侧所有权；Y1 无关代次退役 no-op；Y4 drain 回调隔离。
 import { describe, expect, it } from "vitest";
 import type { IntentId, JournalLine, SessionId } from "@pi-agent-ui/protocol";
 import { DispatchCoordinator, TurnGate, replayIntents } from "@pi-agent-ui/protocol";
@@ -15,17 +16,18 @@ class FakeDurability {
   failAt = -1; // 1 基调用序
   failMode: "before" | "after" = "before";
   failError = new Error("fsync-eio");
-  holdAt = -1;
+  holdAt = -1; // 1 基调用序；命中挂起（支持多挂起槽）
+  holdAt2 = -1; // 第二挂起点（B2：两个 append 同时挂起的窗口）
   calls = 0;
-  private held?: { line: JournalLine; resolve: () => void; reject: (e: unknown) => void } | undefined;
+  private held: { line: JournalLine; resolve: () => void; reject: (e: unknown) => void }[] = [];
 
   append(line: JournalLine): Promise<void> {
     this.calls += 1;
     if (this.failAt === this.calls && this.failMode === "before") return Promise.reject(this.failError);
-    if (this.holdAt === this.calls) {
+    if (this.holdAt === this.calls || this.holdAt2 === this.calls) {
       this.lines.push(line);
       return new Promise<void>((resolve, reject) => {
-        this.held = { line, resolve, reject };
+        this.held.push({ line, resolve, reject });
       });
     }
     if (this.failAt === this.calls && this.failMode === "after") {
@@ -37,19 +39,22 @@ class FakeDurability {
   }
 
   isHeld(): boolean {
-    return this.held !== undefined;
+    return this.held.length > 0;
   }
 
-  releaseHold(): void {
-    if (!this.held) throw new Error("no held append");
-    this.held.resolve();
-    this.held = undefined;
+  /** 结算第 which 个挂起（默认最早；B2 双槽用序号）。 */
+  releaseHold(which = 0): void {
+    const h = this.held[which];
+    if (!h) throw new Error("no held append");
+    this.held.splice(which, 1);
+    h.resolve();
   }
 
-  rejectHold(): void {
-    if (!this.held) throw new Error("no held append");
-    this.held.reject(this.failError);
-    this.held = undefined;
+  rejectHold(which = 0): void {
+    const h = this.held[which];
+    if (!h) throw new Error("no held append");
+    this.held.splice(which, 1);
+    h.reject(this.failError);
   }
 }
 
@@ -71,7 +76,7 @@ interface Harness {
   clock: { iso: string };
 }
 
-function makeHarness(overrides: { maxBufferedEvents?: number } = {}): Harness {
+function makeHarness(overrides: { maxBufferedEvents?: number; onBufferDrain?: (events: readonly unknown[]) => void } = {}): Harness {
   const dur = new FakeDurability();
   const audits: string[] = [];
   const drained: unknown[][] = [];
@@ -84,7 +89,7 @@ function makeHarness(overrides: { maxBufferedEvents?: number } = {}): Harness {
     responseTimeoutMs: 60_000,
     maxBufferedEvents: overrides.maxBufferedEvents ?? 3,
     audit: (l) => audits.push(l),
-    onBufferDrain: (evs) => drained.push([...evs]),
+    onBufferDrain: overrides.onBufferDrain ?? ((evs) => drained.push([...evs])),
   };
   return { coord: new DispatchCoordinator(deps), gate, dur, audits, drained, clock };
 }
@@ -93,6 +98,12 @@ function makeHarness(overrides: { maxBufferedEvents?: number } = {}): Harness {
 const untilHeld = async (dur: FakeDurability): Promise<void> => {
   for (let i = 0; i < 100 && !dur.isHeld(); i += 1) await Promise.resolve();
   if (!dur.isHeld()) throw new Error("append never held");
+};
+
+/** 等到第 N 次 append 已发起（双挂起窗口：首槽已占时等第二槽）。 */
+const untilCalls = async (dur: FakeDurability, n: number): Promise<void> => {
+  for (let i = 0; i < 100 && dur.calls < n; i += 1) await Promise.resolve();
+  if (dur.calls < n) throw new Error(`append calls ${dur.calls} < ${n}`);
 };
 
 describe("派发协调层（DispatchCoordinator，§169④）", () => {
@@ -444,6 +455,140 @@ describe("派发协调层（DispatchCoordinator，§169④）", () => {
       await h.coord.submitTurn(intent("i-1"), 101);
       expect(h.coord.abandonHeld("live")).toBeNull(); // gate in-flight=活轮
       expect(h.coord.getState().command).not.toBeNull();
+    });
+  });
+
+  describe("S2-B1 结算等待窗口：交付取登记上最新缓冲", () => {
+    it("timed-out→settled 挂起窗口新增事件：一并交付（e0+e1 都在 drain）", async () => {
+      const h = makeHarness();
+      await h.coord.submitTurn(intent("i-1"), 101);
+      h.clock.iso = t(120_000);
+      expect(await h.coord.checkResponseTimeout()).toMatchObject({ kind: "recorded" }); // 超时记录完成→timed-out
+      expect(h.coord.onPiEvent({ i: 0 }, 1)).toEqual({ kind: "buffered" }); // e0
+      h.dur.holdAt = 4; // 第 4 次 append=settled 行挂起
+      const p = h.coord.onSettledEvent({ generation: 1, commandId: 101 });
+      await untilHeld(h.dur);
+      expect(h.coord.onPiEvent({ i: 1 }, 1)).toEqual({ kind: "buffered" }); // 结算等待窗口新增 e1
+      h.dur.releaseHold();
+      expect(await p).toMatchObject({ kind: "settled" });
+      expect(h.drained).toEqual([[{ i: 0 }, { i: 1 }]]); // B1：取最新缓冲，e1 不被旧数组吞
+      expect(h.coord.getState().command).toBeNull();
+    });
+
+    it("bufferedSettled→超时分派第二次等待窗口新增事件：recorded-and-settled 一并交付", async () => {
+      const h = makeHarness();
+      await h.coord.submitTurn(intent("i-1"), 101);
+      expect(h.coord.onPiEvent({ i: 0 }, 1)).toEqual({ kind: "buffered" });
+      expect(await h.coord.onSettledEvent({ generation: 1, commandId: 101 })).toMatchObject({ kind: "buffered" });
+      h.dur.holdAt = 4; // 仅挂第 4 次（settled 结算行）；第 3 次（response-timeout 记录）正常完成
+      h.clock.iso = t(120_000);
+      const p = h.coord.checkResponseTimeout();
+      await untilHeld(h.dur); // 记录已完成，结算 append 挂起
+      expect(h.coord.onPiEvent({ i: 1 }, 1)).toEqual({ kind: "buffered" }); // 结算等待窗口新增 e1
+      h.dur.releaseHold();
+      expect(await p).toMatchObject({ kind: "recorded-and-settled" });
+      expect(h.drained).toEqual([[{ i: 0 }, { i: 1 }]]); // 第二次 await 前后新增事件不丢
+      expect(h.coord.getState().command).toBeNull();
+    });
+  });
+
+  describe("S2-B2 超时槽位所有权（退役释放；旧 finally 不清新槽）", () => {
+    it("A 挂起→退役（槽位释放）→新轮 B 超时可自行发起；旧 A 完成=invalidated 不动 B", async () => {
+      const h = makeHarness();
+      await h.coord.submitTurn(intent("i-1", 1), 101);
+      h.dur.holdAt = 3;
+      h.clock.iso = t(120_000);
+      const pendingA = h.coord.checkResponseTimeout();
+      await untilHeld(h.dur);
+      h.coord.onGenerationRetired(1); // 释放槽位+登记
+      expect(h.audits).toContain(
+        "generation-retired generation=1 clearedCommands=1 clearedEvents=0 droppedSettled=false releasedPendingTimeout=true",
+      );
+      h.gate.close("manual");
+      expect(h.gate.reopen()).toBe(true);
+      await h.coord.submitTurn(intent("i-2", 2), 202); // 调用 4/5
+      h.clock.iso = t(240_000); // B 也超窗
+      const outB = await h.coord.checkResponseTimeout(); // 调用 6=B 的 response-timeout
+      expect(outB).toMatchObject({ kind: "recorded", key: { commandId: 202 } }); // B 自行发起（旧 pending 不占位）
+      expect(h.dur.lines.filter((l) => l.t === "response-timeout").map((l) => l.commandId)).toEqual([101, 202]);
+      h.dur.releaseHold(); // 旧 A 完成
+      expect(await pendingA).toMatchObject({ kind: "invalidated", key: { commandId: 101 } });
+      expect(h.coord.getState().command?.key).toMatchObject({ commandId: 202 }); // B 不动
+      expect(h.gate.getState()).toMatchObject({ kind: "in-flight", intentId: "i-2" });
+    });
+
+    it("旧 A 完成不清 B 槽位：B 再查=pending(B)；不双追加", async () => {
+      const h = makeHarness();
+      await h.coord.submitTurn(intent("i-1", 1), 101);
+      h.dur.holdAt = 3;
+      h.clock.iso = t(120_000);
+      const pendingA = h.coord.checkResponseTimeout();
+      await untilHeld(h.dur);
+      h.coord.onGenerationRetired(1);
+      h.gate.close("manual");
+      expect(h.gate.reopen()).toBe(true);
+      await h.coord.submitTurn(intent("i-2", 2), 202); // 调用 4/5
+      h.dur.holdAt2 = 6;
+      h.clock.iso = t(240_000);
+      const pendingB = h.coord.checkResponseTimeout(); // 调用 6=B 的 response-timeout 挂起
+      await untilCalls(h.dur, 6);
+      h.dur.releaseHold(0); // 旧 A 完成：finally 不得清 B 的槽位
+      expect(await pendingA).toMatchObject({ kind: "invalidated" });
+      expect(await h.coord.checkResponseTimeout()).toMatchObject({ kind: "pending", key: { commandId: 202 } }); // B 槽位健在
+      expect(h.dur.calls).toBe(6); // 不双追加
+      h.dur.releaseHold(0); // 现在首槽=B
+      expect(await pendingB).toMatchObject({ kind: "recorded", key: { commandId: 202 } });
+    });
+  });
+
+  describe("S2-B3 失败侧所有权（正常更替后旧 reject 不关后继轮）", () => {
+    it("A 正常收口→B 在飞→旧 A 超时 reject=invalidated；B 正常收口", async () => {
+      const h = makeHarness();
+      await h.coord.submitTurn(intent("i-1", 1), 101);
+      h.dur.holdAt = 3;
+      h.clock.iso = t(120_000);
+      const pendingA = h.coord.checkResponseTimeout();
+      await untilHeld(h.dur);
+      expect((await h.coord.onRpcResponse(101, 1, true)).kind).toBe("accepted"); // 等待期 success 回绑→run-open
+      expect((await h.coord.onSettledEvent({ generation: 1, commandId: 101 })).kind).toBe("settled"); // 调用 4 完成→登记清
+      const lb = await h.coord.submitTurn(intent("i-2", 1), 202); // 正常更替（无 retire；epoch 不变）
+      expect(lb).toMatchObject({ kind: "launched" });
+      h.dur.rejectHold(); // 旧 A 的记录 append 失败
+      expect(await pendingA).toMatchObject({ kind: "invalidated", key: { commandId: 101 } }); // B3：不关后继轮
+      expect(h.audits).toContain("response-timeout-record-invalidated commandId=101 key-mismatch");
+      expect(h.gate.getState()).toMatchObject({ kind: "in-flight", intentId: "i-2" }); // B 存活
+      expect((await h.coord.onRpcResponse(202, 1, true)).kind).toBe("accepted");
+      expect((await h.coord.onSettledEvent({ generation: 1, commandId: 202 })).kind).toBe("settled"); // B 正常收口
+    });
+  });
+
+  describe("S2-Y1 无关代次退役无副作用", () => {
+    it("A(gen2) 结算挂起→retire(gen1)=no-op→结算正常完成", async () => {
+      const h = makeHarness();
+      await h.coord.submitTurn(intent("i-1", 2), 101);
+      await h.coord.onRpcResponse(101, 2, true); // run-open
+      h.dur.holdAt = 3; // settled 行挂起（submit 2 次+settle 第 3 次；无超时记录行）
+      const p = h.coord.onSettledEvent({ generation: 2, commandId: 101 });
+      await untilHeld(h.dur);
+      expect(h.coord.onGenerationRetired(1)).toEqual({ clearedCommands: 0, clearedEvents: 0 }); // 无关代次=no-op
+      expect(h.audits).toContain("generation-retired generation=1 clearedCommands=0 clearedEvents=0 no-op");
+      h.dur.releaseHold();
+      expect(await p).toMatchObject({ kind: "settled" }); // 不被无关退役取消
+      expect(h.coord.getState().command).toBeNull();
+      expect(h.drained).toEqual([]);
+    });
+  });
+
+  describe("S2-Y4 drain 回调契约（抛错隔离+审计）", () => {
+    it("drain 回调抛错：不中断结算，审计 drain-callback-failed", async () => {
+      const h = makeHarness({ onBufferDrain: () => { throw new Error("sink-down"); } });
+      await h.coord.submitTurn(intent("i-1"), 101);
+      h.coord.onPiEvent({ i: 1 }, 1);
+      await h.coord.onSettledEvent({ generation: 1, commandId: 101 });
+      expect((await h.coord.onRpcResponse(101, 1, true)).kind).toBe("accepted-and-settled");
+      expect(h.audits).toContain("drain-callback-failed events=1");
+      expect(h.coord.getState().command).toBeNull(); // 结算照常完成（回调责任归宿主）
+      expect(h.gate.getState().kind).toBe("idle");
     });
   });
 });

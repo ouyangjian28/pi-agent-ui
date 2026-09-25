@@ -395,4 +395,37 @@ describe("B1-01 补遗（s1c 建议固化：失败 reopen 后原操作失败路�
     expect(gate.getState()).toEqual({ kind: "closed", reason: "durability-failure" }); // 终态未耐久=不放行
     expect(await gate.submit(intent("i-2"))).toEqual({ kind: "rejected", reason: "closed" });
   });
+
+  describe("TurnSettleResult 四值直接断言（s2b Y4；屏障解除证据契约）", () => {
+    it("正常收口=settled（唯一解锁证据）", async () => {
+      const dur = new FakeDurability();
+      const gate = makeGate(dur, 0);
+      await gate.submit(intent());
+      expect(await gate.onTurnSettled()).toBe("settled");
+      expect(gate.getState().kind).toBe("idle");
+    });
+
+    it("settled 行写后拒绝=durability-failure（closed 保持，不放行）", async () => {
+      const dur = new FakeDurability();
+      dur.failAt = 3;
+      dur.failMode = "after";
+      const gate = makeGate(dur);
+      await gate.submit(intent());
+      expect(await gate.onTurnSettled()).toBe("durability-failure");
+      expect(gate.getState()).toEqual({ kind: "closed", reason: "durability-failure" });
+    });
+
+    it("结算挂起窗口 close=invalidated（旧操作不拥有新状态）", async () => {
+      const dur = new FakeDurability();
+      dur.holdAt = 3;
+      const gate = makeGate(dur);
+      await gate.submit(intent());
+      const sp = gate.onTurnSettled();
+      await untilHeld(dur);
+      gate.close("manual");
+      dur.releaseHold();
+      expect(await sp).toBe("invalidated");
+      expect(gate.getState()).toEqual({ kind: "closed", reason: "manual" });
+    });
+  });
 });
