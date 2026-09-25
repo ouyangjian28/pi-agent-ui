@@ -207,6 +207,14 @@ describe("订阅引擎 13 时序", () => {
     expect(z["hasMore"]).toBe(false);
     expect(z["liveFrom"]).toEqual({ streamId: "s-1", seq: 1 });
     expect(e0.state.phase).toBe("live");
+    // c6 C5-05（GPT 实测反例）：paging 期跳 H+1→4409（121..450 不得被空页吞掉进 live）
+    const { eng: e450 } = makeEngine(450);
+    const p1 = e450.startSnapshot("r-1")[0] as unknown as { snapshotId: string; historyNext: { streamId: string; seq: number } };
+    expect(p1.historyNext.seq).toBe(201);
+    const jump = e450.handle({ kind: "page", requestId: "r-2", snapshotId: p1.snapshotId, historyNext: { streamId: "s-1", seq: 451 } })[0] as Record<string, unknown>;
+    expect(jump["t"]).toBe("error");
+    expect(jump["code"]).toBe(4409);
+    expect(e450.state.phase).toBe("paging"); // 未被空页推进到 live
   });
 
   it("⑮缓存域完整游标：错流同 seq 不命中（B01）", () => {
@@ -336,10 +344,11 @@ describe("订阅引擎 13 时序", () => {
     const done = eng.startSnapshot("r-1")[0] as unknown as { page: unknown[]; hasMore: boolean; snapshotId: string };
     expect(done.hasMore).toBe(false); // 单页即完→live（expectNext=null，宽限计时开始）
     t = LIMITS.snapshotTailGraceMs - 1_000;
-    const ok = eng.handle({ kind: "page", requestId: "r-2", snapshotId: done.snapshotId, historyNext: { streamId: "s-1", seq: 101 } })[0] as { t: string };
-    expect(ok.t).toBe("snapshot"); // 宽限内追平幂等
-    t = LIMITS.snapshotTailGraceMs + 1_000; // 距页生成 >60s（重试未续命）
-    const expired = eng.handle({ kind: "page", requestId: "r-3", snapshotId: done.snapshotId, historyNext: { streamId: "s-1", seq: 101 } })[0] as { t: string; code: number };
+    // 双路重试：缓存命中（seq=1=页首）在宽限内成功
+    const ok = eng.handle({ kind: "page", requestId: "r-2", snapshotId: done.snapshotId, historyNext: { streamId: "s-1", seq: 1 } })[0] as { t: string };
+    expect(ok.t).toBe("snapshot"); // 宽限内缓存重发（非追平分支）
+    t = LIMITS.snapshotTailGraceMs + 1_000; // 距页生成 >60s（缓存重试未续命——固定期限）
+    const expired = eng.handle({ kind: "page", requestId: "r-3", snapshotId: done.snapshotId, historyNext: { streamId: "s-1", seq: 1 } })[0] as { t: string; code: number };
     expect(expired.t).toBe("error");
     expect(expired.code).toBe(4409);
   });
