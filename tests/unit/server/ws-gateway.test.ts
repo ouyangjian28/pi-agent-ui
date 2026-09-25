@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WsGateway, type ConnMeta, type GatewayConnHooks, type HistoryInvalidateReason, type HistorySinks, type HistorySourcePort, type HistoryUnavailableReason, type WsGatewayOpts } from "../../../apps/server/src/ws/ws-gateway.ts";
 import { TokenAuthority } from "../../../apps/server/src/ws/token-auth.ts";
+import { FileHistorySource } from "../../../apps/server/src/runtime/history-source.ts";
 import { ComputeSemaphore } from "../../../apps/server/src/ws/compute-semaphore.ts";
 import type { RecoveryEvidenceSnapshot, BadJournalEntry } from "../../../apps/server/src/runtime/recover.ts";
 import type { ScanRow } from "@pi-agent-ui/protocol";
@@ -83,6 +84,10 @@ class FakeHistory implements HistorySourcePort {
   releaseCalls: string[] = [];
   /** R3 身份门探针：observe 可返 null（换代竞态），触发 observe-missed 路径 */
   failNextObserve = false;
+  /** 3b2c-B4 探针：observe 右侧在返回 stop 前同步回调 onUnavailable（同步终止） */
+  syncUnavailableOnObserve = false;
+  /** 3b2c-B4：stop 闭包调用计数（孤儿 stop 是否被即停） */
+  readonly stopped: string[] = [];
   /** B3：受控挂起——文件名命中时 load 等待对应 resolver（造 await 窗口） */
   gates = new Map<string, () => void>();
   async load(file: string): Promise<readonly ScanRow[] | null> {
@@ -97,7 +102,8 @@ class FakeHistory implements HistorySourcePort {
     this.observeCalls.push(file);
     if (!this.observeGate()) return null; // R1：无活跃代可绑（换代竞态）
     this.sinks.set(file, sinks);
-    return () => { this.sinks.delete(file); };
+    if (this.syncUnavailableOnObserve) sinks.onUnavailable?.("deleted"); // B4：赋值返回前同步终止
+    return () => { this.stopped.push(file); this.sinks.delete(file); };
   }
   release(file: string): void { this.releaseCalls.push(file); }
   rows(file: string): ScanRow[] {
@@ -1602,6 +1608,95 @@ describe("3b-2 源事件接线（onInvalidate/onUnavailable）", () => {
       r.history.append("b.jsonl", makeRows(3)[2]!);
       await new Promise((res) => setTimeout(res, 5));
       expect(c.frames().some((f) => f.t === "events")).toBe(true);
+    } finally {
+      await r.dispose();
+    }
+  });
+});
+
+// ── 3b2c-B3/B4：load 引用恰一次结算 + observe 同步终止（对照 3b2b 报告 N11/N12 反例）──
+describe("3b2c-B3/B4——引用恰一次配对与同步终止", () => {
+  it("B3：首订阅 observe 消费引用→不 release；次订阅复用绑定→release 结算（恰一次/流）", async () => {
+    const r = await makeRig();
+    try {
+      r.history.put("x.jsonl", makeRows(2));
+      const c1 = await authed(r);
+      const c2 = await authed(r);
+      await c1.say({ t: "subscribe", requestId: "s1", file: "x.jsonl" });
+      await new Promise((res) => setTimeout(res, 5));
+      expect(r.history.observeCalls).toContain("x.jsonl");
+      // 修复点（N11 根因）：本流 observe 已消费 load 引用——不得再 release
+      //（旧逻辑 unobserve!==null→release=对本流双结算，多扣他方匿名计数）。
+      expect(r.history.releaseCalls).not.toContain("x.jsonl");
+      await c2.say({ t: "subscribe", requestId: "s2", file: "x.jsonl" });
+      await new Promise((res) => setTimeout(res, 5));
+      expect(c2.frames().some((f) => f.t === "snapshot")).toBe(true);
+      expect(r.history.observeCalls.filter((f) => f === "x.jsonl")).toHaveLength(1); // 绑定复用：无二次 observe
+      expect(r.history.releaseCalls.filter((f) => f === "x.jsonl")).toHaveLength(1); // c2 的 load 由 release 结算
+      expect(r.history.sinks.has("x.jsonl")).toBe(true); // 绑定仍在（未被多扣关闭）
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("B3/N11：真源+他方裸 load——网关关流后他方引用仍在，观察句柄不归零；他方结算后才收", async () => {
+    const d = await mkdtemp(join(tmpdir(), "ws-gw-n11-"));
+    const handles: Array<{ closed: boolean }> = [];
+    const src = new FileHistorySource({
+      roots: [d],
+      watcher: { watch: (_abs: string, _onNotice: () => void, _onError: (err: unknown) => void) => {
+        const h = { closed: false, close(): void { h.closed = true; } };
+        handles.push(h);
+        return h;
+      } },
+      audit: () => {},
+    });
+    const gw = new WsGateway({
+      tokens: TokenAuthority.fromTokens(["tok-ok"]),
+      roots: [d],
+      scanDir: d,
+      allowedOrigins: ["http://localhost:5173"],
+      recoveryEvidence: () => null,
+      historySource: src,
+      heartbeat: { pingMs: 0, idleMs: 0 },
+      audit: () => {},
+    });
+    try {
+      await writeFile(join(d, "x.jsonl"), `{"t":"sending","intentId":"a1"}\n{"t":"sending","intentId":"a2"}\n`);
+      const ext = await src.load("x.jsonl"); // 他方（非网关）裸 load：持一份引用，不 observe 不 release
+      expect(ext !== null && ext.length).toBe(2);
+      const c = new FakeConn();
+      gw.attach(c, c.hooks(), { origin: "http://localhost:5173", loopback: true, tls: false } satisfies ConnMeta);
+      await c.say({ t: "hello", protocolVersion: 1, token: "tok-ok" });
+      await c.say({ t: "subscribe", requestId: "s1", file: "x.jsonl" });
+      await new Promise((res) => setTimeout(res, 15));
+      expect(c.frames().some((f) => f.t === "snapshot")).toBe(true); // 订阅成功（快照已投）
+      expect(handles.length).toBe(1); // 初扫观察已建立（真源单句柄）
+      c.closedByTransport(1006); // 关闭网关侧唯一订阅者
+      await new Promise((res) => setTimeout(res, 15));
+      // 修复点：旧逻辑 observe 后又 release=多扣一份→关流后计数归零→entry 误关、句柄归零（N11 实测 0）。
+      expect(handles.some((h) => !h.closed)).toBe(true); // 他方引用仍在→entry 活、句柄不归零
+      src.release("x.jsonl"); // 他方结算（恰一次）
+      await new Promise((res) => setTimeout(res, 15));
+      expect(handles.every((h) => h.closed)).toBe(true); // 引用真归零→entry 关、句柄全收
+    } finally {
+      gw.dispose();
+      await rm(d, { recursive: true, force: true });
+    }
+  });
+
+  it("B4/N12：observe 同步终止（右侧未返回即 onUnavailable）→不发死快照+孤儿 stop 即停+audit", async () => {
+    const r = await makeRig();
+    try {
+      r.history.put("x.jsonl", makeRows(2));
+      r.history.syncUnavailableOnObserve = true; // 源在 observe 返回前同步 onUnavailable("deleted")
+      const c = await authed(r);
+      await c.say({ t: "subscribe", requestId: "s1", file: "x.jsonl" });
+      await new Promise((res) => setTimeout(res, 8));
+      expect(c.frames().some((f) => f.t === "snapshot")).toBe(false); // 死快照不发（订阅已被同步回调退役）
+      expect(errFrames(c).some((f) => f.code === 4402)).toBe(true); // 同步终止→4402 历史源不可用
+      expect(r.history.stopped.filter((f) => f === "x.jsonl")).toHaveLength(1); // 孤儿 stop 恰一次（旧=0 丢失）
+      expect(r.audits.some((l) => l.includes("observe-sync-terminated"))).toBe(true);
     } finally {
       await r.dispose();
     }

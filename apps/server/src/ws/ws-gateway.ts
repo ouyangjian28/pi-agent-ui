@@ -472,12 +472,12 @@ export class WsGateway {
       } catch {
         rows = null;
       }
-      if (st.closed) { // 等待期间断开（W1-07 同型复核）——3b2a-R1：load 引用已取得，必须释放
-        this.opts.historySource?.release?.(file);
+      if (rows === null) { // B3（3b2c）：null=未取得引用——不释放（与源侧「失败不取票」口径一致）
+        this.enqueue(st, { t: "error", code: 4402, message: "会话不可读", retryable: true, requestId });
         return;
       }
-      if (rows === null) {
-        this.enqueue(st, { t: "error", code: 4402, message: "会话不可读", retryable: true, requestId });
+      if (st.closed) { // 等待期间断开（W1-07 同型复核）——3b2a-R1：load 引用已取得，必须释放
+        this.opts.historySource?.release?.(file);
         return;
       }
       // W1-04：索引装载（前缀判定/换流 replace；registry/get 超预算→4402）
@@ -549,35 +549,42 @@ export class WsGateway {
         st.subs.delete(file);
       }
       st.subs.set(file, { engine });
-      this.watchFile(st, file);
+      const consumedRef = this.watchFile(st, file); // B3：本流 observe 是否消费了本次 load 引用
+      if (!st.subs.has(file)) { // B4（3b2c）：observe 右侧同步终止（onUnavailable/onInvalidate）已退役
+        // 本订阅（4402 已发、帧已撤）——不得再发死快照/排泵；仅结算引用。
+        this.settleLoadRef(st, file, consumedRef);
+        return;
+      }
       this.emitFrames(st, frames);
       this.schedulePump(file); // 单页即追平（hasMore=false）时 buffered 已入 outbox——需排空
-      this.settleLoadRef(st, file); // 3b2a-R1：load 引用配对（observe 已消耗则释放本次；未绑定→退役不静默断流）
+      this.settleLoadRef(st, file, consumedRef); // 3b2a-R1+B3：恰一次结算（observe 消费则不重复释放）
     } finally {
       st.inflight.delete(requestId);
     }
   }
 
-  /** 3b2a-R1：订阅成功后的 load 引用配对。observe 已绑定（首订阅）→释放本次 load 引用（源侧 clamp 幂等）；
-   *  observe 存在但未绑定（返回 null=装载后被失效的竞态）→本订阅立即退役（4409 重订阅）——
-   *  不得静默断流（快照已发，流已终结——语义一致：流被替换）。快照模式（无 observe 面）无引用语义。 */
-  private settleLoadRef(st: ConnState, file: string): void {
-    const w = this.watchers.get(file);
+  /** 3b2c-B3：订阅成功后的 load 引用**恰一次**结算。
+   *  consumedRef=true：本流 watchFile 的 observe 已把本次 load 引用消费进绑定（绑定停=结算）——
+   *    不再额外 release（旧逻辑「observe 后又 release」=对本流双结算，多扣他方匿名计数，N11）。
+   *  consumedRef=false：本流未消费——普通 release；若 w 存在且仍未绑定（observe 返 null=装载后
+   *    被失效的竞态）→本订阅立即退役（4409 重订阅），不得静默断流。
+   *  无释放面（快照模式）无引用语义。 */
+  private settleLoadRef(st: ConnState, file: string, consumedRef: boolean): void {
     const source = this.opts.historySource;
-    if (w === undefined || source?.observe === undefined) return; // 无观察面（快照模式）
-    if (w.unobserve !== null) {
-      source.release?.(file); // observe 消耗了引用：丢弃本次 load 引用
-      return;
+    if (source?.release === undefined) return; // 无释放面（快照模式）
+    if (consumedRef) return; // B3：已消费，恰一次
+    const w = this.watchers.get(file);
+    if (w !== undefined && w.unobserve === null && source.observe !== undefined) {
+      this.audit(`observe-missed conn=${st.id} file=${file}`);
+      const sub = st.subs.get(file);
+      if (sub !== undefined) {
+        this.enqueue(st, { t: "error", code: 4409, message: `stream-replaced:${sub.engine.subscriptionId}`, retryable: true, requestId: "" });
+        sub.engine.close(4431, "observe-missed", false);
+        st.queue.cancelBySubscription(sub.engine.subscriptionId);
+        st.subs.delete(file);
+      }
+      this.releaseWatcher(st, file);
     }
-    this.audit(`observe-missed conn=${st.id} file=${file}`);
-    const sub = st.subs.get(file);
-    if (sub !== undefined) {
-      this.enqueue(st, { t: "error", code: 4409, message: `stream-replaced:${sub.engine.subscriptionId}`, retryable: true, requestId: "" });
-      sub.engine.close(4431, "observe-missed", false);
-      st.queue.cancelBySubscription(sub.engine.subscriptionId);
-      st.subs.delete(file);
-    }
-    this.releaseWatcher(st, file);
     source.release?.(file);
   }
 
@@ -656,17 +663,19 @@ export class WsGateway {
   /** W1-04：文件级共享观察器+排空泵（多连接同文件一份 observe；引用归零即停观察）。
    *  3b2a-R3：所有 sink 闭包先验身份（this.watchers.get(file)===rec）——观察重建/释放后旧闭包
    *  不得再作用于新订阅/新资源（旧 onAppend 不得入新引擎、旧 onInvalidate/onUnavailable 不得退新订阅）。 */
-  private watchFile(st: ConnState, file: string): void {
+  /** 返回=本调用是否通过 observe 消费了一次 load 引用（B3 结算依据）。 */
+  private watchFile(st: ConnState, file: string): boolean {
     let w = this.watchers.get(file);
     if (w === undefined) {
       w = { refs: new Set(), unobserve: null };
       this.watchers.set(file, w);
     }
     w.refs.add(st);
+    if (w.unobserve !== null) return false; // B3：绑定已存在（他流消费）——本流不消费引用
     if (w.unobserve === null && this.opts.historySource?.observe !== undefined) {
       const rec = w; // 身份捕获（R3）
       this.registry.touch(file); // R3（w1c）：纯 LRU 活动刷新（get 有触顶换流/抛错副作用，不得作 touch 用）
-      w.unobserve = this.opts.historySource.observe(file, {
+      const stop = this.opts.historySource.observe(file, {
         onAppend: (row) => {
           if (this.watchers.get(file) !== rec) return; // R3：旧闭包不得入新流
           // B2（w1b）：事件时取【当前】索引（换流 replace 后旧闭包索引不得再接收追加）
@@ -727,7 +736,20 @@ export class WsGateway {
           this.schedulePump(file);
         },
       });
+      // B3（3b2c）：先落 unobserve 再复核——旧代码 `w.unobserve = observe(...)` 的赋值在
+      // 同步回调返回后才写：回调侧 releaseWatcher 读到 null → 漏停孤儿 stop（N12）。
+      if (stop !== null) w.unobserve = stop;
+      // B4（3b2c）：observe 右侧执行期间源可能同步终止（onUnavailable/onInvalidate 摘除本 rec）。
+      // 复核不在位→立即停孤儿 stop（引用已消费即结算）；订阅已由回调侧退役——
+      // handleSubscribe 在 st.subs 复核后丢弃死快照，不再 emitFrames。
+      if (this.watchers.get(file) !== rec) {
+        try { stop?.(); } catch { /* 宿主清理异常不阻断 */ }
+        this.audit(`observe-sync-terminated conn=${st.id} file=${file}`);
+        return true; // 本流 observe 消费了引用（stop 即停=绑定已结算）
+      }
+      return stop !== null;
     }
+    return false; // 无观察面：本流不消费引用
   }
 
   /** B4：文件触顶——对该 file 所有活跃订阅发 4402+静默关引擎+退观察引用（下次重订阅走换流）。3b-2：message 随源语义。 */
