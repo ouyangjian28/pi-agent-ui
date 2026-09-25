@@ -128,8 +128,9 @@ describe("idle-reaper（闲置回收受控面）", () => {
     });
     reaper.tick(); // 第 1 次 true→起点
     nowN = 1_101;
-    reaper.tick(); // 第 2 次 true→到期判定过；第 3 次 false→触发前复核取消
-    expect(calls).toEqual(["idle-timer-start generation=1"]);
+    reaper.tick(); // 第 2 次 true→到期判定过；S5-R4 重排：idle-reap-start 先行留痕，最终复核（第 3 次 false）取消→不发起
+    // 取消路径也留 idle-reap-start 审计行（审计前移=可重入边界收紧的自然结果，触发与否以 retire 不发起为准）
+    expect(calls).toEqual(["idle-timer-start generation=1", "idle-reap-start generation=1 idleMs=100"]);
     expect(registry.activeCount()).toBe(0);
     void h; // h 未用于断言（独立构造覆盖）
   });
@@ -180,6 +181,45 @@ describe("idle-reaper（闲置回收受控面）", () => {
     reaper.tick(); // 到期触发
     expect(calls).toBe(1);
     void h;
+  });
+
+  it("S5-R1：采样间活动失效旧起点（生产期限）——短登记在两 tick 间完成后不从旧起点回收", () => {
+    let now = 0, retired = 0;
+    const registry = new MapRegistry();
+    const r = new IdleReaper({
+      supervisor: { getState: () => ({ generation: 1, phase: "running" as const }), retireCurrentGraceful: async () => { retired += 1; return { kind: "confirmed" }; } },
+      isSessionIdle: () => true, registry, now: () => now, idleMs: 1_800_000,
+    });
+    r.tick(); // 起点 0
+    now = 1_799_900; registry.register("short");
+    now = 1_799_950; registry.complete("short");
+    r.noteActivity(); // 包装层在 register/complete 转发后同步调用（RpcSession 语义）
+    now = 1_800_000; r.tick(); // 旧版此处误回收（起点 0 沿用满 30min）
+    expect(retired).toBe(0);
+    now = 1_799_950 + 1_800_000; r.tick(); // 从活动时刻重新计满才回收
+    expect(retired).toBe(1);
+  });
+
+  it("S5-R4：audit 回调同步重入（登记/dispose/受理）→触发前最终复核取消，不发起退役", () => {
+    // 反例三连：audit 是可重入外部回调——idle-reap-start 后的最终复核必须重查全部条件
+    const run = (mutate: (r: IdleReaper, registry: MapRegistry, setIdle: (v: boolean) => void) => void) => {
+      let now = 0, retired = 0;
+      const registry = new MapRegistry();
+      let sessionIdle = true;
+      const r = new IdleReaper({
+        supervisor: { getState: () => ({ generation: 1, phase: "running" as const }), retireCurrentGraceful: async () => { retired += 1; return { kind: "confirmed" }; } },
+        isSessionIdle: () => sessionIdle, registry, now: () => now, idleMs: 100,
+        audit: (l) => { if (l.startsWith("idle-reap-start")) mutate(r, registry, (v) => { sessionIdle = v; }); },
+      });
+      r.tick(); now = 100; r.tick();
+      return { retired, r };
+    };
+    const a = run((r, reg) => { reg.register("audit-task"); void r; }); // P3：回调里登记
+    expect(a.retired).toBe(0);
+    const b = run((r) => { r.dispose(); }); // P5：回调里 dispose
+    expect(b.retired).toBe(0);
+    const c = run((_r, _reg, setIdle) => { setIdle(false); }); // P6：回调里 send 受理（gate 非 idle）
+    expect(c.retired).toBe(0);
   });
 
   it("dispose 后不再触发；MapRegistry 重复 register 幂等/未知 complete 无害", () => {

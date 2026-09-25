@@ -94,6 +94,12 @@ class FakeProcessHost {
     this.proc(h).stopSignals.push(signal);
   }
 
+  /** S5-R2：EOF 优雅面记录。 */
+  closedStdin: string[] = [];
+  closeStdin(h: { readonly id: string }): void {
+    this.closedStdin.push(h.id);
+  }
+
   proc(h: { readonly id: string }): FakeProc {
     const p = this.procs.find((q) => q.handle.id === h.id);
     if (!p) throw new Error(`unknown handle ${h.id}`);
@@ -692,5 +698,51 @@ describe("进程代次监管器（ProcessSupervisor，切片3）", () => {
     h.host.holdWrites = false;
     expect(h.sup.spawnNext([])).toEqual({ kind: "spawned", generation: 2 });
     expect((await h.sup.submitTurn(intent("i-2"), 102, "b\n")).kind).toBe("launched");
+  });
+
+
+  it("S5-R2 表驱动：EOF 段不吃 SIGTERM 自身宽限（TERM 截止锚在发出时刻）", async () => {
+    const cases: Array<[string, number, number, number, number[]]> = [
+      ["默认值：EOF 3s→TERM 宽限 2s→KILL 余 5s", 3000, 2000, 10000, [3000, 2000, 5000]],
+      ["EOF<grace：1s→2s→7s", 1000, 2000, 10000, [1000, 2000, 7000]],
+      ["EOF>grace：8s→TERM 余 2s→KILL 余 1ms（钳位）", 8000, 2000, 10000, [8000, 2000, 1]],
+      ["EOF 吃满预算：10s→TERM/KILL 各 1ms", 10000, 2000, 10000, [10000, 1, 1]],
+    ];
+    for (const [label, eofMs, graceMs, deadlineMs, want] of cases) {
+      const h = makeHarness({ graceMs, exitDeadlineMs: deadlineMs });
+      h.sup.spawnNext([]);
+      const p = h.sup.retireCurrentGraceful(eofMs);
+      // 逐段推进（每段 sleep 到点即 fire；无退出→走完三段）
+      for (let i = 0; i < want.length; i += 1) {
+        await until(() => h.sleep.requests.length === i + 1, `${label} 第${i + 1}段 sleep 请求`);
+        h.sleep.advance(h.sleep.now() + h.sleep.requests[i]!);
+      }
+      expect(await p).toEqual({ kind: "deadline-exceeded" });
+      expect(h.sleep.requests).toEqual(want);
+      expect(h.host.procs[0]!.stopSignals).toEqual(["SIGTERM", "SIGKILL"]);
+      expect(h.host.closedStdin).toHaveLength(1);
+      void label;
+    }
+  });
+
+  it("S5-R2：EOF 段内自然退出→confirmed(idle-eof)；TERM 段内退出→confirmed(idle-eof-escalated)", async () => {
+    const h1 = makeHarness({ exitDeadlineMs: 10000 });
+    h1.sup.spawnNext([]);
+    const p1 = h1.sup.retireCurrentGraceful(3000);
+    await until(() => h1.sleep.requests.length === 1, "EOF 段请求");
+    h1.host.procs[0]!.handlers.onExit(0, null); // EOF 宽限内自然退出
+    expect(await p1).toEqual({ kind: "confirmed", exit: { code: 0, signal: null } });
+    expect(h1.host.procs[0]!.stopSignals).toEqual([]); // 未发任何信号
+
+    const h2 = makeHarness({ exitDeadlineMs: 10000 });
+    h2.sup.spawnNext([]);
+    const p2 = h2.sup.retireCurrentGraceful(1000);
+    await until(() => h2.sleep.requests.length === 1, "EOF 段请求");
+    h2.sleep.advance(h2.sleep.now() + 1000); // EOF 超时
+    await until(() => h2.host.procs[0]!.stopSignals.includes("SIGTERM"), "SIGTERM");
+    await until(() => h2.sleep.requests.length === 2, "TERM 段请求");
+    h2.host.procs[0]!.handlers.onExit(null, "SIGTERM"); // TERM 宽限内退出
+    expect(await p2).toEqual({ kind: "confirmed", exit: { code: null, signal: "SIGTERM" } });
+    expect(h2.host.procs[0]!.stopSignals).toEqual(["SIGTERM"]);
   });
 });

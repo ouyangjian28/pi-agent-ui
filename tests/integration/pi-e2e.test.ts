@@ -5,7 +5,7 @@
 import { describe, expect, it, beforeAll, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, appendFileSync, truncateSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PiProcessHost } from "../../apps/server/src/host/process-host.js";
@@ -463,11 +463,22 @@ describe("assistantBodyText 命中谓词（受控）", () => {
     await until(() => audits.some((l) => l.includes("idle-reap-done kind=confirmed")), "真 EOF 自然退出+回收确认", 20_000);
     expect((s.getState().supervisor as { phase: string }).phase).toBe("idle");
     expect(audits.some((l) => l.includes("process-retire-eof-timeout"))).toBe(false); // EOF 宽限内真退（未升级信号）
+    // s5 首审补强：回收=真自然退出的结构证据（idle-reap-done exitCode=0）+会话文件跨代持久增长
+    const reapDone = audits.filter((l) => l.includes("idle-reap-done"));
+    expect(reapDone).toHaveLength(1);
+    expect(reapDone[0]).toContain("kind=confirmed");
+    expect(reapDone[0]).toContain("exitCode=0"); // EOF 自然退出（SIGTERM/SIGKILL 路径 signal 非空、code 多为 null）
+    const sessionFile = join(dir, "session.jsonl");
+    const sizeAfterGen1 = (await stat(sessionFile)).size;
+    expect(sizeAfterGen1).toBeGreaterThan(0); // 第一代已有会话历史落盘
     // 回收≠销毁+journal 保留：send=明确申请执行→冷启动 gen2（原会话文件）→新一轮真往返
     const l2 = await s.send("请只回复：DONE");
     expect(l2.kind).toBe("launched");
     expect((s.getState().supervisor as { generation: number }).generation).toBe(2);
     await until(() => settledGens.length === 2, "冷启动第二轮 settled", 120_000);
+    // s5 首审补强：gen2 仍接同一 --session 文件（持久身份）且历史继续增长（原上下文未被丢）
+    const sizeAfterGen2 = (await stat(sessionFile)).size;
+    expect(sizeAfterGen2).toBeGreaterThan(sizeAfterGen1);
     const rep = await recoverFromJournal(join(dir, "journal.jsonl"), "e2e");
     expect(rep.bad).toEqual([]);
     expect(rep.intents).toHaveLength(2);

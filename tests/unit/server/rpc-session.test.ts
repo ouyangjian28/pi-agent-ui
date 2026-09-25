@@ -13,12 +13,15 @@ import { MapRegistry } from "../../../apps/server/src/runtime/idle-reaper.js";
  *  writeMode：ok=正常受理；fail=write reject（S4-03 写入失败）；hang=write 永不兑现（S4-03 挂起窗口）。 */
 class FakeRpcHost implements ProcessHostPort {
   readonly frames: string[] = [];
+  /** S5-R3：跨代 spawn 参数记录（同文件断言用）。 */
+  readonly spawnArgs: string[][] = [];
   writeMode: "ok" | "fail" | "hang" = "ok";
   private handler: ProcessSpawnHandlers | null = null;
   private stopped: string[] = [];
   handle: ProcessHandle | null = null;
 
-  spawn(_args: readonly string[], h: ProcessSpawnHandlers): ProcessHandle {
+  spawn(args: readonly string[], h: ProcessSpawnHandlers): ProcessHandle {
+    this.spawnArgs.push([...args]);
     this.handler = h;
     this.handle = { id: `fake-${Date.now()}-${Math.random().toString(36).slice(2)}` };
     return this.handle;
@@ -584,6 +587,61 @@ describe("RpcSession（受控替身）", () => {
     const ra = await startA; // 探针成功路径内已退出：终窗复核不得返回 ready
     expect(ra.kind).not.toBe("ready");
     expect(ra).toMatchObject({ kind: "superseded", generation: 1 });
+  });
+
+  it("S5-R3：构造拒绝——sessionFile 与 piArgs 都缺（无持久身份不得启用回收生命周期）", () => {
+    const dir = join(tmpdir(), "no-file");
+    expect(
+      () =>
+        new RpcSession({
+          journalPath: join(dir, "j.jsonl"),
+          sessionId: "s",
+          host: new FakeRpcHost(),
+          durability: { append: async () => undefined },
+        }),
+    ).toThrow(/sessionFile|piArgs/);
+  });
+
+  it("S5-R3：默认绑定 sessionFile——两代 spawn 同一 --session 文件（跨回收持久身份）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "rpc-s5r3-"));
+    dirs.push(dir);
+    const host = new FakeRpcHost();
+    const audits: string[] = [];
+    const dur = new FileDurability(join(dir, "journal.jsonl"));
+    const sessionFile = join(dir, "persist.session");
+    const session = new RpcSession({
+      sessionFile,
+      journalPath: join(dir, "journal.jsonl"),
+      sessionId: "s-r3",
+      host,
+      durability: dur,
+      readinessTimeoutMs: 500,
+      timeoutPollMs: 20,
+      disableIdleReaper: true,
+      audit: (l) => audits.push(l),
+    });
+    sessions.push(session);
+    const ready = session.start();
+    await until(() => host.frames.some((f) => f.includes("get_state")), "探针帧");
+    host.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true, data: {} });
+    expect((await ready).kind).toBe("ready");
+    const stopP = session.stop();
+    await until(() => host.stopSignals.includes("SIGTERM"), "SIGTERM");
+    host.emitExit(0, null);
+    await stopP;
+    // 冷启动：send→start→gen2 spawn——断言两代 --session 同一文件（S5-R3 核心）
+    const sendP = session.send("再次明确输入");
+    await until(() => host.spawnArgs.length === 2, "第二代 spawn");
+    await until(() => host.frames.some((f) => f.includes("get_state") && f.includes("ready-2")), "gen2 探针");
+    host.emitEvent({ id: "ready-2", type: "response", command: "get_state", success: true, data: {} });
+    await until(() => host.frames.some((f) => f.includes("\"type\":\"prompt\"")), "prompt 帧写出");
+    const frame = JSON.parse(host.frames.filter((f) => f.includes("prompt")).slice(-1)[0]!) as { id: string };
+    host.emitEvent({ id: frame.id, type: "response", command: "prompt", success: true });
+    host.emitEvent({ type: "agent_settled" });
+    expect((await sendP).kind).toBe("launched");
+    const sessionArgs = host.spawnArgs.map((a) => a[a.indexOf("--session") + 1]);
+    expect(sessionArgs).toEqual([sessionFile, sessionFile]);
+    expect(host.spawnArgs.every((a) => !a.includes("--no-session"))).toBe(true);
   });
 
   it("切片5①：settled 后闲置到期→EOF 优雅回收（无信号）→send 自动冷启动 gen2（journal 保留续写）", async () => {

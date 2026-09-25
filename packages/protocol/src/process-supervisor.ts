@@ -256,12 +256,15 @@ export class ProcessSupervisor {
         }
         this.audit(`process-retire-eof-timeout generation=${entry.generation} escalating=SIGTERM`);
       }
-      // 升级链：与 retireCurrent 同构；startMs 不重置（EOF 段计入总预算）
+      // 升级链：与 retireCurrent 同构；startMs 不重置（EOF 段计入总预算）。
+      // S5-R2：SIGTERM 的宽限锚定在 TERM 发出时刻，而非退役链起点——EOF 段消耗后
+      // TERM 自身宽限仍完整（受总截止钳位）；各阶段截止=min(阶段起点+阶段预算, 总截止)。
       const graceMs = this.opts.graceMs ?? 2_000;
-      const graceEnd = startMs + Math.min(graceMs, deadlineMs);
       const deadlineEnd = startMs + deadlineMs;
       this.stopSignal(entry, "SIGTERM");
-      let exit = await this.raceExit(entry, this.remainMs(graceEnd, startMs));
+      const termSentAt = this.nowMs();
+      const termEnd = Math.min((Number.isFinite(termSentAt) ? termSentAt : startMs) + graceMs, deadlineEnd);
+      let exit = await this.raceExit(entry, this.remainMs(termEnd, startMs));
       if (exit === null) {
         this.stopSignal(entry, "SIGKILL");
         exit = await this.raceExit(entry, this.remainMs(deadlineEnd, startMs));

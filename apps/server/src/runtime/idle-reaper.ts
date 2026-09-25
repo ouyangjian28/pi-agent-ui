@@ -19,7 +19,7 @@
 
 export interface IdleSupervisorPort {
   getState(): { generation: number | null; phase: "idle" | "running" | "stopping" };
-  retireCurrentGraceful(eofGraceMs?: number): Promise<{ kind: string }>;
+  retireCurrentGraceful(eofGraceMs?: number): Promise<{ kind: string; exit?: { code: number | null; signal: string | null } }>;
 }
 
 export interface BackgroundTaskRegistry {
@@ -61,6 +61,8 @@ export interface IdleReaperDeps {
 
 export class IdleReaper {
   private idleSince: number | null = null;
+  /** 最近一次执行活动时刻（S5-R1：采样间发生的受理/登记/完成/换代同步登记于此，tick 吸收后旧起点失效）。 */
+  private lastActivity: number | null = null;
   private reaping = false;
   private disposed = false;
   private readonly idleMs: number;
@@ -85,6 +87,16 @@ export class IdleReaper {
     );
   }
 
+  /**
+   * 执行活动通知（S5-R1）：受理/登记/完成/换代等同步活动时由宿主调用。
+   * 两次 tick 之间完整发生的短活动由此失效旧闲置起点；不能仅靠 tick 重读
+   * activeCount/gate 状态（采样间的历史活动不可见，旧起点会沿用整段期限）。
+   */
+  noteActivity(): void {
+    const n = this.deps.now();
+    if (Number.isFinite(n)) this.lastActivity = n;
+  }
+
   /** 由宿主巡检循环驱动（与超时巡检共用一个 interval）；同步段完成复核+触发置位。 */
   tick(): void {
     if (this.disposed || this.reaping) return;
@@ -99,20 +111,29 @@ export class IdleReaper {
       this.audit(`idle-timer-start generation=${this.deps.supervisor.getState().generation}`);
       return;
     }
+    // S5-R1：吸收采样间活动——最近活动晚于当前起点时，起点后移到活动时刻
+    // （短登记/短新轮/换代在两 tick 间完整发生，旧起点不得沿用）。
+    if (this.lastActivity !== null && this.lastActivity > this.idleSince) {
+      this.idleSince = this.lastActivity;
+      this.audit(`idle-timer-reset-by-activity since=${this.lastActivity}`);
+    }
     if (now - this.idleSince >= this.idleMs) {
-      // 触发前同步复核：与 send 竞争闭合在本同步段（置 stopping 后 send 撞拒）
-      if (!this.eligible()) {
-        this.idleSince = null;
-        return;
-      }
-      const gen = this.deps.supervisor.getState().generation;
       this.reaping = true;
       this.idleSince = null;
-      this.audit(`idle-reap-start generation=${gen} idleMs=${this.idleMs}`);
+      this.audit(`idle-reap-start generation=${this.deps.supervisor.getState().generation} idleMs=${this.idleMs}`);
+      // S5-R4：audit 是可重入外部回调（登记/完成/发送/dispose 都可能同步发生）——
+      // 触发前复核放在 audit 之后：最终复核到 retireCurrentGraceful 同步置 stopping
+      // 之间不再有外部回调，竞争闭合的原子边界才成立。
+      if (this.disposed || !this.eligible()) {
+        this.reaping = false;
+        return;
+      }
       void this.deps.supervisor
         .retireCurrentGraceful(this.deps.eofGraceMs)
         .then((r) => {
-          this.audit(`idle-reap-done kind=${r.kind}`);
+          // 退出证据入审计（s5 首审补强）：自然退出 code=0 / 信号退出 signal 名——观测面可辨回收质量
+          const ex = r.exit !== undefined ? ` exitCode=${r.exit.code} signal=${r.exit.signal}` : "";
+          this.audit(`idle-reap-done kind=${r.kind}${ex}`);
         })
         .catch((err: unknown) => {
           this.audit(`idle-reap-failed err=${String(err)}`);

@@ -26,8 +26,15 @@ import {
 import { IdleReaper, MapRegistry } from "./idle-reaper.js";
 
 export interface RpcSessionOpts {
-  /** pi 参数（默认 ["--mode","rpc","--no-session"]）。 */
+  /**
+   * pi 参数。默认=绑定 opts.sessionFile 的持久会话（["--mode","rpc","----session",sessionFile]）。
+   * S5-R3：闲置回收生命周期要求跨回收重启接同一会话文件——sessionFile 与 piArgs 必须显式给一个；
+   * 两者都缺=构造拒绝（不默认 --no-session：无会话文件即无原上下文恢复，回收后冷启动只当新会话跑）。
+   * 显式传 piArgs=测试/临时模式（含 --no-session 时无持久身份，由调用方自担，不得作生产默认）。
+   */
   readonly piArgs?: readonly string[];
+  /** 持久会话文件路径（默认 piArgs 的绑定源；跨回收/重启两代 spawn 必须同一文件）。 */
+  readonly sessionFile?: string;
   /** journal 路径（意图/sending/超时记录行；append-only+逐行 fdatasync）。 */
   readonly journalPath: string;
   readonly sessionId: string;
@@ -69,7 +76,26 @@ export type SessionStartResult =
     | { readonly kind: "rejected"; readonly reason: "not-idle" }
     | { readonly kind: "spawn-exited"; readonly generation: number; exit: Readonly<{ code: number | null; signal: string | null }> });
 
-export type SessionSendResult = LaunchOutcome | { readonly kind: "no-process" } | { readonly kind: "invalidated"; readonly stage: "first-byte" } | { readonly kind: "not-ready" };
+export type SessionSendResult = LaunchOutcome | { readonly kind: "no-process" } | { readonly kind: "invalidated"; readonly stage: "first-byte" } | { readonly kind: "not-ready"; readonly cause?: string };
+
+/**
+ * 包装登记表（S5-R1）：register/complete 转发后同步通知回收器活动——
+ * 采样间完成的短登记不得沿用旧闲置起点。宿主应使用 session.idleRegistry（包装版）
+ * 而非自有原始引用，否则活动通知语义失效。
+ */
+function wrapRegistry(raw: import("./idle-reaper.js").BackgroundTaskRegistry, note: () => void): import("./idle-reaper.js").BackgroundTaskRegistry {
+  return {
+    register: (id: string, label?: string) => {
+      raw.register(id, label);
+      note();
+    },
+    complete: (id: string) => {
+      raw.complete(id);
+      note();
+    },
+    activeCount: () => raw.activeCount(),
+  };
+}
 
 interface ReadinessWaiter {
   /** 响应已到→标记布尔（S4-B1：只标记；不清 timer 不删入口——总截止约束写+响应整体） */
@@ -86,6 +112,10 @@ export class RpcSession {
   private readonly gate: TurnGate;
   private readonly coordinator: DispatchCoordinator;
   private readonly supervisor: ProcessSupervisor;
+  /** S5-R3：两代 spawn 共用的 pi 参数（构造时解析：显式 piArgs 或绑定 sessionFile）。 */
+  private readonly piArgs: readonly string[];
+  /** 宿主登记面（S5-R1 包装版：register/complete 同步通知回收器活动；勿绕过它用原始引用）。 */
+  readonly idleRegistry: import("./idle-reaper.js").BackgroundTaskRegistry;
   private reaper: IdleReaper | null = null; // dispose 置 null
   private readonly readiness = new Map<string, ReadinessWaiter>();
   private readonly readinessCancels = new Map<number, ReadinessCancel>();
@@ -141,6 +171,7 @@ export class RpcSession {
         }
       },
       onSpawned: (handle, generation) => {
+        this.reaper?.noteActivity(); // S5-R1：换代即活动（旧代退出+新 spawn 都在两 tick 间时旧起点不得沿用）
         // spawn 成功即发探针；成败都汇入 readyPromise（start 汇合后按所有权处置）
         const p = this.probeReadiness(handle, generation)
           .catch((e: unknown) => {
@@ -161,15 +192,22 @@ export class RpcSession {
       sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
       audit: (l: string) => safeAudit(`supervisor ${l}`),
     });
+    // S5-R3：持久身份建模——sessionFile 与 piArgs 必须显式给一个（默认绑定同一 sessionFile）
+    if (opts.piArgs === undefined && opts.sessionFile === undefined) {
+      throw new Error("RpcSession：必须显式提供 sessionFile（生产持久会话）或 piArgs（测试/临时模式）——闲置回收生命周期要求跨回收重启绑定同一会话文件");
+    }
+    this.piArgs = opts.piArgs ?? ["--mode", "rpc", "--session", opts.sessionFile as string];
     const pollMs = opts.timeoutPollMs ?? 250;
     // 切片5①：闲置回收器（双条件同满足才开始连续计时；回收=EOF 优先优雅链）
+    // S5-R1：登记表包装（register/complete 同步通知活动）；宿主用 this.idleRegistry 登记后回收器自动感知
+    this.idleRegistry = wrapRegistry(opts.idleRegistry ?? new MapRegistry(), () => this.reaper?.noteActivity());
     this.reaper =
       opts.disableIdleReaper === true
         ? null
         : new IdleReaper({
             supervisor: this.supervisor,
             isSessionIdle: () => this.gate.getState().kind === "idle",
-            registry: opts.idleRegistry ?? new MapRegistry(),
+            registry: this.idleRegistry,
             now: () => performance.now(),
             audit: (l) => safeAudit(l),
             ...(opts.idleMs !== undefined ? { idleMs: opts.idleMs } : {}),
@@ -278,6 +316,7 @@ export class RpcSession {
       return;
     }
     this.settledNotified.add(key.intentId);
+    this.reaper?.noteActivity(); // S5-R1：settled 即活动——两 tick 间完成的短轮，闲置起点后移到结算时刻
     if (this.settledNotified.size > SETTLED_NOTIFIED_CAP) {
       const oldest = this.settledNotified.values().next().value; // 插入序首项
       if (oldest !== undefined) this.settledNotified.delete(oldest);
@@ -350,7 +389,7 @@ export class RpcSession {
       const ok = this.gate.reopen();
       if (!ok) return { kind: "rejected", reason: "not-idle" }; // reopen 仅 closed→idle（B1-01）
     }
-    const r = this.supervisor.spawnNext(this.opts.piArgs ?? ["--mode", "rpc", "--no-session"]);
+    const r = this.supervisor.spawnNext(this.piArgs);
     if (r.kind !== "spawned") {
       if (r.kind === "rejected") return { kind: "rejected", reason: r.reason };
       if (r.kind === "spawn-failed") return { kind: "spawn-failed", error: r.error };
@@ -387,12 +426,14 @@ export class RpcSession {
     // 切片5①：闲置回收后无进程——send=明确申请执行，冷启动拉起（查看不拉起；原会话文件+readiness）
     if (st.phase === "idle") {
       const sr = await this.start();
-      if (sr.kind !== "ready") return { kind: "not-ready" };
+      // ②面准备：失败原因结构化透传（cause），UI 不得只显一律「未就绪」
+      if (sr.kind !== "ready") return { kind: "not-ready", cause: sr.kind };
       st = this.supervisor.getState();
     }
+    this.reaper?.noteActivity(); // S5-R1：受理即活动（采样间的受理→settled 短轮不得沿用旧起点）
     const gen = st.generation;
     // B2 面：ready 标志之外还须现态 running（stopping/已退出不开真实派发）
-    if (gen === null || st.phase !== "running" || this.readyGeneration !== gen) return { kind: "not-ready" };
+    if (gen === null || st.phase !== "running" || this.readyGeneration !== gen) return { kind: "not-ready", cause: "not-running" };
     const commandId = (this.cmdSeq += 1);
     const intentId = `i-${(this.intentSeq += 1)}`;
     const mk = matchKeyOf(message, [], this.takeOrdinal(message));
