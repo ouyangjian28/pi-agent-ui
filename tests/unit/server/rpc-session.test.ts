@@ -546,6 +546,43 @@ describe("RpcSession（受控替身）", () => {
     expect((await stopP).kind).toBe("confirmed");
   });
 
+  it("Y-C2 dispose 关闭耐久句柄（可选 close 端口；生产职责收口）", async () => {
+    const dir8 = await mkdtemp(join(tmpdir(), "rpc-s4yc2-"));
+    dirs.push(dir8);
+    let closed = 0;
+    const dur8: DurabilityPort = {
+      append: () => Promise.resolve(),
+      close: () => {
+        closed += 1;
+        return Promise.resolve();
+      },
+    };
+    const host8 = new FakeRpcHost();
+    const s8 = new RpcSession({
+      piArgs: ["--mode", "rpc", "--no-session"],
+      journalPath: join(dir8, "journal.jsonl"),
+      sessionId: "s-test",
+      host: host8,
+      durability: dur8,
+      readinessTimeoutMs: 500,
+      timeoutPollMs: 20,
+    });
+    sessions.push(s8);
+    const p = s8.start();
+    await until(() => host8.frames.length === 1, "探针写出");
+    host8.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true });
+    await p; // ready
+    await s8.dispose();
+    expect(closed).toBe(1); // 恰一次
+    await s8.dispose(); // 幂等
+    expect(closed).toBe(1);
+    // 进程退役独立于 dispose：stop 路径仍工作（fake 收尾防悬挂）
+    const stopP = s8.stop();
+    await until(() => host8.stopSignals.length === 1, "SIGTERM");
+    host8.emitExit(0, null);
+    expect((await stopP).kind).toBe("confirmed");
+  });
+
   it("S4-05d settled 先缓冲→超时记录收口（recorded-and-settled）：通知恰一次", async () => {
     const dir4 = await mkdtemp(join(tmpdir(), "rpc-s405d-"));
     dirs.push(dir4);
