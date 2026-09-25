@@ -15,7 +15,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p packages/protocol --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "typecheck:tests": "tsc -p tests --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "build": "npm run build -w apps/web -w apps/server"

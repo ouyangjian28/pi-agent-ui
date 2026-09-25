@@ -456,6 +456,27 @@ describe("派发协调层（DispatchCoordinator，§169④）", () => {
       expect(h.coord.abandonHeld("live")).toBeNull(); // gate in-flight=活轮
       expect(h.coord.getState().command).not.toBeNull();
     });
+
+    it("abandonHeld 释放挂起超时槽位：releasedPendingTimeout=true/false 直接入审计", async () => {
+      const h = makeHarness();
+      await h.coord.submitTurn(intent("i-1"), 101); // 调用 1/2
+      h.dur.holdAt = 3;
+      h.clock.iso = t(120_000);
+      const pendingA = h.coord.checkResponseTimeout(); // 调用 3 挂起：槽位=101
+      await untilHeld(h.dur);
+      h.gate.close("manual");
+      h.gate.reopen();
+      expect(h.coord.abandonHeld("recover")).toEqual({ droppedEvents: 0, droppedSettled: false });
+      expect(h.audits.some((l) => l.includes("releasedPendingTimeout=true"))).toBe(true); // 弃置=登记释放边界，同步放槽
+      h.dur.releaseHold(0); // 旧 A 续跑：epoch 已失效→invalidated，不占不清新槽
+      expect(await pendingA).toMatchObject({ kind: "invalidated", key: { commandId: 101 } });
+      const h2 = makeHarness(); // 无挂起超时槽的弃置
+      await h2.coord.submitTurn(intent("i-1"), 101);
+      h2.gate.close("manual");
+      h2.gate.reopen();
+      h2.coord.abandonHeld("recover");
+      expect(h2.audits.some((l) => l.includes("releasedPendingTimeout=false"))).toBe(true);
+    });
   });
 
   describe("S2-B1 结算等待窗口：交付取登记上最新缓冲", () => {
@@ -612,6 +633,8 @@ describe("派发协调层（DispatchCoordinator，§169④）", () => {
       expect(await pendingA).toMatchObject({ kind: "invalidated", key: { commandId: 101 } });
       expect(h.audits).toContain("response-timeout-invalidated commandId=101 key-mismatch"); // 成功侧：记录已在盘，旧登记不拥有新轮
       expect(h.coord.getState().command?.key).toMatchObject({ commandId: 202 }); // B 不动
+      expect(await h.coord.checkResponseTimeout()).toMatchObject({ kind: "pending", key: { commandId: 202 } }); // B 槽健在（s2d：A finally 错清可直接查获）；查询不追加
+      expect(h.dur.calls).toBe(7); // 无第八次 append（pending 查询零写入）
       h.dur.releaseHold(0); // 现在首槽=B
       expect(await pendingB).toMatchObject({ kind: "recorded", key: { commandId: 202 } });
       expect(h.coord.getState().command?.phase).toBe("response-timed-out");
@@ -654,7 +677,7 @@ describe("派发协调层（DispatchCoordinator，§169④）", () => {
       expect(h.audits.some((l) => l.startsWith("launch-invalidated-post-send intentId=i-1 gate="))).toBe(true);
     });
 
-    it("close+reopen 后 B 在飞：旧 A 续跑=invalidated 不覆盖 B 登记", async () => {
+    it("close+reopen 后 B 抢先派发：A 续跑时 B 已接管（dispatching）→最终 B in-flight；invalidated 不覆盖 B 登记", async () => {
       const h = makeHarness();
       h.dur.holdAt = 2;
       const pA = h.coord.submitTurn(intent("i-1"), 101);
@@ -666,12 +689,32 @@ describe("派发协调层（DispatchCoordinator，§169④）", () => {
         h.gate.reopen();
         pB = h.coord.submitTurn(intent("i-2"), 202); // 抢先提交 B（调用 3/4）
       });
-      expect(await pA).toEqual({ kind: "invalidated", stage: "post-send" }); // 旧许可不复用：Gate 已属 B
+      expect(await pA).toEqual({ kind: "invalidated", stage: "post-send" }); // 旧许可不复用：A 续跑时 Gate 正派发 B（dispatching，非 in-flight(A)）
       const outB = await pB!;
       expect(outB).toMatchObject({ kind: "launched", key: { commandId: 202 } });
       expect(h.coord.getState().command?.key).toMatchObject({ intentId: "i-2", commandId: 202 }); // 只登记 B
       expect(h.gate.getState()).toMatchObject({ kind: "in-flight", intentId: "i-2" });
       expect(h.audits.some((l) => l.startsWith("launch-invalidated-post-send intentId=i-1 gate="))).toBe(true);
+    });
+
+    it("【受控替身·分支面】Gate in-flight 但属另一意图（同 kind 不同 intentId）→invalidated/post-send", async () => {
+      // 真实 TurnGate 下该态与上一例窗口重合（A 续跑时 B 多在 dispatching）；此处受控构造 in-flight(i-other)，
+      // 直接守住「仅删 intentId 比较仍放行」的窄变异（s2d 审窄变异实测存活）。
+      const dur = new FakeDurability();
+      const audits: string[] = [];
+      const fakeGate = {
+        submit: async () => ({ kind: "send" }),
+        getState: () => ({ kind: "in-flight", intentId: "i-other" }),
+      } as unknown as TurnGate;
+      const coord = new DispatchCoordinator({
+        gate: fakeGate,
+        now: () => t(0),
+        durability: dur,
+        audit: (l: string) => audits.push(l),
+      });
+      expect(await coord.submitTurn(intent("i-1"), 101)).toEqual({ kind: "invalidated", stage: "post-send" });
+      expect(coord.getState().command).toBeNull(); // 不登记
+      expect(audits.some((l) => l.startsWith("launch-invalidated-post-send intentId=i-1 gate=in-flight"))).toBe(true);
     });
   });
 });
