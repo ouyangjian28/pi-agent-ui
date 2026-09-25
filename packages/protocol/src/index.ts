@@ -8,3 +8,4 @@ export * from "./command-dedup.ts";
 export * from "./command-channel.ts";
 export * from "./turn-gate.ts";
 export * from "./dispatch-coordinator.ts";
+export * from "./process-supervisor.ts";

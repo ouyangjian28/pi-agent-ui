@@ -38,6 +38,7 @@ export type GateCloseReason =
   | "durability-failure" // 账本 fsync 失败：closed 保持，恢复流程裁决后 reopen
   | "turn-timeout" // 轮超时：中断呈现（不自动重发）；进程处置+对账归宿主
   | "buffer-overflow" // 事件缓冲溢出（§169④ 溢出关闭非静默丢；协调层触发）
+  | "generation-retired" // 进程代次退役（交接/意外退出）：该代次轮次永不再 settle；屏障解除归宿主 reopen
   | "manual"; // 宿主显式关闭（进程换代/接管等场景）
 
 export type GateState =
