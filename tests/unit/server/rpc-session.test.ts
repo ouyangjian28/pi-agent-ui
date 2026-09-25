@@ -252,11 +252,11 @@ describe("RpcSession（受控替身）", () => {
   });
 
   // ---- S4-03：readiness 写入/响应/超时=同一有界启动操作；无孤立 rejection ----
-  it("S4-03a 探针 write reject：启动失败→退役收口→readiness-timeout（无 unhandled）", async () => {
-    const { session, host } = await makeSession();
+  it("S4-03a 探针 write reject：启动失败→立即退役（不等超时）→readiness-timeout", async () => {
+    const { session, host } = await makeSession({ readinessTimeoutMs: 5_000 }); // 远大于写失败处置时间：证明 SIGTERM 由写失败驱动
     host.writeMode = "fail";
     const r = session.start();
-    await until(() => host.stopSignals.includes("SIGTERM"), "写失败→自动退役 SIGTERM");
+    await until(() => host.stopSignals.includes("SIGTERM"), "写失败→立即 SIGTERM（非 5s 超时路径）", 800);
     host.emitExit(null, "SIGTERM");
     expect((await r)).toMatchObject({ kind: "readiness-timeout", generation: 1 });
     expect(session.getState().supervisor).toMatchObject({ phase: "idle" });
@@ -394,6 +394,39 @@ describe("RpcSession（受控替身）", () => {
     await cmd;
     await until(() => settledCalls.length === 1, "超时记录收口路径通知");
     expect(settledCalls).toEqual([1]);
-    await until(() => (s2.getState().gate as { kind: string }).kind === "idle", "gate idle");
+  });
+
+  it("S4-05c settled 先于 response（buffered）：不提前通知；response 回绑即结算→恰一次", async () => {
+    const dir3 = await mkdtemp(join(tmpdir(), "rpc-s405c-"));
+    dirs.push(dir3);
+    const host3 = new FakeRpcHost();
+    const dur3 = new FileDurability(join(dir3, "journal.jsonl"));
+    const settledCalls: number[] = [];
+    const s3 = new RpcSession({
+      piArgs: ["--mode", "rpc", "--no-session"],
+      journalPath: join(dir3, "journal.jsonl"),
+      sessionId: "s-test",
+      host: host3,
+      durability: dur3,
+      readinessTimeoutMs: 500,
+      responseTimeoutMs: 5_000,
+      timeoutPollMs: 20,
+      onSettled: (g) => settledCalls.push(g),
+    });
+    sessions.push(s3);
+    const p = s3.start();
+    await until(() => host3.frames.length === 1, "探针");
+    host3.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true });
+    await p;
+    const cmd = s3.send("settled 先到");
+    await until(() => host3.frames.some((f) => f.includes('"prompt"')), "prompt 写出");
+    host3.emitEvent({ type: "agent_settled" }); // response 未到：协调器 buffer（不得通知）
+    await new Promise((r) => setTimeout(r, 80));
+    expect(settledCalls).toEqual([]); // buffered 路径不通知（S4-05）
+    host3.emitEvent({ id: "c1", type: "response", command: "prompt", success: true }); // 回绑即结算
+    await cmd;
+    await until(() => settledCalls.length === 1, "回绑即结算后通知");
+    expect(settledCalls).toEqual([1]);
+    await until(() => (s3.getState().gate as { kind: string }).kind === "idle", "gate idle");
   });
 });

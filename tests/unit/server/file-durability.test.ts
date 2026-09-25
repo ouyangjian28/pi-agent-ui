@@ -80,13 +80,18 @@ describe("FileDurability（受控 fsPort）", () => {
     fs.datasyncHang = true; // 第一次 append 挂在 datasync
     const dur = new FileDurability("/fake/j.jsonl", { fsPort: fs });
     const a1 = dur.append(line("enqueue"));
+    let a1Done = false;
+    void a1.then(() => {
+      a1Done = true;
+    });
     await new Promise((r) => setTimeout(r, 10)); // 进入 datasync 挂起
-    const closeP = dur.close(); // 排队：等 a1 完成
+    const closeP = dur.close(); // 排队：等 a1 完成（close 先兑现=未串行）
     const a2 = dur.append(line("sending")); // close 同步置位：新任务立即拒（但队列推进须等前序）
     fs.releaseDatasync(); // 先释放：a1→close→a2 依序兑现
+    await closeP;
+    expect(a1Done).toBe(true); // close 完成前 a1 必已落定（串行证据）
     await a1;
     await expect(a2).rejects.toThrow(/已关闭|失败态/);
-    await closeP;
     expect(fs.events).toEqual(["open", "write", "datasync", "close"]); // close 在已接收 append 之后
     expect(fs.closeCalls).toBe(1);
   });
