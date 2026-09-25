@@ -47,7 +47,7 @@ describe("通用命令去重表（opId 幂等）", () => {
     expect(d.size()).toBe(3);
 
     // ①会话仍活跃：即使占位已过 25h 一律不删
-    expect(d.sweep(t(25), { active: true })).toBe(0);
+    expect(d.sweep(t(25), { active: true, inactiveSince: T0 })).toBe(0); // r8c：携陈旧退出时刻仍不删=锁 active 优先级（非缺判据兜底）
     expect(d.size()).toBe(3);
 
     // ②生命周期未知（缺判据）=保守不删

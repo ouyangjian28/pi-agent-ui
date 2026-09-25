@@ -42,7 +42,7 @@ describe("W1 双 tab 写权代次（让位广播）", () => {
 });
 
 describe("W1a A 在飞+B 输入接管（默认转接现有进程，无双写者）", () => {
-  it("写者进程存活：转接（代次+1 进程不动）——signal 未被调用=无 spawn/无停进程", () => {
+  it("写者进程存活：转接（代次+1 进程不动）——不发停止信号（r8c：证据=signal 未调用，非 spawn 计数）", () => {
     const sigLog: string[] = [];
     const auth = new WriterAuthority(fakeOps(sigLog));
     const r = auth.requestWriter("s1", "connB", true); // B 输入接管，A 的轮在飞（进程活着）
