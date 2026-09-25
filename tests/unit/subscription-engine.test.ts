@@ -168,7 +168,7 @@ describe("订阅引擎 13 时序", () => {
     expect(b1).toHaveLength(2);
     expect(b1[0]).toMatchObject({ t: "status" });
     expect(b1[1]).toMatchObject({ t: "events", origin: "history", refSeq: 101 });
-    const b2 = eng.drain(2);
+    const b2 = eng.drain(3);
     expect(b2[0]).toMatchObject({ t: "events", origin: "live", liveSeq: 2 });
     expect(b2[1]).toMatchObject({ t: "status", status: { statusVersion: 3 } });
     // 再 drain 空
