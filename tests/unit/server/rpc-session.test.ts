@@ -86,10 +86,9 @@ class HoldDurability {
 
 const dirs: string[] = [];
 const sessions: RpcSession[] = [];
-const durClose: FileDurability[] = []; // Y-C2（s4c）：独立构造的 FileDurability 也在收尾显式 close（防 DEP0137 句柄泄漏警告）
+// s4e Y-C2：独立构造的 FileDurability 就地 close（已不再需要集中数组）
 afterEach(async () => {
   await Promise.all(sessions.splice(0).map((s) => s.dispose())); // dispose 现含 durability.close
-  await Promise.all(durClose.splice(0).map((d) => d.close().catch(() => undefined)));
   await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
 });
 
@@ -244,6 +243,7 @@ describe("RpcSession（受控替身）", () => {
     const lines = (await readFile(join(dir, "d.jsonl"), "utf8")).trim().split("\n");
     expect(lines.length).toBe(2);
     expect(JSON.parse(lines[0]!).t).toBe("enqueue");
+    await dur.close(); // s4e Y-C2：独立构造实例就地 close（防 DEP0137 句柄泄漏警告）
     // 失败态：把路径换成目录 → append reject → 后续 append 一律拒绝
     const bad = new FileDurability(dir); // 目录：open("a") 在 Linux 上 EISDIR
     await expect(bad.append({ t: "enqueue" } as never)).rejects.toThrow();
@@ -254,6 +254,44 @@ describe("RpcSession（受控替身）", () => {
     const fresh = new FileDurability(join(dir, "d2.jsonl"));
     await fresh.append({ t: "enqueue" } as never);
     await fresh.close();
+  });
+
+  it("Y-C2b 并发 dispose：复用同一收尾 Promise——第二次 await 不早于第一次（close 挂起时不提前返回）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "yc2b-"));
+    dirs.push(dir);
+    let closeCalls = 0;
+    let closeResolve: (() => void) | null = null;
+    const dur: DurabilityPort = {
+      append: async () => {},
+      close: () => {
+        closeCalls += 1;
+        return new Promise<void>((r) => {
+          closeResolve = r; // 手动挂起：验证第二次 dispose 不提前返回
+        });
+      },
+    };
+    const s = new RpcSession({
+      piArgs: ["--mode", "rpc", "--no-session"],
+      journalPath: join(dir, "j.jsonl"),
+      sessionId: "s1",
+      host: new FakeRpcHost(),
+      durability: dur,
+    });
+    sessions.push(s);
+    const p1 = s.dispose();
+    const p2 = s.dispose(); // 同刻第二次：旧版（disposed 布尔）立即返回——close 仍挂起=假完成
+    let secondDone = false;
+    void p2.then(() => {
+      secondDone = true;
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(secondDone).toBe(false); // 尚未完成（close 挂起中）
+    expect(closeCalls).toBe(1); // 恰一次 close
+    closeResolve!();
+    await Promise.all([p1, p2]);
+    expect(closeCalls).toBe(1);
+    await s.dispose(); // 再调也是同一已完成 Promise
+    expect(closeCalls).toBe(1);
   });
 
   // ---- S4-03：readiness 写入/响应/超时=同一有界启动操作；无孤立 rejection ----

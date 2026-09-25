@@ -1,0 +1,23 @@
+
+> pi-agent-ui-monorepo@0.0.0 test
+> vitest run
+
+
+ RUN  v5.0.1 /home/yyj/ai/repos/pi-agent-ui
+
+
+ Test Files  23 passed | 1 skipped (24)
+      Tests  267 passed | 3 skipped (270)
+   Start at  14:01:52
+   Duration  8.56s (tests 77%, transform 15%, import 5%, environment 3%, worker 1%)
+
+
+> pi-agent-ui-monorepo@0.0.0 typecheck
+> tsc -p tsconfig.json --noEmit && tsc -p packages/protocol --noEmit && tsc -p apps/server --noEmit
+
+
+> pi-agent-ui-monorepo@0.0.0 lint
+> eslint .
+
+
+AUDIT_EXIT test=0 typecheck=0 lint=0

@@ -7,27 +7,33 @@ import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, appendFileSync, truncateSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { PiProcessHost } from "../../apps/server/src/host/process-host.js";
 import { FileDurability } from "../../apps/server/src/runtime/file-durability.js";
 import { RpcSession } from "../../apps/server/src/runtime/rpc-session.js";
 import { readJournalFile, recoverFromJournal } from "../../apps/server/src/runtime/recover.js";
+import { spawn } from "node:child_process";
+import { ProcessSupervisor, type SupervisorCoordinatorPort, type SupervisorGatePort } from "@pi-agent-ui/protocol";
 import type { ProcessHandle } from "@pi-agent-ui/protocol";
 
-/** 锁定 pi 可执行（s4c 六项①：绝对路径+版本证据；升级须显式改这里并复跑本套）。 */
+/** 锁定 pi 可执行（s4c 六项①：绝对路径+版本证据；s4e：exact 版本锁非前缀匹配——升级须显式改这里并复跑本套）。 */
 const PI_BIN = "/home/yyj/.nvm/versions/node/v24.18.0/bin/pi";
-const PI_VERSION_RE = /0\.86\.\d+/;
+const PI_VERSION = "0.86.1";
 /** 真实参数面（TECH §24/§40；--no-extensions=受控环境，扩展 UI 面归后续 UI 接线层）。 */
 const piArgsFor = (sessionFile: string): string[] => ["--mode", "rpc", "--no-extensions", "--session", sessionFile];
 
-/** 目录耐久（s4c 六项⑥职责模式）：mkdir 后 fsync 目录——journal 首次创建的目录条目耐久归宿主初始化。 */
+/** 目录耐久（s4c 六项⑥+s4e R3 修正）：mkdir 后逐层向上 fsync——目录自身条目须在父层耐久，
+ *  自身 fsync 同步的是「目录内容变更」（journal 新建文件名的耐久由 FileDurability 首写后 syncDir 承担）。 */
 function ensureDirDurable(dir: string): void {
   mkdirSync(dir, { recursive: true });
-  const fd = openSync(dir, "r");
-  try {
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
+  const parent = dirname(dir);
+  for (const d of [dir, parent]) {
+    const fd = openSync(d, "r");
+    try {
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
   }
 }
 
@@ -59,7 +65,7 @@ describe.skipIf(!running)("真 pi E2E（切片4c）", () => {
     expect(v.status).toBe(0);
     const out = `${v.stdout}${v.stderr}`;
     console.log(`[e2e] pi 二进制=${PI_BIN} --version=${out.trim()}`);
-    expect(out).toMatch(PI_VERSION_RE);
+    expect(out.trim()).toBe(PI_VERSION); // s4e①：exact 版本锁（前缀匹配会放行任意补丁版）
   });
 
   it("e2e-1 真管道 readiness 往返+SIGTERM 退役退出确认（六项①②④）", { timeout: 60_000 }, async () => {
@@ -76,7 +82,11 @@ describe.skipIf(!running)("真 pi E2E（切片4c）", () => {
       durability: dur,
       readinessTimeoutMs: 15_000,
     });
-    cleanups.push(() => s.dispose());
+    // s4e Y-C2：异常路径也不留真 pi 子进程——running 则先退役确认退出，再 dispose
+    cleanups.push(async () => {
+      if ((s.getState().supervisor as { phase: string }).phase === "running") await s.stop().catch(() => undefined);
+      await s.dispose();
+    });
     const r = await s.start();
     expect(r).toMatchObject({ kind: "ready", generation: 1 }); // 真实 get_state 往返（受控面探针=生产同一条路径）
     const stop = await s.stop(); // SIGTERM→真实退出→exit 事件=唯一退出证据
@@ -110,7 +120,11 @@ describe.skipIf(!running)("真 pi E2E（切片4c）", () => {
       },
       onSettled: (g) => settledGens.push(g),
     });
-    cleanups.push(() => s.dispose());
+    // s4e Y-C2：异常路径也不留真 pi 子进程——running 则先退役确认退出，再 dispose
+    cleanups.push(async () => {
+      if ((s.getState().supervisor as { phase: string }).phase === "running") await s.stop().catch(() => undefined);
+      await s.dispose();
+    });
     expect(await s.start()).toMatchObject({ kind: "ready" });
 
     const l1 = await s.send("请只回复两个字：收到");
@@ -142,6 +156,7 @@ describe.skipIf(!running)("真 pi E2E（切片4c）", () => {
     dirs.push(dir);
     ensureDirDurable(dir);
     const settledGens: number[] = [];
+    const gen2Hits: string[] = []; // gen2 事件流中命中第一轮回复原文（「收到」）的事件（宽松收集：不精事件字段名）
     let curHandle: ProcessHandle | null = null;
     const host = new PiProcessHost({ piBin: PI_BIN });
     const dur = new FileDurability(join(dir, "journal.jsonl"));
@@ -156,11 +171,20 @@ describe.skipIf(!running)("真 pi E2E（切片4c）", () => {
       turnTimeoutMs: 120_000,
       timeoutPollMs: 100,
       onSettled: (g) => settledGens.push(g),
+      onPiEvent: (ev, gen) => {
+        if (gen !== 2) return;
+        const s = JSON.stringify(ev);
+        if (s.includes("收到")) gen2Hits.push(s);
+      },
       onSpawned: (h) => {
         curHandle = h;
       },
     });
-    cleanups.push(() => s.dispose());
+    // s4e Y-C2：异常路径也不留真 pi 子进程——running 则先退役确认退出，再 dispose
+    cleanups.push(async () => {
+      if ((s.getState().supervisor as { phase: string }).phase === "running") await s.stop().catch(() => undefined);
+      await s.dispose();
+    });
     expect(await s.start()).toMatchObject({ kind: "ready", generation: 1 });
 
     const l1 = await s.send("请只回复两个字：收到");
@@ -196,15 +220,24 @@ describe.skipIf(!running)("真 pi E2E（切片4c）", () => {
     // 拿字符位置 truncate 会截在中途再造撕裂——readFile 不带 utf8 即 Buffer）
     const buf3 = await readFile(jpath);
     truncateSync(jpath, buf3.lastIndexOf(0x0a) + 1); // 半行丢弃（其效果未知已由重放呈现承载）
+    // s4e R3：截尾修复=盘面变更，续写授权前同步文件（大小+数据耐久）；ftruncate 后 fsync
+    const fd3 = openSync(jpath, "r+");
+    try {
+      fsyncSync(fd3);
+    } finally {
+      closeSync(fd3);
+    }
     const repFix = await readJournalFile(jpath);
     expect(repFix.bad).toEqual([]);
 
     // 同一会话对象重组装（六项②readiness+连续两轮：服务不重启，世代 2 接管）
     const r2 = await s.start(); // gate closed→reopen→spawn gen2（持久 --session：pi 上下文延续）
     expect(r2).toMatchObject({ kind: "ready", generation: 2 });
-    const l3 = await s.send("进程重启过，继续，请只回复：恢复");
+    // s4e⑤：pi 侧会话历史恢复的直接证据——第三轮追问第一轮内容，断言回复引用了当时的话（上下文丢失则答不出）
+    const l3 = await s.send("我第一轮请你只回复两个字，你当时回复的是哪两个字？请原样回答这两个字。");
     expect(l3.kind).toBe("launched");
     await until(() => settledGens.length === 2, "第三代次首轮 settled");
+    expect(gen2Hits.length).toBeGreaterThan(0); // gen2 事件流中出现第一轮回复原文=上下文延续证据
     // journal 续写（无失败态，append 模式接旧文件）：3 intents，i-2 仍=效果未知，i-3 settled
     const rep3 = await recoverFromJournal(join(dir, "journal.jsonl"), "e2e");
     expect(rep3.intents.map((r) => r.intentId)).toEqual(["i-1", "i-2", "i-3"]);
@@ -212,4 +245,119 @@ describe.skipIf(!running)("真 pi E2E（切片4c）", () => {
     expect(rep3.settledCount).toBe(2);
     expect((await s.stop()) as unknown).toMatchObject({ kind: "confirmed" });
   });
+
+  // ---- s4e 六项②补强：受控 node 子进程真管道证据（无 LLM 费用） ----
+
+  it("e2e-4 真子进程背压：4MB 写在子进程读前挂起（write false→等 cb），读后兑现且字节完整（六项②）", { timeout: 30_000 }, async () => {
+    const host = new PiProcessHost({ piBin: process.execPath });
+    // 128KB 实测一写即交（内核管道缓冲+libuv 队列），不足以证背压；4MB>全部缓冲面→write 返回 false→cb 等子进程真实消费
+    const script = `
+      process.stdin.pause();
+      process.stdout.write('{"type":"ready"}\\n');
+      let got = 0;
+      setTimeout(() => {
+        process.stdin.on("data", (c) => { got += c.length; });
+        process.stdin.resume();
+        setTimeout(() => { process.stdout.write(JSON.stringify({type:"count", got}) + "\\n"); process.exit(0); }, 400);
+      }, 400);
+    `;
+    const events: Array<{ type?: string; got?: number }> = [];
+    const h = host.spawn(["-e", script], { onEvent: (e) => events.push(e as { type?: string; got?: number }), onStderr: () => {}, onExit: () => {} });
+    await until(() => events.some((e) => e.type === "ready"), "ready 事件（背压前置）", 10_000);
+    const big = "x".repeat(4 * 1024 * 1024) + "\n"; // 4MB+1B
+    let resolved = false;
+    let err: unknown = null;
+    const t0 = Date.now();
+    const p = host.writeStdin(h, big).then(
+      () => {
+        resolved = true;
+      },
+      (e) => {
+        err = e;
+      },
+    );
+    await new Promise((r) => setTimeout(r, 150));
+    expect(resolved).toBe(false); // 子进程未读：写未确认（真管道背压——cb 等真实消费）
+    await p;
+    expect(err).toBe(null);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(250); // 确实等了子进程开始读
+    await until(() => events.some((e) => e.type === "count"), "子进程计数报告", 10_000);
+    expect(events.find((e) => e.type === "count")?.got).toBe(4 * 1024 * 1024 + 1); // 字节完整（背压不丢）
+  });
+
+  it("e2e-5 双管道排空：stdout+stderr 各超管道容量，两泵都排→子进程正常退出（任一不排空则死锁）", { timeout: 30_000 }, async () => {
+    const host = new PiProcessHost({ piBin: process.execPath });
+    // 注意：同步写完立即 process.exit 会丢未 flush 的异步写（实测丢半）→写完等回调齐+宽限再退
+    const script = `
+      const c = "y".repeat(65536);
+      let done = 0;
+      const fin = () => { if (++done === 8) setTimeout(() => process.exit(0), 200); };
+      for (let i = 0; i < 4; i++) { process.stdout.write(c + "\\n", fin); process.stderr.write("E" + c + "\\n", fin); }
+    `;
+    const stderrLines: string[] = [];
+    let exited = false;
+    let exitCode: number | null = null;
+    const h = host.spawn(["-e", script], {
+      onEvent: () => {},
+      onStderr: (t) => stderrLines.push(t),
+      onExit: (c) => {
+        exited = true;
+        exitCode = c;
+      },
+    });
+    await until(() => exited, "子进程退出（任一管道不排空都会阻塞子进程写→死锁→超时）", 15_000);
+    expect(exitCode).toBe(0);
+    expect(stderrLines.length).toBeGreaterThanOrEqual(8); // 4×[stdout-nonjson] + 4×stderr 原文（两路都收到了）
+    expect(stderrLines.some((l) => l.startsWith("E"))).toBe(true);
+    expect(stderrLines.some((l) => l.startsWith("[stdout-nonjson]"))).toBe(true);
+  });
+
+  it("e2e-6 旧代迟到输出不污染新代：真子进程退役前后输出只归因自己代次（六项⑥）", { timeout: 30_000 }, async () => {
+    const scriptA = `
+      process.stdout.write('{"type":"e","ev":"gen1-first"}\\n');
+      process.on("SIGTERM", () => { process.stdout.write('{"type":"e","ev":"gen1-late"}\\n'); process.exit(0); });
+      setInterval(() => {}, 1000);
+    `;
+    const scriptB = `
+      process.stdout.write('{"type":"e","ev":"gen2-first"}\\n');
+      setInterval(() => {}, 1000);
+    `;
+    const routed: Array<{ ev: unknown; gen: number }> = [];
+    const audits: string[] = [];
+    const host = new PiProcessHost({ piBin: process.execPath });
+    const coordinator = {
+      submitTurn: async () => ({ kind: "rejected", stage: "enqueue" as const }),
+      onGenerationRetired: () => ({ clearedCommands: 0, clearedEvents: 0 }),
+      getState: () => ({ command: null }),
+    } as unknown as SupervisorCoordinatorPort;
+    const gate = {
+      getState: () => ({ kind: "idle" as const }),
+      close: () => {},
+    } as unknown as SupervisorGatePort;
+    const sup = new ProcessSupervisor({
+      host,
+      coordinator,
+      gate,
+      now: () => new Date().toISOString(),
+      nowMs: () => performance.now(),
+      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+      audit: (l) => audits.push(l),
+      onProcessEvent: (ev, gen) => routed.push({ ev, gen }),
+    });
+    expect(sup.spawnNext(["-e", scriptA]).kind).toBe("spawned");
+    await until(() => routed.some((x) => x.gen === 1), "gen1 首事件", 10_000);
+    const ret = await sup.retireCurrent(); // SIGTERM→子进程 handler 输出 late 行→exit→确认
+    expect(ret).toMatchObject({ kind: "confirmed" });
+    await new Promise((r) => setTimeout(r, 300)); // 给迟到行（若有）到达的时间
+    expect(sup.spawnNext(["-e", scriptB]).kind).toBe("spawned");
+    await until(() => routed.some((x) => x.gen === 2), "gen2 首事件", 10_000);
+    // 不污染断言：gen1 迟到输出（best-effort）只归因 gen1（stopping 期合法路由或 retired 丢弃），
+    // gen2 只见自己事件——无跨代归因是可观测面（丢弃细节受控面已证）
+    const gen1Evs = routed.filter((x) => x.gen === 1).map((x) => (x.ev as { ev?: string }).ev);
+    expect(gen1Evs.every((e) => e === "gen1-first" || e === "gen1-late")).toBe(true);
+    expect(routed.filter((x) => x.gen === 2).map((x) => (x.ev as { ev?: string }).ev)).toEqual(["gen2-first"]);
+    expect(audits.some((l) => l.includes("generation-retired"))).toBe(true);
+    expect(await sup.retireCurrent()).toMatchObject({ kind: "confirmed" });
+  });
 });
+

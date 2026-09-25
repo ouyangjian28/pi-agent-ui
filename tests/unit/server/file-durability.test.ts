@@ -14,9 +14,11 @@ interface WritePlan {
 class FakeFs implements DurabilityFsPort {
   readonly chunks: Buffer[] = [];
   readonly events: string[] = [];
+  readonly dirSyncs: string[] = [];
   writes: WritePlan[] = [];
   datasyncHang = false;
   closeCalls = 0;
+  syncDirError: Error | null = null;
   private datasyncWaiters: Array<() => void> = [];
 
   async open(): Promise<DurabilityFileHandleLike> {
@@ -44,6 +46,12 @@ class FakeFs implements DurabilityFsPort {
 
   releaseDatasync(): void {
     this.datasyncWaiters.splice(0).forEach((r) => r());
+  }
+
+  async syncDir(dirPath: string): Promise<void> {
+    this.events.push("dirsync");
+    this.dirSyncs.push(dirPath);
+    if (this.syncDirError !== null) throw this.syncDirError;
   }
 
   text(): string {
@@ -94,7 +102,7 @@ describe("FileDurability（受控 fsPort）", () => {
     expect(a1Done).toBe(true); // close 完成前 a1 必已落定（串行证据）
     await a1;
     await expect(a2).rejects.toThrow(/已关闭|失败态/);
-    expect(fs.events).toEqual(["open", "write", "datasync", "close"]); // close 在已接收 append 之后
+    expect(fs.events).toEqual(["open", "write", "datasync", "dirsync", "close"]); // 首写含目录同步（R3）
     expect(fs.closeCalls).toBe(1);
   });
 
@@ -113,7 +121,7 @@ describe("FileDurability（受控 fsPort）", () => {
     await a; // 不得 reject「已关闭」
     await c;
     expect(fs.text()).toBe(`${JSON.stringify(line("enqueue"))}\n`);
-    expect(fs.events).toEqual(["open", "write", "datasync", "close"]);
+    expect(fs.events).toEqual(["open", "write", "datasync", "dirsync", "close"]); // 首写含目录同步（R3）
     await expect(dur.append(line("sending"))).rejects.toThrow(/已关闭/); // close 后新调用仍拒
   });
 
@@ -131,8 +139,32 @@ describe("FileDurability（受控 fsPort）", () => {
     await a2;
     await c;
     expect(fs.text()).toBe(`${JSON.stringify(line("enqueue"))}\n${JSON.stringify(line("sending"))}\n`);
-    expect(fs.events).toEqual(["open", "write", "datasync", "write", "datasync", "close"]);
+    expect(fs.events).toEqual(["open", "write", "datasync", "dirsync", "write", "datasync", "close"]); // dirsync 仅首写（R3）
     expect(fs.closeCalls).toBe(1);
+  });
+
+  it("R3a 目录同步恰一次：首次成功追加后同步父目录，后续追加不再（文件名条目耐久边界）", async () => {
+    const fs = new FakeFs();
+    const dur = new FileDurability("/fake/j.jsonl", { fsPort: fs });
+    await dur.append(line("enqueue"));
+    await dur.append(line("sending"));
+    await dur.close();
+    expect(fs.dirSyncs).toEqual(["/fake"]); // 恰一次+路径=父目录
+    expect(fs.events.filter((e) => e === "dirsync")).toHaveLength(1);
+  });
+
+  it("R3b 目录同步失败=fail-closed：本次 append 拒绝+失败态置位（不确认未同步的文件名）", async () => {
+    const fs = new FakeFs();
+    fs.syncDirError = new Error("EIO: 目录同步失败");
+    const dur = new FileDurability("/fake/j.jsonl", { fsPort: fs });
+    await expect(dur.append(line("enqueue"))).rejects.toThrow(/EIO/);
+    await expect(dur.append(line("sending"))).rejects.toThrow(/失败态/); // 未修复不得续写
+    expect(fs.dirSyncs).toEqual(["/fake"]);
+    dur.markRepaired();
+    fs.syncDirError = null;
+    await dur.append(line("sending")); // 修复+故障排除后：重试成功且完成目录同步（dirSynced 仅成功置位）
+    expect(fs.dirSyncs).toEqual(["/fake", "/fake"]);
+    await dur.close();
   });
 
   it("Y2 部分写重试字节正确性：offset 尊重，盘面逐字节无重写/无丢字节", async () => {

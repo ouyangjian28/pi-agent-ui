@@ -5,8 +5,10 @@
 // close() 同样入队（先排空已接收 append 再关句柄），close 后本实例拒绝新 append（S4-06）。
 // 失败锁（S4-06）：close() 不解除——关闭文件描述符不是修复授权；恢复须走 markRepaired()
 // 显式入口（宿主先完成尾部修复/换段裁决后调用），或另建新实例（换段）。
-// 目录耐久（Y3 备注）：mkdir+datasync 不覆盖「目录条目已耐久」——新建 journal 文件的父目录
-// fsync 归宿主初始化流程（预创建目录+首次 datasync 后目录 sync），本层不代偿。
+// 目录耐久（s4e R3）：首次成功追加（open+写+datasync）返回前同步父目录一次——新建 journal
+// 文件的目录条目（文件名）在此之前不保证耐久；mkdir 先于文件创建≠目录条目已同步。
+// win32 平台目录 open 不可携→跳过（生产部署=Linux；Windows 下文件名耐久不保证，注释声明）。
+// 目录同步失败=本次追加结果未确认：fail-closed 同其他写失败。
 import { open, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { DurabilityPort, JournalLine } from "@pi-agent-ui/protocol";
@@ -14,6 +16,8 @@ import type { DurabilityPort, JournalLine } from "@pi-agent-ui/protocol";
 /** fs 端口（测试注入用；生产=node:fs/promises 同构子集）。 */
 export interface DurabilityFsPort {
   open(path: string, flags: string): Promise<DurabilityFileHandleLike>;
+  /** 目录同步（首写后文件名条目耐久；仅生产真实现需要，测试替身记录调用即可）。 */
+  syncDir?(dirPath: string): Promise<void>;
 }
 export interface DurabilityFileHandleLike {
   /** offset=缓冲区偏移（Y-C3/s4c 命名勘误：非文件 position；append 模式下文件位置由实现推进）。
@@ -28,15 +32,27 @@ export interface FileDurabilityOpts {
   readonly fsPort?: DurabilityFsPort;
 }
 
-const realFs: DurabilityFsPort = {
-  open: (path: string, flags: string) => open(path, flags as "a"),
-};
+const realFs: DurabilityFsPort =
+  process.platform === "win32"
+    ? { open: (path: string, flags: string) => open(path, flags as "a") } // win32 无目录 open：跳过目录同步（文件名耐久不保证，注释声明）
+    : {
+        open: (path: string, flags: string) => open(path, flags as "a"),
+        syncDir: async (dirPath: string) => {
+          const dh = await open(dirPath, "r"); // POSIX：以读模式打开目录再 fsync（文件名条目耐久）
+          try {
+            await dh.datasync();
+          } finally {
+            await dh.close();
+          }
+        },
+      };
 
 export class FileDurability implements DurabilityPort {
   private fh: DurabilityFileHandleLike | null = null;
   private queue: Promise<unknown> = Promise.resolve();
   private failed = false;
   private closed = false;
+  private dirSynced = false; // 首写后文件名条目已同步（append 不改目录条目，只做一次）
 
   constructor(readonly path: string, private readonly opts: FileDurabilityOpts = {}) {}
 
@@ -76,6 +92,14 @@ export class FileDurability implements DurabilityPort {
           offset += bytesWritten;
         }
         await fh.datasync(); // fdatasync：行内容已确认（append 模式下数据指针随写推进，无需 fsync 元数据）
+        if (!this.dirSynced) {
+          // R3（s4e）：首次追加返回前同步父目录——否则新建文件名不在目录耐久面内（掉电可丢文件名）。
+          const fs = this.opts.fsPort ?? realFs;
+          if (fs.syncDir !== undefined) {
+            await fs.syncDir(dirname(this.path));
+            this.dirSynced = true; // 成功才置位：失败走 catch=本次 append 未确认（fail-closed）
+          }
+        }
       } catch (e) {
         this.failed = true; // 打开/写入/sync 任一失败=结果未确认：后续 append 拒绝，直到恢复流程裁决
         throw e;
