@@ -58,7 +58,7 @@ export function estJson(v: unknown): number {
  *  整帧终判再退末条循环重测，保证任何页实测 ≤budgetBytes。 */
 export function buildRecoveryFrame(
   requestId: string, file: string, report: RecoveryReportLike, offset: number,
-  budgetBytes: number = LIMITS.frameMaxBytes,
+  budgetBytes: number = LIMITS.pageFrameBudgetBytes, // c8 R3：页预算统一 200k（262144=硬限防线，非装页默认）
 ): ServerFrame | null {
   if (offset < 0 || offset > report.perIntent.length) return null; // 域外
   // 行级粗估并入终判循环：首版直接从 recoveryPageSize 条起按整帧实测收缩（派生视图开销随整帧计入）
@@ -97,7 +97,7 @@ export function buildSessionsFrame(
   requestId: string, sessions: readonly SessionSummaryDTO[], offset: number, listVersion: number,
   dirReliability: "full" | "partial" = "full",
   limit: number = LIMITS.listPageSizeDefault,
-  budgetBytes: number = LIMITS.frameMaxBytes,
+  budgetBytes: number = LIMITS.pageFrameBudgetBytes, // c8 R3：页预算统一 200k（262144=硬限防线，非装页默认）
 ): ServerFrame | null {
   const n = Math.max(1, Math.min(LIMITS.listPageSizeMax, Math.floor(limit)));
   if (offset < 0 || offset > sessions.length) return null;

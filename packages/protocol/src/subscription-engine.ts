@@ -32,6 +32,9 @@ export type SubscribeRequest =
 
 export type Phase = "init" | "paging" | "live" | "closed";
 
+/** 最大合法 requestId 信封（c8 R1：装页按最坏重试信封预算——任何合法重试不得超页预算） */
+const MAX_ENVELOPE_REQUEST_ID = "r".repeat(64); // requestIdPattern=/^[\w-]{1,64}$/
+
 type OutboxItem =
   | { readonly kind: "frame"; readonly frame: ServerFrame; readonly est: number } // status 等即时帧（编入序锚点）
   | { readonly kind: "hist"; readonly ev: HistoryEvent; readonly est: number }    // 落盘事件（快照后 journal 追加/缓冲回放）
@@ -106,14 +109,22 @@ export class SubscriptionEngine {
       }
       // 幂等优先（C6-05）：命中最近 2 页缓存→页内容+status 快照复用+新 envelope（不重调 status、不续命 TTL）
       const cached = this.recentPages.find((p) => p.pageFrom.seq === cur.seq);
-      if (cached) return [this.emitPage(req.requestId, cur, cached.events, cached.done, cached.status)];
+      if (cached) {
+        // R1：缓存重发同样整帧终判（防御层——装页已按最坏信封预留，此处不应触发；触发=显式失败）
+        const f = this.emitPage(req.requestId, cur, cached.events, cached.done, cached.status);
+        if ((this.d.estimateFrame ?? estimateFrameBytes)(f) > LIMITS.pageFrameBudgetBytes) {
+          this.close(4431, "事件超预算", false);
+          return [{ t: "error", code: 4431, message: "事件超预算", retryable: false, requestId: req.requestId }];
+        }
+        return [f];
+      }
       // 追平补页（C5-05 收紧+C6-05 幂等）：仅 live 态（空页 done，生成入缓存——重试同 statusVersion）；paging 期 H+1 属超前（跳页）
       if (cur.seq === this.barrier + 1) {
         if (this.phase === "live") {
           const status = this.d.status(); // 首次生成冻结（C6-05）；重试走上方缓存分支
           const empty: PageCache = { pageFrom: { streamId: this.streamId, seq: cur.seq }, barrier: this.barrier, events: [], done: true, status };
           const f = this.emitPage(req.requestId, empty.pageFrom, empty.events, true, status);
-          if ((this.d.estimateFrame ?? estimateFrameBytes)(f) > LIMITS.pageFrameBudgetBytes) {
+          if ((this.d.estimateFrame ?? estimateFrameBytes)({ ...(f as { requestId: string }), requestId: MAX_ENVELOPE_REQUEST_ID } as ServerFrame) > LIMITS.pageFrameBudgetBytes) {
             this.close(4431, "事件超预算", false);
             return [{ t: "error", code: 4431, message: "事件超预算", retryable: false, requestId: req.requestId }];
           }
@@ -176,7 +187,9 @@ export class SubscriptionEngine {
     let frame: ServerFrame | null = null;
     while (true) {
       const f = this.emitPage(requestId, page, events, done, status);
-      if (measure(f) <= LIMITS.pageFrameBudgetBytes) { frame = f; break; }
+      // R1：终判按最坏重试信封（64B requestId）测——缓存重发不因合法 requestId 变长击穿页预算
+      const worst = { ...(f as { requestId: string }), requestId: MAX_ENVELOPE_REQUEST_ID } as ServerFrame; // 快照帧必有 requestId；上界克隆仅供测量
+      if (measure(worst) <= LIMITS.pageFrameBudgetBytes) { frame = f; break; }
       if (events.length === 0) {
         // 首条即超整帧预算：无截断/占位规则→显式失败（4431 关订阅；retryable=false=订阅已亡，恢复=重新订阅）
         this.close(4431, "事件超预算", false);
@@ -299,7 +312,7 @@ export class SubscriptionEngine {
       const item = this.outbox.shift()!;
       if (item.kind === "frame") {
         flushHist(histEst); flushLive(); histEst = 0; // 帧前先冲（编入序）
-        if (failed) { this.outbox.unshift(item); break; } // 冲批已失败：帧退回队列，错误帧为唯一出口
+        if (failed) break; // R2：冲批已失败→丢弃当前已取出项（close 已清队列；unshift 会让 closed 队列复活普通帧，下次 drain 误交付）
         if (out.length >= maxFrames) { this.outbox.unshift(item); break; }
         if (est(item.frame) > LIMITS.frameMaxBytes) { out.push(overBudget()); break; }
         out.push(item.frame); commit(item.est);

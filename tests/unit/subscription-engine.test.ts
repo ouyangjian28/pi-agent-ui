@@ -56,14 +56,17 @@ describe("c7 回归（C6-01..05）", () => {
     expect(seen).toEqual(Array.from({ length: 450 }, (_, i) => i + 1)); // 不丢不重，序连续
   });
 
-  it("C6-04：稳态队列不误杀——2000 轮 status+drain(1) 恒 live（积压计量=当前待发，非累计流量）", () => {
+  it("C6-04：稳态队列不误杀——2000 轮恒留 1 项待发（GPT 口径：队列永不全空）+drain(1) 恒 live", () => {
     const { eng } = makeEngine(2);
     eng.startSnapshot("r-1"); // H=2 → 首页即 done 进 live
     eng.drain(1);
+    eng.onStatus(fakeStatus(1));
+    eng.onStatus(fakeStatus(2)); // 预留 2 项：drain(1) 后仍剩 1——队列永不全空
+    eng.drain(1);
     for (let i = 0; i < 2000; i++) {
-      eng.onStatus(fakeStatus(2 + i));
+      eng.onStatus(fakeStatus(3 + i));
       const out = eng.drain(1);
-      expect(out).toHaveLength(1); // 每轮恰发 1 帧（旧实现第 429 轮起 backlogBytes 误关）
+      expect(out).toHaveLength(1); // 每轮恰发 1 帧（旧实现第 429 轮起 backlogBytes 误关=累计流量）
       expect(eng.state.phase).toBe("live");
     }
   });
@@ -426,5 +429,83 @@ describe("订阅引擎 13 时序", () => {
     const expired = eng.handle({ kind: "page", requestId: "r-3", snapshotId: done.snapshotId, historyNext: { streamId: "s-1", seq: 1 } })[0] as { t: string; code: number };
     expect(expired.t).toBe("error");
     expect(expired.code).toBe(4409);
+  });
+});
+
+describe("c8 回归（R1/R2：缓存信封预算+失败清理）", () => {
+  it("R1：缓存重发不因合法 requestId 变长击穿页预算（120 条 500 中文+64B requestId 重试）", () => {
+    const idx = new ReadIndex("s.jsonl", "s-1");
+    const cn = "忆".repeat(500);
+    // GPT 探针口径：前 119 条各 500 中文 + 末条 325 中文 → 首次页（1B requestId）199,938B，64B requestId 重试 200,001B 击穿
+    for (let i = 1; i <= 119; i++) {
+      idx.append("journal", `L${i}`, `L${i}`, { kind: "message", seq: i, ts: null, generation: null, intentId: null, entryId: `e-${i}`, role: "user", textPreview: { text: cn, truncated: false }, final: true } as HistoryEvent);
+    }
+    idx.append("journal", "L120", "L120", { kind: "message", seq: 120, ts: null, generation: null, intentId: null, entryId: "e-120", role: "user", textPreview: { text: cn.slice(0, 325), truncated: false }, final: true } as HistoryEvent);
+    let idSeq = 0;
+    const eng = new SubscriptionEngine({ index: idx, status: () => fakeStatus(1), now: () => 0, newId: () => `id-${++idSeq}` });
+    const first = eng.startSnapshot("r")[0] as unknown as import("@pi-agent-ui/protocol").ServerFrame; // 1 字符 requestId
+    expect(first.t).toBe("snapshot");
+    expect(estimateFrameBytes(first)).toBeGreaterThan(190_000); // 真实大页（接近预算）
+    expect(estimateFrameBytes(first)).toBeLessThanOrEqual(LIMITS.pageFrameBudgetBytes);
+    // 装页按最坏信封（64B requestId）预算 → 首页本就应留有余量
+    const firstWorst = { ...first, requestId: "r".repeat(64) } as unknown as import("@pi-agent-ui/protocol").ServerFrame;
+    expect(estimateFrameBytes(firstWorst)).toBeLessThanOrEqual(LIMITS.pageFrameBudgetBytes); // R1 核心：任何合法重试不超
+    // 缓存重发（合法 64 字符 requestId，validateClientFrame 域内）
+    const retry = eng.handle({ kind: "page", requestId: "r".repeat(64), snapshotId: (first as { snapshotId: string }).snapshotId, historyNext: { streamId: "s-1", seq: 1 } })[0] as unknown as import("@pi-agent-ui/protocol").ServerFrame;
+    expect(retry.t).toBe("snapshot");
+    expect(estimateFrameBytes(retry)).toBeLessThanOrEqual(LIMITS.pageFrameBudgetBytes); // 旧实现=200,001B 击穿
+    // 幂等：内容/游标/status 与首页一致（envelope 除外）
+    const { requestId: _a, ...firstRest } = first as { requestId?: string };
+    const { requestId: _b, ...retryRest } = retry as { requestId?: string };
+    expect(retryRest).toEqual(firstRest);
+  });
+
+  it("R2：live 冲批失败→丢弃已取出 status（closed 队列不复活；二次 drain 空；错误恰一份）", () => {
+    const idx = new ReadIndex("s.jsonl", "s-1");
+    for (let i = 1; i <= 2; i++) idx.append("journal", `L${i}`, `L${i}`, hEv(i));
+    let idSeq = 0;
+    // 估算器仅对 live origin events 帧返回 300000（GPT 探针口径）
+    const eng = new SubscriptionEngine({ index: idx, status: () => fakeStatus(1), now: () => 0, newId: () => `id-${++idSeq}`,
+      estimateFrame: (f) => {
+        const fr = f as unknown as { t: string; origin?: string };
+        if (fr.t === "events" && fr.origin === "live") return 300_000;
+        return estimateFrameBytes(f);
+      } });
+    const snap = eng.startSnapshot("r-1")[0] as { snapshotId: string; historyNext: { streamId: string; seq: number } | null };
+    expect(snap.historyNext).toBeNull(); // H=2 单页 done
+    eng.drain(1);
+    eng.onLiveEvent({ kind: "process-note", phase: "running" });
+    eng.onStatus(fakeStatus(9)); // 帧项排在 live 项后
+    const out1 = eng.drain();
+    expect(out1).toHaveLength(1); // 恰一份错误
+    expect(out1[0]!.t).toBe("error");
+    expect((out1[0] as { code: number }).code).toBe(4431);
+    expect((out1[0] as { retryable: boolean }).retryable).toBe(false);
+    expect(eng.state.phase).toBe("closed");
+    const out2 = eng.drain(); // 旧实现：resurrected status 在此交付
+    expect(out2).toEqual([]); // R2：closed 后无残留普通帧
+  });
+
+  it("R2：history 冲批失败同样不残留（origin 切换路径）", () => {
+    const idx = new ReadIndex("s.jsonl", "s-1");
+    for (let i = 1; i <= 2; i++) idx.append("journal", `L${i}`, `L${i}`, hEv(i));
+    let idSeq = 0;
+    const eng = new SubscriptionEngine({ index: idx, status: () => fakeStatus(1), now: () => 0, newId: () => `id-${++idSeq}`,
+      estimateFrame: (f) => {
+        const fr = f as unknown as { t: string; origin?: string };
+        if (fr.t === "events" && fr.origin === "history") return 300_000;
+        return estimateFrameBytes(f);
+      } });
+    const snap = eng.startSnapshot("r-1")[0] as { snapshotId: string };
+    void snap;
+    eng.drain(1);
+    eng.onHistoryAppend({ kind: "message", seq: 3, ts: null, generation: null, intentId: null, entryId: "e-3", role: "user", textPreview: { text: "x", truncated: false }, final: true } as HistoryEvent);
+    eng.onStatus(fakeStatus(9));
+    const out1 = eng.drain();
+    expect(out1).toHaveLength(1);
+    expect(out1[0]!.t).toBe("error");
+    const out2 = eng.drain();
+    expect(out2).toEqual([]);
+    expect(eng.state.phase).toBe("closed");
   });
 });

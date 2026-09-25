@@ -34,9 +34,9 @@ interface EventCursor { readonly streamId: StreamId; readonly seq: number; }  //
 **修订条款**：
 - **源文件指纹=整文件 SHA-256**（读/增量观察时计算；文件变更时重算重扫）。投影前缀校验=重扫结果与索引已编入定位（源+行定位）逐一比对；前缀不符（截短/替换/重写/header.id 变化）→换流。**指纹覆盖完整字节，非首行**（C3-R01）。
 - **索引预算（c5 B02+c7 C6-03 诚实口径）**：LRU ≤32 流×每流 ≤20_000 事件。**常驻=理论估算（非实测）**：仅坐标≈48B/事件，含事件投影（预览文本/身份字段）≈数百 B~2KB/事件（500 中文字预览≈1.5KB）→理论最坏 ≈1.2GB；按预览配额典型 ≈100~300MB。**触顶状态机（c7 修正）**：现流触顶→废弃换流一次（宽容额度按文件记）；**新流在预算内 `get` 恒放行**（不因历史触顶记录误拒空流）；**现流再次触顶且额度已用**→`FileOverBudgetError`（宿主转 4402；有限出口，不循环重扫）；LRU 淘汰后重建视为新流（重建流再触顶时因额度记录仍会被拒）。`append` **不设硬门**——写侧容量由宿主经 `get`/`overBudget` 检查+换流维持（接线验收项，非本层保证）；`get` 触达即 LRU 刷新；**boot 隔离**：流 ID=注入随机源 base16(16B)，不随注册序重放（跨 boot 同 s-1 假命中不可能）。
-- **索引不变量（c5 B02）**：①`append` 原子赋 seq（输入携带 seq 一律被覆盖统一——引擎/索引坐标恒一致）；②每已编入行保存**内容摘要**（源+定位+事件投影的规范化摘要），前缀比对=位置+定位+摘要三重——**同位内容改写=换流**（不只比位置）；③触顶=换流非标记。
+- **索引不变量（c5 B02+c8 口径对齐）**：①`append` 原子赋 seq（输入携带 seq 一律被覆盖统一——引擎/索引坐标恒一致）；②每已编入行保存**内容摘要=fnv1a64Hex(JSON.stringify([源, 定位, raw 原文]))**（c6 C5-02 实装：对 **raw 原始行**而非事件投影——投影抹平型改写也换流；read-index.ts:71），前缀比对=位置+定位+摘要三重——**同位内容改写=换流**（不只比位置）；③触顶=换流非标记。
 - **编排保证（时序③口径修正）**：任何事件只在其编入时刻获得 seq>H（快照发起后编入的必然>H）——「分页间新增落 H 前」**不可能发生**；两源新增一律在快照结束后按编入序投递（history 域续读）。时序表 §3.7 已修正。
-- 换流全集：服务重启；journal/session 截短/替换/重写；绑定重建；索引卸载。游标拒绝：streamId≠当前→4409；超前/跨会话→4409；非法 seq→4404。
+- 换流全集：服务重启；journal/session 截短/替换/重写；绑定重建；索引卸载。游标拒绝（c8 单模型）：streamId≠当前→4404（B01 完整游标域——错流不命中缓存）；**合法域内非期待游标（未缓存且≠expectNext）→4409**（按游标续读；引擎实现口径）；域外（seq<1 或 >H+1）→4409；非法 seq 类型→4404。
 
 ### 1.4 订阅实例与状态版本
 
@@ -158,7 +158,7 @@ type ProgressNote = "thinking" | "tool-start" | "tool-end" | "compacting" | "mes
 - 只读解析 session JSONL（完整行边界=末 `\n`；半行不判坏不发布）；消息正文投影（role/content 块）；**工具调用=宿主消息内内容块**，块键=`entryId:blockIndex`（多 toolCall 共用 entryId 时块索引分立——C3-R04）；异常行占位 `corrupt-entry`（entryId=`corrupt-<byteOffset>`）；零副作用。
 - **归因规则（冻结）**：
   - **用户条目**：hash+attachmentIdentity+ordinal 三元组匹配 journal enqueue（`matchKeyOf` 同构）→携带 intentId+generation。
-  - **assistant/toolResult 条目（c6 C5-06 方向修正）**：归因区间=**[本意图 user 锚（consumed.anchorEntryId 的 entryId 字符串身份）, intervalEnd{entryId,lengthHash}]，从锚向后含两端**（`session-attribution.ts` 纯投影已落地：区间内归该 intentId；user-A/assistant-A/user-B/assistant-B 中 assistant-A 归 A——旧「向前到下一锚」方向反了）。锚=entryId 身份非行号/扫描序；终点=entryId+lengthHash 双身份（防同 id 改写伪造终点）。**不得用跨文件扫描先后当归属**。**序前置条件（c7 C5-06 残余收口，撤销「任意置换不变」过宽承诺）**：consumed 数组按 **journal 行序**给定（宿主扫描两源的调度顺序任意——纯函数收完整数组，调度置换不影响结果；但数组内部序=journal 序是前置条件，不得反转数组）；同意图多次 consumed 同锚=**journal 序最晚**（数组末项）生效；同意图不同锚=各区间独立生效。区间无效（锚/终点不可见、哈希不符、终点在锚前）→`intentId:null` 不猜；重叠区间=最近锚（内层）优先。**迟到更正不回改已发布事件**（发布后归属固定；更正只影响后续编入=延迟编入或永久 null）。
+  - **assistant/toolResult 条目（c6 C5-06 方向修正）**：归因区间=**[本意图 user 锚（consumed.anchorEntryId 的 entryId 字符串身份）, intervalEnd{entryId,lengthHash}]，从锚向后含两端**（`session-attribution.ts` 纯投影已落地：区间内归该 intentId；user-A/assistant-A/user-B/assistant-B 中 assistant-A 归 A——旧「向前到下一锚」方向反了）。锚=entryId 身份非行号/扫描序；终点=entryId+lengthHash 双身份（防同 id 改写伪造终点）。**不得用跨文件扫描先后当归属**。**序前置条件（c7 C5-06+c8 R3 收口，撤销「任意置换不变」过宽承诺）**：consumed 数组按 **journal 行序**给定（宿主扫描两源的调度顺序任意——纯函数收完整数组，调度置换不影响结果；但数组内部序=journal 序是前置条件，不得反转数组）；**同一意图至多一个活跃区间=最新 consumed（journal 序末项）生效，旧锚区间整体作废**（`latest.set` 覆盖；append-only journal 下 consumed 只追加、不撤销——旧锚作废不产生回改）。同意图不同锚多次 consumed（u1→a1 后 u2→a2）=归因 `[null,null,I,I]`（u1/a1 落作废区间）——**非「各区间独立生效」**（旧句作废；fixture 固化）。区间无效（锚/终点不可见、哈希不符、终点在锚前）→`intentId:null` 不猜；重叠区间=最近锚（内层）优先。**迟到更正不回改已发布事件**（发布后归属固定；更正只影响后续编入=延迟编入或永久 null）。
   - **多 toolCall 块**：同 entryId 的第 n 个 toolCall 块=块键 `entryId:blockIndex`（0 起，编入序）；toolResult 以其 toolCallId 回链（无 toolCallId 的孤儿 toolResult→`intentId:null`）。
   - **分支口径（声明）**：v1 投影=当前文件全量；分支切换=文件替换→换流（§1.3）。
 - **final 逐项映射（冻结）**：stop→`final:true`；length→`final:true`（截断终局，`textPreview.truncated` 标注——SanitizedText 结构体内字段，无独立 previewTruncated 顶层字段=c6 单模型）；aborted→`final:true`（终局非成功）；toolUse→`final:false`（等待工具结果）；无 stopReason 的 user/toolCall→按角色（user 终局 true；toolCall false）。
@@ -211,11 +211,11 @@ interface SnapshotFrame {
 3b. **字节装页（c5 B04+c7 C6-01 精确化）**：页边界在快照服务（servePage）内按**条数上限（200）贪心装页 → 整帧序列化实测（UTF-8）≤200_000B 终判**双约束决定——粗估仅快筛，**终判=完整帧（含 requestId/游标/冻结 status 信封）真实序列化字节**，超限退末条循环重测；首条必装（退空仍有待发数据→显式 4431，不静默空页）；`done`/`expectNext` 由**核验通过后的实装末位**决定——引擎状态（expectNext/live 化/页缓存）在核验通过后才提交。live 事件合批：每帧 ≤`maxEventsPerLiveFrame`(7) 事件（7×32k 单事件上限+信封 <262_144B 帧硬上限）；帧数（≤16/轮）与每帧事件数**分立常量**；合批帧同样先验字节再提交 liveSeq。
 4. 断线续读：hello→subscribe(f,cursor{streamId,455})→补 455..H'→接续。
 5. 4409（重启/截断/卸载）：旧 cursor 失配→error 4409→重新初始化。
-6. 4431：缓冲超限→error+close 4431（尽力）→destroy→退避重连→cursor 补齐→追赶节流。
+6. 4431（订阅级）：订阅缓冲超限→error 4431+该订阅 close（retryable=false；引擎已实现：错误恰一份、closed 后无残留普通帧）→客户端新 subscribe+cursor 补齐→追赶节流。连接级 4431（队列 1024 帧/1MB）→连接 destroy→退避重连（§5.3 表分立行）。
 7. 同连接主动 resync：A 订阅中 subscribe(f,cursor)→旧订阅终止（新 id）→补齐→续。
 8. A→B→A 晚到页：A 的 snapshotId 在 A 终止后失效→4404。
 9. 已退订续页：4404。
-10. **同页重复请求（修正）**：网络重试同页（historyNext=最近已服务页）→幂等重发缓存内容；期待下页以外的其他值→4404。
+10. **同页重复请求（修正，c8 单模型）**：网络重试同页（historyNext=最近已服务页）→幂等重发缓存内容（新 requestId envelope+整帧终判）；**期待下页以外的其他合法域内值→4409**（跳页/过期页；按游标续读）；非法 seq→4404。
 11. 历史读完与 live 交错：缓冲回放按编入序有序投递（history 帧与 live 帧可交错，各自域内有序）。
 12. live 进度未落盘断线：不承诺恢复（终局以 history 补）。
 13. 高生产率追赶失败：4431 有界出口（支持条件=可追赶负载）。
@@ -277,7 +277,7 @@ interface RecoveryIntentRow { readonly intentId: string; readonly verdict: "sett
 - short-fragment 无源端分类：blockedReasons 保持计数分类（归因分类归写链，读侧不造）。
 - **残片证据口径（c6 单模型）**：坏行残片不随盘面修复消失——权威载体=**RecoveryEvidenceSnapshot**（captureRecoveryEvidence 修复前捕获；recoverFromSnapshot 唯一合法出口；冷启动无快照→unavailable(no-evidence-snapshot)，`recoveryAvailability` 纯选择器可执行门）。旧「索引见过坏行/journal 侧消耗」表述作废。
 - **修复后残片（c6 C5-01/C5-07 单模型修订）**：宿主修复盘面**不消耗**残片证据——权威载体=RecoveryEvidenceSnapshot（修复前捕获，bad 永久保留）；`recoverFromSnapshot` 按快照事实分派（未修复快照=diskBlocked 恒阻断+resumable 恒空；`withRepair` 标记后才进残片证据裁决）。若读索引曾编入 journal-corrupt/unknown-line 证据事件而盘面重读已无对应坏行（原始行摘要前缀不符）→`availability:"unavailable"; reason:"concurrent-modification"`（不输出 resumable 假安全；须宿主走写链确认后重置读索引=换流）。旧「journal 侧消耗」表述作废。
-- **evidenceHash 输入域（c6 对齐实现）**：`snapshotEvidenceHash`（recover.ts）=SHA-256 over `JSON.stringify([version, file, sessionId, lines, bad, attributedFragments(按 排序后), repaired])`——**完整权威快照输入域**（非字节偏移、非 journal 裸 SHA；attributedFragments 排序=冻结编码，归因集合顺序不影响哈希）；跨页固定（get-recovery 首次调用冻结，页缓存同版本）。
+- **evidenceHash 输入域（c6 对齐实现+c8 排序键补全）**：`snapshotEvidenceHash`（recover.ts:520-530）=SHA-256 over `JSON.stringify([version, file, sessionId, lines, bad, attributedFragments(按 `raw` 字典序，`raw` 相同再按 `intentId` 字典序排序后), repaired])`——**完整权威快照输入域**（非字节偏移、非 journal 裸 SHA；排序=冻结编码，归因集合顺序不影响哈希；对象内部仍按其序列化字节摘要，不承诺与构造顺序无关的规范化）；跨页固定（get-recovery 首次调用冻结，页缓存同版本）。
 - **恢复分页版本（修订）**：get-recovery 首次响应冻结证据版本（evidenceHash+内容页缓存）；续页带 `evidenceHash` 参数→不符→`error 4409 retryable`（证据已变更，客户端重拉）；不带→按当前版本新快照。恢复投影读取有界（§5.6）。
 
 ---
@@ -330,7 +330,8 @@ type ServerFrame =
 | 4409 | 游标过期/流已替换/证据已变更 | 请求级 | true |
 | 4413 | 会话身份损坏 | 请求级 | false |
 | 4429 | 订阅数超限 | 请求级 | false |
-| 4431 | 慢客户端缓冲超限 | 连接 close（尽力 4431 后 destroy） | true |
+| 4431（订阅级） | 订阅出帧超预算/订阅缓冲超限（1024 帧/256KB） | **订阅 close**（error 4431 后该订阅终局；连接与其余订阅不受影响） | false（该订阅已终局；恢复=新 subscribe 请求） |
+| 4431（连接级） | 连接统一发送队列超限（1024 帧/1MB；接线层实现） | 连接 close（尽力 4431 后 destroy） | true（重连后原请求可续；按游标补齐） |
 | 4432 | 心跳超时 | 连接 close **1000**（正常关闭；4432 只在 error 帧标识原因） | true |
 
 **判别优先级（冻结，逐级短路）**：
@@ -405,7 +406,7 @@ type ServerFrame =
 | C3-R03 线协议 | §5.2 events 判别联合（history 无 liveSeq/live 无 refSeq）+origin 统一字面量+note 受控枚举+turn-state 带 statusVersion+快照后落盘走 history 帧 |
 | C3-R04 归因/块 | §3.5 三元组匹配（用户）+代次边界邻接（assistant）+blockIndex 块键+分支口径声明+final 逐项映射 |
 | C3-R05 残片证据 | §4 concurrent-modification 不可用出口+evidenceHash 完整输入域+perIntent 穷尽表（含 cancelled/not-evaluated/unknownEffect-only 行）+不落新裁决 |
-| C3-R06 恢复分页 | §4 evidenceHash 参数续页+4409 证据变更+PageOf 五字段+§5.6 字节装页（不甩 4404）+recovery 帧保 unavailable；**单 offset 只驱动 perIntent**（unknownEffect/resumable 恒整表自然有界、truncated=false、next=null——c6 C5-07 实装口径，替代旧「三 next 独立驱动」） |
+| C3-R06 恢复分页 | §4 evidenceHash 参数续页+4409 证据变更+PageOf 五字段+§5.6 字节装页（不甩 4404）+recovery 帧保 unavailable；**单 offset 派生三视图（c7 起）**——perIntent 装页驱动，unknown/resumable 从本页行派生（total=全集计数；truncated/next 随 perIntent）；c5-c6 旧「恒整表自然有界」口径**作废**（c6 探针 3000×128B=488KB 证伪） |
 | C3-R07 脱敏 | §5.4 单段路径允许透出声明+PEM 整块/截断遮蔽+先凭据后白名单+`~` 前缀撞键消除+number 澄清+精确 Unicode 集+SanitizedText 结构化+人工 golden |
 | C3-R08 请求预算 | §5.6 连接级统一队列+在途 4+计算并发 2+5s 排队超时+有界读取 8MB/1000 文件 |
 | C3-R09 错误矩阵 | §5.3 版本层 4403（合法整数≠1）+有界包络先识别 t+写类不论字段 4405+4432 close 1000+requestId 缺失不回显+file 正则统一 |

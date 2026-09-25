@@ -62,6 +62,13 @@ describe("会话条目归因（c6 C5-06）", () => {
     expect(reversed.map((x) => x.intentId)).toEqual(["i", "i", null]); // 末项=旧区间 m1→m2 不归（前置条件被违反的可见后果）
   });
 
+  it("⑦b c8 R3：同意图不同锚=最新 consumed 生效，旧锚区间作废（GPT 反例 u1,a1,u2,a2→[null,null,I,I]）", () => {
+    const entries = [e("u1", "user"), e("a1", "assistant"), e("u2", "user"), e("a2", "assistant")];
+    // journal 序：先 consumed(u1→a1)，后 consumed(u2→a2)——同意图两区间
+    const r = attributeSessionEntries({ consumed: [c("i", "u1", "a1"), c("i", "u2", "a2")], entries });
+    expect(r.map((x) => x.intentId)).toEqual([null, null, "i", "i"]); // u1/a1 落作废区间（非「各区间独立生效」——旧承诺已废）
+  });
+
   it("⑧无 consumed→全 null；system/toolResult 同规则归区间", () => {
     const entries = [e("u1", "user"), e("s1", "system"), e("t1", "toolResult")];
     const r0 = attributeSessionEntries({ consumed: [], entries });

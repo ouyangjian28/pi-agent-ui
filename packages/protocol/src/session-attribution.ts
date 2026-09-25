@@ -7,7 +7,8 @@
 // - 锚=entryId 身份（非行号/扫描序）；终点=entryId+lengthHash 双身份（防同 id 改写伪造终点）。
 // - 区间无效（锚不可见/终点不可见/终点在锚之前/哈希不符）→ 该意图区间整体 null（不猜，不回改已发布）。
 // - 重叠区间：嵌套/交错时内层（更近的未闭合锚）优先——条目归最近的后开锚；
-//   与「区间=[锚,终点]包含判定」一致，且对 journal 行扫描顺序置换不敏感（纯集合关系）。
+//   与「区间=[锚,终点]包含判定」一致。宿主扫描两源的**调度顺序**不影响结果（纯函数收完整数组），
+//   但 consumed 数组内部须按 journal 行序给定（前置条件，宿主保证——见契约 §3.5）。
 // - 同一意图多次 consumed：最新（journal 序末条）生效；锚不变更权威（append-only 契约）。
 import type { EntryIdentity } from "./identity.ts";
 
@@ -36,9 +37,10 @@ export interface EntryAttribution {
 }
 
 /** 归因主投影：每个会话条目→意图 id 或 null。
- *  纯函数：只依赖条目序列与 consumed 集合，不依赖两源的扫描先后（置换不敏感）。 */
+ *  纯函数：依赖条目序列与 consumed 数组（journal 序前置条件由宿主保证——数组内部序=journal 行序；
+ *  两源扫描调度顺序不影响结果）。 */
 export function attributeSessionEntries(input: AttributionInput): EntryAttribution[] {
-  // 1. 每意图取最新 consumed（journal 序末条）
+  // 1. 每意图取最新 consumed（journal 序末条；旧锚区间作废——同意图至多一个活跃区间，§3.5 c8）
   const latest = new Map<string, ConsumedInterval>();
   for (const c of input.consumed) latest.set(c.intentId, c);
 

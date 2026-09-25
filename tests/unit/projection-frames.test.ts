@@ -1,6 +1,6 @@
 // c6 C5-07：recovery/sessions 纯投影装页。
 import { describe, expect, it } from "vitest";
-import { buildRecoveryFrame, buildSessionsFrame, packPage, type RecoveryIntentRow, type SessionSummaryDTO, type SanitizedText } from "@pi-agent-ui/protocol";
+import { buildRecoveryFrame, buildSessionsFrame, packPage, estimateFrameBytes, type RecoveryIntentRow, type ServerFrame, type SessionSummaryDTO, type SanitizedText } from "@pi-agent-ui/protocol";
 
 function row(id: string): RecoveryIntentRow { return { intentId: id, verdict: "settled", provisional: false }; }
 function sum(file: string, rel: "full" | "partial" = "full"): SessionSummaryDTO {
@@ -50,9 +50,10 @@ describe("纯投影装页（c6 C5-07）", () => {
     expect(f2.unknownEffect.truncated).toBe(false);
   });
 
-  it("buildRecoveryFrame：3000 意图大表逐页有界（C6-02 整表突破反例）+resumable 从本页派生", () => {
+  it("buildRecoveryFrame：3000 意图×128 字符 ID 逐页有界（C6-02+GPT c7 精度：真实长 ID+UTF-8 字节断言）", () => {
+    const longId = (i: number) => `i-${String(i + 1).padStart(4, "0")}-${"x".repeat(120)}`; // ≈128 字符/ID（GPT 探针口径）
     const perIntent = Array.from({ length: 3000 }, (_, i) =>
-      i % 2 === 0 ? row(`i-${i + 1}`) : { intentId: `i-${i + 1}`, verdict: "not-evaluated" as const, provisional: false });
+      i % 2 === 0 ? row(longId(i)) : { intentId: longId(i), verdict: "not-evaluated" as const, provisional: false });
     const resumable = perIntent.filter((r) => r.verdict === "not-evaluated").map((r) => r.intentId);
     const report = { evidenceHash: "a".repeat(64), resumeBlocked: false, diskBlocked: false, unknownEffect: [], resumable, perIntent };
     const seen: string[] = [];
@@ -62,11 +63,11 @@ describe("纯投影装页（c6 C5-07）", () => {
       const f = buildRecoveryFrame(`r-${pages}`, "f.jsonl", report, off)! as unknown as { perIntent: { items: RecoveryIntentRow[]; next: { offset: number } | null }; resumable: { items: string[]; total: number }; [k: string]: unknown };
       pages += 1;
       seen.push(...f.resumable.items);
-      expect(JSON.stringify(f).length).toBeLessThan(200_000); // 整帧有界（C6-02）
+      expect(estimateFrameBytes(f as unknown as ServerFrame)).toBeLessThanOrEqual(200_000); // 整帧 UTF-8 实测有界（C6-02；旧实现 488,476B）
       if (f.perIntent.next === null) break;
       off = f.perIntent.next.offset;
     }
-    expect(pages).toBe(6); // 3000/recoveryPageSize(500)=6 页（每页整帧有界）
+    expect(pages).toBe(6); // 128B ID×500 行≈95KB+派生 resumable≈33KB<200k → 恢复页上限=500 行/页（字节断言仍恒真；整表突破型由 M-c02 变异覆盖）
     expect(seen).toEqual(resumable); // 全量翻页后派生视图拼回全集（顺序=行序）
   });
 
@@ -84,14 +85,17 @@ describe("纯投影装页（c6 C5-07）", () => {
   });
 
   it("buildSessionsFrame：目录级 partial 输入→页级 partial（C6-06 目录截断反例）+默认 limit 50+limit 钳位", () => {
-    const sessions = Array.from({ length: 80 }, (_, i) => sum(`f${i}.jsonl`)); // 全 full 条目
+    const sessions = Array.from({ length: 300 }, (_, i) => sum(`f${i}.jsonl`)); // 全 full 条目（GPT c7 精度：>200 才能证明上限）
     const f1 = buildSessionsFrame("r-1", sessions, 0, 7, "partial")! as unknown as { listReliability: string; sessions: unknown[]; hasMore: boolean };
     expect(f1.listReliability).toBe("partial"); // 条目全 full 但目录扫描截断 → 页级 partial（保守聚合）
     expect(f1.sessions).toHaveLength(50); // 默认 limit=50（非旧固定 200）
     expect(f1.hasMore).toBe(true);
     const f2 = buildSessionsFrame("r-2", sessions, 50, 7, "full", 999)! as unknown as { sessions: unknown[]; hasMore: boolean };
-    expect(f2.sessions).toHaveLength(30); // limit=999 钳到 200 → 剩 30 条
-    expect(f2.hasMore).toBe(false);
+    expect(f2.sessions).toHaveLength(200); // 300 条输入 + limit=999 钳到 200（旧测试 80 条只到 30，证不了上限）
+    expect(f2.hasMore).toBe(true);
+    const f3 = buildSessionsFrame("r-3", sessions, 200, 7, "full", 999)! as unknown as { sessions: unknown[]; hasMore: boolean };
+    expect(f3.sessions).toHaveLength(100); // 续页余量
+    expect(f3.hasMore).toBe(false);
   });
 
   it("单条超预算→null（显式失败，宿主转错误帧）", () => {
