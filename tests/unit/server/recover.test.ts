@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readJournalFile, buildRecoverReport, recoverFromJournal } from "../../../apps/server/src/runtime/recover.js";
+import type { BadJournalEntry } from "../../../apps/server/src/runtime/recover.js";
 import type { JournalLine } from "@pi-agent-ui/protocol";
 
 const dirs: string[] = [];
@@ -172,5 +173,100 @@ describe("recover（恢复入口受控面）", () => {
     const r = buildRecoverReport(lines, "s1");
     expect(r.unknownEffect).toEqual([]); // cancelled/delivered 均有终局
     expect(r.resumable).toEqual([]);
+  });
+
+  // ---- s4f F1：不可关联残片=恢复范围级阻断（盘面修复≠重发裁决）；转义 ID 解码；宿主显式归因 ----
+
+  it("F1a：不可关联 sending 残片（{\"t\":\"send）→修复后续读（blocked=false）resumable 仍恒空+unattributableFragments 呈现；显式归因后解锁", () => {
+    const enqueue: JournalLine = {
+      t: "enqueue",
+      intentId: "i-1",
+      sessionId: "s1",
+      generation: 1,
+      leafId: "l1",
+      matchKey: { textHash: "h", attachmentIdentity: "", ordinal: 0 },
+      payload: { kind: "prompt", rawText: "x", attachments: [], sentAt: "t" },
+    };
+    const frag: BadJournalEntry = { raw: '{"t":"send', error: "撕裂尾", partialTail: true };
+    // 修复后续读：盘面已截齐（好行）+携残片证据+blocked:false——不可关联→恢复范围级阻断
+    const r = buildRecoverReport([enqueue], "s1", { fragments: [frag], blocked: false });
+    expect(r.blocked).toBe(false);
+    expect(r.unattributableFragments).toEqual([frag]); // 呈现交宿主裁决
+    expect(r.resumable).toEqual([]); // 不可关联→不给任何重发授权（两证分离）
+    // 宿主人工调查后显式归因到已知意图→并入 unknown+阻断解除
+    const r2 = buildRecoverReport([enqueue], "s1", {
+      fragments: [frag],
+      blocked: false,
+      attributedFragments: [{ raw: frag.raw, intentId: "i-1" }],
+    });
+    expect(r2.unattributableFragments).toEqual([]);
+    expect(r2.unknownEffect).toEqual(["i-1"]);
+    expect(r2.resumable).toEqual([]); // i-1 已发送（残片归因）→仍不可重发
+  });
+
+  it("F1b：残片 intentId 为 JSON 转义（\\u0069-1=i-1）→字面量解码后正确关联（裸正则提取会漏）", () => {
+    const enqueue: JournalLine = {
+      t: "enqueue",
+      intentId: "i-1",
+      sessionId: "s1",
+      generation: 1,
+      leafId: "l1",
+      matchKey: { textHash: "h", attachmentIdentity: "", ordinal: 0 },
+      payload: { kind: "prompt", rawText: "x", attachments: [], sentAt: "t" },
+    };
+    // raw 原文含转义序列（非解码后的 i-1）——合法 JSON 字符串身份
+    const frag: BadJournalEntry = { raw: '{"t":"sending","intentId":"\\u0069-1"', error: "撕裂尾", partialTail: true };
+    const r = buildRecoverReport([enqueue], "s1", { fragments: [frag], blocked: false });
+    expect(r.unattributableFragments).toEqual([]); // 解码成功→可关联
+    expect(r.unknownEffect).toEqual(["i-1"]);
+  });
+
+  it("F1c：归因不在场（raw 不匹配任何残片）→忽略，阻断保留", () => {
+    const enqueue: JournalLine = {
+      t: "enqueue",
+      intentId: "i-1",
+      sessionId: "s1",
+      generation: 1,
+      leafId: "l1",
+      matchKey: { textHash: "h", attachmentIdentity: "", ordinal: 0 },
+      payload: { kind: "prompt", rawText: "x", attachments: [], sentAt: "t" },
+    };
+    const frag: BadJournalEntry = { raw: '{"t":"send', error: "撕裂尾", partialTail: true };
+    const r = buildRecoverReport([enqueue], "s1", {
+      fragments: [frag],
+      blocked: false,
+      attributedFragments: [{ raw: '{"t":"resp', intentId: "i-1" }], // 不在场的 raw
+    });
+    expect(r.unattributableFragments).toEqual([frag]);
+    expect(r.resumable).toEqual([]);
+  });
+
+  it("F2：嵌套结构校验（payload={}/matchKey=[]/cleared=[42]/intervalEnd=[]/kind 非法/attachments 元素非字符串/ordinal 非整数→拒收不进重放）", async () => {
+    const goodEnq = JSON.parse(enq("i-1")) as Record<string, unknown>;
+    const p = await writeJournal([
+      JSON.stringify({ ...goodEnq, payload: {} }), // payload 缺四字段（GPT 探针：旧版照常 resumable）
+      JSON.stringify({ ...goodEnq, matchKey: [] }), // 数组冒充对象
+      JSON.stringify({ ...goodEnq, payload: { ...(goodEnq.payload as object), kind: "nope" } }), // kind 非枚举
+      JSON.stringify({ ...goodEnq, payload: { ...(goodEnq.payload as object), attachments: [1] } }), // 元素非字符串
+      JSON.stringify({ ...goodEnq, matchKey: { ...(goodEnq.matchKey as object), ordinal: 1.5 } }), // 非整数
+      '{"t":"clear","sessionId":"s1","cleared":[42]}', // cleared 元素非字符串（旧版静默略过）
+      '{"t":"consumed","intentId":"i-1","anchorEntryId":"a","intervalEnd":[]}', // intervalEnd 数组冒充
+      enq("i-1"),
+      '{"t":"settled","intentId":"i-1"}',
+      "",
+    ]);
+    const r = await readJournalFile(p);
+    expect(r.lines.map((l) => (l as { t: string }).t)).toEqual(["enqueue", "settled"]); // 嵌套非法全拒收
+    expect(r.bad).toHaveLength(7);
+    expect(r.bad.every((b) => b.error.includes("嵌套非法"))).toBe(true);
+    expect(r.bad.map((b) => b.error)).toEqual([
+      "schema 损坏：嵌套非法 payload.kind", // payload={}：kind 检查先于 rawText（首报 kind）
+      "schema 损坏：嵌套非法 matchKey",
+      "schema 损坏：嵌套非法 payload.kind",
+      "schema 损坏：嵌套非法 payload.attachments",
+      "schema 损坏：嵌套非法 matchKey.ordinal",
+      "schema 损坏：嵌套非法 cleared（元素须字符串）",
+      "schema 损坏：嵌套非法 intervalEnd",
+    ]);
   });
 });

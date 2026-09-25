@@ -86,7 +86,7 @@ export class RpcSession {
   private cmdSeq = 0;
   private intentSeq = 0;
   private pollTimer: NodeJS.Timeout | null; // dispose 置 null
-  private disposeP: Promise<void> | null = null; // 并发 dispose 复用同一收尾 Promise（s4e Y-C2：不能让第二次调用提前返回——那时 close 可能仍挂起）
+  private disposeP: Promise<void> | null = null; // 并发 dispose 复用同一收尾 Promise（s4e Y-C2：不能让第二次调用提前返回——那时 close 可能仍挂起）；s4f F3：先发布后运行——同步重入（close 回调里再 dispose）也返回同一 Promise，恰一次 close
 
   constructor(private readonly opts: RpcSessionOpts) {
     const now = opts.now ?? (() => new Date().toISOString());
@@ -175,8 +175,15 @@ export class RpcSession {
   /** 释放本地资源（Y-C2/s4c：巡检定时器+耐久句柄）；进程退役另走 stop()。幂等。 */
   async dispose(): Promise<void> {
     if (this.disposeP !== null) return this.disposeP;
-    this.disposeP = this.runDispose();
-    return this.disposeP;
+    // F3：先发布再运行（微任务边界）：外部 durability.close 的同步回调里若重入 dispose()，
+    // 此刻 disposeP 已发布→返回同一 Promise，不会二次 close。
+    // 注：close 内不得 await 本 dispose Promise（自等待死锁）——同步契约注释见 DurabilityPort.close。
+    const p = (async () => {
+      await Promise.resolve();
+      return this.runDispose();
+    })();
+    this.disposeP = p;
+    return p;
   }
 
   private async runDispose(): Promise<void> {

@@ -12,7 +12,6 @@ import { PiProcessHost } from "../../apps/server/src/host/process-host.js";
 import { FileDurability } from "../../apps/server/src/runtime/file-durability.js";
 import { RpcSession } from "../../apps/server/src/runtime/rpc-session.js";
 import { readJournalFile, recoverFromJournal } from "../../apps/server/src/runtime/recover.js";
-import { spawn } from "node:child_process";
 import { ProcessSupervisor, type SupervisorCoordinatorPort, type SupervisorGatePort } from "@pi-agent-ui/protocol";
 import type { ProcessHandle } from "@pi-agent-ui/protocol";
 
@@ -22,8 +21,8 @@ const PI_VERSION = "0.86.1";
 /** 真实参数面（TECH §24/§40；--no-extensions=受控环境，扩展 UI 面归后续 UI 接线层）。 */
 const piArgsFor = (sessionFile: string): string[] => ["--mode", "rpc", "--no-extensions", "--session", sessionFile];
 
-/** 目录耐久（s4c 六项⑥+s4e R3 修正）：mkdir 后逐层向上 fsync——目录自身条目须在父层耐久，
- *  自身 fsync 同步的是「目录内容变更」（journal 新建文件名的耐久由 FileDurability 首写后 syncDir 承担）。 */
+/** 目录耐久（s4c 六项⑥+s4e R3+s4f 口径收窄）：mkdir 后 fsync dir+parent 两层（非任意递归——
+ *  更深新建祖先目录的条目耐久归宿主部署；journal 新建文件名的耐久由 FileDurability 首写后 syncDir 承担）。 */
 function ensureDirDurable(dir: string): void {
   mkdirSync(dir, { recursive: true });
   const parent = dirname(dir);
@@ -156,7 +155,11 @@ describe.skipIf(!running)("真 pi E2E（切片4c）", () => {
     dirs.push(dir);
     ensureDirDurable(dir);
     const settledGens: number[] = [];
-    const gen2Hits: string[] = []; // gen2 事件流中命中第一轮回复原文（「收到」）的事件（宽松收集：不精事件字段名）
+    // s4f：口令化两代一致性断言——第一轮用非常见固定口令（PENGUIN-42 不会出现在 pi 系统提示/事件噪声里），
+    // gen1 捕获 assistant 确实回了口令，gen2 追问后回复同一口令=--session 历史恢复直接证据（两代正文一致）。
+    const TOKEN = "PENGUIN-42";
+    const gen1Hits: string[] = [];
+    const gen2Hits: string[] = [];
     let curHandle: ProcessHandle | null = null;
     const host = new PiProcessHost({ piBin: PI_BIN });
     const dur = new FileDurability(join(dir, "journal.jsonl"));
@@ -172,9 +175,11 @@ describe.skipIf(!running)("真 pi E2E（切片4c）", () => {
       timeoutPollMs: 100,
       onSettled: (g) => settledGens.push(g),
       onPiEvent: (ev, gen) => {
-        if (gen !== 2) return;
         const s = JSON.stringify(ev);
-        if (s.includes("收到")) gen2Hits.push(s);
+        if (s.includes(TOKEN)) {
+          if (gen === 1) gen1Hits.push(s);
+          if (gen === 2) gen2Hits.push(s);
+        }
       },
       onSpawned: (h) => {
         curHandle = h;
@@ -187,9 +192,10 @@ describe.skipIf(!running)("真 pi E2E（切片4c）", () => {
     });
     expect(await s.start()).toMatchObject({ kind: "ready", generation: 1 });
 
-    const l1 = await s.send("请只回复两个字：收到");
+    const l1 = await s.send(`请只回复这个口令，不要任何其它文字：${TOKEN}`);
     expect(l1.kind).toBe("launched");
     await until(() => settledGens.length === 1, "第一轮 settled（铺垫完整轮）");
+    await until(() => gen1Hits.length > 0, "第一轮 assistant 正文含口令（捕获实际答案）");
 
     // 第二轮进行中注入真实 SIGKILL（六项⑤：kill -9 = 意外退出，非退役路径）
     const l2 = await s.send("这条消息会被进程死亡打断，请只回复：打断");
@@ -233,11 +239,12 @@ describe.skipIf(!running)("真 pi E2E（切片4c）", () => {
     // 同一会话对象重组装（六项②readiness+连续两轮：服务不重启，世代 2 接管）
     const r2 = await s.start(); // gate closed→reopen→spawn gen2（持久 --session：pi 上下文延续）
     expect(r2).toMatchObject({ kind: "ready", generation: 2 });
-    // s4e⑤：pi 侧会话历史恢复的直接证据——第三轮追问第一轮内容，断言回复引用了当时的话（上下文丢失则答不出）
-    const l3 = await s.send("我第一轮请你只回复两个字，你当时回复的是哪两个字？请原样回答这两个字。");
+    // s4e⑤+s4f：pi 侧会话历史恢复的直接证据——第三轮追问第一轮口令，gen2 回复同一口令（两代正文一致；上下文丢失则答不出）
+    const l3 = await s.send("我第一轮请你回复过一个口令，那个口令是什么？只回口令本身。");
     expect(l3.kind).toBe("launched");
     await until(() => settledGens.length === 2, "第三代次首轮 settled");
-    expect(gen2Hits.length).toBeGreaterThan(0); // gen2 事件流中出现第一轮回复原文=上下文延续证据
+    expect(gen1Hits.length).toBeGreaterThan(0); // gen1 实际答案已捕获（非零证据）
+    expect(gen2Hits.length).toBeGreaterThan(0); // gen2 回复同一口令=历史延续直接证据
     // journal 续写（无失败态，append 模式接旧文件）：3 intents，i-2 仍=效果未知，i-3 settled
     const rep3 = await recoverFromJournal(join(dir, "journal.jsonl"), "e2e");
     expect(rep3.intents.map((r) => r.intentId)).toEqual(["i-1", "i-2", "i-3"]);
@@ -263,6 +270,7 @@ describe.skipIf(!running)("真 pi E2E（切片4c）", () => {
     `;
     const events: Array<{ type?: string; got?: number }> = [];
     const h = host.spawn(["-e", script], { onEvent: (e) => events.push(e as { type?: string; got?: number }), onStderr: () => {}, onExit: () => {} });
+    cleanups.push(() => host.stop(h, "SIGKILL")); // s4f：断言中途失败不留子进程
     await until(() => events.some((e) => e.type === "ready"), "ready 事件（背压前置）", 10_000);
     const big = "x".repeat(4 * 1024 * 1024) + "\n"; // 4MB+1B
     let resolved = false;
@@ -305,17 +313,26 @@ describe.skipIf(!running)("真 pi E2E（切片4c）", () => {
         exitCode = c;
       },
     });
+    cleanups.push(() => host.stop(h, "SIGKILL")); // s4f：断言中途失败不留子进程
     await until(() => exited, "子进程退出（任一管道不排空都会阻塞子进程写→死锁→超时）", 15_000);
     expect(exitCode).toBe(0);
-    expect(stderrLines.length).toBeGreaterThanOrEqual(8); // 4×[stdout-nonjson] + 4×stderr 原文（两路都收到了）
-    expect(stderrLines.some((l) => l.startsWith("E"))).toBe(true);
-    expect(stderrLines.some((l) => l.startsWith("[stdout-nonjson]"))).toBe(true);
+    // s4f：分通道断言（合计≥8 会放行 7+1）——stdout 泵转送=「[stdout-nonjson] 前缀+原文」；stderr 泵=原文「E+64KB」。
+    // 每通道恰 4 条且长度恒定（65536+换行内容完整不截）。
+    const viaStdoutPump = stderrLines.filter((l) => l.startsWith("[stdout-nonjson] "));
+    const viaStderrPump = stderrLines.filter((l) => l.startsWith("E"));
+    expect(viaStdoutPump).toHaveLength(4);
+    expect(viaStderrPump).toHaveLength(4);
+    expect(viaStdoutPump.every((l) => l.length === "[stdout-nonjson] ".length + 65536)).toBe(true); // 行文本不含换行
+    expect(viaStderrPump.every((l) => l.length === 65537)).toBe(true); // "E"+y×65536（拆行后不含换行）
   });
 
   it("e2e-6 旧代迟到输出不污染新代：真子进程退役前后输出只归因自己代次（六项⑥）", { timeout: 30_000 }, async () => {
     const scriptA = `
       process.stdout.write('{"type":"e","ev":"gen1-first"}\\n');
-      process.on("SIGTERM", () => { process.stdout.write('{"type":"e","ev":"gen1-late"}\\n'); process.exit(0); });
+      process.on("SIGTERM", () => {
+        // s4f：写完回调再退（process.exit 会丢未 flush 异步写）——gen1-late 必达，迟到证据非 best-effort
+        process.stdout.write('{"type":"e","ev":"gen1-late"}\\n', () => process.exit(0));
+      });
       setInterval(() => {}, 1000);
     `;
     const scriptB = `
@@ -346,14 +363,19 @@ describe.skipIf(!running)("真 pi E2E（切片4c）", () => {
     });
     expect(sup.spawnNext(["-e", scriptA]).kind).toBe("spawned");
     await until(() => routed.some((x) => x.gen === 1), "gen1 首事件", 10_000);
-    const ret = await sup.retireCurrent(); // SIGTERM→子进程 handler 输出 late 行→exit→确认
+    const ret = await sup.retireCurrent(); // SIGTERM→子进程 handler 写完 late 行才退→确认
     expect(ret).toMatchObject({ kind: "confirmed" });
-    await new Promise((r) => setTimeout(r, 300)); // 给迟到行（若有）到达的时间
     expect(sup.spawnNext(["-e", scriptB]).kind).toBe("spawned");
+    cleanups.push(async () => {
+      // s4f：断言中途失败不留常驻子进程（scriptB setInterval 保活）
+      const st = sup.getState() as { phase: string };
+      if (st.phase !== "idle") await sup.retireCurrent().catch(() => undefined);
+    });
     await until(() => routed.some((x) => x.gen === 2), "gen2 首事件", 10_000);
-    // 不污染断言：gen1 迟到输出（best-effort）只归因 gen1（stopping 期合法路由或 retired 丢弃），
-    // gen2 只见自己事件——无跨代归因是可观测面（丢弃细节受控面已证）
+    // 不污染断言：gen1 迟到输出只归因 gen1（stopping 期合法路由或 retired 丢弃），gen2 只见自己事件。
+    // s4f：gen1-late 为强制迟到（SIGTERM handler 写完回调才 exit）——非空迟到证据非 best-effort。
     const gen1Evs = routed.filter((x) => x.gen === 1).map((x) => (x.ev as { ev?: string }).ev);
+    expect(gen1Evs).toContain("gen1-late"); // 迟到行必达（写完回调才退）
     expect(gen1Evs.every((e) => e === "gen1-first" || e === "gen1-late")).toBe(true);
     expect(routed.filter((x) => x.gen === 2).map((x) => (x.ev as { ev?: string }).ev)).toEqual(["gen2-first"]);
     expect(audits.some((l) => l.includes("generation-retired"))).toBe(true);

@@ -256,6 +256,32 @@ describe("RpcSession（受控替身）", () => {
     await fresh.close();
   });
 
+  it("F3 同步重入：close 回调里同步再 dispose——恰一次 close（先发布 Promise 再运行，微任务边界）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "f3-"));
+    dirs.push(dir);
+    let closeCalls = 0;
+    let session: RpcSession | null = null;
+    const dur: DurabilityPort = {
+      append: async () => {},
+      close: () => {
+        closeCalls += 1;
+        // 同步重入：close 被调用的同刻重入 dispose（旧版：runDispose 同步段先调 close、disposeP 尚未赋值→二次 close）
+        void session?.dispose();
+        return Promise.resolve();
+      },
+    };
+    session = new RpcSession({
+      piArgs: ["--mode", "rpc", "--no-session"],
+      journalPath: join(dir, "j.jsonl"),
+      sessionId: "s1",
+      host: new FakeRpcHost(),
+      durability: dur,
+    });
+    sessions.push(session);
+    await session.dispose();
+    expect(closeCalls).toBe(1); // 旧版此处为 2
+  });
+
   it("Y-C2b 并发 dispose：复用同一收尾 Promise——第二次 await 不早于第一次（close 挂起时不提前返回）", async () => {
     const dir = await mkdtemp(join(tmpdir(), "yc2b-"));
     dirs.push(dir);
