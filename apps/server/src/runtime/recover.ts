@@ -5,7 +5,7 @@
 //   - sending 且无终态行（lastVerdict=null）→「写后中断，效果未知」（可能已写完整/部分帧）
 //   - responseTimeoutRecorded 且无终态行 →「超时未结算，效果未知」
 //   - lastVerdict==="unknown" → 上轮已判效果未知
-//   - 非 sending 且无终态 →「已受理未发送」（同 matchKey 重发=幂等安全；仅当无坏行时才输出——见 blocked）
+//   - 非 sending 且无终态 →「已受理未发送」（同 matchKey 重发=幂等安全；仅当无坏行时才输出——见 resumeBlocked）
 // 损坏阻断（s4e R1+s4f F1）：存在未裁决坏行（含撕裂尾）时 diskBlocked=true、resumable 恒空——
 //   「识别了坏尾」不等于「已处理坏尾对判据的影响」：被剔除的残片可能已承载 sending，
 //   证据不存在不能重新解释为「从未发送」。宿主先修复盘面（截尾/换段+重读）再获得恢复授权。
@@ -148,7 +148,7 @@ export interface RecoverReport {
   readonly intents: readonly IntentRecord[];
   /** 效果未知（须保守呈现/人工裁决；含 sending 无终态、超时未结算、已判 unknown、取消前已发送）。 */
   readonly unknownEffect: readonly IntentId[];
-  /** 已受理未发送（同 matchKey 重发=幂等安全；cancelled 不在内——取消是终局，重发违背用户意图）。**blocked=true 时恒空：先修复盘面再谈权限**。 */
+  /** 已受理未发送（同 matchKey 重发=幂等安全；cancelled 不在内——取消是终局，重发违背用户意图）。**resumeBlocked=true（含盘面 blocked）时恒空：先修复盘面、裁决残片证据，再谈权限**。 */
   readonly resumable: readonly IntentId[];
   readonly settledCount: number;
   /** 存在未裁决坏行（撕裂尾/schema 损坏）：恢复授权阻断——宿主先修复（截尾/换段+重读）再获得可执行结论。 */

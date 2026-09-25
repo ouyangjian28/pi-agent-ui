@@ -176,7 +176,7 @@ export class RpcSession {
   async dispose(): Promise<void> {
     if (this.disposeP !== null) return this.disposeP;
     // F3：先发布再运行（微任务边界）：外部 durability.close 的同步回调里若重入 dispose()，
-    // 此刻 disposeP 已发布→返回同一 Promise，不会二次 close。
+    // 此刻 disposeP 已发布（共享同一关闭操作与完成结果，同步重入 dispose 也走同一链）→不会二次 close。
     // 注：close 内不得 await 本 dispose Promise（自等待死锁）——同步契约注释见 DurabilityPort.close。
     const p = (async () => {
       await Promise.resolve();

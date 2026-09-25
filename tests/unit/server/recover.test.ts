@@ -408,6 +408,17 @@ describe("recover（恢复入口受控面）", () => {
     }
   });
 
+  it("F1k3（M-h1a2 定向）：纯嵌套身份键残片（无任何顶层身份键）保守阻断——栈长检查被去时顶层身份被嵌套键冒名顶替", () => {
+    const lines: JournalLine[] = [JSON.parse(enq("i-1")), JSON.parse(enq("i-2"))];
+    // 无顶层 intentId 键；嵌套 {"intentId":"i-1"} 完整闭合。栈长检查在→嵌套键冲突→阻断；
+    // 若被去（变异）→嵌套键冒名 topValue="i-1"→误归因 i-1（unknownEffect=["i-1"]）
+    const r = buildRecoverReport(lines, "s1", { fragments: [{ raw: '{"metadata":{"intentId":"i-1"}', error: "撕裂尾", partialTail: true }], blocked: false });
+    expect(r.unknownEffect).toEqual([]);
+    expect(r.unattributableFragments).toHaveLength(1);
+    expect(r.resumeBlocked).toBe(true);
+    expect(r.resumable).toEqual([]);
+  });
+
   it("F1k2（I1 正常面）：转义键解码后同等识别——顶层唯一转义 intentId 键+完整值仍归因；数字段截断保持", () => {
     const lines: JournalLine[] = [JSON.parse(enq("i-1")), JSON.parse(enq("i-2"))];
     // GPT s4i 观察例：顶层 "intent\u0049d"（解码=intentId）+完整值→接受归因（解码后同等识别，非一律拒绝转义）
