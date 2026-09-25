@@ -142,19 +142,22 @@
 
 接线面（真 pi 子进程 spawn/真信号/真 waitpid 退出确认/真 stdin 背压/接管恢复流）仍 🔴，归切片 4 接线。
 
-### adapter 切片 4（真进程接线：ProcessHost 适配+组装 RpcSession；4a/4b 两步；受控替身 16 it+协调器/网关纯逻辑测试不变）
+### adapter 切片 4（真进程接线：ProcessHost 适配+组装 RpcSession；4a/4b 两步；受控替身 35 it+协调器/网关纯逻辑测试不变）
 
 | 编号 | 断言落点 | 状态 |
 | --- | --- | --- |
-| 真子进程适配 writeStdin（Node 流背压：write false→等 drain 才 resolve；EPIPE/带错 destroy/关闭→reject 呈现调用方；多源竞态单结算；destroyed 预检；每次 spawn 新句柄不可复用） | process-host.test@真背压（64KB>16KB HWM 未读=挂起，读走 drain 后 resolve+全字节断言）+EPIPE destroy | ✅（PassThrough 真流语义；变异：M-a 背压不等 drain 立即 resolve→例挂；**M-241 教训：首轮变异假存活=陈旧编译产物遮蔽源码，清理后六杀全中**） |
-| 真子进程退出证据（exit 事件=唯一退出证据；异步 spawn 失败 error 事件（ENOENT 无伴随 exit）折算 onExit(null,null)=保守意外退出；句柄级去重（error+exit 只报一次）；退出后 writeStdin 拒；残尾 flush） | process-host.test@ENOENT 折算+后到 exit 不重复+exit 后写拒+正常退出残尾 | ✅（变异：M-b 去折算→例挂） |
-| 行分帧（StringDecoder 跨块多字节+\n 拆行；坏行分流 [stdout-nonjson]；stderr 透传；大块多行一次解析） | process-host.test@好行/坏行/撕裂+stderr+50 行大块 | ✅（沿用 r8 LinePump） |
+| 真子进程适配 writeStdin（S4-01 双门：成功=回调无错 cbOk 且背压释放 backlog（write 返 true 或 drain），true≠已写入；EPIPE/带错 destroy/背压中关闭/同步 throw→reject；多源竞态单结算；生命周期级 stdin error 吸收器（结算后迟到流错误不 uncaught）） | process-host.test@真背压（64KB）+S4-01a 短写异步 EPIPE（HoldStdin 受控回调：write true 但回调带错→reject）+S4-01b/c/d 背压中 destroy/close/同步 throw | ✅（变异：M-a 背压门→挂；**M-01 去 cbOk 门→S4-01a 挂**；PassThrough 小写在无可读者时回调立即兑现=测不了「true 但未确认」窗口→改 HoldStdin） |
+| 真子进程退出证据（exit=唯一退出证据；S4-02 分立：pid undefined（ENOENT 进程未创建）→折算 onExit(null,null)；pid 在（kill EPERM 运行错误）→仅 stderr+句柄保留等真 exit；句柄级去重；退出后 writeStdin 拒；残尾 flush） | process-host.test@ENOENT 折算+S4-02 pid=4242 运行错误不折算（exits 空+句柄保留 stdin 可用+真 exit 上报一次）+exit 后写拒+残尾 | ✅（变异：M-b/M-02b 一律折算→挂） |
+| 行分帧（StringDecoder 跨块多字节+\n 拆行；坏行分流 [stdout-nonjson]（Y2：type 非字符串同坏行）；stderr 透传；大块多行一次解析） | process-host.test@好行/坏行/撕裂+stderr+50 行大块+Y2 | ✅ |
+| 回调隔离（S4-07：onEvent 消费者抛错→[handler-error] 诊断+同块后续行继续；onStderr/audit 抛错不阻断 kill/退出登记） | process-host.test@S4-07a 审计抛错不阻断退出登记+stop 仍发+exit 上报；S4-07b 同块 a 抛错 b 仍处理 | ✅（变异：M-07 重抛→挂） |
 | stop 信号透传+未知句柄 no-op；closeStdin=stdin.end() 写完成面（finish 事件非 end） | process-host.test@stop+closeStdin | ✅ |
-| FileDurability（append=JSONL+open a+循环写部分写重试+fdatasync；内部 Promise 队列串行化保行原子；任一失败 fail-closed 拒续写直到 close 重置） | rpc-session.test@FileDurability JSONL 落盘+EISDIR 首错+次错「未修复失败态」+close 重置 | ✅（变异：M-c 去失败置位→例挂；写不确定语义=s1b 续加契约，恢复以重放裁决） |
-| 组装 demux（type:"response"+id 字符串→readiness waiter 或 c<commandId>→onRpcResponse；agent_settled→onSettledEvent；其余→onPiEvent；未知 id response 丢弃） | rpc-session.test@两轮正常序（response 归因+settled 结算+gate 回 idle+journal enqueue/sending/settled 各 2 行）+探针回执不进事件流 | ✅（变异：M-d 去归因→两轮例挂） |
-| readiness（spawn 后写 get_state 探针；success 回执→ready；超时→自动 retireCurrent 返回 readiness-timeout 不留活进程；重试探针 gen2 成功） | rpc-session.test@探针往返+readiness 超时（SIGTERM 观察→并行放行退出确认；不能先 await start——内部 retire 等退出确认会死锁=测试设计面）+重试 | ✅（变异：M-e 去超时退役→例挂；探针 id=ready-<gen>） |
-| 意外退出重组装（exit→gate closed(generation-retired)+supervisor idle；start=reopen+spawn gen2+新探针；新代次整链路跑通） | rpc-session.test@意外退出后重开新轮 | ✅（supervisor 语义透传） |
-| 双超时驱动（RpcSession 巡检 interval 定期 checkResponseTimeout+checkTurnTimeout（后者同步 void 签名——.catch 属类型错误且运行时 TypeError 炸 interval，实修为 try/catch）；响应超时后 settled 仍收口；晚到 response=ignored-late 不炸） | rpc-session.test@响应超时不阻断收口 | ✅（变异：M-f 去巡检驱动→例挂；dispose() 清 interval=测试隔离） |
-| stop（=retireCurrent：SIGTERM→退出确认 confirmed） | rpc-session.test@stop confirmed | ✅（优雅 stdin EOF 面=host.closeStdin 已备，v1 会话级 stop 走信号路径，EOF 归闲置回收后续） |
-| 帧渲染（send→{id:"c<N>",type:"prompt"}JSON 行；matchKey=matchKeyOf(text,[],ordinal)；commandId/intentId 递增） | rpc-session.test@两轮（帧 id 递增+prompt 类型断言，经 runTurn 帧计数基准） | 🟡（steer/followUp 流中行为 streamingBehavior 归消费接线；attachments 传递归 UI 层） |
-| 真 pi 进程 E2E（readiness→连续两轮→retire→SIGKILL 恢复重放） | —— | 🔴（未落；s3c 验收表八项归本切片接线证据：handle 不可复用/退出证据/异步 spawn 失败清理/spawn-exited 分支/真实背压/携代次事件泵/日志失败后安全续加/readiness+连续两轮） |
+| FileDurability（S4-06：DurabilityFsPort 注入；部分写重试+零进展保护；close 入队串行不抢先已接收 append；**close 不解锁 failed**，恢复须 markRepaired() 显式授权（换段=新实例）；closed 同步置位新 append 立拒） | file-durability.test@S4-06a 部分写撕裂尾+close 不解锁（盘面不推进）+S4-06b markRepaired+S4-06c close 串行（a1 落定先于 close 兑现）+零进展；rpc-session@close 不解锁+换段 | ✅（变异：M-c/M-06r close 不串行→S4-06c 挂；M-241 教训见上） |
+| 组装 demux（type:"response"+id 字符串→readiness waiter 或 c<commandId>→onRpcResponse；agent_settled→onSettledEvent；其余→onPiEvent；未知 id response 丢弃） | rpc-session.test@两轮正常序+探针回执不进事件流 | ✅（变异：M-d 去归因→挂） |
+| readiness（S4-03：探针写入/响应/超时=同一有界启动操作，writeP+gateP Promise.all 聚合无孤立 rejection；写失败立即退役不等超时；超时自动 retire 返回 readiness-timeout；重试 gen2） | rpc-session.test@S4-03a write fail→800ms 内 SIGTERM（readinessTimeoutMs=5000 证明写失败驱动）+S4-03b write 挂起→超时能终结等待→重试 ready | ✅（变异：M-e 去超时退役→挂；**M-03r writeP 不入聚合→S4-03a 挂（强化后）**） |
+| 代次所有权（S4-04：探针成功侧复核当前代（换代→superseded 不置 ready）；失败侧先复核所有权只退役自己代；启动中 stop→取消探针+旧 start=superseded 不双退） | rpc-session.test@S4-04a 旧 start 超时续体不退役 gen2（GPT P5）+S4-04b 同步段窗口（GPT P6）+S4-04c 启动中 stop | ✅（变异：M-04 成功侧→挂；M-04b 失败侧→3 例挂） |
+| 完成通知（S4-05：onSettled 只从协调器确认路径发出（settled/accepted-and-settled/recorded-and-settled）；buffered/discard/耐久挂起不通知；settledNotified 去重恰一次） | rpc-session.test@S4-05a 耐久挂起不提前通知（HoldDurability）+S4-05b 超时记录收口路径+S4-05c settled 先于 response（buffered 不通知+回绑即结算） | ✅（变异：M-05r 无条件通知→S4-05c 挂；**M-05b 去重层→存活：公开路径下协调器已门控全部通知路径，去重=防御层不可直接杀伤，披露**） |
+| 意外退出重组装（exit→gate closed(generation-retired)+supervisor idle；start=reopen+spawn gen2+新探针；新代次整链路跑通） | rpc-session.test@意外退出后重开新轮 | ✅ |
+| 双超时驱动（巡检 interval checkResponseTimeout+checkTurnTimeout（同步 void 签名 try/catch）；响应超时后 settled 仍收口；晚到 response=ignored-late 不炸） | rpc-session.test@响应超时不阻断收口 | ✅（变异：M-f 去巡检→挂；dispose() 清 interval） |
+| stop（=cancelReadiness+retireCurrent：SIGTERM→退出确认 confirmed；confirmed 后 readyGeneration=null） | rpc-session.test@stop confirmed+S4-04c | ✅ |
+| 帧渲染（send→{id:"c<N>",type:"prompt"}JSON 行；matchKey=matchKeyOf(text,[],ordinal)；commandId/intentId 递增） | rpc-session.test@两轮（帧 id 递增，runTurn 帧计数基准） | 🟡（steer/followUp streamingBehavior 归消费接线；attachments 归 UI 层） |
+| 真 pi 进程 E2E（readiness→连续两轮→retire→SIGKILL 恢复重放） | —— | 🔴（未落；s3c 八项中 spawn-exited 分支/携代次事件泵真进程面仍归此；其余六项受控替身已证） |
