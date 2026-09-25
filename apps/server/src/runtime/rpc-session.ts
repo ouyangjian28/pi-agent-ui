@@ -27,7 +27,7 @@ import { IdleReaper, MapRegistry } from "./idle-reaper.js";
 
 export interface RpcSessionOpts {
   /**
-   * pi 参数。默认=绑定 opts.sessionFile 的持久会话（["--mode","rpc","----session",sessionFile]）。
+   * pi 参数。默认=绑定 opts.sessionFile 的持久会话（["--mode","rpc","--session",sessionFile]）。
    * S5-R3：闲置回收生命周期要求跨回收重启接同一会话文件——sessionFile 与 piArgs 必须显式给一个；
    * 两者都缺=构造拒绝（不默认 --no-session：无会话文件即无原上下文恢复，回收后冷启动只当新会话跑）。
    * 显式传 piArgs=测试/临时模式（含 --no-session 时无持久身份，由调用方自担，不得作生产默认）。

@@ -401,34 +401,6 @@ describe.skipIf(!running)("真 pi E2E（切片4c）", () => {
     expect(audits.some((l) => l.includes("generation-retired"))).toBe(true);
     expect(await sup.retireCurrent()).toMatchObject({ kind: "confirmed" });
   });
-});
-
-
-// s4g：e2e-3 命中谓词的受控负例（不依赖真 LLM；PI_E2E 守卫外始终跑）——
-// 「仅 user/元数据含 TOKEN、assistant 正文不含」必须不命中（旧 stringify(ev).includes 会假命中）。
-describe("assistantBodyText 命中谓词（受控）", () => {
-  const TOKEN = "PENGUIN-42";
-  const userEv = { type: "message_end", message: { role: "user", content: [{ type: "text", text: `请只回复这个口令：${TOKEN}` }] } };
-  const assistantEv = { type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking: "内含口令思考" }, { type: "text", text: TOKEN }] } };
-  const assistantNoToken = { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "别的回答" }] } };
-
-  it("user 消息含 TOKEN（assistant 不含）→不命中（旧版事件整体匹配会假命中）", () => {
-    expect(assistantBodyText(userEv).includes(TOKEN)).toBe(false);
-    expect(assistantBodyText({ ...userEv, message: { ...userEv.message, role: "assistant", content: [{ type: "text", text: "别的回答" }] } }).includes(TOKEN)).toBe(false);
-  });
-
-  it("assistant 正文含 TOKEN（thinking 段口令不计，只认 text 段）→命中", () => {
-    const t = assistantBodyText(assistantEv);
-    expect(t.includes(TOKEN)).toBe(true);
-    expect(assistantBodyText(assistantNoToken).includes(TOKEN)).toBe(false);
-  });
-
-  it("非 message_end / 非 assistant / content 非数组→空串", () => {
-    expect(assistantBodyText({ type: "message_update" })).toBe("");
-    expect(assistantBodyText({ type: "message_end", message: { role: "system", content: [] } })).toBe("");
-    expect(assistantBodyText({ type: "message_end", message: { role: "assistant", content: null } })).toBe("");
-  });
-
   it("e2e-7（切片5①）：闲置到期→真 EOF 自然退出（code 0）→send 冷启动 gen2 原会话续跑", { timeout: 180_000 }, async () => {
     const dir = await mkdtemp(join(tmpdir(), "e2e7-"));
     dirs.push(dir);
@@ -478,7 +450,7 @@ describe("assistantBodyText 命中谓词（受控）", () => {
     expect(l2.kind).toBe("launched");
     expect((s.getState().supervisor as { generation: number }).generation).toBe(2);
     await until(() => settledGens.length === 2, "冷启动第二轮 settled", 120_000);
-    // s5 首审补强：gen2 仍接同一 --session 文件（持久身份）且历史继续增长（原上下文未被丢）
+    // s5 首审补强：gen2 仍接同一 --session 文件（持久身份）且历史继续增长（持久历史保存口径——不断言第二代内存上下文已加载，见下方 s5c 注）
     const sizeAfterGen2 = (await stat(sessionFile)).size;
     expect(sizeAfterGen2).toBeGreaterThan(sizeAfterGen1);
     // s5c 报告 §7 补强（s5d 修正时序）：第一代发出的唯一标记在回收+冷启动后仍完整存在于
@@ -492,6 +464,35 @@ describe("assistantBodyText 命中谓词（受控）", () => {
     expect(rep.settledCount).toBe(2);
     expect((await s.stop()) as unknown).toMatchObject({ kind: "confirmed" });
   });
+
+});
+
+
+// s4g：e2e-3 命中谓词的受控负例（不依赖真 LLM；PI_E2E 守卫外始终跑）——
+// 「仅 user/元数据含 TOKEN、assistant 正文不含」必须不命中（旧 stringify(ev).includes 会假命中）。
+describe("assistantBodyText 命中谓词（受控）", () => {
+  const TOKEN = "PENGUIN-42";
+  const userEv = { type: "message_end", message: { role: "user", content: [{ type: "text", text: `请只回复这个口令：${TOKEN}` }] } };
+  const assistantEv = { type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking: "内含口令思考" }, { type: "text", text: TOKEN }] } };
+  const assistantNoToken = { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "别的回答" }] } };
+
+  it("user 消息含 TOKEN（assistant 不含）→不命中（旧版事件整体匹配会假命中）", () => {
+    expect(assistantBodyText(userEv).includes(TOKEN)).toBe(false);
+    expect(assistantBodyText({ ...userEv, message: { ...userEv.message, role: "assistant", content: [{ type: "text", text: "别的回答" }] } }).includes(TOKEN)).toBe(false);
+  });
+
+  it("assistant 正文含 TOKEN（thinking 段口令不计，只认 text 段）→命中", () => {
+    const t = assistantBodyText(assistantEv);
+    expect(t.includes(TOKEN)).toBe(true);
+    expect(assistantBodyText(assistantNoToken).includes(TOKEN)).toBe(false);
+  });
+
+  it("非 message_end / 非 assistant / content 非数组→空串", () => {
+    expect(assistantBodyText({ type: "message_update" })).toBe("");
+    expect(assistantBodyText({ type: "message_end", message: { role: "system", content: [] } })).toBe("");
+    expect(assistantBodyText({ type: "message_end", message: { role: "assistant", content: null } })).toBe("");
+  });
+
 
   it("s4h 补：thinking-only（content 只有 thinking 段含口令）→不命中；metadata-only（message_update 带 metadata 含口令）→不命中", () => {
     const thinkingOnly = { type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking: `口令思考 ${TOKEN}` }] } };
