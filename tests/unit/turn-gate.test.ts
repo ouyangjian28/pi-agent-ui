@@ -183,7 +183,7 @@ describe("轮派发屏障（TurnGate）", () => {
     expect(gate.getState().kind).toBe("in-flight");
     gate.checkTimeout(t(30 * 60 * 1000 + 1)); // 超窗（> 上界）
     expect(gate.getState()).toEqual({ kind: "closed", reason: "turn-timeout" });
-    expect(await gate.onTurnSettled()).toBeUndefined(); // 晚到 settled=no-op
+    expect(await gate.onTurnSettled()).toBe("not-in-flight"); // 晚到 settled=no-op（未开轮/已收口）
     expect(gate.getState()).toEqual({ kind: "closed", reason: "turn-timeout" });
     expect(gate.reopen()).toBe(true);
     expect(gate.getState().kind).toBe("idle");

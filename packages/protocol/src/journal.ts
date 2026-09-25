@@ -54,6 +54,8 @@ export interface IntentRecord {
   readonly consumed: ConsumedEvidence | null; // 最新有效 consumed 行（锚=最早，终点=最新；撕裂整行拒收）
   readonly cancelled: boolean;
   readonly lastVerdict: "delivered" | "settled" | "unknown" | null; // 三审①：终态行重放保留——clear 分派须保留原判不得改写
+  /** §169④ 超时未结算发送记录行在（恢复消费：true+lastVerdict=null→效果未知呈现；settled 行到达则终态由其承载）。重放恒置位；手写记录缺省=未记录。 */
+  readonly responseTimeoutRecorded?: boolean;
 }
 
 /** 消费证据（重放重建）：锚 append-only 保留，区间终点按最新重算承载。 */
@@ -79,6 +81,7 @@ export function replayIntents(lines: readonly JournalLine[], sessionId: SessionI
         consumed: null,
         cancelled: false,
         lastVerdict: null,
+        responseTimeoutRecorded: false,
       });
       enqueueOrder.push(line.intentId);
       continue;
@@ -118,8 +121,9 @@ export function replayIntents(lines: readonly JournalLine[], sessionId: SessionI
         byId.set(rec.intentId, { ...rec, lastVerdict: "unknown" });
         break;
       case "response-timeout":
-        // 观测记录行（§169④）：不改变意图重放状态——终态仍由 settled/unknown 行承载；
-        // 恢复对账按「response-timeout 行在+无 settled 行=效果未知」呈现，协调器运行时消费
+        // 观测记录行（§169④）：不改变终态——终态仍由 settled/unknown 行承载；
+        // 恢复消费判据=record.responseTimeoutRecorded && lastVerdict===null →「效果未知」呈现
+        byId.set(rec.intentId, { ...rec, responseTimeoutRecorded: true });
         break;
       default:
         break; // consumed/sending/cancelled 已在上方处理

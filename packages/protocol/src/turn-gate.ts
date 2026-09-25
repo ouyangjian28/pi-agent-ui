@@ -69,6 +69,13 @@ export type SubmitOutcome =
 
 export const DEFAULT_TURN_TIMEOUT_MS = 30 * 60 * 1000; // §5.5 轮超时默认 30min（含模型+工具全程）
 
+/** 结算结果（协调层解锁依据：仅 "settled" 证明本轮屏障释放；不以 idle 推测）。 */
+export type TurnSettleResult =
+  | "settled" // settled 行已耐久+屏障释放（→idle）
+  | "not-in-flight" // 非在飞（未开轮/已收口/生命周期已接管）：未追加
+  | "invalidated" // 追加期间生命周期接管（close/reopen/换代）：未释放，状态由接管方定
+  | "durability-failure"; // settled 行耐久失败：已转 closed("durability-failure")
+
 export class TurnGate {
   private state: GateState = { kind: "idle" };
   /** 操作代次（A1-01）：close/reopen 递增，使仍在 await 中的旧 submit/旧 settled 追加失效——旧操作完成后不得返回 send、不得覆盖新状态。 */
@@ -134,21 +141,24 @@ export class TurnGate {
   /** agent_settled 事件：in-flight→settling+settled 行 fsync→成功才 idle（释放屏障）；失败=closed 保持。
    *  晚到 settled（idle/closed 后，如超时收口后）=观察 no-op——轮已收口，不开新轮；观测层记录归宿主。
    *  A1-04 部分修复：追加 await 期间屏障被 close/reopen 接管后，旧追加的成败均不得改写新状态（含不得把新在飞轮关掉）。 */
-  async onTurnSettled(): Promise<void> {
-    if (this.state.kind !== "in-flight") return;
+  /** onTurnSettled 返回值口径（宿主解锁证据）：settled=本轮屏障已释放；其余=未释放（不得据 idle 推测）。 */
+  async onTurnSettled(): Promise<TurnSettleResult> {
+    if (this.state.kind !== "in-flight") return "not-in-flight";
     const intentId = this.state.intentId;
     const epoch = this.opEpoch; // A1-01：本次结算绑定的操作身份
     this.state = { kind: "settling", intentId };
     try {
       await this.opts.durability.append({ t: "settled", intentId });
     } catch {
-      if (epoch !== this.opEpoch) return; // 生命周期已接管（如已换代+新轮在飞）：旧追加失败不关新轮，恢复以实际重放裁决
+      if (epoch !== this.opEpoch) return "invalidated"; // 生命周期已接管（如已换代+新轮在飞）：旧追加失败不关新轮，恢复以实际重放裁决
       this.state = { kind: "closed", reason: "durability-failure" }; // 终态耐久失败=保持关闭
-      return;
+      return "durability-failure";
     }
     if (epoch === this.opEpoch && this.state.kind === "settling" && this.state.intentId === intentId) {
       this.state = { kind: "idle" };
+      return "settled";
     }
+    return "invalidated"; // 追加成功但等待期间被接管（未释放）
   }
 
   /** 轮超时检查（宿主受控时钟周期调用）：in-flight 超窗→closed("turn-timeout")=中断呈现（不自动重发）。 */
