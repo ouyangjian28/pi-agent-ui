@@ -483,6 +483,33 @@ describe("RpcSession（受控替身）", () => {
     expect(ra).toMatchObject({ kind: "superseded", generation: 1 });
   });
 
+  it("S4-B2c 探针成功路径内同步退出（readyGeneration 已置→finish 前窗口）：返回前复核兜底", async () => {
+    // 审计钩子在探针成功路径内同步观察：readyGeneration 已置、finish 未落——用它在精确窗口注入退出
+    const dir6 = await mkdtemp(join(tmpdir(), "rpc-s402c-"));
+    dirs.push(dir6);
+    const host6 = new FakeRpcHost();
+    const dur6 = new FileDurability(join(dir6, "journal.jsonl"));
+    const s6 = new RpcSession({
+      piArgs: ["--mode", "rpc", "--no-session"],
+      journalPath: join(dir6, "journal.jsonl"),
+      sessionId: "s-test",
+      host: host6,
+      durability: dur6,
+      readinessTimeoutMs: 500,
+      timeoutPollMs: 20,
+      audit: (l) => {
+        if (l.includes("rpc-session ready")) host6.emitExit(0, null); // 同步窗口：readyGeneration 已置、探针未 finish
+      },
+    });
+    sessions.push(s6);
+    const startA = s6.start();
+    await until(() => host6.frames.length === 1, "探针写出");
+    host6.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true });
+    const ra = await startA; // 探针成功路径内已退出：终窗复核不得返回 ready
+    expect(ra.kind).not.toBe("ready");
+    expect(ra).toMatchObject({ kind: "superseded", generation: 1 });
+  });
+
   it("S4-05d settled 先缓冲→超时记录收口（recorded-and-settled）：通知恰一次", async () => {
     const dir4 = await mkdtemp(join(tmpdir(), "rpc-s405d-"));
     dirs.push(dir4);
