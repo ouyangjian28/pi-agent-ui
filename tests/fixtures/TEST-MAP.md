@@ -230,3 +230,11 @@
 | **C6-05 空流/尾补页幂等**（handle 顺序：closed→snapshotId→错流 4404→末页宽限→**缓存查找（先于 H+1 分支）**→H+1（仅 live：空补页走 PageCache——status 冻结+rememberPage+整帧预算检查；paging 期=4409 跳页）；startResync H+1 同路径（servePageFrom 空页 done）） | subscription-engine.test C6-05 例（H=0 首页空 done+liveFrom=1；外部 statusV 1→9 重试回冻结 1）；M-c05（缓存现调 status）→2 挂 | ✅ |
 | **C6-06 sessions 目录可靠性+limit**（buildSessionsFrame(requestId,sessions,offset,listVersion,**dirReliability**,limit,budget)：limit 默认 50 钳 [1,200]；页级 listReliability=目录级 partial‖任一条目 partial 保守聚合；装页仍完整列表坐标系（total=全集）；整帧终判收缩） | projection-frames.test：limit=3/默认 50/钳 999 三例+目录级 partial 传播例（条目全 full→页级 partial）；M-c06（忽略目录级）→1 挂 | ✅ |
 | **C6-07 文档/TEST-MAP 单模型九处**（§1.3 预算=理论估算+触顶状态机新口径+append 无硬门声明；§3.6 H+1 仅 live 受理+补页入缓存；§3.7 3b 三层装页（投影层截断/装页层整帧终判/硬帧层 4431）+7×32k 算式；§4 三视图派生注释+provisional 表对齐实现（耐久 sending/超时=false，残片/裁决=true）；§5.2 sessions 联合加页级字段；§5.6 分层装页规则；§5.7 汇总行同步；§3.5 归因序前置条件（撤销任意置换承诺）） | 文档 python 单点替换九处+session-attribution.test ⑦改序前置条件（M-a07 首条生效→2 挂） | ✅ |
+
+## c8 段（R1/R2/R3——GPT c7 复审 84/100 三红修复）
+| 面 | 断言来源 | 变异证据 |
+| --- | --- | --- |
+| R1 缓存信封预算（worst 克隆+缓存重发防御终判） | subscription-engine.test「R1：缓存重发不因合法 requestId 变长击穿页预算」（119×500 中文+末条 660 中文边界复刻：first(1B id) 197,847B/119 事件；worst64 ≤200k 恒真断言+retry64 实测+幂等 rest 对比） | M-r1-noWorst/M-r1b-noCacheCheck **存活=防御层如实披露**：贪心粗估留 ≥144B 余量 > 64B 最坏信封增量——页内容永不进入预算 63B 邻域，两测量层与贪心余量三重覆盖同一路径；GPT c7 探针的 200,001B 场景（信封形状更小、贪心装满至 199,938B）在本仓事件 DTO/信封几何下不可达 |
+| R2 失败清理不复活（drain 冲批失败丢弃已取出项） | 「R2：live 冲批失败」+「R2：history 冲批失败」（估算器 300k 注入→error 恰一份+phase=closed+二次 drain 空） | M-r2-unshift→2 挂 |
+| R3 文档单模型+归因旧锚作废 | session-attribution.test「⑦b 同意图不同锚=最新 consumed 生效（[null,null,I,I]）」 | M-a07 首条生效→⑦⑥ 2 挂（c7 轮已验） |
+| 测试精度（GPT c7 三问） | 稳态例改恒留 1 项待发；3000 意图改 128 字符 ID+estimateFrameBytes UTF-8 断言；limit 例改 300 条输入（999→200+续页 100） | — |
