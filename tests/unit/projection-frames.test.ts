@@ -51,7 +51,8 @@ describe("纯投影装页（c6 C5-07）", () => {
   });
 
   it("buildRecoveryFrame：3000 意图×128 字符 ID 逐页有界（C6-02+GPT c7 精度：真实长 ID+UTF-8 字节断言）", () => {
-    const longId = (i: number) => `i-${String(i + 1).padStart(4, "0")}-${"x".repeat(120)}`; // ≈128 字符/ID（GPT 探针口径）
+    const longId = (i: number) => `i-${String(i + 1).padStart(4, "0")}-${"x".repeat(120)}`.padEnd(128, "x"); // 恰 128 字符/ID（GPT 探针口径；padEnd 消 127 边界）
+    expect(longId(0).length).toBe(128);
     const perIntent = Array.from({ length: 3000 }, (_, i) =>
       i % 2 === 0 ? row(longId(i)) : { intentId: longId(i), verdict: "not-evaluated" as const, provisional: false });
     const resumable = perIntent.filter((r) => r.verdict === "not-evaluated").map((r) => r.intentId);
@@ -90,11 +91,11 @@ describe("纯投影装页（c6 C5-07）", () => {
     expect(f1.listReliability).toBe("partial"); // 条目全 full 但目录扫描截断 → 页级 partial（保守聚合）
     expect(f1.sessions).toHaveLength(50); // 默认 limit=50（非旧固定 200）
     expect(f1.hasMore).toBe(true);
-    const f2 = buildSessionsFrame("r-2", sessions, 50, 7, "full", 999)! as unknown as { sessions: unknown[]; hasMore: boolean };
+    const f2 = buildSessionsFrame("r-2", sessions, 0, 7, "full", 999)! as unknown as { sessions: unknown[]; hasMore: boolean };
     expect(f2.sessions).toHaveLength(200); // 300 条输入 + limit=999 钳到 200（旧测试 80 条只到 30，证不了上限）
     expect(f2.hasMore).toBe(true);
     const f3 = buildSessionsFrame("r-3", sessions, 200, 7, "full", 999)! as unknown as { sessions: unknown[]; hasMore: boolean };
-    expect(f3.sessions).toHaveLength(100); // 续页余量
+    expect(f3.sessions).toHaveLength(100); // 续页 offset200（与 f2 的 0..200 无重叠——连续性可证）
     expect(f3.hasMore).toBe(false);
   });
 

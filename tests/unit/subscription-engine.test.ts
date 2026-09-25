@@ -433,31 +433,61 @@ describe("订阅引擎 13 时序", () => {
 });
 
 describe("c8 回归（R1/R2：缓存信封预算+失败清理）", () => {
-  it("R1：缓存重发不因合法 requestId 变长击穿页预算（120 条 500 中文+64B requestId 重试）", () => {
-    const idx = new ReadIndex("s.jsonl", "s-1");
+  it("R1：缓存重发不因合法 requestId 变长击穿页预算（GPT c9 反例原样固化：119×500 中文+末条 325；assistant role）", () => {
+    // GPT c9 独立探针口径：role=assistant、entryId=e1..e120、id-1/id-2 工厂、末条 325 中文（≤500 预览配额）。
+    // 未修实现：首页 120 事件=199,938B，64B requestId 重试=200,001B 击穿；worst 信封终判退末条→119 事件。
+    const idx = new ReadIndex("f.jsonl", "s");
     const cn = "忆".repeat(500);
-    // GPT 探针口径（边界复刻）：119×500 中文+末条 700 中文 → 不收缩页（1B id）≈200,110B/最坏信封 ≈200,173B——须收缩末条才装得下任何合法重试
-    for (let i = 1; i <= 119; i++) {
-      idx.append("journal", `L${i}`, `L${i}`, { kind: "message", seq: i, ts: null, generation: null, intentId: null, entryId: `e-${i}`, role: "user", textPreview: { text: cn, truncated: false }, final: true } as HistoryEvent);
-    }
-    idx.append("journal", "L120", "L120", { kind: "message", seq: 120, ts: null, generation: null, intentId: null, entryId: "e-120", role: "user", textPreview: { text: "忆".repeat(660), truncated: false }, final: true } as HistoryEvent); // 末条 660 中文：未收缩页≈199,9xxB（1B id 过，64B id 超）——预算边缘精确复刻
+    const ev = (i: number, text: string): HistoryEvent => ({ kind: "message", seq: i, ts: null, generation: null, intentId: null, entryId: `e${i}`, role: "assistant", textPreview: { text, truncated: false }, final: true } as HistoryEvent);
+    for (let i = 1; i <= 119; i++) idx.append("journal", `L${i}`, `L${i}`, ev(i, cn));
+    idx.append("journal", "L120", "L120", ev(120, "忆".repeat(325)));
     let idSeq = 0;
     const eng = new SubscriptionEngine({ index: idx, status: () => fakeStatus(1), now: () => 0, newId: () => `id-${++idSeq}` });
-    const first = eng.startSnapshot("r")[0] as unknown as import("@pi-agent-ui/protocol").ServerFrame; // 1 字符 requestId
+    const first = eng.startSnapshot("r")[0] as unknown as import("@pi-agent-ui/protocol").ServerFrame & { page: { seq: number }[]; snapshotId: string; historyNext: { streamId: string; seq: number } | null };
     expect(first.t).toBe("snapshot");
-    expect(estimateFrameBytes(first)).toBeGreaterThan(190_000); // 真实大页（接近预算）
+    expect(first.page).toHaveLength(119); // worst 信封使末条退到第 2 页（未修实现贪心装满 120→重试击穿）
     expect(estimateFrameBytes(first)).toBeLessThanOrEqual(LIMITS.pageFrameBudgetBytes);
-    // 装页按最坏信封（64B requestId）预算 → 首页本就应留有余量
+    expect(estimateFrameBytes(first)).toBeGreaterThan(190_000); // 真实大页（GPT 实测 198,796B）
+    // 任何合法 requestId（≤64B）重发不超预算（含信封最坏替换）
     const firstWorst = { ...first, requestId: "r".repeat(64) } as unknown as import("@pi-agent-ui/protocol").ServerFrame;
-    expect(estimateFrameBytes(firstWorst)).toBeLessThanOrEqual(LIMITS.pageFrameBudgetBytes); // R1 核心：任何合法重试不超
-    // 缓存重发（合法 64 字符 requestId，validateClientFrame 域内）
-    const retry = eng.handle({ kind: "page", requestId: "r".repeat(64), snapshotId: (first as { snapshotId: string }).snapshotId, historyNext: { streamId: "s-1", seq: 1 } })[0] as unknown as import("@pi-agent-ui/protocol").ServerFrame;
+    expect(estimateFrameBytes(firstWorst)).toBeLessThanOrEqual(LIMITS.pageFrameBudgetBytes);
+    // 缓存重发（合法 64 字符 requestId）：仍是 snapshot 帧、≤预算、除 requestId 外完全相等
+    const retry = eng.handle({ kind: "page", requestId: "r".repeat(64), snapshotId: first.snapshotId, historyNext: { streamId: "s", seq: 1 } })[0] as unknown as import("@pi-agent-ui/protocol").ServerFrame & { page: { seq: number }[] };
     expect(retry.t).toBe("snapshot");
-    expect(estimateFrameBytes(retry)).toBeLessThanOrEqual(LIMITS.pageFrameBudgetBytes); // 旧实现=200,001B 击穿
-    // 幂等：内容/游标/status 与首页一致（envelope 除外）
+    expect(estimateFrameBytes(retry)).toBeLessThanOrEqual(LIMITS.pageFrameBudgetBytes);
     const { requestId: _a, ...firstRest } = first as { requestId?: string };
     const { requestId: _b, ...retryRest } = retry as { requestId?: string };
     expect(retryRest).toEqual(firstRest);
+    // 续页拼回全集（退掉的末条在第 2 页；不丢不重）
+    expect(first.historyNext).not.toBeNull();
+    const p2 = eng.handle({ kind: "page", requestId: "r2", snapshotId: first.snapshotId, historyNext: first.historyNext! })[0] as unknown as import("@pi-agent-ui/protocol").ServerFrame & { page: { seq: number }[]; historyNext: { streamId: string; seq: number } | null };
+    expect(p2.page.map((e) => e.seq)).toEqual([120]);
+    expect(p2.historyNext).toBeNull();
+  });
+
+  it("R1b：缓存重发防御终判（故障注入：缓存生成后 snapshot 帧超预算→唯一 4431+closed+无残留）", () => {
+    // 防御故障注入（非默认估算器自然发生）：首页真实计量装页；缓存生成后 estimator 对 snapshot 帧返回 200,001B。
+    const idx = new ReadIndex("f.jsonl", "s");
+    for (let i = 1; i <= 3; i++) idx.append("journal", `L${i}`, `L${i}`, hEv(i));
+    let idSeq = 0;
+    let poison = false;
+    const eng = new SubscriptionEngine({ index: idx, status: () => fakeStatus(1), now: () => 0, newId: () => `id-${++idSeq}`,
+      estimateFrame: (f) => {
+        if (poison && f.t === "snapshot") return LIMITS.pageFrameBudgetBytes + 1;
+        return estimateFrameBytes(f);
+      } });
+    const first = eng.startSnapshot("r-1")[0] as { snapshotId: string; historyNext: null };
+    expect(first.historyNext).toBeNull(); // H=3 单页 done → live
+    eng.drain(1);
+    poison = true; // 缓存已生成：重试帧「超预算」
+    const out = eng.handle({ kind: "page", requestId: "r".repeat(64), snapshotId: first.snapshotId, historyNext: { streamId: "s", seq: 1 } });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.t).toBe("error");
+    expect((out[0] as { code: number }).code).toBe(4431);
+    expect((out[0] as { retryable: boolean }).retryable).toBe(false);
+    expect(eng.state.phase).toBe("closed");
+    expect(eng.state.buffered).toBe(0);
+    expect(eng.drain()).toEqual([]); // 无复活
   });
 
   it("R2：live 冲批失败→丢弃已取出 status（closed 队列不复活；二次 drain 空；错误恰一份）", () => {
