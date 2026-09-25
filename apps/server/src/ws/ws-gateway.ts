@@ -51,10 +51,15 @@ export interface ConnMeta {
   readonly clientIp?: string;
 }
 
-/** 订阅数据入口（W1-04）：宿主提供安全读+观察。load=null→4402；observe 可选（无观察=只读快照）。 */
+/** 订阅数据入口（W1-04）：宿主提供安全读+观察。load=null→4402；observe 可选（无观察=只读快照）。
+ *  3b2a-R1：load/observe/release 共享扫描所有权——每次 load 解析必配对一次 observe（消耗一引用并绑定）
+ *  或 release（丢弃引用）；observe 返回 null=源无活跃代（装载后失效竞态）——订阅方不得静默断流。 */
 export interface HistorySourcePort {
   load(file: string): Promise<readonly ScanRow[] | null>;
-  observe?(file: string, sinks: HistorySinks): () => void; // 返回停止观察
+  /** 绑定观察（消耗一次 load 引用）；null=无可绑定的活跃代。返回解绑闭包。 */
+  observe?(file: string, sinks: HistorySinks): (() => void) | null;
+  /** 释放一次 load 引用（load 解析后不 observe 的出口：失败口/重复订阅丢弃）。 */
+  release?(file: string): void;
 }
 /** 3b-2（GPT 3b-0 §IV.E 冻结）：盘面失效分类——后两者不得伪装成行追加/onStatus。 */
 export type HistoryInvalidateReason = "rewrite" | "truncate" | "replace";
@@ -467,7 +472,10 @@ export class WsGateway {
       } catch {
         rows = null;
       }
-      if (st.closed) return; // 等待期间断开（W1-07 同型复核）
+      if (st.closed) { // 等待期间断开（W1-07 同型复核）——3b2a-R1：load 引用已取得，必须释放
+        this.opts.historySource?.release?.(file);
+        return;
+      }
       if (rows === null) {
         this.enqueue(st, { t: "error", code: 4402, message: "会话不可读", retryable: true, requestId });
         return;
@@ -480,18 +488,21 @@ export class WsGateway {
         index = this.syncIndex(file, rows);
       } catch {
         this.errFrame(st, 4402, "会话索引构建失败", requestId);
+        this.opts.historySource?.release?.(file); // 3b2a-R1 失败口配对
         return;
       }
       // R3（w1c）：装载/增量触顶——统一 4402 拒订阅（不装引擎、不发绑定超限索引的快照）
       if (index === WsGateway.INDEX_BUDGET) {
         this.errFrame(st, 4402, "会话索引超预算，请重新订阅", requestId);
         this.audit(`subscribe-index-over-budget conn=${st.id} file=${file}`);
+        this.opts.historySource?.release?.(file); // 3b2a-R1 失败口配对
         return;
       }
       // B1 二验：syncIndex 换流后（盘面改写）当前流身份已变——旧游标不再有效（统一 4404，不静默跳过错流门）
       if ("cursor" in frame && index.streamId !== frame.cursor.streamId) {
         this.errFrame(st, 4404, "请求与订阅状态不符", requestId);
         this.audit(`resync-stream-replaced-disk conn=${st.id} file=${file} cursor=${frame.cursor.streamId} current=${index.streamId}`);
+        this.opts.historySource?.release?.(file); // 3b2a-R1 失败口配对
         return;
       }
       try {
@@ -507,6 +518,7 @@ export class WsGateway {
       } catch {
         this.audit(`subscribe-failed conn=${st.id} file=${file}`);
         this.enqueue(st, { t: "error", code: 4402, message: "会话不可读", retryable: true, requestId });
+        this.opts.historySource?.release?.(file); // 3b2a-R1 失败口配对
         return;
       }
       // W1-05：原子切换——先试启新引擎；失败只发错误（旧订阅原样保留）
@@ -517,6 +529,7 @@ export class WsGateway {
         } else {
           this.emitFrames(st, frames); // 4409 游标超前（可重试；不动旧订阅）
         }
+        this.opts.historySource?.release?.(file); // 3b2a-R1 失败口配对
         return;
       }
       // B3（w1b）：提交点重验——await 载入窗口内状态可能已变；旧快照 existing 不得作为唯一依据
@@ -524,6 +537,7 @@ export class WsGateway {
       if (current === undefined && st.subs.size >= LIMITS.subscriptionsPerConn) {
         engine.close(4431, "quota-lost-race", false);
         this.enqueue(st, { t: "error", code: 4429, message: "订阅数超限", retryable: false, requestId });
+        this.opts.historySource?.release?.(file); // 3b2a-R1 失败口配对
         return;
       }
       // 成功：退旧（通知关联旧 subscriptionId+撤未发旧帧）再装新（退的是【当前】旧订阅，非 await 前快照）
@@ -538,9 +552,33 @@ export class WsGateway {
       this.watchFile(st, file);
       this.emitFrames(st, frames);
       this.schedulePump(file); // 单页即追平（hasMore=false）时 buffered 已入 outbox——需排空
+      this.settleLoadRef(st, file); // 3b2a-R1：load 引用配对（observe 已消耗则释放本次；未绑定→退役不静默断流）
     } finally {
       st.inflight.delete(requestId);
     }
+  }
+
+  /** 3b2a-R1：订阅成功后的 load 引用配对。observe 已绑定（首订阅）→释放本次 load 引用（源侧 clamp 幂等）；
+   *  observe 存在但未绑定（返回 null=装载后被失效的竞态）→本订阅立即退役（4409 重订阅）——
+   *  不得静默断流（快照已发，流已终结——语义一致：流被替换）。快照模式（无 observe 面）无引用语义。 */
+  private settleLoadRef(st: ConnState, file: string): void {
+    const w = this.watchers.get(file);
+    const source = this.opts.historySource;
+    if (w === undefined || source?.observe === undefined) return; // 无观察面（快照模式）
+    if (w.unobserve !== null) {
+      source.release?.(file); // observe 消耗了引用：丢弃本次 load 引用
+      return;
+    }
+    this.audit(`observe-missed conn=${st.id} file=${file}`);
+    const sub = st.subs.get(file);
+    if (sub !== undefined) {
+      this.enqueue(st, { t: "error", code: 4409, message: `stream-replaced:${sub.engine.subscriptionId}`, retryable: true, requestId: "" });
+      sub.engine.close(4431, "observe-missed", false);
+      st.queue.cancelBySubscription(sub.engine.subscriptionId);
+      st.subs.delete(file);
+    }
+    this.releaseWatcher(st, file);
+    source.release?.(file);
   }
 
   /** B1（w1b）+R1（w1c）：当前流身份——peek 纯查看（不创建/不触发触顶换流/不抛错）。
@@ -615,7 +653,9 @@ export class WsGateway {
     return retired;
   }
 
-  /** W1-04：文件级共享观察器+排空泵（多连接同文件一份 observe；引用归零即停观察）。 */
+  /** W1-04：文件级共享观察器+排空泵（多连接同文件一份 observe；引用归零即停观察）。
+   *  3b2a-R3：所有 sink 闭包先验身份（this.watchers.get(file)===rec）——观察重建/释放后旧闭包
+   *  不得再作用于新订阅/新资源（旧 onAppend 不得入新引擎、旧 onInvalidate/onUnavailable 不得退新订阅）。 */
   private watchFile(st: ConnState, file: string): void {
     let w = this.watchers.get(file);
     if (w === undefined) {
@@ -624,9 +664,11 @@ export class WsGateway {
     }
     w.refs.add(st);
     if (w.unobserve === null && this.opts.historySource?.observe !== undefined) {
+      const rec = w; // 身份捕获（R3）
       this.registry.touch(file); // R3（w1c）：纯 LRU 活动刷新（get 有触顶换流/抛错副作用，不得作 touch 用）
       w.unobserve = this.opts.historySource.observe(file, {
         onAppend: (row) => {
+          if (this.watchers.get(file) !== rec) return; // R3：旧闭包不得入新流
           // B2（w1b）：事件时取【当前】索引（换流 replace 后旧闭包索引不得再接收追加）
           let index: ReadIndex;
           try {
@@ -656,22 +698,31 @@ export class WsGateway {
           this.schedulePump(file);
         },
         onInvalidate: (reason) => {
-          // 3b-2：源已停旧代追加（源侧状态机保证）——网关只负责退役：该文件全部引擎 4409+撤帧+释放观察引用。
-          // 不自动重装载（新订阅走 handleSubscribe→syncIndex 同源路径；旧游标被拒）。
+          if (this.watchers.get(file) !== rec) return; // R3：旧闭包不得退新订阅
+          // 3b-2/R4：源已停旧代追加（源侧状态机保证）且盘面已非该索引所见内容——旧流身份作废
+          //（同内容再现也换流：失效事件是权威信号，不做「内容寻址」猜测）；下次装载走换流重建，
+          // 旧游标按错流拒。网关只负责退役：该文件全部引擎 4409+撤帧+释放观察引用，不自动重装载
+          //（新订阅走 handleSubscribe→syncIndex 同源路径）。
           this.audit(`history-invalidate file=${file} reason=${reason}`);
+          this.registry.replace(file);
           const retired = this.retireEnginesForFile(file, null, `history-${reason}`);
           if (retired === 0) this.releaseWatcherFor(file); // 无活跃引擎（不应发生：观察存在⇒有引用）——仍幂等收口
         },
         onUnavailable: (reason) => {
-          // 3b-2：不可用=终该文件订阅（4402 文案随原因，不复用索引超预算文案）；不波及无关订阅/连接。
+          if (this.watchers.get(file) !== rec) return; // R3：旧闭包不得关新订阅
+          // 3b-2/R4：不可用=终该文件订阅（4402 文案随原因，不复用索引超预算文案）；流身份不可信
+          //（内容/身份未知）——registry.replace 后下次装载新流身份；不波及无关订阅/连接。
           this.audit(`history-unavailable file=${file} reason=${reason}`);
+          this.registry.replace(file);
           this.closeSubscriptionsFor(file, `history-${reason}`, `历史源不可用（${reason}），请重新订阅`);
         },
         onLive: (ev) => {
+          if (this.watchers.get(file) !== rec) return;
           this.forEachEngine(file, (e) => e.onLiveEvent(ev));
           this.schedulePump(file);
         },
         onStatus: (status) => {
+          if (this.watchers.get(file) !== rec) return;
           this.forEachEngine(file, (e) => e.onStatus(status));
           this.schedulePump(file);
         },
@@ -725,9 +776,11 @@ export class WsGateway {
     if (w === undefined) return;
     w.refs.delete(st);
     if (w.refs.size === 0) {
-      try { w.unobserve?.(); } catch { /* 宿主清理异常不阻断 */ }
+      // 3b2a-R3：逻辑失效先行（摘登记——sink 身份门即失效，旧闭包不再作用于任何资源），
+      // 再停宿主观察；宿主清理异常不阻断。
       this.watchers.delete(file);
       this.pendingPumps.delete(file);
+      try { w.unobserve?.(); } catch { /* 宿主清理异常不阻断 */ }
     }
   }
 

@@ -6,6 +6,7 @@
 // 时间面（v1 披露）：ts=null（journal 行无统一时间戳；enqueue.payload.sentAt 的展示级映射留后续）；
 // seq=0 占位——ReadIndex.append 以分配值覆盖（坐标系归索引，宿主序号不进入）。
 import { sanitizeText } from "./sanitizer.ts";
+import { journalLineSchemaError, type UnknownRecord } from "./journal-schema.ts";
 import type { JournalLine } from "./journal.ts";
 import type { ScanRow } from "./read-index.ts";
 
@@ -22,7 +23,9 @@ function baseEvent(line?: JournalLine): { seq: number; ts: number | null; genera
   };
 }
 
-/** 单行投影：合法 JournalLine→对应事件；不可解析/未知形状→journal-corrupt（完整行不静默丢弃）。 */
+/** 单行投影：合法 JournalLine→对应事件；不可解析/schema 非法/未知形状→journal-corrupt（完整行不静默丢弃）。
+ *  3b2a-R5：schema 判定走 protocol 共享校验器（journalLineSchemaError，与恢复侧同一权威）——
+ *  投影器不得自造宽松解析（审读 P1/P1b：坏嵌套抛 TypeError/非法字段流入事件）。 */
 function projectLine(raw: string, lineNo: number): ScanRow {
   const locator = String(lineNo);
   let parsed: unknown;
@@ -31,11 +34,13 @@ function projectLine(raw: string, lineNo: number): ScanRow {
   } catch {
     return { source: "journal", locator, raw, event: { ...baseEvent(), kind: "journal-corrupt" } };
   }
-  const l = parsed as Partial<JournalLine> | null;
-  if (parsed === null || typeof parsed !== "object" || typeof l?.t !== "string") {
+  if (parsed === null || typeof parsed !== "object" || typeof (parsed as UnknownRecord)["t"] !== "string") {
     return { source: "journal", locator, raw, event: { ...baseEvent(), kind: "journal-corrupt" } };
   }
-  const j = l as JournalLine;
+  if (journalLineSchemaError(parsed as UnknownRecord) !== null) {
+    return { source: "journal", locator, raw, event: { ...baseEvent(), kind: "journal-corrupt" } };
+  }
+  const j = parsed as JournalLine;
   const b = () => baseEvent(j);
   switch (j.t) {
     case "enqueue":

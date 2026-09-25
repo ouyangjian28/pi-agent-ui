@@ -1,12 +1,13 @@
-// 3b-2a：FileHistorySource 单测+真盘集成测（验收=GPT 3b-0 §V 五组：基线四窗口/盘面分型/新旧流隔离/
-// 不可用分型/撕裂与坏行）。替身=可编程 reader/watcher（读序/通知可控）；真盘面=临时目录真 fs。
+// 3b-2a+3b2a-R1/R2/R6：FileHistorySource 单测+真盘集成测。
+// 证据分级（R7）：主受控面=真 reader 语义（脚本化 FakeReader 可挂起/多槽）+受控 watcher（FakeWatcher）；
+// 真盘组=真 fs+RealReader（分型/跨界/撕裂/预算）+受控触发（重扫描由 FakeWatcher notice 驱动——
+// 真 watcher E2E 归 3b-3 组装验收）。夹具全部合法 schema（kind="prompt"）。
 import { afterAll, describe, expect, it } from "vitest";
-import { mkdtemp, rm, writeFile, appendFile, rename, unlink } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, appendFile, rename, unlink, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileHistorySource, type HistoryReaderPort, type HistoryWatcherPort } from "../../../apps/server/src/runtime/history-source.ts";
 import type { HistoryInvalidateReason, HistorySinks, HistoryUnavailableReason } from "../../../apps/server/src/ws/ws-gateway.ts";
-import { SafeOpenError } from "../../../apps/server/src/ws/safe-open.ts";
 import type { ScanRow } from "@pi-agent-ui/protocol";
 
 const CLEANUP: string[] = [];
@@ -17,30 +18,38 @@ async function tmpRoot(): Promise<string> {
   return d;
 }
 function jline(n: number, text = `m${n}`): string {
-  return JSON.stringify({ t: "enqueue", intentId: `i-${n}`, sessionId: "s", generation: 1, leafId: `L${n}`, matchKey: { textHash: `h${n}`, attachmentIdentity: "", ordinal: n }, payload: { kind: "user", rawText: text, attachments: [], sentAt: 1 } });
+  return JSON.stringify({ t: "enqueue", intentId: `i-${n}`, sessionId: "s", generation: 1, leafId: `L${n}`, matchKey: { textHash: `h${n}`, attachmentIdentity: "", ordinal: n }, payload: { kind: "prompt", rawText: text, attachments: [], sentAt: "1" } });
 }
 
-/** 可编程读取替身：脚本化结果队列（文本+身份）；支持挂起（fn 推进）。 */
+type ReadResult = { text: string; identity: string };
+/** 挂起读占位：手动 resolve/reject（多槽——R2 单飞/P3 竞态证据）。 */
+class HeldRead {
+  settled = false;
+  private res?: (v: ReadResult) => void;
+  private rej?: (e: unknown) => void;
+  readonly promise: Promise<ReadResult>;
+  constructor() {
+    this.promise = new Promise((res, rej) => { this.res = res; this.rej = rej; });
+  }
+  resolve(v: ReadResult): void { if (!this.settled) { this.settled = true; (this.res as (x: ReadResult) => void)(v); } }
+  reject(e: unknown): void { if (!this.settled) { this.settled = true; (this.rej as (x: unknown) => void)(e); } }
+}
+
+/** 可编程读取替身：脚本化结果队列；HeldRead 占位=挂起（多槽）。 */
 class FakeReader implements HistoryReaderPort {
-  reads: Array<{ text: string; identity: string } | Error | Promise<{ text: string; identity: string }>> = [];
+  reads: Array<ReadResult | Error | HeldRead> = [];
   calls = 0;
-  private waiters: Array<() => void> = [];
-  read(_abs: string): Promise<{ text: string; identity: string }> {
+  read(_abs: string): Promise<ReadResult> {
     this.calls += 1;
     const next = this.reads[this.calls - 1];
     const r = next === undefined ? { text: "", identity: "0:0" } : next;
     if (r instanceof Error) return Promise.reject(r);
+    if (r instanceof HeldRead) return r.promise;
     return Promise.resolve(r);
   }
-  hold(): void { // 下一次 read 结果扣住不放（pending 占位）
-    const idx = this.calls; // 已消耗数=下一次下标
-    const orig = this.reads[idx];
-    this.reads[idx] = new Promise((res) => { this.waiters.push(() => res(orig as { text: string; identity: string })); });
-  }
-  releaseHold(): void { const w = this.waiters.shift(); if (w) w(); }
 }
 
-/** 观察替身：每次 .watch 建一个可控句柄（全部句柄留档可查）。 */
+/** 观察替身：每次 .watch 建一个可控句柄（全部留档）；failNextSetup=建立失败（R6 throw 语义）。 */
 class FakeWatcher implements HistoryWatcherPort {
   handles: FakeWatchHandle[] = [];
   failNextSetup = false;
@@ -67,7 +76,6 @@ interface SinkLog {
   lives: unknown[];
   statuses: unknown[];
 }
-function statusRecorder(log: SinkLog): (st: unknown) => void { return (st) => { log.statuses.push(st); }; }
 function makeSinks(): { s: HistorySinks; log: SinkLog } {
   const log: SinkLog = { appends: [], invalidates: [], unavailables: [], lives: [], statuses: [] };
   return {
@@ -77,7 +85,7 @@ function makeSinks(): { s: HistorySinks; log: SinkLog } {
       onInvalidate: (reason) => { log.invalidates.push(reason); },
       onUnavailable: (reason) => { log.unavailables.push(reason); },
       onLive: (ev) => { log.lives.push(ev); },
-      onStatus: statusRecorder(log),
+      onStatus: (st) => { log.statuses.push(st); },
     },
   };
 }
@@ -86,13 +94,16 @@ function harness(over: { reader?: FakeReader; watcher?: FakeWatcher; roots?: str
   const reader = over.reader ?? new FakeReader();
   const watcher = over.watcher ?? new FakeWatcher();
   const audits: string[] = [];
-  const src = new FileHistorySource(over.maxScanBytes !== undefined
-    ? { roots: over.roots ?? ["/safe"], reader, watcher, maxScanBytes: over.maxScanBytes, audit: (l) => { audits.push(l); } }
-    : { roots: over.roots ?? ["/safe"], reader, watcher, audit: (l) => { audits.push(l); } });
+  const src = new FileHistorySource({
+    roots: over.roots ?? ["/safe"], reader, watcher,
+    ...(over.maxScanBytes === undefined ? {} : { maxScanBytes: over.maxScanBytes }),
+    audit: (l) => { audits.push(l); },
+  });
   return { src, reader, watcher, audits };
 }
+function activeHandles(w: FakeWatcher): FakeWatchHandle[] { return w.handles.filter((x) => !x.closed); }
 
-/** 微任务排空（rescan 是微任务链）。 */
+/** 微任务排空（rescan 是微任务链+setTimeout(0) 泵）。 */
 async function drain(ms = 4): Promise<void> { await new Promise((r) => setTimeout(r, ms)); }
 async function until(cond: () => boolean, ms = 400): Promise<void> {
   const t0 = Date.now();
@@ -100,8 +111,8 @@ async function until(cond: () => boolean, ms = 400): Promise<void> {
   if (!cond()) throw new Error("until timeout");
 }
 
-describe("FileHistorySource（3b-2a）——基线与四窗口（§V①）", () => {
-  it("load=快照+observe 绑定；前缀追加逐行 onAppend", async () => {
+describe("FileHistorySource（3b-2a+R1/R2）——基线与四窗口（§V①）", () => {
+  it("load=快照+observe 绑定（非 null）；前缀追加逐行 onAppend", async () => {
     const text = `${jline(1)}\n${jline(2)}\n`;
     const r = new FakeReader(); r.reads.push({ text, identity: "1:1" }, { text: `${text}${jline(3)}\n`, identity: "1:1" });
     const h = harness({ reader: r });
@@ -109,18 +120,19 @@ describe("FileHistorySource（3b-2a）——基线与四窗口（§V①）", () 
     expect(rows?.map((x) => x.event.kind)).toEqual(["turn-enqueued", "turn-enqueued"]);
     const sk = makeSinks();
     const stop = h.src.observe("a.jsonl", sk.s);
+    expect(typeof stop).toBe("function"); // R1：observe 返回解绑闭包（非 null——活跃代绑定成功）
     h.watcher.handles[0]?.triggerNotice();
     await until(() => sk.log.appends.length === 1);
     expect(sk.log.appends[0]).toMatchObject({ locator: "3" });
     expect(sk.log.invalidates).toEqual([]);
-    stop();
+    stop!();
+    expect(activeHandles(h.watcher)).toHaveLength(0); // 解绑=最后引用离开→槽关闭（句柄全关）
   });
 
   it("窗口①监视前/读取中：读期间落盘的新行→装载后 dirty 收敛（激活即补扫）", async () => {
     const r = new FakeReader();
     r.reads.push({ text: `${jline(1)}\n`, identity: "1:1" }); // 读返回时盘面其实已有第 2 行
     const h = harness({ reader: r });
-    // 读取期间 watcher 通知（监视已建立=真实读竞态窗口）
     const origRead = r.read.bind(r);
     r.read = (p) => { const pr = origRead(p); h.watcher.handles[0]?.triggerNotice(); return pr; };
     const rows = await h.src.load("a.jsonl");
@@ -149,7 +161,7 @@ describe("FileHistorySource（3b-2a）——基线与四窗口（§V①）", () 
     expect(sk.log.appends).toHaveLength(1);
   });
 
-  it("窗口③退役重挂：重扫后旧句柄关闭、新句柄就位（无句柄泄漏）", async () => {
+  it("窗口③重挂：重扫后旧句柄关闭、新句柄就位（无句柄泄漏）", async () => {
     const t1 = `${jline(1)}\n`;
     const r = new FakeReader();
     r.reads.push({ text: t1, identity: "1:1" }, { text: `${t1}${jline(2)}\n`, identity: "1:1" }, { text: `${t1}${jline(2)}\n${jline(3)}\n`, identity: "1:1" });
@@ -162,15 +174,14 @@ describe("FileHistorySource（3b-2a）——基线与四窗口（§V①）", () 
     await until(() => sk.log.appends.length === 1);
     await drain();
     expect(first?.closed).toBe(true); // 重挂后旧句柄已关
-    expect(h.watcher.handles.filter((x) => !x.closed)).toHaveLength(1); // 恰一个活跃
-    // 再一轮：仍无泄漏
-    h.watcher.handles.filter((x) => !x.closed)[0]?.triggerNotice();
+    expect(activeHandles(h.watcher)).toHaveLength(1); // 恰一个活跃
+    activeHandles(h.watcher)[0]?.triggerNotice();
     await until(() => sk.log.appends.length === 2);
     await drain();
-    expect(h.watcher.handles.filter((x) => !x.closed)).toHaveLength(1);
+    expect(activeHandles(h.watcher)).toHaveLength(1);
   });
 
-  it("窗口④换代重挂补扫去重：stop 后重 load，旧流事件不进新流（§V③）", async () => {
+  it("窗口④换代重挂：stop 后重 load，旧流事件不进新流（§V③）", async () => {
     const t1 = `${jline(1)}\n`;
     const r = new FakeReader();
     r.reads.push({ text: t1, identity: "1:1" }, { text: `${t1}${jline(2)}\n`, identity: "1:1" });
@@ -179,9 +190,9 @@ describe("FileHistorySource（3b-2a）——基线与四窗口（§V①）", () 
     const skA = makeSinks();
     const stopA = h.src.observe("a.jsonl", skA.s);
     const handleA = h.watcher.handles[0];
-    stopA(); // 旧代退役
+    stopA!(); // 旧代退役（引用清零→关闭）
     const skB = makeSinks();
-    await h.src.load("a.jsonl");
+    await h.src.load("a.jsonl"); // 新一代（第二次初扫）
     h.src.observe("a.jsonl", skB.s);
     handleA?.triggerNotice(); // 旧代句柄的迟到通知
     await drain(30);
@@ -190,267 +201,471 @@ describe("FileHistorySource（3b-2a）——基线与四窗口（§V①）", () 
   });
 });
 
-describe("FileHistorySource——盘面分型（§V②）", () => {
-  async function armed(h: ReturnType<typeof harness>, r: FakeReader, t0: string) {
-    r.reads.push({ text: t0, identity: "1:1" });
-    await h.src.load("a.jsonl");
-    const sk = makeSinks();
-    h.src.observe("a.jsonl", sk.s);
-    return sk;
-  }
-  it("同位置原文变化（投影不变）→invalidate(rewrite) 而非部分续读", async () => {
+describe("FileHistorySource R1——load/observe/release 共享扫描所有权", () => {
+  it("P4 双订阅共享初扫：并发 load=一次扫描、同快照；此后 append 双订阅各自收（不静默断流）", async () => {
+    const t12 = `${jline(1)}\n${jline(2)}\n`;
     const r = new FakeReader();
+    r.reads.push({ text: t12, identity: "1:1" }, { text: `${t12}${jline(3)}\n`, identity: "1:1" });
     const h = harness({ reader: r });
-    const sk = await armed(h, r, `${jline(1)}\n`);
-    const rewritten = jline(1).replace("h1", "hX"); // 只动 textHash（投影不含）→投影不变但 raw 变
-    r.reads.push({ text: `${rewritten}\n`, identity: "1:1" });
+    const [a, b] = await Promise.all([h.src.load("a.jsonl"), h.src.load("a.jsonl")]);
+    expect(r.calls).toBe(1); // 单飞：并发 load 共享同一初扫
+    expect(a?.map((x) => x.locator)).toEqual(["1", "2"]);
+    expect(b?.map((x) => x.locator)).toEqual(a?.map((x) => x.locator));
+    const skA = makeSinks(), skB = makeSinks();
+    const stopA = h.src.observe("a.jsonl", skA.s);
+    expect(h.src.observe("a.jsonl", skB.s)).not.toBeNull(); // B 绑定自己的 sinks（第二 load 引用消耗）
     h.watcher.handles[0]?.triggerNotice();
-    await until(() => sk.log.invalidates.length === 1);
-    expect(sk.log.invalidates).toEqual(["rewrite"]);
-    expect(sk.log.appends).toEqual([]);
+    await until(() => skA.log.appends.length === 1 && skB.log.appends.length === 1);
+    stopA!();
+    expect(activeHandles(h.watcher)).toHaveLength(1); // B 仍持有引用——不关闭
   });
 
-  it("截短→invalidate(truncate)；此后通知不再产生事件（旧代已停）", async () => {
+  it("join 增量：B 晚到 load-join 返回基线快照（此后增长由 append 补齐）", async () => {
+    const t1 = `${jline(1)}\n`;
     const r = new FakeReader();
-    const h = harness({ reader: r });
-    const sk = await armed(h, r, `${jline(1)}\n${jline(2)}\n`);
-    r.reads.push({ text: `${jline(1)}\n`, identity: "1:1" });
-    h.watcher.handles[0]?.triggerNotice();
-    await until(() => sk.log.invalidates.length === 1);
-    expect(sk.log.invalidates).toEqual(["truncate"]);
-    h.watcher.handles.filter((x) => !x.closed)[0]?.triggerNotice();
-    await drain(30);
-    expect(sk.log.appends).toEqual([]);
-  });
-
-  it("同尺寸同位置的 replace（dev:ino 变化）→invalidate(replace)（身份即换流）", async () => {
-    const r = new FakeReader();
-    const h = harness({ reader: r });
-    const sk = await armed(h, r, `${jline(1)}\n`);
-    r.reads.push({ text: `${jline(1)}\n`, identity: "9:9" }); // 同内容不同 inode
-    h.watcher.handles[0]?.triggerNotice();
-    await until(() => sk.log.invalidates.length === 1);
-    expect(sk.log.invalidates).toEqual(["replace"]);
-  });
-
-  it("重复通知+无变化→零事件零失效（幂等重扫）", async () => {
-    const r = new FakeReader();
-    const h = harness({ reader: r });
-    const t = `${jline(1)}\n`;
-    const sk = await armed(h, r, t);
-    r.reads.push({ text: t, identity: "1:1" });
-    h.watcher.handles[0]?.triggerNotice();
-    await drain(30);
-    expect(sk.log.appends).toEqual([]);
-    expect(sk.log.invalidates).toEqual([]);
-    expect(sk.log.unavailables).toEqual([]);
-  });
-
-  it("同文本不同两行→两行各自 onAppend（文本不参与去重键）", async () => {
-    const r = new FakeReader();
-    const h = harness({ reader: r });
-    const sk = await armed(h, r, `${jline(1)}\n`);
-    r.reads.push({ text: `${jline(1)}\n${jline(2, "dup")}\n${jline(3, "dup")}\n`, identity: "1:1" });
-    h.watcher.handles[0]?.triggerNotice();
-    await until(() => sk.log.appends.length === 2);
-    expect(sk.log.appends.map((x) => x.locator)).toEqual(["2", "3"]);
-  });
-});
-
-describe("FileHistorySource——异步读完成与换代隔离（§V③）", () => {
-  it("读挂起期间换代：旧读恢复后结果丢弃（不作用新流）", async () => {
-    const r = new FakeReader();
-    r.reads.push({ text: `${jline(1)}\n`, identity: "1:1" });
+    r.reads.push({ text: t1, identity: "1:1" }, { text: `${t1}${jline(2)}\n`, identity: "1:1" });
     const h = harness({ reader: r });
     await h.src.load("a.jsonl");
     const skA = makeSinks();
     h.src.observe("a.jsonl", skA.s);
-    // 发起重扫并扣住
-    const t2 = `${jline(1)}\n${jline(2)}\n`;
-    r.reads.push({ text: t2, identity: "1:1" });
-    r.hold(); // rescan 读挂起
+    const b = await h.src.load("a.jsonl"); // join：不触发新扫描
+    expect(r.calls).toBe(1);
+    expect(b?.map((x) => x.locator)).toEqual(["1"]);
+    h.src.observe("a.jsonl", makeSinks().s);
     h.watcher.handles[0]?.triggerNotice();
-    await drain(10);
+    await until(() => h.audits.some((l) => l.includes("rescan")));
+    await drain();
     expect(r.calls).toBe(2);
-    // 换代：stop+重新 load（新代读完成）
-    const t3 = `${jline(1)}\n${jline(9)}\n`;
-    r.reads.push({ text: t3, identity: "1:1" });
-    await h.src.load("a.jsonl");
-    const skB = makeSinks();
-    h.src.observe("a.jsonl", skB.s);
-    r.releaseHold(); // 旧读恢复——必须被丢弃
-    await drain(30);
-    expect(skA.log.appends).toEqual([]);
-    expect(skB.log.appends).toEqual([]); // 新代基线=t3 已是全量；旧续体不得给它补 append
-    expect(h.audits.some((l) => l.includes("superseded") || l.includes("retired"))).toBe(true);
   });
 
-  it("onAppend 回调抛错不逸出：源存活、后续通知仍工作", async () => {
+  it("P3 在飞初扫：B await 同一 promise（不二次扫描）；A 不被 B 覆盖（单 entry 提交）", async () => {
     const r = new FakeReader();
-    const t1 = `${jline(1)}\n`;
-    r.reads.push({ text: t1, identity: "1:1" }, { text: `${t1}${jline(2)}\n`, identity: "1:1" }, { text: `${t1}${jline(2)}\n${jline(3)}\n`, identity: "1:1" });
+    const held = new HeldRead();
+    r.reads.push(held, { text: `${jline(1)}\n${jline(2)}\n`, identity: "1:1" });
+    const h = harness({ reader: r });
+    const pa = h.src.load("a.jsonl");
+    const pb = h.src.load("a.jsonl"); // 初扫在飞：join 到同一 promise
+    await drain();
+    expect(r.calls).toBe(1); // 没有第二次扫描
+    held.resolve({ text: `${jline(1)}\n`, identity: "1:1" });
+    const [a, b] = await Promise.all([pa, pb]);
+    expect(a?.map((x) => x.locator)).toEqual(["1"]);
+    expect(b?.map((x) => x.locator)).toEqual(["1"]); // 同一提交（无覆盖）
+    expect(h.audits.some((l) => l.includes("load-joined-after-scan"))).toBe(true);
+  });
+
+  it("release 配对：load 后 release（未 observe）→槽关闭（无主 watcher 归零）", async () => {
+    const r = new FakeReader();
+    r.reads.push({ text: `${jline(1)}\n`, identity: "1:1" });
     const h = harness({ reader: r });
     await h.src.load("a.jsonl");
-    const seen: number[] = [];
-    const sk: HistorySinks = {
-      onAppend: (row) => { seen.push(Number(row.locator)); if (row.locator === "2") throw new Error("sink boom"); },
-      onLive: () => {}, onStatus: () => {},
-    };
-    h.src.observe("a.jsonl", sk);
-    h.watcher.handles[0]?.triggerNotice();
-    await until(() => seen.length === 1);
+    expect(activeHandles(h.watcher)).toHaveLength(1);
+    h.src.release("a.jsonl"); // 最后引用离开且未绑定→关闭
+    expect(activeHandles(h.watcher)).toHaveLength(0);
+    expect(h.audits.some((l) => l.includes("released-unobserved"))).toBe(true);
+  });
+
+  it("P9 初扫在飞时放弃（release）→装载完成即弃：无主 watcher=0", async () => {
+    const r = new FakeReader();
+    const held = new HeldRead();
+    r.reads.push(held);
+    const h = harness({ reader: r });
+    const p = h.src.load("a.jsonl");
     await drain();
-    h.watcher.handles.filter((x) => !x.closed)[0]?.triggerNotice();
-    await until(() => seen.length === 2);
-    expect(seen).toEqual([2, 3]); // 抛错后源继续推进
-    expect(h.audits.some((l) => l.includes("append-cb-error"))).toBe(true);
+    h.src.release("a.jsonl"); // 初扫在飞：置 releasePending
+    held.resolve({ text: `${jline(1)}\n`, identity: "1:1" });
+    expect(await p).toBeNull(); // 装载即弃（fail-closed，不给无主快照）
+    await drain();
+    expect(activeHandles(h.watcher)).toHaveLength(0);
+    expect(h.audits.some((l) => l.includes("released-unobserved"))).toBe(true);
+  });
+
+  it("unobserve 后待配对引用仍在：槽保留至引用清零", async () => {
+    const r = new FakeReader();
+    r.reads.push({ text: `${jline(1)}\n`, identity: "1:1" });
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl"); // +1
+    await h.src.load("a.jsonl"); // +1
+    const sk = makeSinks();
+    const stop = h.src.observe("a.jsonl", sk.s); // -1（绑定）
+    stop!(); // 解绑：awaitingBind=1>0 →槽保留
+    expect(activeHandles(h.watcher)).toHaveLength(1);
+    h.src.release("a.jsonl"); // 最后引用→关闭
+    expect(activeHandles(h.watcher)).toHaveLength(0);
+  });
+
+  it("observe 无活跃代→null（换代竞态后不再绑定旧代）", async () => {
+    const r = new FakeReader();
+    r.reads.push({ text: `${jline(1)}\n`, identity: "1:1" });
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");
+    h.src.release("a.jsonl"); // 关闭
+    expect(h.src.observe("a.jsonl", makeSinks().s)).toBeNull();
   });
 });
 
-describe("FileHistorySource——不可用分型与 fail-closed（§V④）", () => {
-  function soe(kind: "missing" | "too-large" | "open-denied" | "symlink"): SafeOpenError {
-    return new SafeOpenError(kind, "a.jsonl", "test");
-  }
-  it("删除（missing）→onUnavailable(deleted)+观察收口", async () => {
+describe("FileHistorySource R2——单飞扫描与通知折叠", () => {
+  it("P2 在飞重扫与追加竞态：旧扫返回旧前缀不得误判 truncate；折叠一次跟进补齐", async () => {
+    const t12 = `${jline(1)}\n${jline(2)}\n`;
     const r = new FakeReader();
-    r.reads.push({ text: `${jline(1)}\n`, identity: "1:1" }, soe("missing"));
+    r.reads.push({ text: t12, identity: "1:1" }); // 初扫
+    const held = new HeldRead();
+    r.reads.push(held); // 第一次重扫（挂起）
+    r.reads.push({ text: `${t12}${jline(3)}\n`, identity: "1:1" }); // 跟进重扫（见到第 3 行）
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");
+    const sk = makeSinks();
+    h.src.observe("a.jsonl", sk.s);
+    h.watcher.handles[0]?.triggerNotice(); // 触发重扫（挂起中）
+    await drain();
+    // 重扫挂起期间：第 3 行已落盘+新通知（折 dirtyPending——不并发第二扫）
+    h.watcher.handles[0]?.triggerNotice();
+    h.watcher.handles[0]?.triggerNotice();
+    held.resolve({ text: t12, identity: "1:1" }); // 旧扫返回【旧前缀】（读到追加前快照）
+    await until(() => sk.log.appends.length === 1);
+    await drain();
+    expect(sk.log.invalidates).toEqual([]); // 不误判 truncate/rewrite
+    expect(sk.log.appends.map((x) => x.locator)).toEqual(["3"]);
+    expect(r.calls).toBe(3); // 初扫+挂起重扫+跟进（通知折叠恰一次）
+  });
+
+  it("在飞重扫期间通知折叠：3 次通知→完成后恰一次跟进", async () => {
+    const t1 = `${jline(1)}\n`;
+    const r = new FakeReader();
+    r.reads.push({ text: t1, identity: "1:1" });
+    const held = new HeldRead();
+    r.reads.push(held, { text: t1, identity: "1:1" }, { text: `${t1}${jline(2)}\n`, identity: "1:1" });
     const h = harness({ reader: r });
     await h.src.load("a.jsonl");
     const sk = makeSinks();
     h.src.observe("a.jsonl", sk.s);
     h.watcher.handles[0]?.triggerNotice();
-    await until(() => sk.log.unavailables.length === 1);
-    expect(sk.log.unavailables).toEqual(["deleted"]);
-    expect(h.watcher.handles.every((x) => x.closed)).toBe(true);
+    await drain();
+    h.watcher.handles[0]?.triggerNotice();
+    h.watcher.handles[0]?.triggerNotice();
+    h.watcher.handles[0]?.triggerNotice();
+    held.resolve({ text: t1, identity: "1:1" });
+    await until(() => r.calls === 3);
+    await drain(20);
+    expect(r.calls).toBe(3); // 初扫+重扫+跟进一次（3 通知不放大）
   });
 
-  it("超限→scan-over-budget；权限/符号链接/泛错→unreadable", async () => {
-    for (const [err, want] of [[soe("too-large"), "scan-over-budget"], [soe("open-denied"), "unreadable"], [soe("symlink"), "unreadable"], [new Error("boom"), "unreadable"]] as const) {
-      const r = new FakeReader();
-      r.reads.push({ text: `${jline(1)}\n`, identity: "1:1" }, err as Error);
-      const h = harness({ reader: r });
-      await h.src.load("a.jsonl");
-      const sk = makeSinks();
-      h.src.observe("a.jsonl", sk.s);
-      h.watcher.handles[0]?.triggerNotice();
-      await until(() => sk.log.unavailables.length === 1);
-      expect(sk.log.unavailables[0]).toBe(want);
-    }
-  });
-
-  it("watch 建立失败→load=null（fail-closed：不降级快照）", async () => {
+  it("读挂起期间换代（stop）：旧读完成不进任何流（await 后复核）", async () => {
+    const t1 = `${jline(1)}\n`;
     const r = new FakeReader();
-    r.reads.push({ text: `${jline(1)}\n`, identity: "1:1" });
+    r.reads.push({ text: t1, identity: "1:1" });
+    const held = new HeldRead();
+    r.reads.push(held);
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");
+    const sk = makeSinks();
+    const stop = h.src.observe("a.jsonl", sk.s);
+    h.watcher.handles[0]?.triggerNotice();
+    await drain();
+    stop!(); // 重扫挂起中换代关闭
+    held.resolve({ text: `${t1}${jline(2)}\n`, identity: "1:1" });
+    await drain(20);
+    expect(sk.log.appends).toEqual([]); // 旧代已 disposed：await 后复核丢弃
+    expect(sk.log.invalidates).toEqual([]);
+    expect(activeHandles(h.watcher)).toHaveLength(0);
+  });
+
+  it("onAppend 抛错不逸出（隔离）", async () => {
+    const t1 = `${jline(1)}\n`;
+    const r = new FakeReader();
+    r.reads.push({ text: t1, identity: "1:1" }, { text: `${t1}${jline(2)}\n`, identity: "1:1" });
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");
+    let threw = false;
+    const s: HistorySinks = { onAppend: () => { threw = true; throw new Error("sink boom"); }, onLive: () => {}, onStatus: () => {} };
+    const stop = h.src.observe("a.jsonl", s);
+    h.watcher.handles[0]?.triggerNotice();
+    await until(() => threw);
+    await drain();
+    expect(h.audits.some((l) => l.includes("append-cb-error"))).toBe(true);
+    stop!();
+  });
+});
+
+describe("FileHistorySource R6——watcher 建立失败 fail-closed（不降空句柄）", () => {
+  it("初扫 watch 建立失败→load=null（不读盘、无句柄）", async () => {
+    const r = new FakeReader();
     const w = new FakeWatcher();
-    const h = harness({ reader: r, watcher: w });
     w.failNextSetup = true;
-    expect(await h.src.load("a.jsonl")).toBeNull();
-  });
-
-  it("watch 建立后早期错误（装载完成前）→load=null", async () => {
-    const r = new FakeReader();
-    r.reads.push({ text: `${jline(1)}\n`, identity: "1:1" });
-    const w = new FakeWatcher();
     const h = harness({ reader: r, watcher: w });
-    const origRead = r.read.bind(r);
-    r.read = (p) => { const pr = origRead(p); w.handles[0]?.triggerError(new Error("early")); return pr; };
     expect(await h.src.load("a.jsonl")).toBeNull();
-    expect(h.audits.some((l) => l.includes("watch-error-early"))).toBe(true);
+    expect(r.calls).toBe(0); // 建观察失败→不读（fail-closed，无读循环）
+    expect(w.handles).toHaveLength(0);
+    expect(h.audits.some((l) => l.includes("watch-setup-failed"))).toBe(true);
   });
 
-  it("重挂观察失败→onUnavailable(watch-failed)（旧观察已关）", async () => {
+  it("活跃期 watcher error→先重挂新句柄再重扫核实（无窗口、无读循环）", async () => {
+    const t1 = `${jline(1)}\n`;
     const r = new FakeReader();
-    r.reads.push({ text: `${jline(1)}\n`, identity: "1:1" }, { text: `${jline(1)}\n`, identity: "1:1" });
+    r.reads.push({ text: t1, identity: "1:1" }, { text: t1, identity: "1:1" });
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");
+    const sk = makeSinks();
+    h.src.observe("a.jsonl", sk.s);
+    const first = h.watcher.handles[0];
+    first?.triggerError(new Error("watcher died"));
+    await until(() => activeHandles(h.watcher).length === 1 && first?.closed === true);
+    await until(() => r.calls === 2); // 重扫一次（核实无变化——句柄换新后异步进行）
+    await drain();
+    expect(sk.log.invalidates).toEqual([]);
+    expect(sk.log.unavailables).toEqual([]); // 恢复成功（重挂成功→不降级）
+  });
+
+  it("重挂失败→unavailable(watch-failed)+槽关闭（fail-closed，不空转）", async () => {
+    const t1 = `${jline(1)}\n`;
+    const r = new FakeReader();
+    r.reads.push({ text: t1, identity: "1:1" }, { text: t1, identity: "1:1" });
     const w = new FakeWatcher();
     const h = harness({ reader: r, watcher: w });
     await h.src.load("a.jsonl");
     const sk = makeSinks();
     h.src.observe("a.jsonl", sk.s);
-    w.failNextSetup = true;
+    w.failNextSetup = true; // 重扫后 rearm 失败
     w.handles[0]?.triggerNotice();
     await until(() => sk.log.unavailables.length === 1);
-    expect(sk.log.unavailables).toEqual(["watch-failed"]);
-    expect(h.watcher.handles.every((x) => x.closed)).toBe(true);
+    expect(sk.log.unavailables[0]).toBe("watch-failed");
+    expect(activeHandles(w)).toHaveLength(0);
+    expect(h.audits.some((l) => l.includes("watch-rearm-failed"))).toBe(true);
   });
 
-  it("越界路径→load=null（outside-roots 拒绝）", async () => {
-    const h = harness({ roots: ["/safe"] });
-    expect(await h.src.load("../escape.jsonl")).toBeNull();
-    expect(h.audits.some((l) => l.includes("outside-roots"))).toBe(true);
+  it("活跃期 error 重挂也失败→unavailable（error 路径 fail-closed）", async () => {
+    const t1 = `${jline(1)}\n`;
+    const r = new FakeReader();
+    r.reads.push({ text: t1, identity: "1:1" });
+    const w = new FakeWatcher();
+    const h = harness({ reader: r, watcher: w });
+    await h.src.load("a.jsonl");
+    const sk = makeSinks();
+    h.src.observe("a.jsonl", sk.s);
+    w.failNextSetup = true;
+    w.handles[0]?.triggerError(new Error("died"));
+    await until(() => sk.log.unavailables.length === 1);
+    expect(sk.log.unavailables[0]).toBe("watch-failed");
+    expect(activeHandles(w)).toHaveLength(0);
+  });
+
+  it("邻文件健康：一个文件 watch 失败不波及另一文件流", async () => {
+    const r = new FakeReader();
+    r.reads.push({ text: `${jline(1)}\n`, identity: "1:1" }, { text: `${jline(1)}\n`, identity: "2:2" }, { text: `${jline(1)}\n`, identity: "1:1" }, { text: `${jline(1)}\n`, identity: "2:2" });
+    const w = new FakeWatcher();
+    const h = harness({ reader: r, watcher: w });
+    await h.src.load("bad.jsonl");
+    await h.src.load("good.jsonl");
+    const skBad = makeSinks(), skGood = makeSinks();
+    expect(h.src.observe("bad.jsonl", skBad.s)).not.toBeNull();
+    expect(h.src.observe("good.jsonl", skGood.s)).not.toBeNull();
+    // bad 触发 notice→重扫→重挂失败→unavailable
+    w.failNextSetup = true;
+    w.handles[0]?.triggerNotice();
+    await until(() => skBad.log.unavailables.length === 1);
+    const goodHandle = activeHandles(w).find((x) => x !== w.handles[0]);
+    goodHandle?.triggerNotice();
+    await drain();
+    expect(skGood.log.unavailables).toEqual([]); // good 不受影响
+    expect(skGood.log.invalidates).toEqual([]);
   });
 });
 
-describe("FileHistorySource——真盘集成（§V①⑤）", () => {
-  it("真 fs：装载/追加/截短分型/半行跨块/UTF-8 撕裂/坏行占位/替换/删除/超限", async () => {
+describe("FileHistorySource——盘面分型（§V②）", () => {
+  async function setup(t1: string): Promise<{ h: ReturnType<typeof harness>; sk: HistorySinks; log: SinkLog }> {
+    const r = new FakeReader();
+    r.reads.push({ text: t1, identity: "1:1" });
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");
+    const { s: sk, log } = makeSinks();
+    h.src.observe("a.jsonl", sk);
+    return { h, sk, log };
+  }
+  it("rewrite（同位置原文变化）→invalidate", async () => {
+    const { h, log } = await setup(`${jline(1)}\n`);
+    h.reader.reads.push({ text: `${jline(9)}\n`, identity: "1:1" });
+    h.watcher.handles[0]?.triggerNotice();
+    await until(() => log.invalidates.length === 1);
+    expect(log.invalidates[0]).toBe("rewrite");
+    expect(h.audits.some((l) => l.includes("invalidate"))).toBe(true);
+  });
+
+  it("truncate（变短）→invalidate", async () => {
+    const { h, log } = await setup(`${jline(1)}\n${jline(2)}\n`);
+    h.reader.reads.push({ text: `${jline(1)}\n`, identity: "1:1" });
+    h.watcher.handles[0]?.triggerNotice();
+    await until(() => log.invalidates.length === 1);
+    expect(log.invalidates[0]).toBe("truncate");
+  });
+
+  it("replace（身份变化）→invalidate", async () => {
+    const { h, log } = await setup(`${jline(1)}\n`);
+    h.reader.reads.push({ text: `${jline(1)}\n`, identity: "9:9" }); // dev:ino 变
+    h.watcher.handles[0]?.triggerNotice();
+    await until(() => log.invalidates.length === 1);
+    expect(log.invalidates[0]).toBe("replace");
+  });
+
+  it("幂等重扫（无变化）不发布任何信号", async () => {
+    const { h, log } = await setup(`${jline(1)}\n`);
+    h.reader.reads.push({ text: `${jline(1)}\n`, identity: "1:1" });
+    h.watcher.handles[0]?.triggerNotice();
+    await drain(20);
+    expect(log.appends).toEqual([]);
+    expect(log.invalidates).toEqual([]);
+    expect(log.unavailables).toEqual([]);
+  });
+
+  it("同文本两行（内容相同但 locator 不同）各自发布", async () => {
+    const { h, log } = await setup(`${jline(1)}\n`);
+    h.reader.reads.push({ text: `${jline(1)}\n${jline(2)}\n`, identity: "1:1" });
+    h.watcher.handles[0]?.triggerNotice();
+    await until(() => log.appends.length === 1);
+    expect(log.appends[0]?.locator).toBe("2");
+  });
+});
+
+describe("FileHistorySource R5——投影防御与坏行", () => {
+  it("坏行装载为 corrupt 占位（不 null、不抛）；追加坏行照常发布", async () => {
+    const r = new FakeReader();
+    const base = `${jline(1)}\nnot-json\n`;
+    r.reads.push({ text: base, identity: "1:1" }, { text: `${base}{"t":"sending","intentId":{}}\n`, identity: "1:1" });
+    const h = harness({ reader: r });
+    const rows = await h.src.load("a.jsonl");
+    expect(rows?.map((x) => x.event.kind)).toEqual(["turn-enqueued", "journal-corrupt"]);
+    const sk = makeSinks();
+    h.src.observe("a.jsonl", sk.s);
+    h.watcher.handles[0]?.triggerNotice();
+    await until(() => sk.log.appends.length === 1);
+    expect(sk.log.appends[0]?.event.kind).toBe("journal-corrupt"); // P1b 坏行不再流入非法字段
+    expect(sk.log.unavailables).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 真盘组（真 fs+RealReader；watcher 仍受控——真 watcher E2E 归 3b-3 组装验收）
+// ---------------------------------------------------------------------------
+describe("FileHistorySource 真盘（3b-2a+R7 证据分级）", () => {
+  it("真盘全分型：追加/改写/截短/替换(rename)/删除 + 半行撕裂 + 坏行", async () => {
     const root = await tmpRoot();
-    const file = join(root, "j.jsonl");
-    await writeFile(file, `${jline(1)}\n`, "utf8");
-    // 注入 FakeWatcher（真 watcher 时序不稳），reader 用真盘（默认 RealReader）
+    const file = join(root, "real.jsonl");
+    await writeFile(file, `${jline(1)}\n${jline(2)}\n`, "utf8");
     const w = new FakeWatcher();
     const src = new FileHistorySource({ roots: [root], watcher: w, audit: () => {} });
-    const rows = await src.load("j.jsonl");
-    expect(rows).toHaveLength(1);
+    const rows1 = await src.load(file);
+    expect(rows1).toHaveLength(2);
     const sk = makeSinks();
-    src.observe("j.jsonl", sk.s);
-
-    // 追加完整行
-    await appendFile(file, `${jline(2)}\n`, "utf8");
+    const stop = src.observe(file, sk.s);
+    // 追加（含一次半行撕裂：先写半行→通知→不发布；补全→通知→发布）
+    await appendFile(file, jline(3).slice(0, 20));
     w.handles[0]?.triggerNotice();
+    await drain();
+    expect(sk.log.appends).toHaveLength(0); // 撕裂尾不发布
+    await appendFile(file, `${jline(3).slice(20)}\n`);
+    activeHandles(w)[0]?.triggerNotice(); // 撕裂重扫后已 rearm——用当前活跃句柄
     await until(() => sk.log.appends.length === 1);
-    expect(sk.log.appends[0]?.locator).toBe("2");
-
-    // 半行（无换行）→不发布；补全后发布
-    await appendFile(file, jline(3).slice(0, 20), "utf8");
-    w.handles.filter((x) => !x.closed)[0]?.triggerNotice();
-    await drain(30);
-    expect(sk.log.appends).toHaveLength(1);
-    await appendFile(file, `${jline(3).slice(20)}\n`, "utf8");
-    w.handles.filter((x) => !x.closed)[0]?.triggerNotice();
+    expect(sk.log.appends[0]?.locator).toBe("3");
+    // 坏行追加→corrupt 发布
+    await appendFile(file, "garbage\n");
+    activeHandles(w)[0]?.triggerNotice();
     await until(() => sk.log.appends.length === 2);
-    expect(sk.log.appends[1]?.locator).toBe("3");
-
-    // UTF-8 撕裂：多字节字符从中间断开（分两次写，先无换行）
-    const u8 = JSON.stringify({ t: "sending", intentId: "i-9", generation: 1 }) + "\n";
-    const bytes = Buffer.from(u8, "utf8");
-    const mid = Math.floor(bytes.length / 2);
-    await appendFile(file, bytes.subarray(0, mid));
-    w.handles.filter((x) => !x.closed)[0]?.triggerNotice();
-    await drain(30);
-    expect(sk.log.appends).toHaveLength(2);
-    await appendFile(file, bytes.subarray(mid));
-    w.handles.filter((x) => !x.closed)[0]?.triggerNotice();
-    await until(() => sk.log.appends.length === 3);
-    expect(sk.log.appends[2]?.event.kind).toBe("sending");
-
-    // 坏完整行→journal-corrupt 占位（不丢）
-    await appendFile(file, "garbage\n", "utf8");
-    w.handles.filter((x) => !x.closed)[0]?.triggerNotice();
-    await until(() => sk.log.appends.length === 4);
-    expect(sk.log.appends[3]?.event.kind).toBe("journal-corrupt");
-
-    // 截短→invalidate(truncate)
+    expect(sk.log.appends[1]?.event.kind).toBe("journal-corrupt");
+    // 改写（同位置原文变化）→rewrite
+    await writeFile(file, `${jline(1)}\n${jline(2)}\n${jline(3)}\n${jline(4)}\n${jline(3)}\n${jline(4)}\n${jline(3)}\n${jline(4)}\n${jline(3)}\n`, "utf8"); // 同长度但行 2 原文不同
+    activeHandles(w)[0]?.triggerNotice();
+    await until(() => sk.log.invalidates.includes("rewrite"));
+    stop!();
+    // 换代后：截短→invalidate(truncate)
+    const rows2 = await src.load(file);
+    expect(rows2).not.toBeNull();
+    const sk2 = makeSinks();
+    const stop2 = src.observe(file, sk2.s);
     await writeFile(file, `${jline(1)}\n`, "utf8");
-    w.handles.filter((x) => !x.closed)[0]?.triggerNotice();
-    await until(() => sk.log.invalidates.length === 1);
-    expect(sk.log.invalidates).toEqual(["truncate"]);
-
-    // 替换（原子 rename）→新订阅重装载=新基线（旧流已停）
-    const tmp = join(root, "swap.tmp");
-    await writeFile(tmp, `${jline(1)}\n${jline(2)}\n`, "utf8");
-    await rename(tmp, file);
-    const rows2 = await src.load("j.jsonl");
-    expect(rows2).toHaveLength(2);
-
-    // 删除→新装载 fail-closed null
+    activeHandles(w)[0]?.triggerNotice();
+    await until(() => sk2.log.invalidates.includes("truncate"));
+    stop2!();
+    // 替换（rename over→dev:ino 变化）→invalidate(replace)
+    const tmp2 = join(root, "real2.jsonl");
+    await writeFile(tmp2, `${jline(1)}\n${jline(2)}\n`, "utf8");
+    const rows3 = await src.load(file);
+    expect(rows3).not.toBeNull();
+    const sk3 = makeSinks();
+    const stop3 = src.observe(file, sk3.s);
+    await rename(tmp2, file);
+    activeHandles(w)[0]?.triggerNotice();
+    await until(() => sk3.log.invalidates.includes("replace"));
+    stop3!();
+    // 删除（活跃订阅期 unlink→missing→deleted）
+    const rows4 = await src.load(file);
+    expect(rows4).not.toBeNull();
+    const sk4 = makeSinks();
+    const stop4 = src.observe(file, sk4.s);
     await unlink(file);
-    expect(await src.load("j.jsonl")).toBeNull();
+    activeHandles(w)[0]?.triggerNotice();
+    await until(() => sk4.log.unavailables.includes("deleted"));
+    stop4!();
   });
 
-  it("真 fs：maxScanBytes 读中硬限→load=null（too-large）", async () => {
+  it("UTF-8 多字节字符跨 64KiB 块界：撕裂两半不发布、补全成行", async () => {
+    const root = await tmpRoot();
+    const file = join(root, "cross.jsonl");
+    const head = jline(1);
+    // 构造第 2 行使其跨越 65536 字节界：中文每字 3 字节
+    const prefixLen = 65530 - head.length - 1; // 第 2 行内、界前的字节数
+    const pad = "a".repeat(Math.max(0, prefixLen - 60));
+    const line2 = jline(2, `${pad}中文跨界中文跨界`); // 多字节字符大概率跨界
+    await writeFile(file, `${head}\n`, "utf8");
+    const w = new FakeWatcher();
+    const src = new FileHistorySource({ roots: [root], watcher: w, audit: () => {} });
+    await src.load(file);
+    const sk = makeSinks();
+    src.observe(file, sk.s);
+    const bytes = Buffer.from(`${line2}\n`, "utf8");
+    // 先写前 65530 字节（恰好停在某个多字节字符中间附近）→通知→不发布
+    await appendFile(file, bytes.subarray(0, 65530 - head.length - 1));
+    w.handles[0]?.triggerNotice();
+    await drain();
+    expect(sk.log.appends).toHaveLength(0); // 撕裂（可能停在多字节中间）不发布
+    await appendFile(file, bytes.subarray(65530 - head.length - 1));
+    activeHandles(w)[0]?.triggerNotice(); // 撕裂重扫已 rearm——用当前活跃句柄
+    await until(() => sk.log.appends.length === 1);
+    expect(sk.log.appends[0]?.event.kind).toBe("turn-enqueued");
+  });
+
+  it("maxScanBytes 硬限：超限→load=null（scan-over-budget 面在重扫）", async () => {
     const root = await tmpRoot();
     const file = join(root, "big.jsonl");
-    await writeFile(file, "x".repeat(4096), "utf8");
-    const src = new FileHistorySource({ roots: [root], watcher: new FakeWatcher(), maxScanBytes: 64, audit: () => {} });
-    expect(await src.load("big.jsonl")).toBeNull();
+    await writeFile(file, `${jline(1)}\n`.repeat(10), "utf8");
+    const w = new FakeWatcher();
+    const src = new FileHistorySource({ roots: [root], watcher: w, maxScanBytes: 50, audit: () => {} });
+    expect(await src.load(file)).toBeNull(); // 超预算 fail-closed
+    expect(activeHandles(w)).toHaveLength(0);
+  });
+
+  it("真盘初扫读挂起期间 release：装载即弃（槽关闭、无泄漏）", async () => {
+    const root = await tmpRoot();
+    const file = join(root, "p9.jsonl");
+    await writeFile(file, `${jline(1)}\n`, "utf8");
+    // 首读真挂起（手动开闸）：验证初扫在飞时 release 的 fail-closed 出口
+    let first = true;
+    let gateOpen = false;
+    const w = new FakeWatcher();
+    const src = new FileHistorySource({
+      roots: [root], watcher: w, audit: () => {},
+      reader: {
+        read: async (abs: string) => {
+          if (first) { first = false; while (!gateOpen) await new Promise((res) => setTimeout(res, 2)); }
+          const st = await stat(abs);
+          return { text: await readFile(abs, "utf8"), identity: `${st.dev}:${st.ino}` };
+        },
+      },
+    });
+    const p = src.load(file);
+    await drain(6); // 初扫挂起中（真读未返回）
+    src.release(file); // 置 releasePending
+    gateOpen = true; // 放行读
+    expect(await p).toBeNull(); // 装载即弃（fail-closed，不给无主快照）
+    await drain();
+    expect(activeHandles(w)).toHaveLength(0); // 无主 watcher=0
   });
 });

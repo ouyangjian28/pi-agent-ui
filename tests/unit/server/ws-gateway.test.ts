@@ -80,6 +80,9 @@ class FakeHistory implements HistorySourcePort {
   readonly sinks = new Map<string, HistorySinks>();
   loadCalls: string[] = [];
   observeCalls: string[] = [];
+  releaseCalls: string[] = [];
+  /** R3 身份门探针：observe 可返 null（换代竞态），触发 observe-missed 路径 */
+  failNextObserve = false;
   /** B3：受控挂起——文件名命中时 load 等待对应 resolver（造 await 窗口） */
   gates = new Map<string, () => void>();
   async load(file: string): Promise<readonly ScanRow[] | null> {
@@ -89,11 +92,14 @@ class FakeHistory implements HistorySourcePort {
     const v = this.files.get(file);
     return v === undefined ? null : v;
   }
-  observe(file: string, sinks: HistorySinks): () => void {
+  private observeGate(): boolean { if (this.failNextObserve) { this.failNextObserve = false; return false; } return true; }
+  observe(file: string, sinks: HistorySinks): (() => void) | null {
     this.observeCalls.push(file);
+    if (!this.observeGate()) return null; // R1：无活跃代可绑（换代竞态）
     this.sinks.set(file, sinks);
     return () => { this.sinks.delete(file); };
   }
+  release(file: string): void { this.releaseCalls.push(file); }
   rows(file: string): ScanRow[] {
     const v = this.files.get(file);
     if (v == null) throw new Error(`fake history 无 ${file}`);
@@ -102,7 +108,7 @@ class FakeHistory implements HistorySourcePort {
   put(file: string, rows: ScanRow[]): void { this.files.set(file, rows); }
   /** B3：挂起闸门——首次调用返回闸门对象，再调才放行（同一文件后续 load 立即过）。 */
   gate(file: string): void { this.gates.set(file, () => {}); }
-  release(file: string): void { const g = this.gates.get(file); if (g) { g(); this.gates.delete(file); } }
+  openGate(file: string): void { const g = this.gates.get(file); if (g) { g(); this.gates.delete(file); } }
   missing(file: string): void { this.files.set(file, null); }
   append(file: string, row: ScanRow): void {
     this.rows(file).push(row);
@@ -140,6 +146,7 @@ interface Rig {
   scanDir: string;
   evidence: Map<string, RecoveryEvidenceSnapshot | null>;
   history: FakeHistory;
+  audits: string[];
   dispose(): Promise<void>;
 }
 
@@ -147,6 +154,7 @@ async function makeRig(over: Partial<WsGatewayOpts> = {}): Promise<Rig> {
   const d = await mkdtemp(join(tmpdir(), "ws-gw-"));
   const evidence = new Map<string, RecoveryEvidenceSnapshot | null>();
   const history = new FakeHistory();
+  const audits: string[] = [];
   const gw = new WsGateway({
     tokens: TokenAuthority.fromTokens(["tok-ok"]),
     roots: [d],
@@ -158,7 +166,7 @@ async function makeRig(over: Partial<WsGatewayOpts> = {}): Promise<Rig> {
     },
     historySource: history,
     heartbeat: { pingMs: 0, idleMs: 0 }, // 默认禁用（个别例覆盖）
-    audit: () => {},
+    audit: (l) => { audits.push(l); },
     ...over,
   });
   const conn = (meta?: Partial<ConnMeta>) => {
@@ -166,7 +174,7 @@ async function makeRig(over: Partial<WsGatewayOpts> = {}): Promise<Rig> {
     const handle = gw.attach(c, c.hooks(), { origin: "http://localhost:5173", loopback: true, tls: false, ...meta } satisfies ConnMeta);
     return { c, handle };
   };
-  return { gw, conn, roots: d, scanDir: d, evidence, history, dispose: async () => { gw.dispose(); await rm(d, { recursive: true, force: true }); } };
+  return { gw, conn, roots: d, scanDir: d, evidence, history, audits, dispose: async () => { gw.dispose(); await rm(d, { recursive: true, force: true }); } };
 }
 
 async function authed(r: Rig, token = "tok-ok"): Promise<FakeConn> {
@@ -936,7 +944,7 @@ describe("ws-gateway w1b：B 系阻断回归", () => {
       void c.say({ t: "subscribe", requestId: "r1", file: "race.jsonl" });
       void c.say({ t: "subscribe", requestId: "r2", file: "race.jsonl" });
       await tick();
-      r.history.release("race.jsonl"); // 两 load 同时放行
+      r.history.openGate("race.jsonl"); // 两 load 同时放行
       await until(() => c.frames().some((f) => f.t === "snapshot") && errFrames(c).some((f) => f.code === 4409), 1000);
       const replaced = errFrames(c).filter((f) => f.code === 4409 && String(f.message).startsWith("stream-replaced:"));
       expect(replaced.length).toBe(1); // 后提交替换先提交（非静默覆盖）——先提交快照可能已被撤（cancelBySubscription）
@@ -969,8 +977,8 @@ describe("ws-gateway w1b：B 系阻断回归", () => {
       void c.say({ t: "subscribe", requestId: "s8", file: "f8.jsonl" });
       void c.say({ t: "subscribe", requestId: "s9", file: "f9.jsonl" });
       await tick();
-      r.history.release("f8.jsonl");
-      r.history.release("f9.jsonl");
+      r.history.openGate("f8.jsonl");
+      r.history.openGate("f9.jsonl");
       await until(() => errFrames(c).some((f) => f.code === 4429), 1000);
       expect(errFrames(c).filter((f) => f.code === 4429).length).toBe(1); // 恰一个超限
       const snaps = c.frames().filter((f) => f.t === "snapshot");
@@ -1397,10 +1405,13 @@ describe("ws-gateway w1d：D 系阻断回归", () => {
       await c2.say({ t: "subscribe", requestId: "g2", file: "g.jsonl" });
       expect(errFrames(c2).some((f) => f.code === 4402 && f.retryable === true)).toBe(true);
       expect(audits.some((l) => l.includes("index-dropped") && l.includes("file=g.jsonl") && l.includes("reason=budget-swap"))).toBe(true);
-      // 保存的迟到 onAppend 回调（退役后宿主仍可能收到尾事件）：get 抛 FileOverBudgetError（已标记+现流触顶）→容量出口吸收不逸出
+      // 3b2a-R3：退役旧闭包在身份门即被丢弃（watchers.get(file)!==rec）——不再触达
+      // registry.get，FileOverBudgetError 路径对退役回调结构性不可达（僵尸回调
+      // 永不入注册表=语义改进）；吸收=无新帧、连接不挂。
+      const frames2 = c2.frames().length;
       sinks.onAppend(rowAt(7));
       await tick(); await tick();
-      expect(audits.some((l) => l.includes("index-over-budget-get") && l.includes("file=g.jsonl"))).toBe(true);
+      expect(c2.frames().length).toBe(frames2); // 旧闭包零效果
       expect(c2.readyState).toBe(1); // 未被未捕获异常拖死
     } finally {
       await r.dispose();
@@ -1482,10 +1493,88 @@ describe("3b-2 源事件接线（onInvalidate/onUnavailable）", () => {
       await c.say({ t: "subscribe", requestId: "s2", file: "x.jsonl" });
       const snap2 = c.frames().filter((f) => f.t === "snapshot").pop() as Record<string, unknown>;
       expect(snap2.subscriptionId).not.toBe(subId1); // 新订阅
-      expect(snap2.streamId).toBe(snap1.streamId); // 内容寻址流身份：同内容=同流（真实 rewrite 内容必变→换流，C17 已覆盖）
+      expect(snap2.streamId).not.toBe(snap1.streamId); // R4（3b2a-P8）：invalidate 已废弃旧流身份——同内容重订阅也必须换流（非内容寻址）
       expect(snap2.barrier).toBe(2);
       expect(r.history.loadCalls.length).toBe(loadsBefore + 1);
       expect(r.history.sinks.has("x.jsonl")).toBe(true);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("R3（3b2a-P5）旧代 sink 闭包不得侵新订阅：旧 onAppend/onInvalidate/onUnavailable 全被身份门丢弃", async () => {
+    const r = await makeRig();
+    try {
+      r.history.put("x.jsonl", makeRows(2));
+      const c = await authed(r);
+      await c.say({ t: "subscribe", requestId: "s1", file: "x.jsonl" });
+      const oldSinks = r.history.sinks.get("x.jsonl") as HistorySinks; // 旧代闭包（捕1旧 rec）
+      expect(oldSinks).toBeDefined();
+      // 旧代退役：invalidate→4409+撤观察；重订阅产生新代闭包
+      r.history.invalidate("x.jsonl", "rewrite");
+      await new Promise((res) => setTimeout(res, 5));
+      await c.say({ t: "subscribe", requestId: "s2", file: "x.jsonl" });
+      const snap2 = c.frames().filter((f) => f.t === "snapshot").pop() as Record<string, unknown>;
+      expect(snap2).toBeDefined();
+      const newSinks = r.history.sinks.get("x.jsonl") as HistorySinks;
+      expect(newSinks).not.toBe(oldSinks); // 新代闭包
+      c.sent.length = 0;
+      // 旧闭包三型迟发：全部不得作用于新订阅
+      oldSinks.onAppend?.({ source: "journal", locator: "99", raw: "{}", event: { seq: 99, ts: 0, generation: null, intentId: null, kind: "sending" } });
+      oldSinks.onInvalidate?.("rewrite");
+      oldSinks.onUnavailable?.("deleted");
+      await new Promise((res) => setTimeout(res, 8));
+      expect(c.frames().some((f) => f.t === "events")).toBe(false); // 旧 onAppend 不入新引擎
+      expect(errFrames(c).some((f) => f.code === 4409)).toBe(false); // 旧 onInvalidate 不退新订阅
+      expect(errFrames(c).some((f) => f.code === 4402)).toBe(false); // 旧 onUnavailable 不关新订阅
+      // 新代闭包照常工作
+      newSinks.onAppend?.({ source: "journal", locator: "3", raw: JSON.stringify({ t: "sending", seq: 3 }), event: { seq: 3, ts: 2, generation: null, intentId: null, kind: "sending" } });
+      await new Promise((res) => setTimeout(res, 8));
+      expect(c.frames().some((f) => f.t === "events")).toBe(true);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("R1（3b2a-P9）连接在 load 挂起期间断开→load 解析后释放引用、无孤儿观察", async () => {
+    const r = await makeRig();
+    try {
+      r.history.put("x.jsonl", makeRows(2));
+      r.history.gate("x.jsonl");
+      const c = await authed(r);
+      const p = c.say({ t: "subscribe", requestId: "s1", file: "x.jsonl" });
+      await new Promise((res) => setTimeout(res, 5)); // load 已挂起
+      c.closedByTransport(1006); // 宿主断开
+      r.history.openGate("x.jsonl"); // 放行 load
+      await p.catch(() => {});
+      await new Promise((res) => setTimeout(res, 5));
+      expect(r.history.releaseCalls).toContain("x.jsonl"); // st.closed 出口配对释放
+      expect(r.history.sinks.has("x.jsonl")).toBe(false); // 无孤儿观察
+      expect(r.history.observeCalls).not.toContain("x.jsonl"); // 未走到 watchFile
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("R1 observe-missed：observe 返 null（换代竞态）→4409 退本订阅+释放，不静默断流", async () => {
+    const r = await makeRig();
+    try {
+      r.history.put("x.jsonl", makeRows(2));
+      const c = await authed(r);
+      r.history.failNextObserve = true; // watchFile 时无活跃代可绑
+      await c.say({ t: "subscribe", requestId: "s1", file: "x.jsonl" });
+      await new Promise((res) => setTimeout(res, 5));
+      // 快照不投：4409 退订会 cancelBySubscription 撤回未发快照帧——订阅以显式
+      // retryable 错误收口（客户端重订阅即得新代快照），比投死快照（观察已断、
+      // 后续无增量）更诚实；「不静默断流」=客户端必收到 4409。
+      const rep = errFrames(c).find((f) => f.code === 4409);
+      expect(rep).toBeDefined(); // 显式退订（不静默断流）
+      const snap = c.frames().find((f) => f.t === "snapshot");
+      expect(snap).toBeUndefined(); // 快照已撤（不投递死订阅）
+      expect(String(rep?.message)).toContain("stream-replaced:");
+      expect(r.audits.some((l) => l.includes("observe-missed"))).toBe(true);
+      expect(r.history.sinks.has("x.jsonl")).toBe(false); // 观察已撤
+      expect(r.history.releaseCalls).toContain("x.jsonl"); // 引用释放
     } finally {
       await r.dispose();
     }
