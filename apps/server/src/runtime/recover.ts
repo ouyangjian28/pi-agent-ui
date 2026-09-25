@@ -64,7 +64,7 @@ export interface RecoverReport {
 function isUnknownEffect(rec: IntentRecord): boolean {
   if (rec.lastVerdict === "unknown") return true;
   if (rec.lastVerdict !== null) return false; // settled/delivered=有终态
-  return rec.sending || rec.responseTimeoutRecorded;
+  return rec.sending || rec.responseTimeoutRecorded === true;
 }
 
 export function buildRecoverReport(lines: readonly JournalLine[], sessionId: SessionId): RecoverReport {
