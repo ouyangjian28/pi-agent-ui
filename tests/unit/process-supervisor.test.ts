@@ -5,7 +5,7 @@
 // S3-03 Gate 许可/S3-04 预算截断+晚醒不重置/黄项：stderr 过滤/spawn 同步退出/审计隔离/写拒绝）。
 // 纯逻辑注入：FakeProcessHost（受控进程）+FakeSleep（虚拟时钟：advance 推进+requests 记录预算）
 // +真协调器/网关+FakeDurability。
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { JournalLine, LaunchOutcome, ProcessSpawnHandlers, SupervisorCoordinatorPort, TrackedCommand } from "@pi-agent-ui/protocol";
 import { DispatchCoordinator, ProcessSupervisor, TurnGate } from "@pi-agent-ui/protocol";
 import type { TurnIntentInput } from "@pi-agent-ui/protocol";
@@ -605,12 +605,36 @@ describe("进程代次监管器（ProcessSupervisor，切片3）", () => {
     await prA; // A 旧续体 finally 在 B 挂起期间执行
     h.host.deliverExit(h.host.procs[1]!, 0, null);
     expect((await prB).kind).toBe("confirmed");
+    // S3C：B 槽位未被 A 旧 finally 误清→B 退出是正常 handover，非 late（窄变异：finally 清 current 槽→B 被误标 late）
+    expect(h.audits.some((l) => l.includes("process-retired-late"))).toBe(false);
     h.gate.reopen();
     h.sup.spawnNext([]);
     const prC = h.sup.retireCurrent();
     await until(() => h.host.proc(h.host.procs[2]!.handle).stopSignals.includes("SIGTERM"), "C SIGTERM");
     h.host.deliverExit(h.host.procs[2]!, 0, null);
     expect((await prC).kind).toBe("confirmed"); // 按代次隔离后各代独立，无双写
+  });
+
+  it("S3C-01 默认时钟选用单调源：performance.now 被调用且 Date.now 未被读取", async () => {
+    const pSpy = vi.spyOn(performance, "now").mockImplementation(() => 10_000); // 单调源固定 10000
+    const dSpy = vi.spyOn(Date, "now").mockImplementation(() => {
+      throw new Error("Date.now 被读取：默认分支应选单调源");
+    });
+    try {
+      const h = makeHarness({ useDefaultNowMs: true });
+      h.sup.spawnNext([]);
+      const pr = h.sup.retireCurrent(); // startMs=10000（performance）
+      await until(() => h.host.proc(h.host.procs[0]!.handle).stopSignals.includes("SIGTERM"), "SIGTERM");
+      h.sleep.advance(2_000); // 宽限到点（虚拟睡眠）
+      await until(() => h.sleep.requests.length === 2, "第二段预算已请求");
+      expect(h.sleep.requests).toEqual([2_000, 5_000]); // 单调源固定→剩余=全额预算
+      expect(pSpy.mock.calls.length).toBeGreaterThanOrEqual(1);
+      h.sleep.advance(7_000);
+      expect((await pr).kind).toBe("deadline-exceeded");
+    } finally {
+      pSpy.mockRestore();
+      dSpy.mockRestore();
+    }
   });
 
   it("stderr 按代次过滤：当前带 generation 转发；退役/非当前丢弃+审计", async () => {
