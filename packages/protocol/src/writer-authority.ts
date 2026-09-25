@@ -60,7 +60,7 @@ export interface RequestWriterResult {
 
 export type SubmitResult =
   | { readonly kind: "ok"; readonly epoch: number }
-  | { readonly kind: "rejected"; readonly reason: "stale-epoch" | "not-holder" | "frozen"; readonly currentEpoch: number };
+  | { readonly kind: "rejected"; readonly reason: "stale-epoch" | "not-holder" | "frozen" | "handoff"; readonly currentEpoch: number };
 
 /** 写权管理器（多会话）。 */
 export class WriterAuthority {
@@ -123,10 +123,10 @@ export class WriterAuthority {
     return ns;
   }
 
-  /** 退出确认到达（waitpid/进程消失）→ 交接完成，可 spawn 新写者（调用方接手）。 */
+  /** 退出确认到达（waitpid/进程消失）→ 交接完成，可 spawn 新写者（调用方接手）。r8：旧进程已确认死 → 持有者同步清空，旧页面提交资格不自动延续。 */
   confirmExit(sessionId: SessionId): WriterState {
     const s = this.get(sessionId);
-    const ns: WriterState = { ...s, phase: "complete", busy: false };
+    const ns: WriterState = { ...s, phase: "complete", busy: false, holder: null };
     this.states.set(sessionId, ns);
     return ns;
   }
@@ -139,10 +139,10 @@ export class WriterAuthority {
     return ns;
   }
 
-  /** 后台核验通过（旧进程消失确认）→ 冻结转可接管。 */
+  /** 后台核验通过（旧进程消失确认）→ 冻结转可接管。r8：同 confirmExit 清持有者。 */
   verifyRecovered(sessionId: SessionId): WriterState {
     const s = this.get(sessionId);
-    const ns: WriterState = { ...s, phase: "complete", busy: false };
+    const ns: WriterState = { ...s, phase: "complete", busy: false, holder: null };
     this.states.set(sessionId, ns);
     return ns;
   }
@@ -156,10 +156,11 @@ export class WriterAuthority {
     return ns;
   }
 
-  /** 命令门：提交校验（epoch 过期→拒；W1 让位后旧页面提交）。 */
+  /** 命令门：提交校验。r8 门序：frozen → 交接中（terminating/killed）拒新提交 → stale-epoch → not-holder → ok。已在飞轮不受此门约束（代次不管在飞轮）；complete 已清 holder → not-holder 如实呈现。 */
   submit(sessionId: SessionId, connId: ConnId, epoch: number): SubmitResult {
     const s = this.get(sessionId);
     if (s.phase === "frozen") return { kind: "rejected", reason: "frozen", currentEpoch: s.epoch };
+    if (s.phase === "terminating" || s.phase === "killed") return { kind: "rejected", reason: "handoff", currentEpoch: s.epoch }; // r8-01：正在停/已停旧写者，新提交门关闭
     // epoch 先验（W1：代次+1 拒旧页面提交——旧代次证据优先呈现；被夺权的旧页面典型=stale-epoch）
     if (epoch !== s.epoch) return { kind: "rejected", reason: "stale-epoch", currentEpoch: s.epoch };
     if (s.holder !== connId) return { kind: "rejected", reason: "not-holder", currentEpoch: s.epoch };

@@ -21,7 +21,7 @@ describe("LinePump（stdout 常驻排空行缓冲）", () => {
     expect(lines).toEqual(['{"type":"event","x":1}', '{"type":"next"}']);
   });
 
-  it("CRLF：\\r 尾剥（跨平台写手）", () => {
+  it("CRLF：\\r 保留在行尾由解析层容忍（泵职责=按 \\n 拆；跨平台写手）", () => {
     const lines: string[] = [];
     const p = new LinePump((l) => lines.push(l));
     p.feed(Buffer.from('{"a":1}\r\n{"b":2}\r\n', "utf8"));

@@ -1,7 +1,7 @@
 // pi 子进程宿主壳：spawn + 常驻排空（stdout/stderr）+ 事件流解析 + 退出捕获
 // 集成面：真 spawn 依赖本机 pi；单元测试走 LinePump 级（line-pump.test.ts）+注入式 fake child（本文件不直接单测）。
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { LinePump } from "./line-pump";
+import { LinePump } from "./line-pump.js";
 
 export interface PiEvent {
   readonly type: string;
@@ -23,15 +23,26 @@ export function spawnPi(args: readonly string[], h: PiChildHandlers): ChildProce
   return child;
 }
 
-/** 挂常驻排空泵（也用于非本模块 spawn 的子进程：测试/复用）。 */
+/** 挂常驻排空泵（也用于非本模块 spawn 的子进程：测试/复用）。r8：解析错与业务回调错分离——onEvent 抛错不得伪装成坏 JSON。 */
 export function attachPumps(child: ChildProcessWithoutNullStreams, h: PiChildHandlers): void {
   const stdout = new LinePump((line) => {
+    let e: PiEvent;
     try {
-      const e = JSON.parse(line) as PiEvent;
-      if (typeof e.type === "string") h.onEvent(e);
+      e = JSON.parse(line) as PiEvent;
     } catch {
-      // 坏行/非 JSON 行（撕裂尾/横幅输出）：stderr 化记录，不炸泵
+      // 解析错（坏行/非 JSON 行：撕裂尾/横幅输出）：stderr 化记录，不炸泵
       h.onStderr(`[stdout-nonjson] ${line}`);
+      return;
+    }
+    // 业务回调错走独立故障路径（r8 建议：不得误报格式问题；泵继续运行）
+    if (typeof e.type !== "string") {
+      h.onStderr(`[stdout-nonjson] ${line}`); // 可解析但无 type 字段=非事件行，同路径记录
+      return;
+    }
+    try {
+      h.onEvent(e);
+    } catch (err) {
+      h.onStderr(`[handler-error] ${e.type}: ${err instanceof Error ? err.message : String(err)}`);
     }
   });
   const stderr = new LinePump((line) => h.onStderr(line));

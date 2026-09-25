@@ -125,3 +125,51 @@ describe("释放与冻结期命令门", () => {
     expect(auth.submit("s1", "connA", 1)).toEqual({ kind: "rejected", reason: "frozen", currentEpoch: 1 });
   });
 });
+
+describe("r8-01 交接期提交门（terminating/killed/complete 拒新提交）", () => {
+  it("从真实持有状态进交接：逐阶段断言旧持有者新提交被拒；默认转接不影响既有轮（本模块不拦在飞轮）", () => {
+    const sigLog: string[] = [];
+    const auth = new WriterAuthority(fakeOps(sigLog), 3000, 10_000);
+    auth.requestWriter("s1", "connA", true); // A 真实持有 epoch=1
+    expect(auth.submit("s1", "connA", 1).kind).toBe("ok");
+
+    // terminating：正在停旧写者 → 新提交门关闭
+    auth.startHandoff("s1");
+    expect(auth.submit("s1", "connA", 1)).toEqual({ kind: "rejected", reason: "handoff", currentEpoch: 1 });
+
+    // killed：SIGKILL 已发仍拒
+    auth.killOldWriter("s1");
+    expect(auth.submit("s1", "connA", 1)).toEqual({ kind: "rejected", reason: "handoff", currentEpoch: 1 });
+
+    // complete：退出确认到达，持有者清空 → 旧页面按 not-holder 拒（资格不自动延续）
+    const c = auth.confirmExit("s1");
+    expect(c.holder).toBeNull();
+    expect(auth.submit("s1", "connA", 1)).toEqual({ kind: "rejected", reason: "not-holder", currentEpoch: 1 });
+
+    // 新页面重新申请 → 附着成功，代次+1
+    const n = auth.requestWriter("s1", "connB", false);
+    expect(n.kind).toBe("attached");
+    expect(n.state.epoch).toBe(2);
+    expect(auth.submit("s1", "connB", 2)).toEqual({ kind: "ok", epoch: 2 });
+  });
+
+  it("W1b 冻结转正路径：verifyRecovered 后旧页面提交仍拒（holder 已清）", () => {
+    const auth = new WriterAuthority(fakeOps(), 3000, 10_000);
+    auth.requestWriter("s1", "connA", false);
+    auth.startHandoff("s1");
+    auth.deadlineReached("s1"); // frozen
+    const v = auth.verifyRecovered("s1");
+    expect(v.phase).toBe("complete");
+    expect(v.holder).toBeNull();
+    expect(auth.submit("s1", "connA", 1)).toEqual({ kind: "rejected", reason: "not-holder", currentEpoch: 1 });
+  });
+
+  it("默认转接（无交接）提交门不受影响：B 接管后 B 即刻可提交（W1a 进程不动路径）", () => {
+    const sigLog: string[] = [];
+    const auth = new WriterAuthority(fakeOps(sigLog));
+    auth.requestWriter("s1", "connA", true);
+    auth.requestWriter("s1", "connB", true); // 转接：phase 仍 idle
+    expect(auth.submit("s1", "connB", 2)).toEqual({ kind: "ok", epoch: 2 });
+    expect(sigLog).toHaveLength(0); // 无信号=无交接，门不应误关
+  });
+});

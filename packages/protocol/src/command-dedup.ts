@@ -53,10 +53,13 @@ export class CommandDedup {
     for (const r of records) this.records.set(r.opId, r);
   }
 
-  /** 滚动清除（24h；调用方传当前时刻）。 */
-  sweep(now: string): number {
-    let removed = 0;
+  /** 滚动清除（r8-02：会话活跃期+24h 双条件）。sessionLastActiveAt=会话最后活跃时刻；缺省=视为此刻活跃（保守不删，逼调用方显式表态）。删除条件=占位过 24h 且会话已退出活跃期满 24h。 */
+  sweep(now: string, opts: { sessionLastActiveAt?: string } = {}): number {
     const cutoff = Date.parse(now) - 24 * 3600 * 1000;
+    if (opts.sessionLastActiveAt === undefined) return 0; // 会话活跃期保护：无判据不删（r8-02）
+    const sessionIdle = Date.parse(opts.sessionLastActiveAt) < cutoff;
+    if (!sessionIdle) return 0;
+    let removed = 0;
     for (const [opId, r] of this.records) {
       const t = Date.parse(r.placedAt);
       if (Number.isFinite(t) && t < cutoff) {

@@ -38,17 +38,30 @@ describe("通用命令去重表（opId 幂等）", () => {
     expect(d.admit("op-1", "argsA", T0)).toEqual({ kind: "cached", result: { ok: true } });
   });
 
-  it("24h 滚动清除（占位与缓存行都过期清除）", () => {
+  it("滚动清除（r8-02：会话活跃期+24h 双条件；活跃超 24h 不删，退出活跃期满 24h 才删）", () => {
     const d = new CommandDedup();
     d.admit("op-old-1", "a", T0);
     d.settle("op-old-1", { ok: 1 });
     d.admit("op-old-2", "b", T0);
     d.admit("op-new", "c", t(20)); // 20h 前
     expect(d.size()).toBe(3);
-    expect(d.sweep(t(25))).toBe(2); // T0 的两条过期（24h+），20h 前的不动
+
+    // 会话 1h 前活跃：占位虽过 25h 仍不删（活跃期保护）
+    expect(d.sweep(t(25), { sessionLastActiveAt: t(24) })).toBe(0);
+    expect(d.get("op-old-1")).toBeDefined();
+    // 清理前旧 op 不重新 admitted（仍在表内=unknown/cached）
+    expect(d.admit("op-old-1", "a", T0)).toEqual({ kind: "cached", result: { ok: 1 } });
+
+    // 未提供活跃时刻=保守不删（逼调用方显式表态）
+    expect(d.sweep(t(25))).toBe(0);
+
+    // 会话退出活跃期满 25h：T0 的两条删（占位与缓存行都清），20h 前的不动
+    expect(d.sweep(t(25), { sessionLastActiveAt: T0 })).toBe(2);
     expect(d.get("op-old-1")).toBeUndefined();
     expect(d.get("op-old-2")).toBeUndefined();
     expect(d.get("op-new")).toBeDefined();
+    // 清理后重用旧 opId=新占位（保留期已过，视为新意图）
+    expect(d.admit("op-old-2", "b", t(25))).toEqual({ kind: "admitted" });
   });
 
   it("无占位的 settle=无操作（占位必须先行）", () => {
