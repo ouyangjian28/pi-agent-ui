@@ -1,5 +1,5 @@
 // 会话列表扫描测试（§6 查看≠接管）：真 tmpdir IO；r8-03 坏 header 不吞行；r8-04 身份=header.id 与文件定位键分离
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

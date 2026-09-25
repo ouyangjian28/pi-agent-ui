@@ -26,6 +26,16 @@ export type AdmitResult =
   | { readonly kind: "rejected-different-args" } // 同键不同参：拒绝（审计行由 adapter 落）
   | { readonly kind: "unknown-effect" }; // 占位无结果（旧请求未知）：不重发不受理
 
+/** 滚动清除的生命周期判据（r8b：两个生命周期事实分开声明，不得用「最后消息时间」冒充「退出时刻」）。
+ * - active:true=仍活跃→一律不删
+ * - inactiveSince=退出活跃期的时刻（ISO）→退出满 24h 且占位过 24h 才删
+ * - 缺省/解析失败=生命周期未知→保守不删（逼调用方显式表态）
+ * 删除条件=占位过 24h 且会话已退出活跃期满 24h。 */
+export interface SweepLifecycle {
+  readonly active?: boolean;
+  readonly inactiveSince?: string;
+}
+
 export class CommandDedup {
   private readonly records = new Map<OpId, OpRecord>();
 
@@ -53,12 +63,15 @@ export class CommandDedup {
     for (const r of records) this.records.set(r.opId, r);
   }
 
-  /** 滚动清除（r8-02：会话活跃期+24h 双条件）。sessionLastActiveAt=会话最后活跃时刻；缺省=视为此刻活跃（保守不删，逼调用方显式表态）。删除条件=占位过 24h 且会话已退出活跃期满 24h。 */
-  sweep(now: string, opts: { sessionLastActiveAt?: string } = {}): number {
-    const cutoff = Date.parse(now) - 24 * 3600 * 1000;
-    if (opts.sessionLastActiveAt === undefined) return 0; // 会话活跃期保护：无判据不删（r8-02）
-    const sessionIdle = Date.parse(opts.sessionLastActiveAt) < cutoff;
-    if (!sessionIdle) return 0;
+  /** 滚动清除（r8-02+r8b：生命周期判据见 SweepLifecycle；两个时间事实分开——placedAt 过窗 且 退出活跃期满 24h）。 */
+  sweep(now: string, lifecycle: SweepLifecycle = {}): number {
+    if (lifecycle.active === true) return 0; // 活跃期保护：仍活跃一律不删
+    if (typeof lifecycle.inactiveSince !== "string") return 0; // 未知=不删（保守）
+    const nowMs = Date.parse(now);
+    const inactiveMs = Date.parse(lifecycle.inactiveSince);
+    if (!Number.isFinite(nowMs) || !Number.isFinite(inactiveMs)) return 0; // 判据坏=未知=不删
+    const cutoff = nowMs - 24 * 3600 * 1000;
+    if (inactiveMs >= cutoff) return 0; // 退出不满 24h：保留窗未满不删（r8b 反例：最后消息 T0+退出 T24，T25 须保留）
     let removed = 0;
     for (const [opId, r] of this.records) {
       const t = Date.parse(r.placedAt);

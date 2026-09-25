@@ -26,14 +26,20 @@ export function spawnPi(args: readonly string[], h: PiChildHandlers): ChildProce
 /** 挂常驻排空泵（也用于非本模块 spawn 的子进程：测试/复用）。r8：解析错与业务回调错分离——onEvent 抛错不得伪装成坏 JSON。 */
 export function attachPumps(child: ChildProcessWithoutNullStreams, h: PiChildHandlers): void {
   const stdout = new LinePump((line) => {
-    let e: PiEvent;
+    let parsed: unknown;
     try {
-      e = JSON.parse(line) as PiEvent;
+      parsed = JSON.parse(line);
     } catch {
       // 解析错（坏行/非 JSON 行：撕裂尾/横幅输出）：stderr 化记录，不炸泵
       h.onStderr(`[stdout-nonjson] ${line}`);
       return;
     }
+    // 形状验证（r8b-01：JSON.parse("null") 成功但 e.type 会抛——null/非对象/数组都不许逃出；类型断言不作运行时保护）
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      h.onStderr(`[stdout-nonjson] ${line}`);
+      return;
+    }
+    const e = parsed as PiEvent;
     // 业务回调错走独立故障路径（r8 建议：不得误报格式问题；泵继续运行）
     if (typeof e.type !== "string") {
       h.onStderr(`[stdout-nonjson] ${line}`); // 可解析但无 type 字段=非事件行，同路径记录

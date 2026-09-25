@@ -11,7 +11,7 @@ export class LinePump {
   constructor(private readonly onLine: (line: string) => void) {}
 
   feed(chunk: Buffer): void {
-    let s = this.dec.write(chunk); // 末尾不完整多字节序列由 decoder 缓冲，不产替换符
+    const s = this.dec.write(chunk); // 末尾不完整多字节序列由 decoder 缓冲，不产替换符
     if (s.length === 0) return;
     this.buf += s;
     let i: number;

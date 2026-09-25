@@ -39,4 +39,26 @@ describe("attachPumps 三路径分离（r8）", () => {
     expect(stderr.some((l) => l.startsWith("[handler-error] boom"))).toBe(true); // 独立故障路径，非格式误报
     expect(stderr.some((l) => l.startsWith("[stdout-nonjson] {\"noType\""))).toBe(true);
   });
+
+  it("r8b-01：null 行/数组行/原始值行不炸泵——与后续正常事件同块时也不丢（JSON.parse(\"null\") 成功但 e.type 会抛的回归）", () => {
+    const child = fakeChild();
+    const events: string[] = [];
+    const stderr: string[] = [];
+    attachPumps(child as never, {
+      onEvent: (e) => {
+        events.push(e.type as string);
+      },
+      onStderr: (t) => stderr.push(t),
+      onExit: () => {},
+    });
+    // 同一 data 块：null + 数组 + 正常事件——旧实现在 e.type 处抛 TypeError，同块后续事件全丢
+    child.stdout.write("null\n" + '["a","b"]' + "\n" + '{"type":"after_null"}\n');
+    child.stdout.write("42\n"); // 非对象原始值同防护
+    child.stdout.write('{"type":"tail"}\n');
+    child.stdout.end();
+    expect(events).toEqual(["after_null", "tail"]); // 不抛+同块后续事件照常交付
+    expect(stderr.some((l) => l.startsWith("[stdout-nonjson] null"))).toBe(true);
+    expect(stderr.some((l) => l.startsWith('[stdout-nonjson] ["a","b"]'))).toBe(true);
+    expect(stderr.some((l) => l.startsWith("[stdout-nonjson] 42"))).toBe(true);
+  });
 });
