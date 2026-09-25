@@ -163,6 +163,21 @@ describe("ws-gateway 3a（hello/入站管线）", () => {
     }
   });
 
+  it("hello 前窗口可配置：helloMaxFrames=1 时第 2 帧 hello（字段非法不关连接）→4401 关闭", async () => {
+    // 不非法字段 hello 不关连接（4404 计数未到 3）；窗口检查先于字段验证——两者分立可观察
+    const r = await makeRig({ helloMaxFrames: 1 });
+    try {
+      const { c } = r.conn();
+      await c.say({ t: "hello", token: "tok-ok" }); // 缺 protocolVersion→4404 不关
+      expect(c.frames().filter((f) => f.code === 4404).length).toBe(1);
+      await c.say({ t: "hello", token: "tok-ok" }); // 窗口=1→第 2 帧→4401+关
+      expect(c.frames().some((f) => f.code === 4401)).toBe(true);
+      expect(c.closes.length).toBeGreaterThan(0);
+    } finally {
+      await r.dispose();
+    }
+  });
+
   it("入站管线：二进制/非 JSON/未知 t→4404；写类 t→4405；累计 3 次 4404→close 1002", async () => {
     const r = await makeRig();
     try {
@@ -210,6 +225,8 @@ describe("ws-gateway 3a（订阅/列表/恢复/心跳）", () => {
       const c = await authed(r);
       await c.say({ t: "subscribe", requestId: "s1", file: "../evil.jsonl" });
       expect(c.frames().some((f) => f.code === 4404)).toBe(true);
+      await c.say({ t: "subscribe", requestId: "s1b", file: "abc" }); // 非法名（无 .jsonl/非法字符）→4404
+      expect(c.frames().filter((f) => f.code === 4404).length).toBe(2);
       await writeFile(join(r.roots, "empty.jsonl"), "");
       await c.say({ t: "subscribe", requestId: "s2", file: "empty.jsonl" });
       const f = c.frames().find((x) => x.t === "snapshot");
