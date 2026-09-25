@@ -34,7 +34,9 @@ export class TokenAuthority {
   private reloadSeq = 0;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
-  private constructor(private readonly tokenFile: string | null, private readonly deps: TokenFileDeps, private readonly audit: (line: string) => void) {}
+  private constructor(private readonly tokenFile: string | null, private readonly deps: TokenFileDeps, private readonly auditFn: (line: string) => void) {}
+  /** 审计隔离（W1-08）：回调同步抛错不得影响鉴权/轮换状态机——吞并即可（审计非关键路径）。 */
+  private audit(line: string): void { try { this.auditFn(line); } catch { /* 隔离 */ } }
 
   /** 测试/受控注入（与 fromFile 互斥；空集合永不放行）。 */
   static fromTokens(tokens: readonly string[], deps: TokenFileDeps = {}, audit: (line: string) => void = () => {}): TokenAuthority {

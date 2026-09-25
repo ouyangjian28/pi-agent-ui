@@ -59,13 +59,16 @@ export function utf8Bytes(s: string): number {
 interface Queued {
   readonly text: string;
   readonly bytes: number;
-  readonly inflight: boolean; // true=已交 socket 等回调（计量仍持有，回调成功才释放）
+  /** 入队帧的原始对象（按订阅身份撤销用；序列化仍唯一走 text） */
+  readonly frame: unknown;
 }
 
 export type EnqueueResult = "queued" | "rejected-overflow" | "rejected-closed";
 
 export class ConnectionQueue {
   private readonly q: Queued[] = [];
+  /** 在途帧数（已交 send、回调未兑现；与待发共同占帧门） */
+  private inflightFrames = 0;
   private queuedBytes = 0;
   private draining = false;
   private state: "open" | "terminating" | "closed" = "open";
@@ -107,15 +110,32 @@ export class ConnectionQueue {
     }
     const text = JSON.stringify(frame);
     const bytes = utf8Bytes(text);
-    if (this.q.length + 1 > this.maxFrames || this.queuedBytes + bytes > this.maxBytes) {
-      this.audit(`conn-queue-overflow frames=${this.q.length + 1} bytes=${this.queuedBytes + bytes}`);
+    if (this.q.length + this.inflightFrames + 1 > this.maxFrames || this.queuedBytes + bytes > this.maxBytes) {
+      this.audit(`conn-queue-overflow frames=${this.q.length + this.inflightFrames + 1} inflight=${this.inflightFrames} bytes=${this.queuedBytes + bytes}`);
       this.beginTerminate("queue-overflow");
       return "rejected-overflow";
     }
-    this.q.push({ text, bytes, inflight: false });
+    this.q.push({ text, bytes, frame });
     this.queuedBytes += bytes;
     this.scheduleDrain();
     return "queued";
+  }
+
+  /** 按订阅身份撤销未发送帧（退旧/重订阅：旧流未发帧不得混入新流）。已交 send 的在途帧不可撤。 */
+  cancelBySubscription(subscriptionId: string): number {
+    if (this.state !== "open" || subscriptionId === "") return 0;
+    const marker = `"subscriptionId":"${subscriptionId}"`;
+    let removed = 0;
+    for (let i = this.q.length - 1; i >= 0; i--) {
+      const item = this.q[i];
+      if (item !== undefined && item.text.includes(marker)) {
+        this.q.splice(i, 1);
+        this.queuedBytes = Math.max(0, this.queuedBytes - item.bytes);
+        removed++;
+      }
+    }
+    if (removed > 0) this.audit(`conn-queue-cancel-by-sub id=${subscriptionId} removed=${removed}`);
+    return removed;
   }
 
   /** bufferedAmount 堆积门（gateway 在发送侧与心跳处调用）。 */
@@ -126,6 +146,11 @@ export class ConnectionQueue {
       return false;
     }
     return this.state === "open";
+  }
+
+  /** 在途帧数（已交 send 未回调；观测口） */
+  get inflight(): number {
+    return this.inflightFrames;
   }
 
   get depth(): number {
@@ -149,6 +174,7 @@ export class ConnectionQueue {
     if (this.state === "closed" && this.port.readyState <= 1) this.port.close(code, reason);
     this.q.length = 0; // 未发出部分丢弃（正常关闭尽力语义）
     this.queuedBytes = 0;
+    this.inflightFrames = 0; // 在途回调迟到不再复账（settled 守卫+closed 态双保险）
   }
 
   /** 终止（异常路径）：恰一次 4431 尽力直发→close(4431)→限时 terminate。 */
@@ -157,6 +183,7 @@ export class ConnectionQueue {
     this.state = "terminating";
     this.q.length = 0; // 丢弃待发（发不完；在途回调不再复活）
     this.queuedBytes = 0;
+    this.inflightFrames = 0;
     const port = this.port;
     if (!this.notified4431 && port.readyState === 1) {
       this.notified4431 = true;
@@ -193,6 +220,7 @@ export class ConnectionQueue {
     this.state = "closed";
     this.q.length = 0;
     this.queuedBytes = 0;
+    this.inflightFrames = 0;
   }
 
   private scheduleDrain(): void {
@@ -221,6 +249,7 @@ export class ConnectionQueue {
         this.state = "terminating";
         this.q.length = 0;
         this.queuedBytes = 0;
+        this.inflightFrames = 0;
         this.tmr(() => {
           this.state = "closed";
         }, 0);
@@ -231,6 +260,7 @@ export class ConnectionQueue {
         return;
       }
       n++;
+      this.inflightFrames++; // 在途计量：回调成功才与字节一同归还（W1-03）
       let settled = false;
       try {
         port.send(item.text, (err?: Error | null) => {
@@ -244,11 +274,13 @@ export class ConnectionQueue {
             this.beginTerminate("send-callback-error");
             return;
           }
+          this.inflightFrames = Math.max(0, this.inflightFrames - 1);
           this.queuedBytes = Math.max(0, this.queuedBytes - item.bytes); // 回调成功才释放
           if (this.q.length > 0) this.scheduleDrain();
         });
       } catch {
         this.audit("conn-queue-send-throw");
+        this.inflightFrames = Math.max(0, this.inflightFrames - 1); // 未交付（同步 throw）：归还计数
         this.beginTerminate("send-throw");
         return;
       }
@@ -270,5 +302,6 @@ export class ConnectionQueue {
     this.state = "closed";
     this.q.length = 0;
     this.queuedBytes = 0;
+    this.inflightFrames = 0;
   }
 }

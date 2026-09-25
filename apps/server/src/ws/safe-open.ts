@@ -2,6 +2,9 @@
 // 契约 §5.5 授权域：file 正则之后仍须双根授权；realpath 落根内≠拒绝符号链接（根内 symlink 仍被跟随）。
 // 本模块：①路径域解析（规范化+目录分隔边界，双根同时约束）；②O_NOFOLLOW 打开最终组件（符号链接→ELOOP→拒绝）；
 // ③打开后同 fd fstat 验证常规文件（检查与使用同一句柄，无 TOCTOU 窗口）；④有界流式读取（读中硬限，不先全读）。
+// W1-09：O_NONBLOCK 与 O_NOFOLLOW 合用——O_RDONLY 打开 FIFO（无写端）会永久阻塞在 open 内，
+//   fstat 拒绝来不及执行；O_NONBLOCK 使 open 立即返回，同 fd fstat 再拒非常规文件。
+//   常规文件不受 O_NONBLOCK 影响（Linux 忽略；win32 无此旗标则跳过）。
 // 前提声明（文档级）：祖先目录不可被非信任方替换（部署前提：roots 归宿主管理；Node 无 openat 链，逐级 dirfd 不可移植）。
 import { open, constants } from "node:fs/promises";
 import { isAbsolute, normalize, resolve, sep } from "node:path";
@@ -32,11 +35,13 @@ export function resolveWithinRoots(file: string, roots: readonly string[]): stri
   return null;
 }
 
-/** 打开安全文件：O_NOFOLLOW+fd fstat。成功返回打开的句柄（同句柄读取——调用方不得重新按路径打开）。 */
+/** 打开安全文件：O_NOFOLLOW|O_NONBLOCK+fd fstat。成功返回打开的句柄（同句柄读取——调用方不得重新按路径打开）。 */
 export async function openSafeFile(absPath: string): Promise<{ fh: import("node:fs/promises").FileHandle; size: number }> {
   let fh: import("node:fs/promises").FileHandle;
+  // W1-09：O_NONBLOCK 防 FIFO/设备文件在 open 内永久挂起（读侧常规文件无副作用）；win32 无该旗标则退 0。
+  const nbFlag = process.platform === "win32" || constants.O_NONBLOCK === undefined ? 0 : constants.O_NONBLOCK;
   try {
-    fh = await open(absPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    fh = await open(absPath, constants.O_RDONLY | constants.O_NOFOLLOW | nbFlag);
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
     if (code === "ELOOP" || code === "ENOTDIR") throw new SafeOpenError("symlink", absPath, code);
