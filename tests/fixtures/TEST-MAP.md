@@ -127,14 +127,14 @@
 
 端到端面（真 spawn+真文件系统+乱序压力+连续派发）待 adapter 后续切片，仍 🔴。
 
-### adapter 切片 3（风险序 3 前半：进程代次与交接隔离；TECH §136/§169④/§4；纯逻辑+注入端口；s3 修复后 22 it；s3 首审 62/100→四阻断修复）
+### adapter 切片 3（风险序 3 前半：进程代次与交接隔离；TECH §136/§169④/§4；纯逻辑+注入端口；s3b 修复后 27 it；s3 首审 62/100→修复；s3b 86/100→S3B-01/02/03 修复）
 
 | 编号 | 断言落点 | 状态 |
 | --- | --- | --- |
 | 代次路由（每个进程句柄的事件回调绑定 spawn 代次登记项；退役代次/非当前登记项的事件丢弃+审计；stopping 期仍路由=SIGTERM 宽限内晚到事件是旧轮最后事实不静默丢） | process-supervisor.test@旧代次事件丢弃+stopping 期仍路由（确认前路由/确认后丢弃两段断言） | ✅（逻辑面；变异：M-b 去路由检查→旧代次例挂） |
 | 首字节身份复核（launched→stdin 首字节之间：当前代次仍拥有该轮+登记同 key+Gate 许可仍本轮 in-flight 才写；失效=invalidated/first-byte 不写+审计；S3-03：Gate 许可项可经排队微任务到达（协调器登记后/监管器复核前窗口，审读探针复现），非防御深度而是可达路径） | process-supervisor.test@首字节窗口失效（受控替身）+S3-03 Gate 许可复核（wrapCoord 在同一 promise 链登记后关 gate→invalidated 不写+gate=closed 审计） | ✅（逻辑面；变异：M-a 去复核→受控例挂；M-03 去 Gate 许可→S3-03 挂） |
 | 背压零串扰（writeStdin await 期间换代/退出：写续体只及旧 handle=旧进程将死无害；新轮写新 handle；写完成复核仅审计不动作） | process-supervisor.test@背压窗口换代零串扰（双 handle 写序互斥断言+stdin-written-stale 审计） | 🟡（逻辑面；真背压（流控 highWaterMark）归真实现验收） |
-| 串行化交接（retireCurrent：SIGTERM→宽限 sleep→SIGKILL→退出确认截止（F1 预算口径=S3-04 绝对截止：自 retire 起算 deadlineEnd，宽限被钳到预算内，每段只睡剩余量，晚醒不重置预算）；退出确认=协调器清登记+gate 三活相态（dispatching/in-flight/settling）之一则 close(generation-retired)→idle→spawnNext 才可用；退役幂等（S3-01：onExit 与 retire 续体双路径只生效一次，旧续体不清新代次登记）；stopping 期 spawn 拒） | process-supervisor.test@串行化交接+宽限升级 SIGKILL+S3-01 双收口不覆盖新代次+S3-02a/02b dispatching/settling 窗口关 gate+S3-04a/b 预算（requests 断言：截断 [1000,1]/晚醒 [2000,1]） | ✅（逻辑面；变异：M-d→串行化例挂；M-01 去幂等→S3-01 挂；M-02 只关 in-flight→02a/02b 挂；M-04 重置预算→04a/04b 挂） |
+| 串行化交接（retireCurrent：SIGTERM→宽限 sleep→SIGKILL→退出确认截止（F1 预算口径=S3-04 绝对截止：自 retire 起算 deadlineEnd，宽限被钳到预算内，每段只睡剩余量，晚醒不重置预算；S3B-01 默认时钟=单调 performance.now，回拨被钳到 startMs 不放大预算，非有限按 0 对待不产生 NaN）；retireInFlight 按代次槽位（S3B-02：A 宽限内收口后 B 立即退役不被 A 旧续体挡，A 旧 finally 不清 B 槽位）；退出确认=协调器清登记+gate 三活相态（dispatching/in-flight/settling）之一则 close(generation-retired)→idle→spawnNext 才可用；退役幂等（S3-01）；stopping 期 spawn 拒） | process-supervisor.test@串行化交接+宽限升级 SIGKILL+S3-01+S3-02a/02b+S3-04a/b 预算（先断言 requests 再收口：截断 [1000,1]/晚醒 [2000,1]）+S3B-01×3（默认单调时钟分支/回拨钳位 [2000,5000] 非 65000/NaN 按 0）+S3B-02×2（B 不被挡+三代次独立） | ✅（逻辑面；变异：M-d→串行化例挂；M-01 去幂等→S3-01+S3B-02 挂；M-02→02a/02b 挂；M-04 未钳版→04a/04b+S3B-01 挂；M-04 钳1 版如实仅 04b+S3B-01 挂（04a 数学上必过——s3b 复审判定正确，04a 防护=未钳版+钳位断言）；M-05 去回拨钳位→S3B-01 回拨例挂；M-B2 回退全局布尔→S3B-02 两例挂） |
 | 截止失败保守语义（deadline 到={deadline-exceeded} 保持 stopping 不裁决进程死活；晚到 exit 自动收口（同退役手续）→idle→可 spawn；审计 process-retired-late/retire-deadline-exceeded；spawn 内同步退出={spawn-exited} 已收口可重试） | process-supervisor.test@截止失败+晚到收口+spawn 同步退出 | ✅（逻辑面；变异：M-e 截止后假装收口→例挂） |
 | 意外退出（running 中 exit→代次退役+gate closed(generation-retired)+协调器登记清+回 idle；屏障解除归宿主 reopen，监管器不自动 reopen；reopen 后新代次新轮可跑） | process-supervisor.test@意外退出+背压例前段 | ✅（逻辑面；变异：M-c 意外退出不退役→4 例挂） |
 | retire 前置/重入（idle=no-process；交接中重入=stopping；spawn 失败回滚=回 idle 可重试（代次号已耗）；重复 exit 幂等（第二次只审计不重复退役））；黄项清理（stderr 按代次过滤+审计钩子抛错隔离+写拒绝透传不毁监管器） | process-supervisor.test@retire 前置/重入+spawn 失败回滚+重复 exit 幂等+stderr 过滤+审计隔离+写拒绝 | ✅（逻辑面；重复退役以 generation-retired 审计行恰一次断言） |
