@@ -25,7 +25,11 @@ export interface TurnIntentInput {
   readonly payload: EnqueuePayload;
 }
 
-/** 账本耐久端口：append=追加一行并 fsync；失败=reject（屏障 fail-closed）。 */
+/** 账本耐久端口：append=追加一行并 fsync；失败=reject（屏障 fail-closed）。
+ *  继续追加前置契约（s1b/A1-02）：append 一旦 reject（写入结果不确定——完整行/部分行可能已在盘），
+ *  宿主必须先使日志恢复「可安全追加」状态（确认尾部有效边界/修复撕裂尾/换新文件段）；
+ *  在此之前同一日志的后续 append 一律拒绝——不得在未确认残片后裸追加并宣称新行可恢复。
+ *  真文件系统实现（含尾修复）归 adapter 后续切片；本接口只约束语义时序。 */
 export interface DurabilityPort {
   append(line: JournalLine): Promise<void>;
 }
@@ -57,7 +61,7 @@ export type SubmitOutcome =
       readonly error: unknown;
     }
   | {
-      /** 生命周期失效（A1-01）：任一 fsync await 期间屏障被 close/reopen 接管——本意图不得发送（无 send 许可、不得覆盖新状态）；已发 journal 行的写入结果同样未确认，恢复以实际重放裁决。 */
+      /** 生命周期失效（A1-01）：任一 fsync await 期间屏障被 close/reopen 接管——本意图不得发送（无 send 许可、不得覆盖新状态）。生命周期失效不改变已有耐久事实（已确认成功的 fsync 仍确认）；该结果本身不提供完整盘态判据，恢复以实际重放裁决。 */
       readonly kind: "invalidated";
       readonly stage: "enqueue" | "sending";
     };
@@ -164,13 +168,12 @@ export class TurnGate {
     this.state = { kind: "closed", reason };
   }
 
-  /** 恢复/裁决后由宿主解锁（仅 closed→idle）。reopen 不证明旧轮已收口——解锁依据（已耐久结算/退出确认/换代完成）归宿主裁决（A1-04 边界）；亦使更早的悬置操作失效。 */
+  /** 恢复/裁决后由宿主解锁（仅 closed→idle）。reopen 不证明旧轮已收口——解锁依据（已耐久结算/退出确认/换代完成）归宿主裁决（A1-04 边界）。
+   *  B1-01：仅真实 closed→idle 时才递增 epoch；非 closed 调用=返回 false 且完全无副作用（不得取消仍在 pending 的有效操作）。 */
   reopen(): boolean {
+    if (this.state.kind !== "closed") return false; // 无副作用：屏障仍在忙（dispatching/settling/in-flight/idle）时拒绝解锁
     this.opEpoch += 1;
-    if (this.state.kind === "closed") {
-      this.state = { kind: "idle" };
-      return true;
-    }
-    return false;
+    this.state = { kind: "idle" };
+    return true;
   }
 }

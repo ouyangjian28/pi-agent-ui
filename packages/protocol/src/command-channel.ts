@@ -13,7 +13,10 @@
 
 import type { CommandDedup, OpId, OpRecord } from "./command-dedup.ts";
 
-/** op 表耐久端口（载体=§17.2 邻接目录；本接口只管语义时序）。 */
+/** op 表耐久端口（载体=§17.2 邻接目录；本接口只管语义时序）。
+ *  继续追加前置契约（s1b/A1-02）：任一 append reject 后写入结果不确定（完整/部分行可能已在盘）——
+ *  宿主必须先使载体恢复「可安全追加」状态（确认尾部边界/修复撕裂尾/换段），否则同一载体的后续 append 一律拒绝；
+ *  不得在未确认残片后裸追加并宣称新行可恢复。真实现（含尾修复）归 adapter 后续切片。 */
 export interface OpLedgerPort {
   /** 占位行 fsync（result=null 的 OpRecord）；失败=reject。 */
   appendPlaceholder(rec: OpRecord): Promise<void>;
@@ -49,10 +52,19 @@ export class CommandChannel {
       dedup: CommandDedup;
       ledger: OpLedgerPort;
       now(): string;
-      /** 审计行钩子（同键不同参拒等；宿主落观测层）。 */
+      /** 审计行钩子（同键不同参拒等；宿主落观测层）。钩子抛错被隔离（B1-02）——不得影响派发结果。 */
       onAudit?: (line: string) => void;
     },
   ) {}
+
+  /** 审计钩子隔离（B1-02）：钩子异常不改变派发结果（观测层失败不进主链路）；不隔离会让 dispatch reject 而非声明语义。 */
+  private audit(line: string): void {
+    try {
+      this.opts.onAudit?.(line);
+    } catch {
+      // 吞钩子异常：审计失败不产生重复发送/洗白风险，宿主观测层自愈
+    }
+  }
 
   /** 占位先行派发。send 由调用方执行（拿到该回调时占位已耐久，可安全写 stdin）；
    *  返回值必须为非 null 应答对象（null=协议违规，按效果未知处理，A1-05）。 */
@@ -63,7 +75,7 @@ export class CommandChannel {
       case "cached":
         return { kind: "cached", result: admit.result };
       case "rejected-different-args":
-        this.opts.onAudit?.(`command-dedup: opId=${opId} 同键不同参拒绝`);
+        this.audit(`command-dedup: opId=${opId} 同键不同参拒绝`);
         return { kind: "rejected-different-args" };
       case "unknown-effect":
         return { kind: "unknown-effect" };
@@ -86,7 +98,7 @@ export class CommandChannel {
     }
     if (result === null || result === undefined) {
       // A1-05：null 哨兵与 unknown-effect 冲突——send 返回 null=协议违规；效果未知，占位留置，不落盘洗白
-      this.opts.onAudit?.(`command-channel: opId=${opId} send 返回 null/undefined（协议违规，按效果未知留置）`);
+      this.audit(`command-channel: opId=${opId} send 返回 null/undefined（协议违规，按效果未知留置）`);
       return { kind: "send-failed", error: new Error("send returned null/undefined") };
     }
     // ④结果行 fsync → ⑤内存 settle（盘先行，内存跟随；崩溃闭环由盘上事实裁决）

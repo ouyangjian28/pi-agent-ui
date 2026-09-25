@@ -293,3 +293,77 @@ describe("A1-02：fsync reject≠盘上无行（写后拒绝替身）", () => {
     expect(dur.calls).toBe(1); // 无 sending 追加
   });
 });
+
+describe("B1-01：非 closed 的 reopen=无副作用假失败（不得取消 pending 中的有效操作）", () => {
+  it("enqueue fsync pending 期间 reopen()=false 且无副作用：追加完成→send 许可正常发放，屏障不卡死", async () => {
+    const dur = new FakeDurability();
+    dur.holdAt = 1;
+    const gate = makeGate(dur);
+    const p = gate.submit(intent());
+    await untilHeld(dur);
+    expect(gate.reopen()).toBe(false); // 屏障仍在忙（dispatching）：拒绝解锁且不递增 epoch
+    dur.releaseHold();
+    expect(await p).toEqual({ kind: "send" }); // 原操作正常推进（未被作废）
+    expect(gate.getState().kind).toBe("in-flight");
+  });
+
+  it("sending fsync pending 期间 reopen()=false：追加完成→send 许可正常发放", async () => {
+    const dur = new FakeDurability();
+    dur.holdAt = 2;
+    const gate = makeGate(dur);
+    const p = gate.submit(intent());
+    await untilHeld(dur);
+    expect(gate.reopen()).toBe(false);
+    dur.releaseHold();
+    expect(await p).toEqual({ kind: "send" });
+    expect(gate.getState().kind).toBe("in-flight");
+  });
+
+  it("settled 行 fsync pending 期间 reopen()=false：追加完成→idle 正常释放，下一意图可受理", async () => {
+    const dur = new FakeDurability();
+    dur.holdAt = 3;
+    const gate = makeGate(dur);
+    await gate.submit(intent());
+    const sp = gate.onTurnSettled();
+    await untilHeld(dur);
+    expect(gate.reopen()).toBe(false);
+    dur.releaseHold();
+    await sp;
+    expect(gate.getState().kind).toBe("idle");
+    expect(await gate.submit(intent("i-2"))).toEqual({ kind: "send" });
+  });
+
+  it("失败 reopen 后原操作失败路径不受污染：enqueue reject→failed(enqueue)+closed（正常 fail-closed）", async () => {
+    const dur = new FakeDurability();
+    dur.holdAt = 1;
+    const gate = makeGate(dur);
+    const p = gate.submit(intent());
+    await untilHeld(dur);
+    expect(gate.reopen()).toBe(false);
+    dur.failHold();
+    expect(await p).toMatchObject({ kind: "failed", stage: "enqueue" }); // 正常失败语义（非 invalidated）
+    expect(gate.getState()).toEqual({ kind: "closed", reason: "durability-failure" });
+    // 真 closed 后 reopen 仍有效（解锁路径不受本修复影响）
+    expect(gate.reopen()).toBe(true);
+    expect(gate.getState().kind).toBe("idle");
+  });
+});
+
+describe("硬序 pending 面（s1b：未关闭时直接断言许可不早于追加完成）", () => {
+  it("sending fsync 挂起期间 submit 不 resolve：send 许可不先于第二次追加完成", async () => {
+    const dur = new FakeDurability();
+    dur.holdAt = 2;
+    const gate = makeGate(dur);
+    const p = gate.submit(intent());
+    await untilHeld(dur);
+    let settled = false;
+    void p.then(() => {
+      settled = true;
+    });
+    for (let i = 0; i < 20; i += 1) await Promise.resolve(); // 排空微任务：仍 pending
+    expect(settled).toBe(false);
+    dur.releaseHold();
+    expect(await p).toEqual({ kind: "send" });
+    expect(settled).toBe(true);
+  });
+});

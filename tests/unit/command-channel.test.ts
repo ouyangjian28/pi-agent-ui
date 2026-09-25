@@ -164,13 +164,17 @@ describe("通用命令通道（CommandChannel）", () => {
     expect(retry).toEqual({ kind: "unknown-effect" }); // 结果行写入未确认：进程内保守口径
   });
 
-  it("结果耐久失败（写后拒绝，A1-02）：进程内 unknown-effect 口径；重放读到结果行=cached 非洗白", async () => {
+  it("结果耐久失败（写后拒绝，A1-02）：进程内 unknown-effect 口径；原通道重试=unknown-effect；重放读到结果行=cached 非洗白", async () => {
     const ledger = new FakeLedger();
     ledger.failResult = "after";
     const { channel } = make(ledger);
     const out = await channel.dispatch("op-1", "argsA", async () => ({ ok: true }));
     expect(out.kind).toBe("result-durability-failed");
     expect(ledger.results).toHaveLength(1); // 结果行已写（fsync 报错不证明无行）
+    // s1b：同通道（同内存 dedup）重试同 opId=unknown-effect（未 settle，不得凭 in 手结果当 cached）
+    const retry = await channel.dispatch("op-1", "argsA", async () => ({ ok: "must-not-send" }));
+    expect(retry).toEqual({ kind: "unknown-effect" });
+    expect(ledger.events.filter((e) => e === "send")).toHaveLength(0); // 未重发
     // 重启重放：读到有效结果行=新增证据→cached（非洗白）
     const dedup2 = new CommandDedup();
     dedup2.replay(ledger.results);
@@ -186,5 +190,47 @@ describe("通用命令通道（CommandChannel）", () => {
     expect(out).toEqual({ kind: "unknown-effect" });
     const out2 = await channel.dispatch("op-new", "argsA", async () => ({ ok: true }));
     expect(out2).toEqual({ kind: "ok", result: { ok: true } });
+  });
+});
+
+describe("B1-02：审计钩子异常隔离（观测层失败不进主链路）", () => {
+  it("同键不同参：onAudit 抛错不影响 rejected-different-args 返回", async () => {
+    const ledger = new FakeLedger();
+    const dedup = new CommandDedup();
+    const channel = new CommandChannel({
+      dedup,
+      ledger,
+      now: () => T0,
+      onAudit: () => {
+        throw new Error("audit-observer-down");
+      },
+    });
+    let sends = 0;
+    const send = async (): Promise<object> => {
+      sends += 1;
+      return { ok: true };
+    };
+    await channel.dispatch("op-1", "argsA", send); // 首次 ok
+    const out = await channel.dispatch("op-1", "argsB", send); // 同键不同参
+    expect(out).toEqual({ kind: "rejected-different-args" }); // dispatch 不因钩子 reject
+    expect(sends).toBe(1); // 只首发过，拒参分支未发送
+  });
+
+  it("send 返回 null（A1-05）：onAudit 抛错不影响 send-failed+占位留置", async () => {
+    const ledger = new FakeLedger();
+    const dedup = new CommandDedup();
+    const channel = new CommandChannel({
+      dedup,
+      ledger,
+      now: () => T0,
+      onAudit: () => {
+        throw new Error("audit-observer-down");
+      },
+    });
+    const out = await channel.dispatch("op-null", "argsA", async () => null as unknown as object);
+    expect(out.kind).toBe("send-failed"); // 隔离生效：声明语义不被钩子改写
+    expect(ledger.results).toHaveLength(0); // 未落结果行
+    const retry = await channel.dispatch("op-null", "argsA", async () => ({ ok: true }));
+    expect(retry).toEqual({ kind: "unknown-effect" }); // 占位留置（效果未知）
   });
 });
