@@ -155,7 +155,7 @@ export class SubscriptionEngine {
     if (this.phase !== "init") return [err4404(requestId)];
     this.barrier = this.d.index.waterMark;
     this.snapshotId = this.d.newId();
-    // 位置为准（streamId 由本引擎权威确认；换流后客户端旧 streamId 经宿主映射到当前流）
+    // 位置为准（streamId 由本引擎权威确认；换流时由宿主退役旧引擎并按新流身份拒绝旧游标——不做跨流位置映射）
     if (cursor.seq <= this.barrier + 1) {
       this.expectNext = { streamId: this.streamId, seq: cursor.seq };
       return [this.servePageFrom(requestId, { streamId: this.streamId, seq: cursor.seq })];

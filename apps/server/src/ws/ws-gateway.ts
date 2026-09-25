@@ -10,7 +10,8 @@
 // W1-05：init/resync 原子切换——先建新引擎试启（startSnapshot/startResync），失败（4409/4404 错误帧）
 //   只发错误不退旧；成功才退旧（4409 通知关联旧 subscriptionId+cancelBySubscription 撤未发旧帧）。
 // W1-06：恢复帧走 typed adapter（evidenceHash=snapshotEvidenceHash+blockedReasons 映射）；
-//   请求带 evidenceHash 且≠当前证据哈希→4409 evidence-changed（无服务端分页缓存：每次现算，跨页一致性由哈希门保证）。
+//   请求带 evidenceHash 且≠冻结证据哈希→4409 evidence-changed。B8：首响应冻结+内容页缓存（每连接 ≤8，LRU 驱逐）；
+//   R4：缓存仅对携 hash 的续页/复读可用——无 hash=读当前（现取 provider 新快照并覆盖缓存上下文）。
 // W1-07：计算任务按连接登记所有者——断开即取消排队任务（semaphore.cancel）、grant 后执行前复核连接存活。
 // W1-08：审计回调安全隔离（safeAudit）+inflight/任务槽 finally 归还（异常不泄漏在途位）。
 // W1-11：listVersion 绑目录内容指纹（同指纹跨页/跨连接版本不变；内容真变才递增）。
@@ -121,7 +122,7 @@ interface ConnState {
   readonly subs: Map<string, SubEntry>; // file → 订阅（每 file 唯一；≤8）
   readonly inflight: Set<string>; // requestId 在途（≤4；第 5 个=4404）
   readonly tasks: Map<string, ComputeTask>; // 计算任务所有者（断开取消；W1-07）
-  readonly recoveryPages: Map<string, { hash: string; adapted: ReturnType<typeof recoverFromSnapshot> & { evidenceHash: string; blockedReasons: RecoveryBlockReason[] } }>; // B8：恢复内容页冻结缓存（≤RECOVERY_PAGE_CACHE_MAX，FIFO 驱逐）
+  readonly recoveryPages: Map<string, { hash: string; adapted: ReturnType<typeof recoverFromSnapshot> & { evidenceHash: string; blockedReasons: RecoveryBlockReason[] } }>; // B8：恢复内容页冻结缓存（≤RECOVERY_PAGE_CACHE_MAX，LRU：命中重插入触碰+超界逐最旧）
 }
 
 export interface ConnHandle {
@@ -134,7 +135,7 @@ export interface ConnHandle {
 }
 
 const HANDSHAKE_WINDOW_MS = 60_000;
-const RECOVERY_PAGE_CACHE_MAX = 8; // B8：每连接恢复页缓存上界（FIFO 驱逐；连接关闭全清）
+const RECOVERY_PAGE_CACHE_MAX = 8; // B8：每连接恢复页缓存上界（LRU 驱逐；连接关闭全清）
 
 export class WsGateway {
   private readonly conns = new Map<string, ConnState>();
@@ -460,7 +461,7 @@ export class WsGateway {
     return this.registry.peek(file)?.streamId ?? null;
   }
 
-  /** R3（w1c）：装载/增量触顶信号——handleRecovery 订阅侧统一 4402（不发绑定超限索引的快照）。 */
+  /** R3（w1c）：装载/增量触顶信号——handleSubscribe 订阅侧统一 4402（不装引擎、不发绑定超限索引的快照）。 */
   private static readonly INDEX_BUDGET = Symbol("index-over-budget");
 
   /** W1-04：索引装载与增量同步（前缀→追加；非前缀=盘面改写→换流重建+退役旧引擎）。
@@ -685,7 +686,7 @@ export class WsGateway {
         return;
       }
       // B8（w1b）：恢复内容页缓存（契约 §4：首响应冻结+内容页缓存）——续页直接从冻结投影出帧，
-      // 不重调 provider、不占计算槽；缓存有界（每连接 ≤8，FIFO 驱逐）+连接关闭即清。
+      // 不重调 provider、不占计算槽；缓存有界（每连接 ≤8，LRU 驱逐）+连接关闭即清。
       const cacheKey = `${requestId}|${file}`;
       const cached = st.recoveryPages.get(cacheKey);
       // R4（w1c）：缓存仅在请求携带 hash（续页/复读=按冻结版本拼回）时可用；
