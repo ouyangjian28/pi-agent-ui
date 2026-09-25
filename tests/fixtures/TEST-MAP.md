@@ -291,7 +291,21 @@
 | **新旧流隔离（§V③）** | 读挂起期间换代：旧读恢复后丢弃（skA/skB 零 append+superseded 审计）；onAppend 回调抛错不逸出（源存活续推进+append-cb-error 审计） | §V③ 2 it | ✅ |
 | **不可用分型+fail-closed（§V④）** | missing→deleted+观察全收口；too-large→scan-over-budget/open-denied+symlink+泛错→unreadable；watch 建立失败→load=null 不降快照；装载期早期 watch 错误→load=null（watch-error-early）；重挂失败→watch-failed+旧观察关；越界→outside-roots 拒 | §V④ 6 it | ✅ |
 | **真盘集成（§V①⑤真 fs）** | 真装载/追加/截短/rename 替换重装载/删除 fail-closed；半行跨块（无换行不发布+补全发布）；UTF-8 字节级撕裂分两写（先半行不发布+补全成 sending 行）；坏完整行→corrupt 占位；maxScanBytes 读中硬限→null | 真盘 2 it | ✅ |
-| **网关源事件接线** | onInvalidate(rewrite)→该文件订阅 4409 stream-replaced:{subId}+撤观察（sinks 删）+不自动重装载（loadCalls 不增）；重订阅→新 subId+内容寻址同 streamId（真实 rewrite 内容必变→换流=C17 已覆盖）+load+1+观察重建；onUnavailable(deleted)→4402「历史源不可用（deleted）」retryable=true+撤观察+邻文件订阅不受波及（b 追加照常投递） | ws-gateway.test 3b-2 组 2 it | ✅ |
+| **网关源事件接线** | onInvalidate(rewrite)→该文件订阅 4409 stream-replaced:{subId}+撤观察（sinks 删）+不自动重装载（loadCalls 不增）；重订阅→新 subId+~~内容寻址同 streamId~~（**3b2a 修复轮勘正：R4/P8 击穿——invalidate 即 registry.replace 废弃旧流身份，同内容重订阅 streamId 必变**）+load+1+观察重建；onUnavailable(deleted)→4402「历史源不可用（deleted）」retryable=true+撤观察+邻文件订阅不受波及（b 追加照常投递） | ws-gateway.test 3b-2 组 2 it | ✅ |
 | **clientIp 映射（gatewayMetaFrom）** | 直连全链映射；可信代理派生 IP 透传（不退 unknown）；origin 缺失→undefined（网关默认拒路径） | ws-support.test 3 it | ✅ |
 | **变异十组（基线 9eb0bb4 全杀）** | M-A1 去改写检测→rewrite 例挂；M-A2 去截短→2 挂；M-B 去身份→replace 挂；M-C missing 误映射→挂；M-D watch 失败降空快照（语义版 return []）→挂；M-E 追加全量重放（i=0 起）→8 挂；M-F 激活不收敛 dirty→2 挂；M-G 关观察跳过→2 挂；M-H 网关失效误走 4402→4409 例挂；M-I 撕裂尾发布→8 挂 | 十杀 | ✅ |
 | **边界披露（3b-2a→2b/3）** | session 投影+双源合序未冻结=3b-2b；组装层 onConnection 实际接线（gatewayMetaFrom 唯一映射点已备）+慢客户端=3b-3；RecoveryEvidenceProvider typed=3b-4/5；真 fs.watch 时序稳定性以 FakeWatcher 替身驱动+真盘读路径全覆盖（真 watcher 端到端=组装后 E2E） | 如实披露 | 🟡 |
+
+## adapter 切片③-3b2a 修复轮（GPT 首审 60/100 七必修；基线 6763d4f/B07+d11fa59/R1-R7）
+| 面 | 断言落点 | 状态 |
+| --- | --- | --- |
+| **R1 扫描所有权（P3/P4/P9）** | load=活跃代 join（baselineRows 副本+增量由 append 补齐+load-joined-after-scan 审计）；双订阅共享初扫（双 sink 各自收同批追加）；release 配对（released-unobserved 审计）；初扫在飞 release→装载即弃 fail-closed（槽关+无孤儿句柄）；unobserve 后待配对引用保留；observe 无活跃代→null；网关级：load 挂起期间 transport 关闭→release 配对+observeCalls 无该文件；observe-missed→4409 显式退订（快照撤回不投死流）+observe-missed 审计+sinks 撤+release | history-source R1 组 7 it+ws-gateway +2 it | ✅ |
+| **R2 单飞+折叠（P2）** | 旧扫描挂起/新扫描先完成→旧前缀恢复不误判 truncate（identity+前缀双核对）；3 通知=1 跟进（reader 恰 2 调）；读挂起期间换代旧读丢弃（superseded）；onAppend 抛错隔离（append-cb-error 审计+源续推进） | R2 组 4 it | ✅ |
+| **R3 网关身份门（P5）** | 旧代三型闭包（onAppend seq99/onInvalidate/onUnavailable）全被身份门丢弃+新代 onAppend 照常收；retired 旧闭包迟到 onAppend→零新帧+连接存活（FileOverBudgetError 路径对退役回调结构性不可达=语义改进，D1c 尾段重写） | ws-gateway +2 it（R3 组+D1c 重标） | ✅ |
+| **R4 失效废弃索引（P8）** | invalidate→registry.replace（旧流身份作废，同内容重订阅 streamId 必变——失效事件=权威信号，非内容寻址） | invalidate 例断言改 NOT toBe | ✅ |
+| **R5 投影防御（P1/P1b/P6）** | 共享校验器 journal-schema.ts（recover.ts 逐字迁移+index 导出）；projectLine 接入——rawText:123/sending intentId:{} 等 14 型坏行→journal-corrupt 不抛；投影夹具合法化（sentAt 字符串/consumedLine 带 intervalEnd/clear 带 sessionId+cleared）；同权威对照（journalLineSchemaError 直测） | history-projection 重写 15 it | ✅ |
+| **R6 watch 建立/重挂失败（P7）** | 初扫建立失败→load=null 不读盘；活跃期 error→先 rearm 再补扫；重扫后 rearm 失败→unavailable(watch-failed)；邻文件隔离 | R6 组 4 it | ✅ |
+| **B07 脱敏二次方回溯（性能）** | 65KiB 无分隔符 9.3s→37ms（全量词有界）；性能门 <500ms（text+machineId）；超长 env 键名前缀透出+值恒遮/深路径分段遮全跨度/scheme 界两侧/超长单段不遮/超长凭据 ID 哈希映射=6 新 golden 向量（47→53 总） | contracts-sanitizer +7 it（49） | ✅ |
+| **实现期自抓三 bug** | ①scanInFlight 注册晚于同步前缀→读取期通知丢失（窗口①抓到）→微任务化注册先于执行；②初扫 onError 绑早期路径→提交后活跃期错误走不到 rearm→slotError 阶段感知；③GenEntry.sinks 单值→P4 双订阅互吞→Set 扇出 | 修复轮内嵌（无独立 it，行为被 R1/R2 组覆盖） | ✅ |
+| **变异七组（基线 d11fa59 全杀）** | M-R1 初扫去微任务化（注册窗口重开）→窗口①挂；M-R2b 在飞通知不折叠+无跟进→2 挂（**首版 M-R2 双 queueRescan 存活=被 rescanQueued 幂等性自然消解，非测试缺——如实披露**）；M-R3 onAppend 身份门移除→R3 例挂；M-R4 invalidate 去 registry.replace→断言挂；M-R5 投影去 schema 守卫→坏行例挂；M-R6 watch 建立失败静默降级→3 挂；M-B07 env 去界→性能门+超长键向量挂 | 七杀（M-R2 首版披露） | ✅ |
+| **证据升级（R7）** | P1-P10 全部由真实测试复现（首审探针 12/13 挂→修复后全绿）；真盘组补 UTF-8 跨 64KiB 撕裂（B07 修复后 316ms 过）+maxScanBytes 硬限+初扫挂起 release；四窗口主证据仍 FakeReader/FakeWatcher 受控调度（真 watcher E2E=组装后） | 31+15 it 重写 | ✅ |
