@@ -166,73 +166,140 @@ function isUnknownEffect(rec: IntentRecord): boolean {
   return rec.sending || rec.responseTimeoutRecorded === true;
 }
 
-/** 残片顶层身份扫描结果：none=无顶层 intentId；conflict=存在不可完全解释的身份形态
- *  （嵌套/转义键/截断字符串/二次键/非字符串值）——保守阻断；unique=唯一完整可解码且无其它候选。 */
+/** 残片顶层身份扫描结果：none=无顶层 intentId；conflict=存在不可完全解释的结构/身份形态
+ *  ——保守阻断；unique=唯一完整可解码且无其它候选。 */
 type TopLevelIdScan = { kind: "none" } | { kind: "conflict" } | { kind: "unique"; id: IntentId };
 
-/** s4h H1：受限结构扫描——手写状态机逐字符跟深度（{[ 层级）与字符串字面量（\\ 转义跨步），
- *  只接受「顶层（depth===1）恰一个 intentId 键且其值为完整可解码非空字符串，且全 raw 无其它
- *  任何 intentId 形态」的残片：嵌套 intentId 键（含 metadata 等）、键名转义变体、值截断、
- *  未闭合字符串（任何位置——无法证明它不是身份候选）、第二次顶层键、非字符串值→conflict。
- *  生产 journal 行只有顶层 intentId 一个身份字段，其余一切形态=结构不可完全解释→保守阻断交人工。 */
+/** s4h H1+s4i I1：受限结构扫描——**栈状态机**（对象/数组上下文+期待态转移），
+ *  只接受「顶层（栈长 1）恰一个 intentId 键且其值为完整可解码非空字符串，且全 raw 无其它
+ *  任何身份形态/非法转移」的残片。期待态：obj=[key→colon→value→member-end]，arr=[value-or-end→
+ *  element-end]；撕裂前缀可以停在任意期待态（截断在字段边界内=合法前缀），但**任何非法转移**
+ *  （键闭合后下一个非空白字符不是冒号（含 EOF）=等待冒号的未完成键 I1、字符串出现在 member-end/
+ *  colon 位置、非字符串 intentId 值、括号错配、栈空裸字符）→conflict。
+ *  生产 journal 行是「顶层对象」的 JSON 前缀（截断只发生在尾部），故栈空出现任何字符=非生产形态。
+ *  身份键识别：键名 JSON.parse 归一（"intent\\u0049d" 转义变体解码后**同等识别**再检查层级/重复，
+ *  不是一律拒绝）；嵌套（栈长≥2）或顶层外出现 intentId 键→conflict；第二次顶层键→conflict。 */
 function scanTopLevelIntentId(raw: string): TopLevelIdScan {
-  let depth = 0;
-  let i = 0;
+  type ObjExpect = "key" | "colon" | "value" | "member-end";
+  type ArrExpect = "value-or-end" | "element-end";
+  type Ctx = { type: "obj"; expect: ObjExpect } | { type: "arr"; expect: ArrExpect };
+  const stack: Ctx[] = [];
   let sawTopKey = false;
   let topValue: IntentId | null = null;
+  let i = 0;
+  const N = raw.length;
   const isWs = (c: string): boolean => c === " " || c === "\t" || c === "\r" || c === "\n";
   /** 从 i（开引号处）读一个完整字符串字面量；返回 [闭引号后一位置, 字面量] 或 null=未闭合。 */
   const readLiteral = (start: number): readonly [number, string] | null => {
     let j = start + 1;
-    while (j < raw.length) {
+    while (j < N) {
       if (raw[j] === "\\") { j += 2; continue; }
       if (raw[j] === '"') return [j + 1, raw.slice(start, j + 1)];
       j += 1;
     }
     return null; // 截断在字符串内（含转义中间）→未解析候选
   };
-  while (i < raw.length) {
+  while (i < N) {
     const ch = raw[i] as string;
+    if (isWs(ch)) { i += 1; continue; }
+    if (ch === "{") { stack.push({ type: "obj", expect: "key" }); i += 1; continue; }
+    if (ch === "[") { stack.push({ type: "arr", expect: "value-or-end" }); i += 1; continue; }
+    if (ch === "}" || ch === "]") {
+      const top = stack.pop();
+      if (top === undefined || (ch === "}" ? top.type !== "obj" : top.type !== "arr")) return { kind: "conflict" }; // 非法配对/栈空
+      const ok = ch === "}" ? top.expect === "key" || top.expect === "member-end" : top.expect === "value-or-end" || top.expect === "element-end";
+      if (!ok) return { kind: "conflict" }; // 在 colon/value 期待态闭合=非合法前缀
+      const parent = stack[stack.length - 1];
+      if (parent !== undefined) parent.expect = parent.type === "obj" ? "member-end" : "element-end";
+      i += 1; continue;
+    }
+    if (ch === ",") {
+      const top = stack[stack.length - 1];
+      if (top === undefined) return { kind: "conflict" };
+      if (top.type === "obj") {
+        if (top.expect !== "member-end") return { kind: "conflict" };
+        top.expect = "key";
+      } else {
+        if (top.expect !== "element-end") return { kind: "conflict" };
+        top.expect = "value-or-end";
+      }
+      i += 1; continue;
+    }
+    if (ch === ":") {
+      const top = stack[stack.length - 1];
+      if (top?.type !== "obj" || top.expect !== "colon") return { kind: "conflict" };
+      top.expect = "value";
+      i += 1; continue;
+    }
     if (ch === '"') {
       const lit = readLiteral(i);
       if (lit === null) return { kind: "conflict" }; // 未闭合字符串：无法证明不是身份候选
-      const [afterKey, keyLiteral] = lit;
-      let k = afterKey;
-      while (k < raw.length && isWs(raw[k] as string)) k += 1;
-      if (raw[k] === ":") {
-        let keyName: string;
-        try {
-          keyName = JSON.parse(keyLiteral) as string; // 键名转义变体（"intent\u0049d"）自然归一
-        } catch {
-          return { kind: "conflict" }; // 键转义中断
-        }
-        if (keyName === "intentId") {
-          if (depth !== 1 || sawTopKey) return { kind: "conflict" }; // 嵌套键/第二次键
-          sawTopKey = true;
-          let m = k + 1;
-          while (m < raw.length && isWs(raw[m] as string)) m += 1;
-          if (raw[m] !== '"') return { kind: "conflict" }; // 值非字符串（数字/对象/截断）非生产形态
-          const val = readLiteral(m);
-          if (val === null) return { kind: "conflict" }; // 值截断
+      const [after, literal] = lit;
+      const top = stack[stack.length - 1];
+      if (top === undefined) return { kind: "conflict" }; // 栈空裸字符串：生产行是顶层对象前缀，此形态非生产
+      let k = after;
+      while (k < N && isWs(raw[k] as string)) k += 1;
+      if (top.type === "obj") {
+        if (top.expect === "key") {
+          // I1：键已闭合，冒号必须紧随（下一个非空白字符）——EOF/其它字符=等待冒号的未完成键/非法转移
+          if (k >= N || raw[k] !== ":") return { kind: "conflict" };
+          let keyName: string;
           try {
-            const decoded: unknown = JSON.parse(val[1]);
-            if (typeof decoded !== "string" || decoded.length === 0) return { kind: "conflict" };
-            topValue = decoded;
+            keyName = JSON.parse(literal) as string; // 键名转义变体（"intent\\u0049d"）解码后同等识别
+          } catch {
+            return { kind: "conflict" }; // 键转义中断
+          }
+          top.expect = "colon";
+          if (keyName === "intentId") {
+            if (stack.length !== 1 || sawTopKey) return { kind: "conflict" }; // 嵌套键/第二次顶层键
+            sawTopKey = true;
+            let m = k + 1;
+            while (m < N && isWs(raw[m] as string)) m += 1;
+            if (m >= N || raw[m] !== '"') return { kind: "conflict" }; // 值未写/非字符串/截断
+            const val = readLiteral(m);
+            if (val === null) return { kind: "conflict" }; // 值截断
+            try {
+              const decoded: unknown = JSON.parse(val[1]);
+              if (typeof decoded !== "string" || decoded.length === 0) return { kind: "conflict" };
+              topValue = decoded;
+            } catch {
+              return { kind: "conflict" }; // 值转义中断
+            }
+            top.expect = "member-end";
             i = val[0];
             continue;
-          } catch {
-            return { kind: "conflict" }; // 值转义中断
           }
+          i = after; // 普通键：冒号由主循环消费
+          continue;
         }
-        i = afterKey;
-        continue;
+        if (top.expect === "value") {
+          i = after;
+          top.expect = "member-end";
+          continue; // 值位置字符串（含转义内嵌文本如 payload.rawText）
+        }
+        return { kind: "conflict" }; // colon（已由键分支确认）/member-end 位置出现字符串=非法转移
       }
-      i = afterKey; // 值位置字符串（非身份）：继续
-      continue;
+      if (top.expect === "value-or-end") {
+        i = after;
+        top.expect = "element-end";
+        continue; // 数组元素字符串（如 payload.attachments）
+      }
+      return { kind: "conflict" }; // element-end 位置字符串=非法转移
     }
-    if (ch === "{" || ch === "[") { depth += 1; i += 1; continue; }
-    if (ch === "}" || ch === "]") { depth -= 1; i += 1; continue; }
-    i += 1;
+    // 数字/true/false/null 标量：只在 value/value-or-end 位置合法；读到下一个结构边界（数字截断无法判完整，
+    // 宽容接受——撕裂尾常截在数字段，标量不是身份候选）。
+    const top = stack[stack.length - 1];
+    if (top === undefined) return { kind: "conflict" };
+    if (top.type === "obj") {
+      if (top.expect !== "value") return { kind: "conflict" }; // key/colon/member-end 位置标量=非法前缀
+      top.expect = "member-end";
+    } else {
+      if (top.expect !== "value-or-end") return { kind: "conflict" };
+      top.expect = "element-end";
+    }
+    let j = i;
+    while (j < N && !",}]\"".includes(raw[j] as string)) j += 1;
+    i = j; continue;
   }
   if (!sawTopKey || topValue === null) return sawTopKey ? { kind: "conflict" } : { kind: "none" };
   return { kind: "unique", id: topValue };

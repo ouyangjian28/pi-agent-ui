@@ -376,6 +376,49 @@ describe("recover（恢复入口受控面）", () => {
     expect(r4.resumable).toEqual(["i-2"]);
   });
 
+  it("F1k（I1 表驱动）：第二身份字段在各截断点全阻断（键未闭/键闭无冒号/键闭+空白/冒号写值未写/值未闭/完整二次键）——普通键/转义键/嵌套键三型", () => {
+    const lines: JournalLine[] = [JSON.parse(enq("i-1")), JSON.parse(enq("i-2"))];
+    const head = '{"t":"sending","intentId":"i-1"';
+    const cases: Array<[string, string]> = [
+      // [标签, 尾部]——base+尾部=完整 raw
+      ["普通键·键未闭合", ',"intentId'],
+      ["普通键·键闭合无冒号", ',"intentId"'],
+      ["普通键·键闭合+空白无冒号", ',"intentId" '],
+      ["普通键·冒号写值未写", ',"intentId":'],
+      ["普通键·值未闭合", ',"intentId":"i-2'],
+      ["普通键·完整二次键", ',"intentId":"i-2"'],
+      ["转义键·键未闭合", ',"intent\\u0049d'],
+      ["转义键·键闭合无冒号", ',"intent\\u0049d"'],
+      ["转义键·冒号写值未写", ',"intent\\u0049d":'],
+      ["转义键·值未闭合", ',"intent\\u0049d":"i-2'],
+      ["转义键·完整二次键", ',"intent\\u0049d":"i-2"'],
+      ["嵌套键·键未闭合", ',"metadata":{"intentId'],
+      ["嵌套键·键闭合无冒号", ',"metadata":{"intentId"'],
+      ["嵌套键·冒号写值未写", ',"metadata":{"intentId":'],
+      ["嵌套键·值未闭合", ',"metadata":{"intentId":"i-2'],
+      ["嵌套键·完整二次键", ',"metadata":{"intentId":"i-2"}'],
+    ];
+    for (const [label, tail] of cases) {
+      const r = buildRecoverReport(lines, "s1", { fragments: [{ raw: head + tail, error: "撕裂尾", partialTail: true }], blocked: false });
+      expect(r.unknownEffect).toEqual([]); // 不臆造归 i-1
+      expect(r.unattributableFragments).toHaveLength(1);
+      expect(r.resumeBlocked).toBe(true); // I1：键闭合无冒号不再当普通值跳过
+      expect(r.resumable).toEqual([]); // 旧版键闭合无冒号时误放 ["i-2"]
+      void label;
+    }
+  });
+
+  it("F1k2（I1 正常面）：转义键解码后同等识别——顶层唯一转义 intentId 键+完整值仍归因；数字段截断保持", () => {
+    const lines: JournalLine[] = [JSON.parse(enq("i-1")), JSON.parse(enq("i-2"))];
+    // GPT s4i 观察例：顶层 "intent\u0049d"（解码=intentId）+完整值→接受归因（解码后同等识别，非一律拒绝转义）
+    const raw = '{"t":"sending","intent\\u0049d":"i-1"';
+    const r = buildRecoverReport(lines, "s1", { fragments: [{ raw, error: "撕裂尾", partialTail: true }], blocked: false });
+    expect(r.unknownEffect).toEqual(["i-1"]);
+    expect(r.unattributableFragments).toEqual([]);
+    expect(r.resumeBlocked).toBe(false);
+    expect(r.resumable).toEqual(["i-2"]);
+  });
+
   it("F1b：残片 intentId 为 JSON 转义（\\u0069-1=i-1）→字面量解码后正确关联（裸正则提取会漏）", () => {
     const enqueue: JournalLine = {
       t: "enqueue",
