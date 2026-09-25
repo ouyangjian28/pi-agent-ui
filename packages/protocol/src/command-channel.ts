@@ -52,7 +52,9 @@ export class CommandChannel {
       dedup: CommandDedup;
       ledger: OpLedgerPort;
       now(): string;
-      /** 审计行钩子（同键不同参拒等；宿主落观测层）。钩子抛错被隔离（B1-02）——不得影响派发结果。 */
+      /** 审计行钩子（同键不同参拒等；宿主落观测层）。钩子抛错被隔离（B1-02）——不得影响派发结果。
+       *  契约边界（C1-02）：仅接收同步钩子——传入 async 函数时其返回 Promise 的拒绝不在隔离范围（会 unhandledRejection）；
+       *  宿主如需异步落盘审计，须自消费 Promise 失败，不得把异步观测错误注入本回调。 */
       onAudit?: (line: string) => void;
     },
   ) {}

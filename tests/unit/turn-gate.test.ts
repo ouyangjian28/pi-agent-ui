@@ -367,3 +367,32 @@ describe("硬序 pending 面（s1b：未关闭时直接断言许可不早于追�
     expect(settled).toBe(true);
   });
 });
+
+describe("B1-01 补遗（s1c 建议固化：失败 reopen 后原操作失败路径两窗口）", () => {
+  it("sending fsync pending 假失败 reopen 后 reject：failed(sending)+closed（正常 fail-closed，非 invalidated）", async () => {
+    const dur = new FakeDurability();
+    dur.holdAt = 2;
+    const gate = makeGate(dur);
+    const p = gate.submit(intent());
+    await untilHeld(dur);
+    expect(gate.reopen()).toBe(false);
+    dur.failHold();
+    expect(await p).toMatchObject({ kind: "failed", stage: "sending" });
+    expect(gate.getState()).toEqual({ kind: "closed", reason: "durability-failure" });
+    expect(gate.reopen()).toBe(true); // 真 closed 解锁仍有效
+  });
+
+  it("settled 行 fsync pending 假失败 reopen 后 reject：closed（durability-failure），未错误释放为 idle", async () => {
+    const dur = new FakeDurability();
+    dur.holdAt = 3;
+    const gate = makeGate(dur);
+    await gate.submit(intent());
+    const sp = gate.onTurnSettled();
+    await untilHeld(dur);
+    expect(gate.reopen()).toBe(false);
+    dur.failHold();
+    await sp;
+    expect(gate.getState()).toEqual({ kind: "closed", reason: "durability-failure" }); // 终态未耐久=不放行
+    expect(await gate.submit(intent("i-2"))).toEqual({ kind: "rejected", reason: "closed" });
+  });
+});

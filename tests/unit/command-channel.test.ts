@@ -168,13 +168,18 @@ describe("通用命令通道（CommandChannel）", () => {
     const ledger = new FakeLedger();
     ledger.failResult = "after";
     const { channel } = make(ledger);
-    const out = await channel.dispatch("op-1", "argsA", async () => ({ ok: true }));
+    let sends = 0;
+    const send = async (): Promise<object> => {
+      sends += 1; // 直接行为计数（C1-01：不得用未记录事件的回调断言「不重发」）
+      return { ok: true };
+    };
+    const out = await channel.dispatch("op-1", "argsA", send);
     expect(out.kind).toBe("result-durability-failed");
     expect(ledger.results).toHaveLength(1); // 结果行已写（fsync 报错不证明无行）
-    // s1b：同通道（同内存 dedup）重试同 opId=unknown-effect（未 settle，不得凭 in 手结果当 cached）
-    const retry = await channel.dispatch("op-1", "argsA", async () => ({ ok: "must-not-send" }));
+    // s1c：同通道（同内存 dedup）重试同 opId=unknown-effect（未 settle，不得凭 in 手结果当 cached）
+    const retry = await channel.dispatch("op-1", "argsA", send);
     expect(retry).toEqual({ kind: "unknown-effect" });
-    expect(ledger.events.filter((e) => e === "send")).toHaveLength(0); // 未重发
+    expect(sends).toBe(1); // 只首发过：重试未调用 send（C1-01 修复：空观测→真计数）
     // 重启重放：读到有效结果行=新增证据→cached（非洗白）
     const dedup2 = new CommandDedup();
     dedup2.replay(ledger.results);
