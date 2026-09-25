@@ -238,3 +238,19 @@
 | R2 失败清理不复活（drain 冲批失败丢弃已取出项） | 「R2：live 冲批失败」+「R2：history 冲批失败」（估算器 300k 注入→error 恰一份+phase=closed+二次 drain 空） | M-r2-unshift→2 挂 |
 | R3 文档单模型+归因旧锚作废 | session-attribution.test「⑦b 同意图不同锚=最新 consumed 生效（[null,null,I,I]）」 | M-a07 首条生效→⑦⑥ 2 挂（c7 轮已验） |
 | 测试精度（GPT c7 三问） | 稳态例改恒留 1 项待发；3000 意图改 128 字符 ID+estimateFrameBytes UTF-8 断言；limit 例改 300 条输入（999→200+续页 100） | — |
+
+## adapter 切片③-3a（WS 网关受控接线：认证/入站管线/队列/订阅/恢复/心跳；495 it）
+| 面 | 断言落点 | 状态 |
+| --- | --- | --- |
+| **认证入站（hello/token/Origin/TLS/窗口/撤销）**（Origin 精确集合缺失默认拒；非 loopback 无 TLS 拒；token timingSafeEqual 摘要；protocolVersion≠1→4403；hello 前窗口可配帧数（默认 3，先于字段验证——与 4404 计数分立）；热轮换 revoked 摘要关既有连接 4401） | ws-gateway.test 9 it（welcome/坏 token/Origin 缺失/非白名单/非 loopback 无 TLS/pv=2→4403/字段非法/未认证非 hello/窗口=1 例/撤销 4401）；ws-support.test token-auth 5 it（fromFile 缺失拒启/reload revoked=旧−新/失败沿用旧+乱序丢弃） | ✅ |
+| **入站管线（二进制/262KB/JSON/未知 t/写类冻结）**（二进制→4404；超长→4404；非 JSON/未知 t→4404 计 3→close 1002；写类集 {prompt,send,stop,resume,takeover,write,execute,spawn,kill}→4405） | ws-gateway.test 入站管线例（二进制/非 JSON/未知 t 三连 4404→1002；prompt→4405） | ✅ |
+| **requestId 在途门**（缺失/非法/^[-\w]{1,64}$/→4404；在途重复→4404；在途≥4→4429；同步占位原子受理） | ws-gateway.test requestId 例（provider 永挂造 4 在途+重复 4404+第 5 个 4429） | ✅ |
+| **订阅三分支+限额**（file FILE_RE+双根域→4404；init/resync 同 file 先退旧→4409 stream-replaced+引擎静默关；≥8 file→4429；page 无活动引擎→4404；全部出帧经 ConnectionQueue） | ws-gateway.test 4 it（越界+非法名/重订阅 4409+第 9 file 4429/page 无引擎/空会话 snapshot 帧） | ✅ |
+| **列表/恢复（semaphore+证据快照）**（list-sessions offset/limit 校验→scanSessions→buildSessionsFrame（semaphore 并发 2 全局）；get-recovery 走证据快照 provider：null→unavailable(no-evidence-snapshot) 禁裸读盘面；有→recoverFromSnapshot→buildRecoveryFrame） | ws-gateway.test 2 it（list 帧+limit 999→4404；无快照 unavailable+有快照 available） | ✅ |
+| **心跳/寿命/清理**（idleMs 无帧→4432+close 1000；maxLifetimeMs→close 1000 lifetime-cap；传输关闭幂等清理 connectionCount 归零） | ws-gateway.test 3 it（4432/lifetime-cap/幂等清理）；ping→pong 经队列 | ✅ |
+| **连接统一队列（B7-B12）**（1024 帧/1MB 双门拒收→beginTerminate 恰一次 4431 直发不占预算+close(4431)+限时 terminate；drain 批 16 帧/8ms setImmediate 让步；回调错误/同步 throw→终止；迟到回调不复活不重复记账；bufferedAmount 4MB 门；close(1000) 尽力排空） | ws-support.test ConnectionQueue 10 it（边界+1 拒/字节门/回调错误/迟到不复活/同步 throw/背压门/批量轮次/尽力排空/terminate 限时） | ✅ |
+| **计算并发（全局 2）**（ComputeSemaphore limit=2 FIFO；排队 5s 超时；cancel 仅未开始生效；幂等 release 不多还槽） | ws-support.test semaphore 4 it | ✅ |
+| **会话枚举（scanSessions）**（FILE_RE 过滤+截 1000=partial+total 全数；每文件 openSafeFile O_NOFOLLOW+512KB 预算→partial 占位不吞文件；sanitize 先于截断；稳定排序 lastActiveMs desc+null 最后+file 字典序） | ws-support.test session-scan 5 it | ✅ |
+| **安全打开（safe-open）**（O_NOFOLLOW→ELOOP/ENOTDIR=symlink；ENOENT=missing；同 fd fstat 非常规=not-regular；64KB 循环读超限即刻 too-large；resolveWithinRoots 根绝对+sep 整段边界） | ws-support.test safe-open 5 it（兄弟前缀拒/symlink/目录拒/too-large/闭环） | ✅ |
+| **变异十二组（M-240 基线 09932d0+6f31a81）** | M-a1 token 门→2 挂/M-a2 Origin→1 挂/M-a3 窗口（首版存活→补 helloMaxFrames=1 例击杀）/M-a4 撤销→1 挂/M-c1 形状门（首版存活→补非法名例击杀）/**M-c1b root 门存活=防御层**（FILE_RE 句法上限定单段名，无路径可越界——真执行面=openSafeFile O_NOFOLLOW，如实披露）/M-c2b 4409 通知→1 挂/M-c3 八限→1 挂/M-d1 no-evidence reason→1 挂/M-d2 idle→1 挂/M-d3 lifetime→1 挂/M-d4 dup→1 挂/M-d5 4429→1 挂 | ✅（11 杀+1 防御层） |
+| **真网络传输（ws 库 socket/真实 backpressure/Origin header/TLS）** | 归 3b 真网络分片（w0 对齐：3a 通过措辞=「受控 WS 接线通过」） | 🔴 3b |
