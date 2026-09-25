@@ -776,7 +776,8 @@ describe("ws-gateway w1b：B 系阻断回归", () => {
       const stream1 = snap1.streamId as string;
       // 盘面改写→重新 init 换流
       const rows2 = makeRows(3);
-      rows2[0] = { ...rows2[0]!, raw: '{"t":"sending","seq":1,"mutated":true}' };
+      // 事件内容真变（仅改 raw 不触发 replace——isPrefixOf 比较事件）→换流
+      rows2[1] = { ...rows2[1]!, event: { ...rows2[1]!.event, ts: 9_999 } };
       r.history.files.set("b2.jsonl", rows2 as unknown as ScanRow[]);
       const c2 = await authed(r);
       await c2.say({ t: "subscribe", requestId: "s2", file: "b2.jsonl" });
@@ -908,11 +909,15 @@ describe("ws-gateway w1b：B 系阻断回归", () => {
 
   it("B7 安静连接末页缓存主动释放（监督 tick 触发 purge）", async () => {
     let clock = 0;
-    const scheduled: Array<() => void> = [];
+    const scheduled: Array<(() => void) | undefined> = [];
     const r = await makeRig({
       now: () => clock,
-      timers: { setTimeout: (cb) => { scheduled.push(cb); return scheduled.length; }, clearTimeout: () => {} },
-      heartbeat: { pingMs: 1_000, idleMs: 0 },
+      timers: {
+        setTimeout: (cb) => { scheduled.push(cb as () => void); return scheduled.length; },
+        clearTimeout: (t) => { const i = t as number; if (i >= 1 && i <= scheduled.length) scheduled[i - 1] = undefined; },
+      },
+      // ping 关闭：否则 tick 的 ping 帧→drain()→内部 purgeExpiredPages 会掩盖监督 purge 本身
+      heartbeat: { pingMs: 0, idleMs: 0 },
     });
     try {
       r.history.put("q.jsonl", makeRows(3));
@@ -924,7 +929,10 @@ describe("ws-gateway w1b：B 系阻断回归", () => {
       const engine = st.subs.get("q.jsonl")!.engine as unknown as { recentPages?: unknown[] };
       expect((engine.recentPages ?? []).length).toBe(1); // 末页缓存尚在
       clock += 61_000; // 越过 60s 宽限
-      (scheduled[scheduled.length - 1]!)(); // 触发监督 tick
+      // 快照 [0]=auth 截止（hello 已 clearTimeout→undefined）、[1]=监督 tick、[2]=订阅期 pump drain
+      // 只触发 tick：pump 的 drain() 首行也 purgeExpiredPages，混发会掩盖监督 purge 本身
+      expect(scheduled.filter(Boolean).length).toBe(2);
+      (scheduled[1] as () => void)(); // 触发监督 tick
       expect((engine.recentPages ?? []).length).toBe(0); // 已释放
     } finally {
       await r.dispose();
