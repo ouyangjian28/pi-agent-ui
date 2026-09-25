@@ -23,6 +23,7 @@ import type {
 import { LIMITS, SubscriptionEngine, validateClientFrame } from "@pi-agent-ui/protocol";
 import type { ScanRow } from "@pi-agent-ui/protocol";
 import { ReadIndexRegistry, FileOverBudgetError } from "@pi-agent-ui/protocol";
+import type { ReadIndex } from "@pi-agent-ui/protocol";
 import { buildRecoveryFrame, buildSessionsFrame } from "@pi-agent-ui/protocol";
 import { utf8Bytes, ConnectionQueue } from "./connection-queue.ts";
 import type { TokenAuthority } from "./token-auth.ts";
@@ -323,7 +324,7 @@ export class WsGateway {
   }
 
   /** 协议错误帧统一出口（W1-01 错误矩阵：4403→close 1003、4405→close 1008、4404 计数 3→close 1002）。 */
-  private errFrame(st: ConnState, code: 4401 | 4403 | 4404 | 4405, message: string, requestId: string): void {
+  private errFrame(st: ConnState, code: 4401 | 4402 | 4403 | 4404 | 4405, message: string, requestId: string): void {
     this.enqueue(st, { t: "error", code, message, retryable: false, requestId });
     if (code === 4403) { this.closeConn(st, 1003, "protocol-version"); return; }
     if (code === 4405) { this.closeConn(st, 1008, "write-frozen"); return; }
@@ -384,14 +385,26 @@ export class WsGateway {
       // W1-04：索引装载（前缀判定/换流 replace；registry/get 超预算→4402）
       let engine: SubscriptionEngine;
       let frames: readonly ServerFrame[];
+      let index: ReadIndex | typeof WsGateway.INDEX_BUDGET;
       try {
-        const index = this.syncIndex(file, rows);
-        // B1 二验：syncIndex 换流后（盘面改写）当前流身份已变——旧游标不再有效（统一 4404，不静默跳过错流门）
-        if ("cursor" in frame && index.streamId !== frame.cursor.streamId) {
-          this.errFrame(st, 4404, "请求与订阅状态不符", requestId);
-          this.audit(`resync-stream-replaced-disk conn=${st.id} file=${file} cursor=${frame.cursor.streamId} current=${index.streamId}`);
-          return;
-        }
+        index = this.syncIndex(file, rows);
+      } catch {
+        this.errFrame(st, 4402, "会话索引构建失败", requestId);
+        return;
+      }
+      // R3（w1c）：装载/增量触顶——统一 4402 拒订阅（不装引擎、不发绑定超限索引的快照）
+      if (index === WsGateway.INDEX_BUDGET) {
+        this.errFrame(st, 4402, "会话索引超预算，请重新订阅", requestId);
+        this.audit(`subscribe-index-over-budget conn=${st.id} file=${file}`);
+        return;
+      }
+      // B1 二验：syncIndex 换流后（盘面改写）当前流身份已变——旧游标不再有效（统一 4404，不静默跳过错流门）
+      if ("cursor" in frame && index.streamId !== frame.cursor.streamId) {
+        this.errFrame(st, 4404, "请求与订阅状态不符", requestId);
+        this.audit(`resync-stream-replaced-disk conn=${st.id} file=${file} cursor=${frame.cursor.streamId} current=${index.streamId}`);
+        return;
+      }
+      try {
         engine = new SubscriptionEngine({
           index,
           status: () => this.opts.statusFor?.(file) ?? unknownStatus(file),
@@ -401,13 +414,9 @@ export class WsGateway {
         frames = "cursor" in frame
           ? engine.startResync(requestId, frame.cursor)
           : engine.startSnapshot(requestId);
-      } catch (e) {
-        if (e instanceof FileOverBudgetError) {
-          this.enqueue(st, { t: "error", code: 4402, message: "会话索引超预算不可读", retryable: true, requestId });
-        } else {
-          this.audit(`subscribe-failed conn=${st.id} file=${file}`);
-          this.enqueue(st, { t: "error", code: 4402, message: "会话不可读", retryable: true, requestId });
-        }
+      } catch {
+        this.audit(`subscribe-failed conn=${st.id} file=${file}`);
+        this.enqueue(st, { t: "error", code: 4402, message: "会话不可读", retryable: true, requestId });
         return;
       }
       // W1-05：原子切换——先试启新引擎；失败只发错误（旧订阅原样保留）
@@ -444,21 +453,30 @@ export class WsGateway {
     }
   }
 
-  /** B1（w1b）：当前流身份（无已知流→null；预算尽/异常→null 由调用方按 4404 拒）。 */
+  /** B1（w1b）+R1（w1c）：当前流身份——peek 纯查看（不创建/不触发触顶换流/不抛错）。
+   * 已成功装载的空流（waterMark=0）同样是已知流：同身份 seq∈[1,H+1] 按 H+1 追平语义受理；
+   * 从未装载（peek 无命中）→null，由调用方按 4404 拒（不得凭请求任意创建流身份）。 */
   private currentStreamId(file: string): string | null {
-    try {
-      const index = this.registry.get(file);
-      return index.waterMark > 0 ? index.streamId : null;
-    } catch {
-      return null;
-    }
+    return this.registry.peek(file)?.streamId ?? null;
   }
 
-  /** W1-04：索引装载与增量同步（前缀→追加；非前缀=盘面改写→换流重建）。 */
-  private syncIndex(file: string, rows: readonly ScanRow[]) {
-    let index = this.registry.get(file);
+  /** R3（w1c）：装载/增量触顶信号——handleRecovery 订阅侧统一 4402（不发绑定超限索引的快照）。 */
+  private static readonly INDEX_BUDGET = Symbol("index-over-budget");
+
+  /** W1-04：索引装载与增量同步（前缀→追加；非前缀=盘面改写→换流重建+退役旧引擎）。
+   * R2（w1c）：换流必须协调所有仍持旧索引身份的活动订阅（4409 退旧+撤帧+清理），
+   * 不得让旧引擎接收新流坐标的事件；R3：所有装载/增量出口统一容量门。 */
+  private syncIndex(file: string, rows: readonly ScanRow[]): ReadIndex | typeof WsGateway.INDEX_BUDGET {
+    let index: ReadIndex;
+    try {
+      index = this.registry.get(file);
+    } catch (err) {
+      if (err instanceof FileOverBudgetError) return WsGateway.INDEX_BUDGET; // 额度已用又触顶：registry 拒建
+      throw err;
+    }
     if (index.waterMark === 0) {
       for (const row of rows) index.append(row.source, row.locator, row.raw, row.event);
+      if (index.overBudget) { this.closeSubscriptionsFor(file, "index-over-budget"); return WsGateway.INDEX_BUDGET; }
       return index;
     }
     if (index.isPrefixOf(rows)) {
@@ -466,13 +484,40 @@ export class WsGateway {
         const row = rows[i];
         if (row !== undefined) index.append(row.source, row.locator, row.raw, row.event);
       }
+      if (index.overBudget) { this.closeSubscriptionsFor(file, "index-over-budget"); return WsGateway.INDEX_BUDGET; }
       return index;
     }
-    // 非前缀=改写：换流（registry.replace 后新 streamId；观察器重挂由 watchFile 处理）
+    // 非前缀=改写：换流（registry.replace 后新 streamId）+R2：先重建新索引，
+    // 再按【新】流身份退役全部旧流订阅（旧引擎不得接收新坐标事件；新流上尚无引擎）
     this.registry.replace(file);
     index = this.registry.get(file);
     for (const row of rows) index.append(row.source, row.locator, row.raw, row.event);
+    if (index.overBudget) { this.closeSubscriptionsFor(file, "index-over-budget"); return WsGateway.INDEX_BUDGET; }
+    const retired = this.retireEnginesForFile(file, index.streamId, "disk-rewrite");
+    if (retired > 0) this.audit(`stream-replaced-disk file=${file} retired=${retired} newStream=${index.streamId}`);
     return index;
+  }
+
+  /** R2（w1c）：换流时退役该文件上全部非目标流身份的订阅（4409 stream-replaced:${oldId} 通知+撤帧+清理）。
+   * 触发连接自身的旧订阅同样经此退役（其新引擎随后照常装入）。 */
+  private retireEnginesForFile(file: string, keepStreamId: string, reason: string): number {
+    const w = this.watchers.get(file);
+    if (w === undefined) return 0;
+    let retired = 0;
+    for (const c of [...w.refs]) {
+      if (c.closed) continue;
+      const sub = c.subs.get(file);
+      if (sub === undefined) continue;
+      if (sub.engine.streamId === keepStreamId) continue;
+      const oldId = sub.engine.subscriptionId;
+      this.enqueue(c, { t: "error", code: 4409, message: `stream-replaced:${oldId}`, retryable: true, requestId: "" });
+      sub.engine.close(4431, `stream-replaced-${reason}`, false);
+      c.queue.cancelBySubscription(oldId);
+      c.subs.delete(file);
+      this.releaseWatcher(c, file);
+      retired += 1;
+    }
+    return retired;
   }
 
   /** W1-04：文件级共享观察器+排空泵（多连接同文件一份 observe；引用归零即停观察）。 */
@@ -484,11 +529,22 @@ export class WsGateway {
     }
     w.refs.add(st);
     if (w.unobserve === null && this.opts.historySource?.observe !== undefined) {
-      this.registry.get(file); // touch LRU（观察活跃=索引保活）
+      this.registry.touch(file); // R3（w1c）：纯 LRU 活动刷新（get 有触顶换流/抛错副作用，不得作 touch 用）
       w.unobserve = this.opts.historySource.observe(file, {
         onAppend: (row) => {
           // B2（w1b）：事件时取【当前】索引（换流 replace 后旧闭包索引不得再接收追加）
-          const index = this.registry.get(file);
+          let index: ReadIndex;
+          try {
+            index = this.registry.get(file);
+          } catch (err) {
+            // R3（w1c）：registry 拒建（额度已用又触顶）——统一容量出口（4402+清理），异常不逸出到宿主
+            if (err instanceof FileOverBudgetError) {
+              this.audit(`index-over-budget-get file=${file}`);
+              this.closeSubscriptionsFor(file, "index-over-budget");
+              return;
+            }
+            throw err;
+          }
           const seq = index.append(row.source, row.locator, row.raw, row.event);
           // B2：分发用索引规范化后的统一坐标（丢弃外部 seq，引擎/索引恒一致）
           const indexed = index.read(seq, 1)[0];
@@ -632,7 +688,9 @@ export class WsGateway {
       // 不重调 provider、不占计算槽；缓存有界（每连接 ≤8，FIFO 驱逐）+连接关闭即清。
       const cacheKey = `${requestId}|${file}`;
       const cached = st.recoveryPages.get(cacheKey);
-      if (cached !== undefined) {
+      // R4（w1c）：缓存仅在请求携带 hash（续页/复读=按冻结版本拼回）时可用；
+      // 无 hash=「读当前」——必须现取 provider 新快照并覆盖缓存上下文，不得回旧投影。
+      if (cached !== undefined && frame.evidenceHash !== undefined) {
         if (frame.evidenceHash !== undefined && frame.evidenceHash !== cached.hash) {
           this.enqueueIfOpen(st, { t: "error", code: 4409, message: "evidence-changed", retryable: true, requestId });
           return;
@@ -670,7 +728,8 @@ export class WsGateway {
         }
         const report = recoverFromSnapshot(snap);
         const adapted = { ...report, evidenceHash: hash, blockedReasons: mapBlockedReasons(snap, report) };
-        // B8：首响应冻结——缓存投影（同 hash 续页确定性拼回；≥501 意图跨页不依赖盘面不变）
+        // B8：首响应冻结——缓存投影（同 hash 续页确定性拼回；≥501 意图跨页不依赖盘面不变）。
+        // R4：无 hash「读当前」也走此 set——覆盖旧缓存上下文（证据已前进的旧投影不再续用）。
         st.recoveryPages.set(cacheKey, { hash, adapted });
         while (st.recoveryPages.size > RECOVERY_PAGE_CACHE_MAX) {
           const oldest = st.recoveryPages.keys().next().value;

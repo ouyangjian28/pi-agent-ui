@@ -292,10 +292,12 @@ describe("ws-gateway w1：A 认证入站（W1-01/02）", () => {
         await cc.sayRaw(JSON.stringify(g));
         await until(() => cc.sent.length > before || cc.readyState !== 1, 1000);
         if (validatorSays) {
-          if (cc.readyState === 1 && cc.sent.length === before) throw new Error(`#${idx} 校验器接受但网关无响应: ${JSON.stringify(g)}`);
+          // w1c 收紧：校验器接受→网关必有响应帧（连接关闭不再作逃生）
+          if (cc.sent.length === before) throw new Error(`#${idx} 校验器接受但网关无响应: ${JSON.stringify(g)}`);
         } else {
+          // w1c 收紧：拒绝帧最后一帧必为 4403/4404/4405（readyState 逃生删除）
           const last = cc.frames()[cc.frames().length - 1];
-          expect(last !== undefined && (last.code === 4404 || last.code === 4403 || last.code === 4405) || cc.readyState !== 1).toBe(true);
+          expect(last !== undefined && (last.code === 4404 || last.code === 4403 || last.code === 4405)).toBe(true);
         }
       }
     } finally {
@@ -520,13 +522,14 @@ describe("ws-gateway w1：C 订阅接线（W1-04/05）", () => {
       c.sent.length = 0;
       await c.say({ t: "subscribe", requestId: "s2", file: "rw.jsonl", cursor: { streamId: snap1.streamId as string, seq: 1 } });
       expect(errFrames(c).some((f) => f.code === 4404)).toBe(true);
+      // R2：s2 的 syncIndex 已换流并退役本连接旧订阅——4409 stream-replaced:${旧subscriptionId}
+      expect(errFrames(c).some((f) => f.code === 4409 && String(f.message).includes("stream-replaced:" + (snap1.subscriptionId as string)))).toBe(true);
       // 重新 init：新流可用，barrier 重读
       c.sent.length = 0;
       await c.say({ t: "subscribe", requestId: "s3", file: "rw.jsonl" });
       const snap2 = c.frames().filter((f) => f.t === "snapshot").pop() as Record<string, unknown>;
       expect(snap2.streamId).not.toBe(snap1.streamId); // 换流
       expect(snap2.barrier).toBe(3);
-      expect(errFrames(c).some((f) => f.code === 4409 && String(f.message).includes("stream-replaced:" + (snap1.subscriptionId as string)))).toBe(true);
     } finally {
       await r.dispose();
     }
@@ -789,10 +792,13 @@ describe("ws-gateway w1b：B 系阻断回归", () => {
       const ev = c2.frames().find((f) => f.t === "events" && f.origin === "history") as { events: Array<{ seq: number }> };
       expect(ev.events.some((e) => e.seq === 4)).toBe(true); // 规范化统一坐标（非 777）
       expect(ev.events.some((e) => e.seq === 777)).toBe(false);
-      // 观察器恰一份（换流未重新 observe——事件时取当前索引）
-      expect(r.history.observeCalls.filter((f) => f === "b2.jsonl").length).toBe(1);
-      // 双连接：c1 也收到（同一索引/同一泵）
-      await until(() => c1.frames().some((f) => f.t === "events" && ((f.events as Array<{ seq: number }> | undefined) ?? []).some((e: { seq: number }) => e.seq === 4)), 1000);
+      // R2 语义：换流退役把旧 refs 清空→unobserve；新订阅者 attach 时 watchFile 重建观察器（calls=2）。
+      // 观察重建窗口的盘面新增行由 3b 真源 observe 语义（重扫补齐）承担——受控替身不模拟该窗口。
+      expect(r.history.observeCalls.filter((f) => f === "b2.jsonl").length).toBe(2);
+      // R2（w1c）：换流退役——c1 旧订阅收 4409 stream-replaced:${旧subscriptionId}（非新流事件）；
+      // 旧引擎不再接收新流坐标的 seq4（跨流不串染）
+      await until(() => errFrames(c1).some((f) => f.code === 4409 && String(f.message) === `stream-replaced:${snap1.subscriptionId}`), 1000);
+      expect(c1.frames().some((f) => f.t === "events" && ((f.events as Array<{ seq: number }> | undefined) ?? []).some((e: { seq: number }) => e.seq === 4))).toBe(false);
     } finally {
       await r.dispose();
     }
@@ -865,11 +871,11 @@ describe("ws-gateway w1b：B 系阻断回归", () => {
       r.history.append("ov.jsonl", rowAt(6));
       await until(() => errFrames(c).some((f) => f.code === 4402), 1000);
       expect(r.history.sinks.has("ov.jsonl")).toBe(false); // 观察已停
-      // 订阅已清：续页→4404
+      // 订阅已清+R3 统一容量出口：合法游标重订阅→4402（旧断言用 snapshotId 非法形态被校验器先拒=假绿）
       const snap1 = c.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
       c.sent.length = 0;
-      await c.say({ t: "subscribe", requestId: "s2", file: "ov.jsonl", snapshotId: snap1.snapshotId, historyNext: snap1.historyNext });
-      expect(errFrames(c).some((f) => f.code === 4404)).toBe(true);
+      await c.say({ t: "subscribe", requestId: "s2", file: "ov.jsonl", cursor: { streamId: snap1.streamId as string, seq: 1 } });
+      expect(errFrames(c).some((f) => f.code === 4402 && String(f.message).includes("超预算"))).toBe(true);
     } finally {
       await r.dispose();
     }
@@ -965,10 +971,14 @@ describe("ws-gateway w1b：B 系阻断回归", () => {
       const next = (f1.perIntent as { next: { offset: number } | null } | undefined)?.next;
       expect(next).not.toBeNull(); // 截断（501>页大小）
       expect(JSON.stringify(f1)).toContain("i-1");
+      // w1c 收紧：跨页全量唯一（两页拼回恰 501 个 intentId，无缺无重）
+      const seen = new Set<string>(JSON.stringify(f1).match(/i-\d+/g) ?? []);
       // 续页（同 requestId+同 hash）→缓存命中（provider 不重调）
       await c.say({ t: "get-recovery", requestId: "rec-1", file: "rec.jsonl", offset: next!.offset, evidenceHash: h });
       const f2 = c.frames().filter((x) => x.t === "recovery" && x.availability === "available").pop() as Record<string, unknown>;
       expect(JSON.stringify(f2)).toContain("i-501"); // 拼回末条
+      for (const m of JSON.stringify(f2).matchAll(/i-\d+/g)) seen.add(m[0]);
+      expect(seen.size).toBe(501); // 逐条唯一
       expect(calls).toBe(1);
       // 缓存内容页的 hash 门：携与冻结快照不同的 hash→4409（客户端须以新快照重启）
       await c.say({ t: "get-recovery", requestId: "rec-1", file: "rec.jsonl", offset: 0, evidenceHash: "ab".repeat(32) });
@@ -980,6 +990,212 @@ describe("ws-gateway w1b：B 系阻断回归", () => {
       const f3 = c.frames().filter((x) => x.t === "recovery" && x.availability === "available").pop() as Record<string, unknown>;
       expect(calls).toBe(2);
       expect(f3.evidenceHash).not.toBe(h);
+    } finally {
+      await r.dispose();
+    }
+  });
+});
+
+describe("ws-gateway w1c：R 系阻断回归", () => {
+  it("R1a 空流身份：已装载空流 resync seq1 受理（H+1 追平）；foreign 仍拒", async () => {
+    const r = await makeRig();
+    try {
+      r.history.put("empty.jsonl", []);
+      const c = await authed(r);
+      await c.say({ t: "subscribe", requestId: "s1", file: "empty.jsonl" });
+      const snap = c.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      expect(snap).toBeDefined();
+      expect((snap.page as unknown[]).length).toBe(0); // 空流 barrier=0
+      const sid = snap.streamId as string;
+      // 空流同身份 seq∈[1,H+1]=[1,1] → 受理（不得 4404「空流误判」）
+      c.sent.length = 0;
+      await c.say({ t: "subscribe", requestId: "s2", file: "empty.jsonl", cursor: { streamId: sid, seq: 1 } });
+      expect(errFrames(c).some((f) => f.code === 4404)).toBe(false);
+      const catchUp = c.frames().filter((f) => f.t === "snapshot").pop() as Record<string, unknown>;
+      expect(catchUp).toBeDefined(); // 追平帧（空页+barrier）
+      // foreign 仍拒（不得凭请求任意创建流身份）
+      c.sent.length = 0;
+      await c.say({ t: "subscribe", requestId: "s3", file: "empty.jsonl", cursor: { streamId: "s-foreign", seq: 1 } });
+      expect(errFrames(c).some((f) => f.code === 4404)).toBe(true);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("R1b 空流后追加：同坐标续读（live seq1 交付）", async () => {
+    const r = await makeRig();
+    try {
+      r.history.put("empty2.jsonl", []);
+      const c = await authed(r);
+      await c.say({ t: "subscribe", requestId: "s1", file: "empty2.jsonl" });
+      await until(() => c.frames().some((f) => f.t === "snapshot"), 1000);
+      r.history.append("empty2.jsonl", rowAt(1));
+      await until(() => c.frames().some((f) => f.t === "events"), 1000);
+      const ev = c.frames().find((f) => f.t === "events") as { events: Array<{ seq: number }> };
+      expect(ev.events.some((e) => e.seq === 1)).toBe(true); // 空流首条=seq1（统一坐标）
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("R2a 分页中换流：旧订阅 4409 退役+不收新流事件+旧游标 4404+重新 init 可用", async () => {
+    const r = await makeRig();
+    try {
+      r.history.put("rw2.jsonl", makeRows(205));
+      const cA = await authed(r);
+      await cA.say({ t: "subscribe", requestId: "a1", file: "rw2.jsonl" });
+      const snapA = cA.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      expect((snapA.page as unknown[]).length).toBe(200); // 首页 200（截断）
+      const subA = snapA.subscriptionId as string;
+      // 盘面改写（行 2 事件真变+行数缩到 3）
+      const rows2 = makeRows(3);
+      rows2[1] = { ...rows2[1]!, event: { ...rows2[1]!.event, ts: 9_999 } };
+      r.history.files.set("rw2.jsonl", rows2 as unknown as ScanRow[]);
+      const cB = await authed(r);
+      await cB.say({ t: "subscribe", requestId: "b1", file: "rw2.jsonl" });
+      // A 收 4409 stream-replaced:${subA}（非新流事件）
+      await until(() => errFrames(cA).some((f) => f.code === 4409 && String(f.message) === `stream-replaced:${subA}`), 1000);
+      const snapB = cB.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      expect(snapB.streamId).not.toBe(snapA.streamId);
+      // 换流后追加：新流事件只到新订阅者（旧引擎不接收新坐标）
+      r.history.append("rw2.jsonl", rowAt(4));
+      await until(() => cB.frames().some((f) => f.t === "events" && f.origin === "history"), 1000);
+      await tick(); await tick(); await tick(); // 稳定窗口：A 不得收到新流 seq4
+      expect(cA.frames().some((f) => f.t === "events" && ((f.events as Array<{ seq: number }> | undefined) ?? []).some((e) => e.seq === 4))).toBe(false);
+      // A 旧游标续页→4404（流身份已变，不按位置映射）
+      cA.sent.length = 0;
+      await cA.say({ t: "subscribe", requestId: "a2", file: "rw2.jsonl", cursor: { streamId: snapA.streamId as string, seq: 201 } });
+      expect(errFrames(cA).some((f) => f.code === 4404)).toBe(true);
+      // A 重新 init：新流可用（barrier=3）
+      cA.sent.length = 0;
+      await cA.say({ t: "subscribe", requestId: "a3", file: "rw2.jsonl" });
+      const snapA2 = cA.frames().filter((f) => f.t === "snapshot").pop() as Record<string, unknown>;
+      expect(snapA2.streamId).toBe(snapB.streamId);
+      expect(snapA2.barrier).toBe(4); // 改写 3 行+追加 1 条=4（重扫全量）
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("R2b 双连接 live 换流：两旧订阅均退役；新流事件仅新订阅者收", async () => {
+    const r = await makeRig();
+    try {
+      r.history.put("rw3.jsonl", makeRows(3));
+      const c1 = await authed(r);
+      const c2 = await authed(r);
+      await c1.say({ t: "subscribe", requestId: "p1", file: "rw3.jsonl" });
+      await c2.say({ t: "subscribe", requestId: "p2", file: "rw3.jsonl" });
+      const s1 = c1.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      const s2 = c2.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      const rows2 = makeRows(3);
+      // 换流须改 raw（isPrefixOf 对 [source,locator,raw] 摘要比较——只改 event 不触发 replace）
+      rows2[0] = { ...rows2[0]!, raw: '{"t":"sending","seq":1,"mutated":true}' };
+      r.history.files.set("rw3.jsonl", rows2 as unknown as ScanRow[]);
+      const c3 = await authed(r);
+      await c3.say({ t: "subscribe", requestId: "p3", file: "rw3.jsonl" });
+      await until(() => errFrames(c1).some((f) => f.code === 4409) && errFrames(c2).some((f) => f.code === 4409), 1000);
+      const s3 = c3.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      expect(s3.streamId).not.toBe(s1.streamId);
+      expect(s3.streamId).not.toBe(s2.streamId);
+      r.history.append("rw3.jsonl", rowAt(4));
+      await until(() => c3.frames().some((f) => f.t === "events" && f.origin === "history"), 1000);
+      await tick(); await tick(); await tick();
+      for (const c of [c1, c2]) {
+        expect(c.frames().some((f) => f.t === "events")).toBe(false); // 旧订阅从未收到新流事件
+      }
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("R3a 初装触顶：4402 无快照；二次 init 仍 4402（统一容量出口）；observe 追加不逸出异常", async () => {
+    const r = await makeRig({ indexLimits: { maxEventsPerStream: 5 } });
+    try {
+      r.history.put("big.jsonl", makeRows(6));
+      const c = await authed(r);
+      await c.say({ t: "subscribe", requestId: "s1", file: "big.jsonl" });
+      expect(errFrames(c).some((f) => f.code === 4402 && String(f.message).includes("超预算"))).toBe(true);
+      expect(c.frames().some((f) => f.t === "snapshot")).toBe(false); // 不发绑定超限索引的快照
+      expect(c.readyState).toBe(1);
+      // 第二次 init：registry 拒建路径（get 抛 FileOverBudgetError）→ 同样 4402
+      c.sent.length = 0;
+      await c.say({ t: "subscribe", requestId: "s2", file: "big.jsonl" });
+      expect(errFrames(c).some((f) => f.code === 4402 && String(f.message).includes("超预算"))).toBe(true);
+      expect(c.frames().some((f) => f.t === "snapshot")).toBe(false);
+      // observe 追加（P4b 场景）：FileOverBudgetError 被容量出口吸收，不逸出到宿主（测试不被未捕获异常杀死即证）
+      r.history.append("big.jsonl", rowAt(7));
+      await tick(); await tick(); await tick();
+      expect(c.readyState).toBe(1);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("R4a 无 hash 同 requestId=读当前：现取新快照覆盖缓存；携旧 hash→4409", async () => {
+    const snaps = new Map<string, RecoveryEvidenceSnapshot>();
+    let calls = 0;
+    const r = await makeRig({ recoveryEvidence: (file) => { calls++; return snaps.get(file) ?? null; } });
+    try {
+      const mkSnap = (salt: number): RecoveryEvidenceSnapshot => {
+        const lines = [];
+        for (let i = 1; i <= 3; i++) {
+          lines.push({ t: "enqueue", intentId: `i-${i}`, sessionId: "sid-1", leafId: "leaf-1", generation: 1,
+            matchKey: { textHash: `h-${i}-${salt}`, attachmentIdentity: "none", ordinal: 0 },
+            payload: { kind: "prompt", rawText: `msg-${i}`, attachments: [], sentAt: "2026-09-28T00:00:00Z" } });
+        }
+        return { version: 1, file: "q.jsonl", sessionId: "sid-1", lines, bad: [], attributedFragments: [], repaired: [], createdAt: 2_000 } as unknown as RecoveryEvidenceSnapshot;
+      };
+      snaps.set("q.jsonl", mkSnap(1));
+      const c = await authed(r);
+      await c.say({ t: "get-recovery", requestId: "q1", file: "q.jsonl", offset: 0 }); // 无 hash
+      const f1 = c.frames().find((x) => x.t === "recovery" && x.availability === "available") as Record<string, unknown>;
+      const h1 = f1.evidenceHash as string;
+      expect(calls).toBe(1);
+      // 证据前进；同 requestId 无 hash 复读→必须现取（不得回旧投影）
+      snaps.set("q.jsonl", mkSnap(2));
+      await c.say({ t: "get-recovery", requestId: "q1", file: "q.jsonl", offset: 0 });
+      const f2 = c.frames().filter((x) => x.t === "recovery" && x.availability === "available").pop() as Record<string, unknown>;
+      expect(calls).toBe(2); // provider 重调
+      expect(f2.evidenceHash).not.toBe(h1); // 新快照
+      // 携旧 hash 续页→缓存上下文已是新版本→4409（客户端须以新快照重启）
+      await c.say({ t: "get-recovery", requestId: "q1", file: "q.jsonl", offset: 0, evidenceHash: h1 });
+      expect(errFrames(c).some((f) => f.code === 4409)).toBe(true);
+      expect(calls).toBe(2); // 未重调（缓存 hash 门拒绝）
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("R4b 缓存有界驱逐：第 9 个缓存驱逐最旧；被逐条目续页→重调 provider 拼回", async () => {
+    const snaps = new Map<string, RecoveryEvidenceSnapshot>();
+    let calls = 0;
+    const r = await makeRig({ recoveryEvidence: (file) => { calls++; return snaps.get(file) ?? null; } });
+    try {
+      const mkSnap = (): RecoveryEvidenceSnapshot => {
+        const lines = [];
+        for (let i = 1; i <= 3; i++) {
+          lines.push({ t: "enqueue", intentId: `i-${i}`, sessionId: "sid-1", leafId: "leaf-1", generation: 1,
+            matchKey: { textHash: `h-${i}`, attachmentIdentity: "none", ordinal: 0 },
+            payload: { kind: "prompt", rawText: `msg-${i}`, attachments: [], sentAt: "2026-09-28T00:00:00Z" } });
+        }
+        return { version: 1, file: "ev.jsonl", sessionId: "sid-1", lines, bad: [], attributedFragments: [], repaired: [], createdAt: 2_000 } as unknown as RecoveryEvidenceSnapshot;
+      };
+      snaps.set("ev.jsonl", mkSnap());
+      const c = await authed(r);
+      const hashes: string[] = [];
+      for (let i = 1; i <= 9; i++) {
+        await c.say({ t: "get-recovery", requestId: `e${i}`, file: "ev.jsonl", offset: 0 });
+        const f = c.frames().filter((x) => x.t === "recovery" && x.availability === "available").pop() as Record<string, unknown>;
+        hashes.push(f.evidenceHash as string);
+      }
+      expect(new Set(hashes).size).toBe(1); // 同快照同 hash
+      expect(calls).toBe(9);
+      // e1 已被驱逐（LRU 上限 8）：携其 hash 续页→缓存 miss→provider 重调+重建
+      await c.say({ t: "get-recovery", requestId: "e1", file: "ev.jsonl", offset: 0, evidenceHash: hashes[0] });
+      const f = c.frames().filter((x) => x.t === "recovery" && x.availability === "available").pop() as Record<string, unknown>;
+      expect(calls).toBe(10); // 重调
+      expect(JSON.stringify(f)).toContain("i-1"); // 拼回
+      expect(f.evidenceHash).toBe(hashes[0]); // hash 匹配（快照未变）
     } finally {
       await r.dispose();
     }

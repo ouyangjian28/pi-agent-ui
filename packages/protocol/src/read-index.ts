@@ -142,6 +142,11 @@ export class ReadIndexRegistry {
     return idx;
   }
 
+  /** 纯查看（不创建、不触 LRU、不触发触顶换流/抛错）——宿主判定「已知流身份」用（含 waterMark=0 空流）。 */
+  peek(file: string): ReadIndex | undefined {
+    return this.map.get(file);
+  }
+
   /** LRU 活动刷新（append/read 期间宿主调用；防长连接高频流被冷流挤出）。 */
   touch(file: string): void {
     const hit = this.map.get(file);
