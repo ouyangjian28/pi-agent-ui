@@ -587,7 +587,7 @@ describe("RpcSession（受控替身）", () => {
   });
 
   it("切片5①：settled 后闲置到期→EOF 优雅回收（无信号）→send 自动冷启动 gen2（journal 保留续写）", async () => {
-    const { session, host, audits } = await makeSession({ idleMs: 80, eofGraceMs: 600, graceMs: 300, exitDeadlineMs: 1_200 });
+    const { session, host, audits } = await makeSession({ idleMs: 80, eofGraceMs: 600 });
     const p0 = session.start();
     await until(() => host.frames.some((f) => f.includes('"type":"get_state"')), "探针写出");
     host.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true });
@@ -598,8 +598,10 @@ describe("RpcSession（受控替身）", () => {
     host.emitExit(0, null); // pi EOF 自然退出（m01879 实测形态）
     await until(() => audits.some((l) => l.includes("idle-reap-done kind=confirmed")), "回收确认");
     expect(host.stopSignals).toEqual([]); // EOF 优先链：无 SIGTERM/SIGKILL
-    expect(session.getState().supervisor.phase).toBe("idle");
-    expect(session.getState().gate.kind).toBe("idle");
+    const st1 = session.getState().supervisor as { phase: string };
+    const gt1 = session.getState().gate as { kind: string };
+    expect(st1.phase).toBe("idle");
+    expect(gt1.kind).toBe("idle");
     // 回收≠销毁：durability 未关（journal 由第二轮续写证明）；send=明确申请执行→冷启动 gen2
     const before2 = host.frames.filter((f) => f.includes('"type":"prompt"')).length;
     const cmd = session.send("第二轮");
@@ -610,7 +612,7 @@ describe("RpcSession（受控替身）", () => {
     host.emitEvent({ id: frame.id, type: "response", command: "prompt", success: true });
     host.emitEvent({ type: "agent_settled" });
     expect((await cmd).kind).toBe("launched");
-    expect(session.getState().supervisor.generation).toBe(2);
+    expect((session.getState().supervisor as { generation: number }).generation).toBe(2);
   });
 
   it("切片5①：登记表活跃阻断闲置回收；完成后再到期回收", async () => {
@@ -633,7 +635,7 @@ describe("RpcSession（受控替身）", () => {
   });
 
   it("切片5①：EOF 宽限超时→升级 SIGTERM（优雅链降级）", async () => {
-    const { session, host, audits } = await makeSession({ idleMs: 60, eofGraceMs: 60, graceMs: 250, exitDeadlineMs: 1_000 });
+    const { session, host, audits } = await makeSession({ idleMs: 60, eofGraceMs: 60 });
     const p0 = session.start();
     await until(() => host.frames.some((f) => f.includes('"type":"get_state"')), "探针写出");
     host.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true });

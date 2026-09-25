@@ -155,7 +155,7 @@ describe("idle-reaper（闲置回收受控面）", () => {
   it("时钟非有限不推进（不触发也不清零）", () => {
     const h = makeDeps();
     h.reaper.tick(); // since=1000
-    let broken = Number.NaN;
+    const broken = Number.NaN;
     // 构造非有限 now：独立小构造
     const registry = new MapRegistry();
     let calls = 0;
