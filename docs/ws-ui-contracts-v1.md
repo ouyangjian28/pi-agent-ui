@@ -304,7 +304,7 @@ JSON 文本帧（UTF-8）；拒二进制（→4403+close 1003，协议违规非�
 
 ```ts
 type ServerFrame =
-  | { t: "welcome"; serverBootId: string; serverBuildId: string; protocolVersion: 1 } // serverBuildId=代码/构建身份（R6/3b-1 兼容条款；旧客户端忽略未知字段不受影响）
+  | { t: "welcome"; serverBootId: string; serverBuildId: string; protocolVersion: 1 } // serverBootId=进程身份（每次启动唯一）；serverBuildId=代码/构建身份（当前固定切片标识 @3b，发行接线前须替换为真实构建号——R6/3b-1 兼容条款；旧客户端忽略未知字段不受影响）
   | { t: "sessions"; requestId: string; sessions: SessionSummaryDTO[]; total: number; offset: number; hasMore: boolean; listVersion: number; listReliability: "full" | "partial" } // C6-06：页级聚合（目录级输入与条目级保守聚合：任一 partial→partial）
   | { t: "snapshot"; } & SnapshotFrame
   | { t: "events"; subscriptionId: SubscriptionId; origin: "history";
@@ -365,7 +365,8 @@ type ServerFrame =
 ### 5.5 认证与授权
 
 - 静态令牌+热轮换（mtime/SIGHUP；**重载失败=保守沿用旧基准**+审计）；不匹配既有连接立即 4401 close。**初始无 token 文件=拒绝启动（fail-closed，Y04）**。24h 有效期；hello 前窗口 10s/3 帧。
-- **per-IP 认证失败限速+退避（R6/3b-1）**：键=传输层派生的有效 clientIp（无 trustProxy 时=socket 对端）；滑窗内认证失败达限（默认 10 次/60s）→封锁该 IP 的后续 hello（4401+close 1008，不延长封锁）；封锁时长指数退避（60s 起、封顶 10min）；认证成功即清户；防护表有上界（超出淘汰最旧非封锁项）。正常客户端无感知。
+- **per-IP 认证失败限速+退避（R6/3b-1；B1/B2=3b1c 勘定）**：键=传输层派生的有效 clientIp（无 trustProxy 时=socket 对端）；滑窗内认证失败达限（默认 10 次/60s）→封锁该 IP 的后续 hello（4401+close 1008）。**封锁期内拒绝不记账不延长**（正确/错误令牌同口径——fails/strikes/blockedUntil 均不变；到期自然恢复）；封锁时长指数退避（60s 起、封顶 10min）；认证成功即清户。**防护表硬上界 1024 条**：满表新观测先淘汰最旧非封锁项（丢失败史，活动封锁不丢）；全表封锁时按最早到期封锁项显式淘汰+审计（不静默丢也不无界增长）。正常客户端无感知。
+- **代理头信任边界（部署约束）**：仅在 remoteAddress ∈ trustedProxies 时采信 X-Forwarded-For 最左段/X-Forwarded-Proto；**可信代理必须在转发时覆盖/清洗 XFF/XFP**（用户可控左端追加链不得当身份），多级代理须逐跳配置信任边界；proxied=true 时 tls 以 XFP 严格判定（socket TLS 与 XFP 混合回程不折衷）。缺头保守回退 socket 事实。
 - 授权域=双根目录；file 命名域+O_NOFOLLOW 等价校验；Origin 白名单（配置）；缺失 Origin=拒绝（非浏览器客户端显式配置放行列表）；非 loopback 必须 TLS；连接 16/服务、握手 10/min；token 不入日志/URL/前端持久化。
 
 ### 5.6 背压与资源预算（C3-R08/R10 修订：连接级统一+计算并发）
