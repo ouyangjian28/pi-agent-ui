@@ -12,6 +12,7 @@ import { ConnectionQueue, type SendPort } from "../../../apps/server/src/ws/conn
 import { openSafeFile, readSafeWithin, resolveWithinRoots } from "../../../apps/server/src/ws/safe-open.ts";
 import { scanSessions } from "../../../apps/server/src/ws/session-scan.ts";
 import { TokenAuthority } from "../../../apps/server/src/ws/token-auth.ts";
+import { gatewayMetaFrom } from "../../../apps/server/src/ws/ws-transport.ts";
 
 function tmp(): Promise<string> {
   return mkdtemp(join(tmpdir(), "ws-support-"));
@@ -488,5 +489,22 @@ describe("ws-support w1 修复面（W1-03/09/12）", () => {
     await new Promise((res) => setImmediate(res));
     for (const n of ["4", "5", "6"]) expect(q2.enqueue({ t: "pong", nonce: n } as never)).toBe("queued"); // 若归还缺失→第 4 帧即拒
     q2.dispose();
+  });
+});
+
+describe("gatewayMetaFrom（3b-2 clientIp 接线）", () => {
+  it("直连元数据全链映射（origin/loopback/tls/clientIp）", () => {
+    const m = gatewayMetaFrom({ origin: "http://localhost:5173", loopback: true, tls: false, clientIp: "::1", remoteAddress: "::1", proxied: false });
+    expect(m).toEqual({ origin: "http://localhost:5173", loopback: true, tls: false, clientIp: "::1" });
+  });
+  it("可信代理派生的 clientIp 原样透传（不退 unknown）", () => {
+    const m = gatewayMetaFrom({ origin: "https://app.example", loopback: false, tls: true, clientIp: "203.0.113.9", remoteAddress: "10.0.0.7", proxied: true });
+    expect(m.clientIp).toBe("203.0.113.9");
+    expect(m.tls).toBe(true);
+    expect(m.loopback).toBe(false);
+  });
+  it("origin 缺失（非浏览器入口被拒前）→undefined（网关默认拒路径）", () => {
+    const m = gatewayMetaFrom({ origin: null, loopback: true, tls: false, clientIp: "127.0.0.1", remoteAddress: "127.0.0.1", proxied: false });
+    expect(m.origin).toBeUndefined();
   });
 });

@@ -22,6 +22,7 @@ import { TLSSocket } from "node:tls";
 import { createServer, type Server as HttpServer } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import { LIMITS } from "@pi-agent-ui/protocol";
+import type { ConnMeta } from "./ws-gateway.ts";
 
 export type Off = () => void;
 export type SendDone = (err?: Error | null) => void;
@@ -114,6 +115,14 @@ export function deriveConnMeta(req: IncomingMessage, socket: Duplex, trustedProx
   const effectiveIp = clientIp.length > 0 ? clientIp : remote;
   const xfp = headerSingle(req.headers["x-forwarded-proto"]);
   return { origin, loopback: isLoopbackIp(effectiveIp), tls: xfp?.toLowerCase() === "https", clientIp: effectiveIp, remoteAddress: remote, proxied: true };
+}
+
+/** 3b-2：传输元数据→网关连接元数据（clientIp 真接线——R6 per-IP 限流键不退 "unknown"）。
+ * 供组装层（3b-3）在 onConnection 里调用；这是传输层与网关层之间的唯一映射点。 */
+export function gatewayMetaFrom(meta: TransportConnMeta): ConnMeta {
+  return meta.origin !== null
+    ? { origin: meta.origin, loopback: meta.loopback, tls: meta.tls, clientIp: meta.clientIp }
+    : { loopback: meta.loopback, tls: meta.tls, clientIp: meta.clientIp };
 }
 
 /** 单连接适配：ws.WebSocket → WsConnectionPort（生命周期错误吸收；释放恰一次）。 */

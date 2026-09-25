@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WsGateway, type ConnMeta, type GatewayConnHooks, type HistorySinks, type HistorySourcePort, type WsGatewayOpts } from "../../../apps/server/src/ws/ws-gateway.ts";
+import { WsGateway, type ConnMeta, type GatewayConnHooks, type HistoryInvalidateReason, type HistorySinks, type HistorySourcePort, type HistoryUnavailableReason, type WsGatewayOpts } from "../../../apps/server/src/ws/ws-gateway.ts";
 import { TokenAuthority } from "../../../apps/server/src/ws/token-auth.ts";
 import { ComputeSemaphore } from "../../../apps/server/src/ws/compute-semaphore.ts";
 import type { RecoveryEvidenceSnapshot, BadJournalEntry } from "../../../apps/server/src/runtime/recover.ts";
@@ -110,6 +110,13 @@ class FakeHistory implements HistorySourcePort {
   }
   live(file: string, ev: Parameters<HistorySinks["onLive"]>[0]): void {
     this.sinks.get(file)?.onLive(ev);
+  }
+  /** 3b-2：源盘面失效/不可用触发器（走真源回调面） */
+  invalidate(file: string, reason: HistoryInvalidateReason): void {
+    this.sinks.get(file)?.onInvalidate?.(reason);
+  }
+  unavailable(file: string, reason: HistoryUnavailableReason): void {
+    this.sinks.get(file)?.onUnavailable?.(reason);
   }
   status(file: string, s: Parameters<HistorySinks["onStatus"]>[0]): void {
     this.sinks.get(file)?.onStatus(s);
@@ -1446,6 +1453,66 @@ describe("ws-gateway w1d：D 系阻断回归", () => {
       expect(p2err?.retryable).toBe(true);
       expect(c.frames().some((x) => x.t === "snapshot")).toBe(false);
       expect(c.readyState).toBe(1);
+    } finally {
+      await r.dispose();
+    }
+  });
+});
+
+describe("3b-2 源事件接线（onInvalidate/onUnavailable）", () => {
+  it("invalidate(rewrite)→该文件订阅 4409 stream-replaced+撤观察+不自动重装载；重订阅=新流新装载", async () => {
+    const r = await makeRig();
+    try {
+      r.history.put("x.jsonl", makeRows(2));
+      const c = await authed(r);
+      await c.say({ t: "subscribe", requestId: "s1", file: "x.jsonl" });
+      const snap1 = c.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      const subId1 = snap1.subscriptionId as string;
+      const loadsBefore = r.history.loadCalls.length;
+      c.sent.length = 0;
+      r.history.invalidate("x.jsonl", "rewrite");
+      await new Promise((res) => setTimeout(res, 5)); // 出队投递
+      const rep = errFrames(c).find((f) => f.code === 4409);
+      expect(rep).toBeDefined();
+      expect(String(rep?.message)).toContain(`stream-replaced:${subId1}`);
+      expect(r.history.sinks.has("x.jsonl")).toBe(false); // 观察引用已撤（unobserve）
+      expect(r.history.loadCalls.length).toBe(loadsBefore); // 不自动重装载（fail-closed：新订阅才重扫）
+      // 重新订阅→重新装载+新流+观察重建
+      c.sent.length = 0;
+      await c.say({ t: "subscribe", requestId: "s2", file: "x.jsonl" });
+      const snap2 = c.frames().filter((f) => f.t === "snapshot").pop() as Record<string, unknown>;
+      expect(snap2.subscriptionId).not.toBe(subId1); // 新订阅
+      expect(snap2.streamId).toBe(snap1.streamId); // 内容寻址流身份：同内容=同流（真实 rewrite 内容必变→换流，C17 已覆盖）
+      expect(snap2.barrier).toBe(2);
+      expect(r.history.loadCalls.length).toBe(loadsBefore + 1);
+      expect(r.history.sinks.has("x.jsonl")).toBe(true);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("unavailable(deleted)→4402 历史源不可用文案+retryable+撤观察；不波及同连接他文件订阅", async () => {
+    const r = await makeRig();
+    try {
+      r.history.put("a.jsonl", makeRows(2));
+      r.history.put("b.jsonl", makeRows(2));
+      const c = await authed(r);
+      await c.say({ t: "subscribe", requestId: "s1", file: "a.jsonl" });
+      await c.say({ t: "subscribe", requestId: "s2", file: "b.jsonl" });
+      c.sent.length = 0;
+      r.history.unavailable("a.jsonl", "deleted");
+      await new Promise((res) => setTimeout(res, 5)); // 出队投递
+      const err = errFrames(c).find((f) => f.code === 4402);
+      expect(err).toBeDefined();
+      expect(String(err?.message)).toContain("历史源不可用（deleted）");
+      expect(err?.retryable).toBe(true);
+      expect(r.history.sinks.has("a.jsonl")).toBe(false);
+      expect(r.history.sinks.has("b.jsonl")).toBe(true); // 邻文件不受波及
+      // b 仍活着：追加照常投递
+      c.sent.length = 0;
+      r.history.append("b.jsonl", makeRows(3)[2]!);
+      await new Promise((res) => setTimeout(res, 5));
+      expect(c.frames().some((f) => f.t === "events")).toBe(true);
     } finally {
       await r.dispose();
     }

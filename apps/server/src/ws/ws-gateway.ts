@@ -56,9 +56,16 @@ export interface HistorySourcePort {
   load(file: string): Promise<readonly ScanRow[] | null>;
   observe?(file: string, sinks: HistorySinks): () => void; // 返回停止观察
 }
+/** 3b-2（GPT 3b-0 §IV.E 冻结）：盘面失效分类——后两者不得伪装成行追加/onStatus。 */
+export type HistoryInvalidateReason = "rewrite" | "truncate" | "replace";
+export type HistoryUnavailableReason = "deleted" | "unreadable" | "watch-failed" | "scan-over-budget";
 export interface HistorySinks {
   /** 落盘追加（journal 行；宿主已安全读取） */
   onAppend(row: ScanRow): void;
+  /** 盘面失效（改写/截短/替换）：源已停旧代追加；网关退役旧订阅（4409），新订阅重新装载。 */
+  onInvalidate?(reason: HistoryInvalidateReason): void;
+  /** 源不可用（删除/不可读/观察失败/扫描超限）：受影响文件 4402 终止订阅并释放引用；后续请求可重试。 */
+  onUnavailable?(reason: HistoryUnavailableReason): void;
   /** 进程内存事件（非耐久） */
   onLive(ev: LiveEvent): void;
   /** 状态变化 */
@@ -648,6 +655,18 @@ export class WsGateway {
           }
           this.schedulePump(file);
         },
+        onInvalidate: (reason) => {
+          // 3b-2：源已停旧代追加（源侧状态机保证）——网关只负责退役：该文件全部引擎 4409+撤帧+释放观察引用。
+          // 不自动重装载（新订阅走 handleSubscribe→syncIndex 同源路径；旧游标被拒）。
+          this.audit(`history-invalidate file=${file} reason=${reason}`);
+          const retired = this.retireEnginesForFile(file, null, `history-${reason}`);
+          if (retired === 0) this.releaseWatcherFor(file); // 无活跃引擎（不应发生：观察存在⇒有引用）——仍幂等收口
+        },
+        onUnavailable: (reason) => {
+          // 3b-2：不可用=终该文件订阅（4402 文案随原因，不复用索引超预算文案）；不波及无关订阅/连接。
+          this.audit(`history-unavailable file=${file} reason=${reason}`);
+          this.closeSubscriptionsFor(file, `history-${reason}`, `历史源不可用（${reason}），请重新订阅`);
+        },
         onLive: (ev) => {
           this.forEachEngine(file, (e) => e.onLiveEvent(ev));
           this.schedulePump(file);
@@ -660,14 +679,14 @@ export class WsGateway {
     }
   }
 
-  /** B4：文件触顶——对该 file 所有活跃订阅发 4402+静默关引擎+退观察引用（下次重订阅走换流）。 */
-  private closeSubscriptionsFor(file: string, reason: string): void {
+  /** B4：文件触顶——对该 file 所有活跃订阅发 4402+静默关引擎+退观察引用（下次重订阅走换流）。3b-2：message 随源语义。 */
+  private closeSubscriptionsFor(file: string, reason: string, message = "会话索引超预算，请重新订阅"): void {
     const w = this.watchers.get(file);
     if (w === undefined) return;
     for (const c of [...w.refs]) {
       const sub = c.subs.get(file);
       if (sub === undefined) continue;
-      this.enqueueIfOpen(c, { t: "error", code: 4402, message: "会话索引超预算，请重新订阅", retryable: true, requestId: "" });
+      this.enqueueIfOpen(c, { t: "error", code: 4402, message, retryable: true, requestId: "" });
       sub.engine.close(4431, reason, false);
       c.queue.cancelBySubscription(sub.engine.subscriptionId);
       c.subs.delete(file);
@@ -710,6 +729,13 @@ export class WsGateway {
       this.watchers.delete(file);
       this.pendingPumps.delete(file);
     }
+  }
+
+  /** 3b-2：文件级观察收口（无引擎可退时的兑底）——退全部引用+unobserve。 */
+  private releaseWatcherFor(file: string): void {
+    const w = this.watchers.get(file);
+    if (w === undefined) return;
+    for (const c of [...w.refs]) this.releaseWatcher(c, file);
   }
 
   private handleUnsubscribe(st: ConnState, frame: Extract<ClientFrame, { t: "unsubscribe" }>): void {

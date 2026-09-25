@@ -11,6 +11,7 @@ export * from "./dispatch-coordinator.ts";
 export * from "./process-supervisor.ts";
 export * from "./contracts.ts";
 export * from "./sanitizer.ts";
+export * from "./history-projection.ts";
 export * from "./read-index.ts";
 export * from "./subscription-engine.ts";
 export * from "./session-attribution.ts";
