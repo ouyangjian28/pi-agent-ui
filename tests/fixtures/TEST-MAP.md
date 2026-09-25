@@ -234,7 +234,7 @@
 ## c8 段（R1/R2/R3——GPT c7 复审 84/100 三红修复）
 | 面 | 断言来源 | 变异证据 |
 | --- | --- | --- |
-| R1 缓存信封预算（worst 克隆+缓存重发防御终判） | subscription-engine.test「R1：缓存重发不因合法 requestId 变长击穿页预算」（119×500 中文+末条 660 中文边界复刻：first(1B id) 197,847B/119 事件；worst64 ≤200k 恒真断言+retry64 实测+幂等 rest 对比） | M-r1-noWorst/M-r1b-noCacheCheck **存活=防御层如实披露**：贪心粗估留 ≥144B 余量 > 64B 最坏信封增量——页内容永不进入预算 63B 邻域，两测量层与贪心余量三重覆盖同一路径；GPT c7 探针的 200,001B 场景（信封形状更小、贪心装满至 199,938B）在本仓事件 DTO/信封几何下不可达 |
+| R1 缓存信封预算（worst 克隆+缓存重发防御终判） | 「R1：缓存重发不因合法 requestId 变长击穿页预算」（GPT c9 反例原样固化：assistant role+e1..e120+119×500 中文+末条 325——first 119 事件 ≤200k 且 >190k、firstWorst ≤200k、retry64 仍 snapshot ≤200k、除 requestId 外相等、续页 p2=[120] 拼回全集）+「R1b：缓存重发防御终判（estimateFrame 故障注入）」（缓存生成后对 snapshot 帧返回 200,001→唯一 4431/false/closed/buffered=0/后续 drain 空） | M-r1-noWorst→新 R1 例击杀（旧 660 边界 fixture 下存活是历史事实：粗估在该 fixture 留 ≥144B 余量致变异不可观测；c9 反例几何下粗估 199,435<实测 199,938——粗估非保守上界，不可推广）；M-r1b-noCacheCheck→R1b 例击杀（防御故障注入，非默认估算器自然发生） |
 | R2 失败清理不复活（drain 冲批失败丢弃已取出项） | 「R2：live 冲批失败」+「R2：history 冲批失败」（估算器 300k 注入→error 恰一份+phase=closed+二次 drain 空） | M-r2-unshift→2 挂 |
 | R3 文档单模型+归因旧锚作废 | session-attribution.test「⑦b 同意图不同锚=最新 consumed 生效（[null,null,I,I]）」 | M-a07 首条生效→⑦⑥ 2 挂（c7 轮已验） |
 | 测试精度（GPT c7 三问） | 稳态例改恒留 1 项待发；3000 意图改 128 字符 ID+estimateFrameBytes UTF-8 断言；limit 例改 300 条输入（999→200+续页 100） | — |
