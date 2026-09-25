@@ -126,3 +126,18 @@
 | 响应失败（ok=false）与整轮超时分立（response-failure 屏障不动宿主处置；turn-timeout 委托 gate checkTimeout） | dispatch-coordinator.test@ok=false+整轮超时委托 | ✅（逻辑面；§169④ 两类超时分立已落） |
 
 端到端面（真 spawn+真文件系统+乱序压力+连续派发）待 adapter 后续切片，仍 🔴。
+
+### adapter 切片 3（风险序 3 前半：进程代次与交接隔离；TECH §136/§169④/§4；纯逻辑+注入端口；s3 首送 12 it）
+
+| 编号 | 断言落点 | 状态 |
+| --- | --- | --- |
+| 代次路由（每个进程句柄的事件回调绑定 spawn 代次登记项；退役代次/非当前登记项的事件丢弃+审计；stopping 期仍路由=SIGTERM 宽限内晚到事件是旧轮最后事实不静默丢） | process-supervisor.test@旧代次事件丢弃+stopping 期仍路由（确认前路由/确认后丢弃两段断言） | ✅（逻辑面；变异：M-b 去路由检查→旧代次例挂） |
+| 首字节身份复核（launched→stdin 首字节之间换代/退出窗口：当前代次仍拥有该轮+登记同 key 才写；失效=invalidated/first-byte 不写+审计；防御深度——公开流由协调器 C3 拦前） | process-supervisor.test@首字节窗口失效（受控替身：stub 协调器挂起 submit 制造窗口，exit 后续返 launched→不写） | ✅（逻辑面；受控替身定向；变异：M-a 去复核→受控例挂） |
+| 背压零串扰（writeStdin await 期间换代/退出：写续体只及旧 handle=旧进程将死无害；新轮写新 handle；写完成复核仅审计不动作） | process-supervisor.test@背压窗口换代零串扰（双 handle 写序互斥断言+stdin-written-stale 审计） | 🟡（逻辑面；真背压（流控 highWaterMark）归真实现验收） |
+| 串行化交接（retireCurrent：SIGTERM→宽限 sleep→SIGKILL→退出确认截止（F1 预算口径）；退出确认=协调器清登记+gate 在飞则 close(generation-retired)→idle→spawnNext 才可用；stopping 期 spawn 拒；退出确认截止后 sleep 先醒再兜查一次 exit） | process-supervisor.test@串行化交接+宽限升级 SIGKILL | ✅（逻辑面；变异：M-d 去 not-idle 拒→串行化例挂；「sleep 先醒兜查」窗口无直接例（时序不可控），以代码顺序保证） |
+| 截止失败保守语义（deadline 到={deadline-exceeded} 保持 stopping 不裁决进程死活；晚到 exit 自动收口（同退役手续）→idle→可 spawn；审计 process-retired-late/retire-deadline-exceeded） | process-supervisor.test@截止失败+晚到收口 | ✅（逻辑面；变异：M-e 截止后假装收口→例挂） |
+| 意外退出（running 中 exit→代次退役+gate closed(generation-retired)+协调器登记清+回 idle；屏障解除归宿主 reopen，监管器不自动 reopen；reopen 后新代次新轮可跑） | process-supervisor.test@意外退出+背压例前段 | ✅（逻辑面；变异：M-c 意外退出不退役→4 例挂） |
+| retire 前置/重入（idle=no-process；交接中重入=stopping；spawn 失败回滚=回 idle 可重试（代次号已耗）；重复 exit 幂等（第二次只审计不重复退役）） | process-supervisor.test@retire 前置/重入+spawn 失败回滚+重复 exit 幂等 | ✅（逻辑面；重复退役以 generation-retired 审计行恰一次断言） |
+| 正常序两轮（防御不误伤：同进程两轮首字节各写各、事件路由带代次、stdin-written 审计） | process-supervisor.test@正常序两轮 | ✅（逻辑面） |
+
+接线面（真 pi 子进程 spawn/真信号/真 waitpid 退出确认/真 stdin 背压/接管恢复流）仍 🔴，归切片 4 接线。
