@@ -436,11 +436,11 @@ describe("c8 回归（R1/R2：缓存信封预算+失败清理）", () => {
   it("R1：缓存重发不因合法 requestId 变长击穿页预算（120 条 500 中文+64B requestId 重试）", () => {
     const idx = new ReadIndex("s.jsonl", "s-1");
     const cn = "忆".repeat(500);
-    // GPT 探针口径：前 119 条各 500 中文 + 末条 325 中文 → 首次页（1B requestId）199,938B，64B requestId 重试 200,001B 击穿
+    // GPT 探针口径（边界复刻）：119×500 中文+末条 700 中文 → 不收缩页（1B id）≈200,110B/最坏信封 ≈200,173B——须收缩末条才装得下任何合法重试
     for (let i = 1; i <= 119; i++) {
       idx.append("journal", `L${i}`, `L${i}`, { kind: "message", seq: i, ts: null, generation: null, intentId: null, entryId: `e-${i}`, role: "user", textPreview: { text: cn, truncated: false }, final: true } as HistoryEvent);
     }
-    idx.append("journal", "L120", "L120", { kind: "message", seq: 120, ts: null, generation: null, intentId: null, entryId: "e-120", role: "user", textPreview: { text: cn.slice(0, 325), truncated: false }, final: true } as HistoryEvent);
+    idx.append("journal", "L120", "L120", { kind: "message", seq: 120, ts: null, generation: null, intentId: null, entryId: "e-120", role: "user", textPreview: { text: "忆".repeat(660), truncated: false }, final: true } as HistoryEvent); // 末条 660 中文：未收缩页≈199,9xxB（1B id 过，64B id 超）——预算边缘精确复刻
     let idSeq = 0;
     const eng = new SubscriptionEngine({ index: idx, status: () => fakeStatus(1), now: () => 0, newId: () => `id-${++idSeq}` });
     const first = eng.startSnapshot("r")[0] as unknown as import("@pi-agent-ui/protocol").ServerFrame; // 1 字符 requestId
