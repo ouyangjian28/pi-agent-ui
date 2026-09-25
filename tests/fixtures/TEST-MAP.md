@@ -142,7 +142,7 @@
 
 接线面（真 pi 子进程 spawn/真信号/真 waitpid 退出确认/真 stdin 背压/接管恢复流）仍 🔴，归切片 4 接线。
 
-### adapter 切片 4（真进程接线：ProcessHost 适配+组装 RpcSession；4a/4b 两步；受控替身 46 it+协调器/网关纯逻辑测试不变；s4b 复审 80/100 三阻断 B1/B2/B3 修复后）
+### adapter 切片 4（真进程接线：ProcessHost 适配+组装 RpcSession；4a/4b 两步；受控替身 47 it（process-host 17+rpc-session 23+file-durability 7）+协调器/网关纯逻辑测试不变；s4b 三阻断修复→s4c 93/100 受控面放行→4c E2E+恢复入口）
 
 | 编号 | 断言落点 | 状态 |
 | --- | --- | --- |
@@ -158,6 +158,16 @@
 | 完成通知（S4-05+**s4b Y1/Y3/Y4**：onSettled 只从协调器确认路径发出（settled/accepted-and-settled/recorded-and-settled）；buffered/耐久挂起/**耐久 reject 零通知**；settledNotified 去重恰一次**且有界（插入序淘汏上限 1024）**；回调同步 throw+**异步返回 Promise 拒绝均隔离入审计**） | rpc-session.test@S4-05a 耐久挂起不提前通知+S4-05b 超时记录收口+S4-05c settled 先于 response+**S4-05d settled 先缓冲→超时记录收口（recorded-and-settled）通知恰一次+S4-05e settled 耐久 reject 零通知** | ✅（变异：M-05r→S4-05c 挂；M-05b 去重层存活=防御层披露；Y3/Y4 为边界/隔离加固，与 M-05b 同属防御层口径） |
 | 意外退出重组装（exit→gate closed(generation-retired)+supervisor idle；start=reopen+spawn gen2+新探针；新代次整链路跑通） | rpc-session.test@意外退出后重开新轮 | ✅ |
 | 双超时驱动（巡检 interval checkResponseTimeout+checkTurnTimeout（同步 void 签名 try/catch）；响应超时后 settled 仍收口；晚到 response=ignored-late 不炸） | rpc-session.test@响应超时不阻断收口 | ✅（变异：M-f 去巡检→挂；dispose() 清 interval） |
-| stop（=cancelReadiness+retireCurrent：SIGTERM→退出确认 confirmed；confirmed 后 readyGeneration=null） | rpc-session.test@stop confirmed+S4-04c | ✅ |
+| stop（=cancelReadiness+retireCurrent：SIGTERM→退出确认 confirmed；confirmed 后 readyGeneration=null；**Y-C1（4c）：探针失败侧 phase≠running（宿主已 stop/retire）→superseded 不再发 readiness-timeout+retire=stopping——结果分类不依赖 exit 送达时序**） | rpc-session.test@stop confirmed+S4-04c+**S4-YC1（stop 后 exit 延迟不达：superseded+stopSignals 恰 1）** | ✅（变异：M-yc1 去 phase 检查→S4-YC1 挂） |
+| 资源收尾（**Y-C2（4c）：dispose 清巡检+关耐久（可选 close 端口）恰一次+幂等门；进程退役独立走 stop**） | rpc-session.test@Y-C2（close 计数恰 1+二次 dispose 幂等+stop 仍 confirmed） | ✅（变异：M-d1 去 close→挂） |
 | 帧渲染（send→{id:"c<N>",type:"prompt"}JSON 行；matchKey=matchKeyOf(text,[],ordinal)；commandId/intentId 递增） | rpc-session.test@两轮（帧 id 递增，runTurn 帧计数基准） | 🟡（steer/followUp streamingBehavior 归消费接线；attachments 归 UI 层） |
-| 真 pi 进程 E2E（readiness→连续两轮→retire→SIGKILL 恢复重放） | —— | 🔴（未落；s3c 八项中 spawn-exited 分支/携代次事件泵真进程面仍归此；其余六项受控替身已证） |
+| **真 pi 进程 E2E（4c：PI_BIN 绝对路径+--version 版本证据；--no-extensions 受控环境（扩展 UI 面归后续 UI 接线）；真管道 readiness 往返/SIGTERM 退出确认；连续两轮+journal 耐久+通知恰一次+真实事件流；SIGKILL 意外退出→同会话重组装（持久 --session）+恢复重放（打断轮=效果未知）+撕裂尾识别→截尾修复→续写；目录耐久 ensureDirDurable 模式）** | **tests/integration/pi-e2e.test.ts 3 it（PI_E2E=1 npm run test:e2e 显式跑，不进默认 npm test——防每跑真调 LLM）** | ✅（s3c 六项①-⑥全落；字节陷阱：撕裂尾修复 truncate 须用字节索引（lastIndexOf(0x0a) on Buffer），字符索引会截在中途再造撕裂；spawn-exited 分支受控已证，真 spawn 失败=运维面） |
+
+### adapter 切片 4c（恢复入口+黄项收口；recover.ts 受控 6 it；E2E 3 it 见上）
+
+| 编号 | 断言落点 | 状态 |
+| --- | --- | --- |
+| journal 读取分型（readJournalFile：末段无换行=撕裂尾 partialTail；完整行 JSON 损坏/无 t 字段=partialTail=false；空行跳过不判坏；好行保留） | recover.test@完整两轮+撕裂尾+坏行分型 | ✅（变异：M-r1 去撕裂尾判定→挂） |
+| 恢复判据三分档（unknownEffect=sending 无终态/超时未结算（responseTimeoutRecorded）/已判 unknown；resumable=非 sending 无终态且**非 cancelled**（取消是终局，重发违背用户意图——真缺陷由测试通出）；settled 计数；cancelled/delivered=终局不进两档） | recover.test@三分档+cancelled/delivered 终态 | ✅（变异：M-r2 判据废→挂；M-r3 去 cancelled 过滤→挂） |
+| 会话过滤（他 session 的 enqueue 不进重放；跨会话 journal 隔离） | recover.test@会话过滤 | ✅ |
+| 恢复不改盘面（只读呈现；撕裂尾修复/换段授权归宿主：截尾+（失败态另须）markRepaired） | E2E e2e-3（截尾修复流程落地） | ✅（E2E 接线证据非变异面） |
