@@ -273,7 +273,6 @@ describe("ws-gateway w1：A 认证入站（W1-01/02）", () => {
   it("W1-01 一致性：同帧喂冻结校验器与网关——拒绝帧必回 4404/4403/4405，接受帧必有响应（golden）", async () => {
     const r = await makeRig();
     try {
-      const c = await authed(r);
       const golden: unknown[] = [
         { t: "ping", nonce: "g" },
         { t: "ping" },
