@@ -142,7 +142,7 @@
 
 接线面（真 pi 子进程 spawn/真信号/真 waitpid 退出确认/真 stdin 背压/接管恢复流）仍 🔴，归切片 4 接线。
 
-### adapter 切片 4（真进程接线：ProcessHost 适配+组装 RpcSession；4a/4b 两步；受控替身 35 it+协调器/网关纯逻辑测试不变）
+### adapter 切片 4（真进程接线：ProcessHost 适配+组装 RpcSession；4a/4b 两步；受控替身 46 it+协调器/网关纯逻辑测试不变；s4b 复审 80/100 三阻断 B1/B2/B3 修复后）
 
 | 编号 | 断言落点 | 状态 |
 | --- | --- | --- |
@@ -151,11 +151,11 @@
 | 行分帧（StringDecoder 跨块多字节+\n 拆行；坏行分流 [stdout-nonjson]（Y2：type 非字符串同坏行）；stderr 透传；大块多行一次解析） | process-host.test@好行/坏行/撕裂+stderr+50 行大块+Y2 | ✅ |
 | 回调隔离（S4-07：onEvent 消费者抛错→[handler-error] 诊断+同块后续行继续；onStderr/audit 抛错不阻断 kill/退出登记） | process-host.test@S4-07a 审计抛错不阻断退出登记+stop 仍发+exit 上报；S4-07b 同块 a 抛错 b 仍处理 | ✅（变异：M-07 重抛→挂） |
 | stop 信号透传+未知句柄 no-op；closeStdin=stdin.end() 写完成面（finish 事件非 end） | process-host.test@stop+closeStdin | ✅ |
-| FileDurability（S4-06：DurabilityFsPort 注入；部分写重试+零进展保护；close 入队串行不抢先已接收 append；**close 不解锁 failed**，恢复须 markRepaired() 显式授权（换段=新实例）；closed 同步置位新 append 立拒） | file-durability.test@S4-06a 部分写撕裂尾+close 不解锁（盘面不推进）+S4-06b markRepaired+S4-06c close 串行（a1 落定先于 close 兑现）+零进展；rpc-session@close 不解锁+换段 | ✅（变异：M-c/M-06r close 不串行→S4-06c 挂；M-241 教训见上） |
-| 组装 demux（type:"response"+id 字符串→readiness waiter 或 c<commandId>→onRpcResponse；agent_settled→onSettledEvent；其余→onPiEvent；未知 id response 丢弃） | rpc-session.test@两轮正常序+探针回执不进事件流 | ✅（变异：M-d 去归因→挂） |
-| readiness（S4-03：探针写入/响应/超时=同一有界启动操作，writeP+gateP Promise.all 聚合无孤立 rejection；写失败立即退役不等超时；超时自动 retire 返回 readiness-timeout；重试 gen2） | rpc-session.test@S4-03a write fail→800ms 内 SIGTERM（readinessTimeoutMs=5000 证明写失败驱动）+S4-03b write 挂起→超时能终结等待→重试 ready | ✅（变异：M-e 去超时退役→挂；**M-03r writeP 不入聚合→S4-03a 挂（强化后）**） |
-| 代次所有权（S4-04：探针成功侧复核当前代（换代→superseded 不置 ready）；失败侧先复核所有权只退役自己代；启动中 stop→取消探针+旧 start=superseded 不双退） | rpc-session.test@S4-04a 旧 start 超时续体不退役 gen2（GPT P5）+S4-04b 同步段窗口（GPT P6）+S4-04c 启动中 stop | ✅（变异：M-04 成功侧→挂；M-04b 失败侧→3 例挂） |
-| 完成通知（S4-05：onSettled 只从协调器确认路径发出（settled/accepted-and-settled/recorded-and-settled）；buffered/discard/耐久挂起不通知；settledNotified 去重恰一次） | rpc-session.test@S4-05a 耐久挂起不提前通知（HoldDurability）+S4-05b 超时记录收口路径+S4-05c settled 先于 response（buffered 不通知+回绑即结算） | ✅（变异：M-05r 无条件通知→S4-05c 挂；**M-05b 去重层→存活：公开路径下协调器已门控全部通知路径，去重=防御层不可直接杀伤，披露**） |
+| FileDurability（S4-06+B3：DurabilityFsPort 注入；部分写重试（**Y2：write 尊重 offset，逐字节无重写无丢字**）+零进展保护；**B3：接收判定在 append 入口同步完成，close 只拦之后调用，已接收任务照常执行（执行时仍拒越过 failed 尾）**；close 入队串行不抢先已接收 append；**close 不解锁 failed**，恢复须 markRepaired() 显式授权；closed 同步置位新 append 立拒） | file-durability.test@S4-06a 部分写撕裂尾+close 不解锁+S4-06b markRepaired+S4-06c close 串行+零进展+**S4-B3a 同段 append→close 已接收完成+S4-B3b 挂起中×2→close 两完成+Y2 offset 逐字节** | ✅（变异：M-c/M-06r→挂；**M-B3 接收回 run→S4-B3a/B3b 挂；M-Y2 offset 恒 0→Y2 例挂**；M-241 教训见上） |
+| 组装 demux（type:"response"+id 字符串→readiness waiter 或 c<commandId>→onRpcResponse；agent_settled→onSettledEvent；其余→onPiEvent；未知 id response 丢弃；**回执不进事件流有直接观察断言**） | rpc-session.test@两轮正常序+探针回执不进事件流（routed 面直接断言） | ✅（变异：M-d 去归因→挂） |
+| readiness（S4-03+**s4b B1**：探针写入/响应/超时/取消=同一有界启动操作；**总截止 timer 约束写+响应整体（响应先到不撤销）**；**取消口独立于响应标记（readinessCancels，响应已到仍可取消）**；finish 幂等单结算；写失败立即退役不等超时；超时自动 retire 返回 readiness-timeout；重试 gen2） | rpc-session.test@S4-03a write fail→800ms 内 SIGTERM+S4-03b write 挂起→超时重试 ready+**S4-B1a 响应先到+写永挂→总截止仍 readiness-timeout（非永久 pending）+S4-B1b 响应已到+写挂起→stop 取消口仍有效** | ✅（变异：M-e/M-03r→挂；**M-B1 去总截止→4 例挂（含 S4-B1a；1e12 版被 Node 鈇到 1ms=无效变异，须 2_147_000_000）；M-B1c 取消口废→S4-B1b/S4-04c 挂**） |
+| 代次所有权（S4-04+**s4b B2**：ready 要求当前代匹配**且相态 running**（stopping/已退出不报 ready）；**start 返回 ready 前终窗复核**；探针成功侧 phase 复核；失败侧先复核所有权只退役自己代；启动中 stop→取消探针+旧 start=superseded 不双退；send 须 running） | rpc-session.test@S4-04a/b/c+**S4-B2a 响应后同段 stop 不返回 ready（P4）+S4-B2b 探针成功与返回间退出（P2）+S4-B2c 探针成功路径内同步退出（审计钩子窗口）** | ✅（变异：M-04/M-04b→挂；**M-B2a 删终窗复核→S4-B2c 挂；M-B2b 删探针侧 phase 检查→存活：终窗复核+取消口双层覆盖全部可观测路径=防御层，披露**） |
+| 完成通知（S4-05+**s4b Y1/Y3/Y4**：onSettled 只从协调器确认路径发出（settled/accepted-and-settled/recorded-and-settled）；buffered/耐久挂起/**耐久 reject 零通知**；settledNotified 去重恰一次**且有界（插入序淘汏上限 1024）**；回调同步 throw+**异步返回 Promise 拒绝均隔离入审计**） | rpc-session.test@S4-05a 耐久挂起不提前通知+S4-05b 超时记录收口+S4-05c settled 先于 response+**S4-05d settled 先缓冲→超时记录收口（recorded-and-settled）通知恰一次+S4-05e settled 耐久 reject 零通知** | ✅（变异：M-05r→S4-05c 挂；M-05b 去重层存活=防御层披露；Y3/Y4 为边界/隔离加固，与 M-05b 同属防御层口径） |
 | 意外退出重组装（exit→gate closed(generation-retired)+supervisor idle；start=reopen+spawn gen2+新探针；新代次整链路跑通） | rpc-session.test@意外退出后重开新轮 | ✅ |
 | 双超时驱动（巡检 interval checkResponseTimeout+checkTurnTimeout（同步 void 签名 try/catch）；响应超时后 settled 仍收口；晚到 response=ignored-late 不炸） | rpc-session.test@响应超时不阻断收口 | ✅（变异：M-f 去巡检→挂；dispose() 清 interval） |
 | stop（=cancelReadiness+retireCurrent：SIGTERM→退出确认 confirmed；confirmed 后 readyGeneration=null） | rpc-session.test@stop confirmed+S4-04c | ✅ |

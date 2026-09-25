@@ -96,6 +96,7 @@ async function makeSession(over: Partial<ConstructorParameters<typeof RpcSession
   dirs.push(dir);
   const host = new FakeRpcHost();
   const audits: string[] = [];
+  const routed: Array<{ ev: unknown; gen: number; disp: string }> = []; // onPiEvent 面（探针回执/response/settled 不得路由至此）
   const dur = new FileDurability(join(dir, "journal.jsonl"));
   const session = new RpcSession({
     piArgs: ["--mode", "rpc", "--no-session"],
@@ -107,10 +108,11 @@ async function makeSession(over: Partial<ConstructorParameters<typeof RpcSession
     responseTimeoutMs: 5_000,
     timeoutPollMs: 20,
     audit: (l) => audits.push(l),
+    onPiEvent: (ev, gen, disp) => routed.push({ ev, gen, disp }),
     ...over,
   });
   sessions.push(session);
-  return { session, host, audits, dur, dir };
+  return { session, host, audits, routed, dur, dir };
 }
 
 /** 真响应序：探针回执→命令 response→agent_settled。帧计数基准=发送前的 prompt 帧数（旧帧不满足等待）。 */
@@ -127,8 +129,8 @@ async function runTurn(h: FakeRpcHost, session: RpcSession, message: string, gen
 }
 
 describe("RpcSession（受控替身）", () => {
-  it("start：spawn→get_state 探针→ready；探针回执不进事件流", async () => {
-    const { session, host } = await makeSession();
+  it("start：spawn→get_state 探针→ready；探针回执不进事件流（routed 面直接观察）", async () => {
+    const { session, host, routed } = await makeSession();
     const p = session.start();
     await until(() => host.frames.some((f) => f.includes('"type":"get_state"')), "探针写出");
     const probe = JSON.parse(host.frames[0]!) as { id: string };
@@ -136,6 +138,7 @@ describe("RpcSession（受控替身）", () => {
     host.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true });
     const r = await p;
     expect(r).toEqual({ kind: "ready", generation: 1 });
+    expect(routed).toEqual([]); // 探针回执不进 onPiEvent 事件流（直接断言，非间接推断）
   });
 
   it("两轮正常序：response 归因+settled 结算+gate 回 idle+journal 落盘", async () => {
