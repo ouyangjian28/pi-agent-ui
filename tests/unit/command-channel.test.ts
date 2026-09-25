@@ -1,28 +1,39 @@
 // 通用命令通道测试（TECH §3②占位先行序；r8/r8c 风险序 1：通用命令先耐久占位再发送）
-// 覆盖：占位 fsync 先于 send／cached 不重发／同键不同参拒+审计／占位 fsync 失败回滚不发送／
-// send 失败=效果未知留置／结果耐久失败=内存占位态／崩溃重放 unknown-effect。
+// 覆盖：占位 fsync 先于 send／cached 不重发／同键不同参拒+审计／占位 fsync 失败=未发送+留置（A1-02 写前/写后两替身）／
+// send 抛错=效果未知留置／send 返回 null=协议违规留置+审计（A1-05）／结果耐久失败=内存占位态+重放读到=cached 非洗白／
+// 崩溃重放 unknown-effect。
 import { describe, expect, it } from "vitest";
 import { CommandChannel, CommandDedup } from "@pi-agent-ui/protocol";
 import type { OpLedgerPort, OpRecord } from "@pi-agent-ui/protocol";
 
 const T0 = "2026-09-25T00:00:00Z";
 
-/** 受控 op 表端口：记录事件序（placeholder/send/result）；可按脚本失败。 */
+/** 受控 op 表端口：记录事件序（placeholder/send 由测试自记）；可按脚本失败（写前/写后两模式，A1-02）。 */
 class FakeLedger implements OpLedgerPort {
   readonly events: string[] = [];
   placeholders: OpRecord[] = [];
-  failPlaceholder = false;
-  failResult = false;
+  results: OpRecord[] = [];
+  failPlaceholder: boolean | "after" = false; // true=写前拒；"after"=已写后拒
+  failResult: boolean | "after" = false;
 
   appendPlaceholder(rec: OpRecord): Promise<void> {
+    if (this.failPlaceholder === "after") {
+      this.placeholders.push(rec); // 行已写再报错
+      return Promise.reject(new Error("ph-eio-after"));
+    }
     if (this.failPlaceholder) return Promise.reject(new Error("ph-eio"));
     this.placeholders.push(rec);
     this.events.push("placeholder");
     return Promise.resolve();
   }
 
-  appendResult(_rec: OpRecord): Promise<void> {
+  appendResult(rec: OpRecord): Promise<void> {
+    if (this.failResult === "after") {
+      this.results.push(rec); // 结果行已写再报错
+      return Promise.reject(new Error("res-eio-after"));
+    }
     if (this.failResult) return Promise.reject(new Error("res-eio"));
+    this.results.push(rec);
     this.events.push("result");
     return Promise.resolve();
   }
@@ -41,8 +52,8 @@ const make = (ledger = new FakeLedger()) => {
 };
 
 const trackedSend =
-  (ledger: FakeLedger, result: unknown = { ok: true }) =>
-  async (): Promise<unknown> => {
+  (ledger: FakeLedger, result: object = { ok: true }) =>
+  async (): Promise<object> => {
     ledger.events.push("send");
     return result;
   };
@@ -60,7 +71,7 @@ describe("通用命令通道（CommandChannel）", () => {
     const ledger = new FakeLedger();
     const { channel } = make(ledger);
     let sends = 0;
-    const send = async () => {
+    const send = async (): Promise<object> => {
       sends += 1;
       ledger.events.push("send");
       return { ok: true, n: sends };
@@ -82,32 +93,45 @@ describe("通用命令通道（CommandChannel）", () => {
     expect(ledger.events).toEqual(["placeholder", "send", "result"]);
   });
 
-  it("占位 fsync 失败：不发送+内存占位回滚（同 opId 重新受理=admitted 非 unknown-effect）", async () => {
+  it("占位 fsync 失败（写前拒绝）：未发送+内存占位留置→同 opId 重试=unknown-effect；新 opId=重新受理", async () => {
     const ledger = new FakeLedger();
     ledger.failPlaceholder = true;
     const { channel } = make(ledger);
     let sent = false;
-    const out = await channel.dispatch("op-1", "argsA", async () => {
+    const out = await channel.dispatch("op-1", "argsA", async (): Promise<object> => {
       sent = true;
       return { ok: true };
     });
     expect(out.kind).toBe("placeholder-durability-failed");
     expect(sent).toBe(false); // 未发送：副作用通道从未开栓
-    // 回滚证据：同通道重试同 opId=重新受理（非 unknown-effect）——占位耐久失败不留内存脏占位
-    ledger.failPlaceholder = false;
-    const out1b = await channel.dispatch("op-1", "argsA", async () => ({ ok: true }));
-    expect(out1b).toEqual({ kind: "ok", result: { ok: true } });
-    expect(ledger.placeholders).toHaveLength(1); // 仅重试成功这一次落占位
-    // 重新派发同 opId=正常受理（盘上无占位=事实一致）
-    const ledger2 = new FakeLedger();
-    const d2 = make(ledger2);
-    const out2 = await d2.channel.dispatch("op-1", "argsA", trackedSend(ledger2));
-    expect(out2).toEqual({ kind: "ok", result: { ok: true } });
+    expect(ledger.placeholders).toHaveLength(0); // 写前拒绝替身：进程内视角无行（真实盘态由恢复重放裁决）
+    ledger.failPlaceholder = false; // 恢复注入故障，后续派发正常耐久
+    // 留置保守口径（A1-02）：同 opId 重试=unknown-effect（不重发）；重发=新 opId
+    const retry = await channel.dispatch("op-1", "argsA", trackedSend(ledger));
+    expect(retry).toEqual({ kind: "unknown-effect" });
+    const fresh = await channel.dispatch("op-2", "argsA", trackedSend(ledger));
+    expect(fresh).toEqual({ kind: "ok", result: { ok: true } });
+    expect(ledger.events.filter((e) => e === "send")).toHaveLength(1); // 仅 op-2 发送过
+  });
+
+  it("占位 fsync 失败（写后拒绝，A1-02）：reject≠盘上无行——占位行已在数组但 reject；同 opId 仍 unknown-effect，新 opId=ok", async () => {
+    const ledger = new FakeLedger();
+    ledger.failPlaceholder = "after";
+    const { channel } = make(ledger);
+    const out = await channel.dispatch("op-1", "argsA", trackedSend(ledger));
+    expect(out.kind).toBe("placeholder-durability-failed");
+    expect(ledger.placeholders).toHaveLength(1); // 行已写（write 已落，fsync 报错）——不得宣称盘上无占位
+    expect(ledger.events).toEqual([]); // send/result 从未发生
+    ledger.failPlaceholder = false; // 恢复注入故障
+    const retry = await channel.dispatch("op-1", "argsA", trackedSend(ledger));
+    expect(retry).toEqual({ kind: "unknown-effect" }); // 与写前拒绝同口径：保守留置
+    const fresh = await channel.dispatch("op-2", "argsA", trackedSend(ledger));
+    expect(fresh).toEqual({ kind: "ok", result: { ok: true } });
   });
 
   it("send 抛错=效果未知：send-failed+占位留置（重试同 opId=unknown-effect 不重发）", async () => {
     const { channel } = make();
-    const boom = async () => {
+    const boom = async (): Promise<object> => {
       throw new Error("EPIPE");
     };
     const out = await channel.dispatch("op-1", "argsA", boom);
@@ -116,7 +140,20 @@ describe("通用命令通道（CommandChannel）", () => {
     expect(retry).toEqual({ kind: "unknown-effect" }); // 不重发（效果未知态留置）
   });
 
-  it("结果耐久失败：result-durability-failed（结果在手）+内存保持占位态（重试=unknown-effect）", async () => {
+  it("send 返回 null=协议违规（A1-05）：send-failed+审计行+占位留置（不得当 cached(null)/落盘洗白）", async () => {
+    const { channel, audits, ledger } = make();
+    const nullSend = async (): Promise<object> => null as unknown as object; // 运行时违规（类型面已禁）
+    const out = await channel.dispatch("op-1", "argsA", nullSend);
+    expect(out.kind).toBe("send-failed");
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toContain("op-1");
+    expect(audits[0]).toContain("null");
+    expect(ledger.results).toHaveLength(0); // 不落结果行（null 哨兵不得进盘冒充事实）
+    const retry = await channel.dispatch("op-1", "argsA", trackedSend(ledger));
+    expect(retry).toEqual({ kind: "unknown-effect" }); // 占位留置：效果未知
+  });
+
+  it("结果耐久失败（写前拒绝）：result-durability-failed（结果在手）+内存保持占位态（重试=unknown-effect）", async () => {
     const ledger = new FakeLedger();
     ledger.failResult = true;
     const { channel } = make(ledger);
@@ -124,7 +161,22 @@ describe("通用命令通道（CommandChannel）", () => {
     expect(out.kind).toBe("result-durability-failed");
     if (out.kind === "result-durability-failed") expect(out.result).toEqual({ ok: true });
     const retry = await channel.dispatch("op-1", "argsA", async () => ({ ok: true }));
-    expect(retry).toEqual({ kind: "unknown-effect" }); // 盘上占位无结果=崩溃闭环口径
+    expect(retry).toEqual({ kind: "unknown-effect" }); // 结果行写入未确认：进程内保守口径
+  });
+
+  it("结果耐久失败（写后拒绝，A1-02）：进程内 unknown-effect 口径；重放读到结果行=cached 非洗白", async () => {
+    const ledger = new FakeLedger();
+    ledger.failResult = "after";
+    const { channel } = make(ledger);
+    const out = await channel.dispatch("op-1", "argsA", async () => ({ ok: true }));
+    expect(out.kind).toBe("result-durability-failed");
+    expect(ledger.results).toHaveLength(1); // 结果行已写（fsync 报错不证明无行）
+    // 重启重放：读到有效结果行=新增证据→cached（非洗白）
+    const dedup2 = new CommandDedup();
+    dedup2.replay(ledger.results);
+    const channel2 = new CommandChannel({ dedup: dedup2, ledger: new FakeLedger(), now: () => T0 });
+    const replayed = await channel2.dispatch("op-1", "argsA", async () => ({ ok: "other" }));
+    expect(replayed).toEqual({ kind: "cached", result: { ok: true } }); // 按盘上事实，不重发
   });
 
   it("崩溃重放后旧 opId=unknown-effect（占位无结果不重发不受理）；新 opId 正常", async () => {

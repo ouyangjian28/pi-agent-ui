@@ -2,9 +2,11 @@
 //
 // 占位先行序（崩溃闭环契约，§3）：
 //   ①dedup.admit（内存受理）→ ②占位行 fsync（OpLedgerPort）→ ③send()（真实 RPC 发送）→ ④结果行 fsync → ⑤dedup.settle
-// - ②失败=不发送+回滚内存占位（副作用通道从未开栓，机械可证；同 opId 可重新受理，不冒充 unknown-effect）
-// - ③send 抛错=效果未知：占位留置（重放/重试同 opId=unknown-effect，不重发）；新取消请求=新 opId
-// - ④失败=结果已在手但盘上占位无结果：内存保持占位态（进程内继续 unknown-effect 口径），调用方可补偿落盘
+// - ②失败=不发送（副作用通道从未开栓）；盘上占位行写入结果未确认（可能已写完整/部分行，A1-02）→内存占位留置：
+//   同 opId 重试=unknown-effect（不冒充可重发），新请求=新 opId（opId 由服务器生成，换号零成本）
+// - ③send 抛错/返回 null（协议违规）=效果未知：占位留置（重试同 opId=unknown-effect，不重发）；新取消请求=新 opId
+// - ④失败=结果已在手但结果行写入未确认：内存保持占位态（进程内继续 unknown-effect 口径）；重启后以实际重放裁决
+//   （读到有效结果行=cached 非洗白，未读到=unknown-effect）
 // - 同键同参=cached 不重发；同键不同参=拒+审计行钩子
 //
 // 本模块=纯逻辑编排：CommandDedup（内存表）+注入 OpLedgerPort（真 fsync 由 adapter 宿主接管，随 §17.2 同目录纪律）。
@@ -25,7 +27,7 @@ export type DispatchOutcome =
   | { readonly kind: "rejected-different-args" } // 同键不同参：拒（审计行已触发钩子）
   | { readonly kind: "unknown-effect" } // 占位无结果（旧请求未知/发送失败留置）：不重发不受理
   | {
-      /** 占位 fsync 失败：未发送，内存占位已回滚——同 opId 可安全重新受理（或换新 opId）。 */
+      /** 占位 fsync 失败：未发送（副作用通道未开栓）；盘上占位行写入结果未确认（可能已写）——内存占位留置，同 opId 重试=unknown-effect；新请求=新 opId。 */
       kind: "placeholder-durability-failed";
       readonly error: unknown;
     }
@@ -35,7 +37,7 @@ export type DispatchOutcome =
       readonly error: unknown;
     }
   | {
-      /** 结果已到手但结果行 fsync 失败：内存保持占位态（重启后按 unknown-effect）；调用方可补偿。 */
+      /** 结果已到手但结果行 fsync 失败：内存保持占位态；重启后以实际重放裁决（读到有效结果行=cached 非洗白）。 */
       kind: "result-durability-failed";
       readonly result: unknown;
       readonly error: unknown;
@@ -52,8 +54,9 @@ export class CommandChannel {
     },
   ) {}
 
-  /** 占位先行派发。send 由调用方执行（拿到该回调时占位已耐久，可安全写 stdin）。 */
-  async dispatch(opId: OpId, argsHash: string, send: () => Promise<unknown>): Promise<DispatchOutcome> {
+  /** 占位先行派发。send 由调用方执行（拿到该回调时占位已耐久，可安全写 stdin）；
+   *  返回值必须为非 null 应答对象（null=协议违规，按效果未知处理，A1-05）。 */
+  async dispatch(opId: OpId, argsHash: string, send: () => Promise<object>): Promise<DispatchOutcome> {
     const placedAt = this.opts.now();
     const admit = this.opts.dedup.admit(opId, argsHash, placedAt);
     switch (admit.kind) {
@@ -71,15 +74,20 @@ export class CommandChannel {
     try {
       await this.opts.ledger.appendPlaceholder({ opId, argsHash, placedAt, result: null });
     } catch (error) {
-      this.opts.dedup.rollback(opId); // 盘上无占位+未发送=回滚内存，对齐事实源（防下次 admit 冒充 unknown-effect）
+      // 未发送（send 从未调用）；但 reject 不证明盘上无占位行（write 可能已落后报错，A1-02）→内存留置保守口径，不回滚
       return { kind: "placeholder-durability-failed", error };
     }
     // ③发送（此刻起效果可能已发生）
-    let result: unknown;
+    let result: object;
     try {
       result = await send();
     } catch (error) {
       return { kind: "send-failed", error }; // 占位留置：效果未知，不重发
+    }
+    if (result === null || result === undefined) {
+      // A1-05：null 哨兵与 unknown-effect 冲突——send 返回 null=协议违规；效果未知，占位留置，不落盘洗白
+      this.opts.onAudit?.(`command-channel: opId=${opId} send 返回 null/undefined（协议违规，按效果未知留置）`);
+      return { kind: "send-failed", error: new Error("send returned null/undefined") };
     }
     // ④结果行 fsync → ⑤内存 settle（盘先行，内存跟随；崩溃闭环由盘上事实裁决）
     try {

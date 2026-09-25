@@ -51,16 +51,23 @@ export type SubmitOutcome =
   | { readonly kind: "send" } // 两 fsync 完成：自此刻起调用方可写 stdin 首字节
   | { readonly kind: "rejected"; readonly reason: "busy" | "closed" }
   | {
-      /** 硬序中断：意图未发送（sending fsync 完成前调用方拿不到 send，副作用通道从未开栓）。 */
+      /** 硬序中断：意图未发送（sending fsync 完成前调用方拿不到 send，副作用通道从未开栓）。注：fsync reject 不证明盘上无行——write 可能已落完整/部分行后报错；恢复以实际重放出的记录裁决（A1-02）。 */
       readonly kind: "failed";
       readonly stage: "enqueue" | "sending";
       readonly error: unknown;
+    }
+  | {
+      /** 生命周期失效（A1-01）：任一 fsync await 期间屏障被 close/reopen 接管——本意图不得发送（无 send 许可、不得覆盖新状态）；已发 journal 行的写入结果同样未确认，恢复以实际重放裁决。 */
+      readonly kind: "invalidated";
+      readonly stage: "enqueue" | "sending";
     };
 
 export const DEFAULT_TURN_TIMEOUT_MS = 30 * 60 * 1000; // §5.5 轮超时默认 30min（含模型+工具全程）
 
 export class TurnGate {
   private state: GateState = { kind: "idle" };
+  /** 操作代次（A1-01）：close/reopen 递增，使仍在 await 中的旧 submit/旧 settled 追加失效——旧操作完成后不得返回 send、不得覆盖新状态。 */
+  private opEpoch = 0;
 
   constructor(
     private readonly opts: {
@@ -74,24 +81,33 @@ export class TurnGate {
     return this.state;
   }
 
-  /** 受理意图：仅 idle。硬序两 fsync 完成后返回 send 许可；任一 fsync 失败→closed（journal 态=§5.5 崩溃矩阵行）。 */
+  /** 受理意图：仅 idle。硬序两 fsync 完成后返回 send 许可；任一 fsync 失败→closed（journal 行写入结果未确认——reject 不证明无行；恢复以实际重放裁决）。 */
   async submit(intent: TurnIntentInput): Promise<SubmitOutcome> {
     if (this.state.kind === "closed") return { kind: "rejected", reason: "closed" };
     if (this.state.kind !== "idle") return { kind: "rejected", reason: "busy" };
+    const epoch = this.opEpoch; // A1-01：本次提交绑定的操作身份
     this.state = { kind: "dispatching", intentId: intent.intentId };
     try {
       // 硬序①：意图行 fsync（≡written）
       await this.opts.durability.append({ t: "enqueue", ...intent });
     } catch (error) {
+      if (epoch !== this.opEpoch) return { kind: "invalidated", stage: "enqueue" }; // 生命周期已接管：不动状态（close 已设 closed）
       this.state = { kind: "closed", reason: "durability-failure" };
       return { kind: "failed", stage: "enqueue", error };
+    }
+    if (epoch !== this.opEpoch || this.state.kind !== "dispatching") {
+      return { kind: "invalidated", stage: "enqueue" }; // await 期间被 close/reopen 接管：不覆盖新状态、不发放 send
     }
     try {
       // 硬序②：sending 行 fsync——完成前调用方拿不到 send（stdin 首字节不可能早于此 fsync，机械硬序）
       await this.opts.durability.append({ t: "sending", intentId: intent.intentId });
     } catch (error) {
+      if (epoch !== this.opEpoch) return { kind: "invalidated", stage: "sending" };
       this.state = { kind: "closed", reason: "durability-failure" };
       return { kind: "failed", stage: "sending", error };
+    }
+    if (epoch !== this.opEpoch || this.state.kind !== "dispatching") {
+      return { kind: "invalidated", stage: "sending" }; // sending 已 fsync 成功但屏障已易主：同样不发 send
     }
     this.state = {
       kind: "in-flight",
@@ -111,18 +127,21 @@ export class TurnGate {
   }
 
   /** agent_settled 事件：in-flight→settling+settled 行 fsync→成功才 idle（释放屏障）；失败=closed 保持。
-   *  晚到 settled（idle/closed 后，如超时收口后）=观察 no-op——轮已收口，不开新轮；观测层记录归宿主。 */
+   *  晚到 settled（idle/closed 后，如超时收口后）=观察 no-op——轮已收口，不开新轮；观测层记录归宿主。
+   *  A1-04 部分修复：追加 await 期间屏障被 close/reopen 接管后，旧追加的成败均不得改写新状态（含不得把新在飞轮关掉）。 */
   async onTurnSettled(): Promise<void> {
     if (this.state.kind !== "in-flight") return;
     const intentId = this.state.intentId;
+    const epoch = this.opEpoch; // A1-01：本次结算绑定的操作身份
     this.state = { kind: "settling", intentId };
     try {
       await this.opts.durability.append({ t: "settled", intentId });
     } catch {
+      if (epoch !== this.opEpoch) return; // 生命周期已接管（如已换代+新轮在飞）：旧追加失败不关新轮，恢复以实际重放裁决
       this.state = { kind: "closed", reason: "durability-failure" }; // 终态耐久失败=保持关闭
       return;
     }
-    if (this.state.kind === "settling" && this.state.intentId === intentId) {
+    if (epoch === this.opEpoch && this.state.kind === "settling" && this.state.intentId === intentId) {
       this.state = { kind: "idle" };
     }
   }
@@ -139,13 +158,15 @@ export class TurnGate {
     }
   }
 
-  /** 宿主显式关闭（进程换代/接管等；原因留痕）。 */
+  /** 宿主显式关闭（进程换代/接管等；原因留痕）。使仍在 await 中的旧 submit/旧 settled 追加失效（A1-01）。 */
   close(reason: GateCloseReason = "manual"): void {
+    this.opEpoch += 1;
     this.state = { kind: "closed", reason };
   }
 
-  /** 恢复/裁决后由宿主解锁（仅 closed→idle）。 */
+  /** 恢复/裁决后由宿主解锁（仅 closed→idle）。reopen 不证明旧轮已收口——解锁依据（已耐久结算/退出确认/换代完成）归宿主裁决（A1-04 边界）；亦使更早的悬置操作失效。 */
   reopen(): boolean {
+    this.opEpoch += 1;
     if (this.state.kind === "closed") {
       this.state = { kind: "idle" };
       return true;
