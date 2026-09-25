@@ -4,6 +4,7 @@
 // session-scan：枚举上限/稳定排序/sanitize 先于截断/条目级 partial。
 import { describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { execSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ComputeSemaphore } from "../../../apps/server/src/ws/compute-semaphore.ts";
@@ -420,5 +421,72 @@ describe("session-scan（D21）", () => {
     } finally {
       await rm(d, { recursive: true, force: true });
     }
+  });
+});
+
+describe("ws-support w1 修复面（W1-03/09/12）", () => {
+  it("W1-09 FIFO（命名管道）open 不阻塞：O_NONBLOCK→同 fd fstat 拒 not-regular", async () => {
+    const d = await tmp();
+    try {
+      const fifo = join(d, "p.jsonl");
+      execSync(`mkfifo '${fifo}'`);
+      const t0 = Date.now();
+      await expect(readSafeWithin(fifo, [d], 64)).rejects.toThrow(/非常规|not-regular/);
+      expect(Date.now() - t0).toBeLessThan(2000); // 不挂起等写端
+    } finally {
+      await rm(d, { recursive: true, force: true });
+    }
+  });
+
+  it("W1-12 ISO 时间戳（真实 pi 会话格式）：lastActiveMs=Date.parse 非 null", async () => {
+    const d = await tmp();
+    try {
+      const iso = "2026-09-27T10:00:00.000Z";
+      await writeFile(join(d, "iso.jsonl"),
+        JSON.stringify({ type: "session", id: "s", timestamp: iso }) + "\n" +
+        JSON.stringify({ type: "message", timestamp: "2026-09-27T11:30:00.000Z", message: { role: "user", content: "hi" } }) + "\n");
+      const r = await scanSessions(d);
+      expect(r.sessions[0]!.lastActiveMs).toBe(Date.parse("2026-09-27T11:30:00.000Z"));
+      expect(r.sessions[0]!.title.text).toBe("hi");
+    } finally {
+      await rm(d, { recursive: true, force: true });
+    }
+  });
+
+  it("W1-03 帧数门计入在途：回调未兑现的 send 占位，未完成+排队>上限→拒收", async () => {
+    const port: SendPort = {
+      readyState: 1, bufferedAmount: 0,
+      send: (_d: string, cb?: (err?: Error | null) => void): boolean => { heldCbs.push(cb ?? (() => {})); return false; },
+      close: () => {}, terminate: () => {},
+    };
+    const heldCbs: Array<(err?: Error | null) => void> = [];
+    const q = new ConnectionQueue({ port, maxFrames: 3, maxBytes: 1_000_000 });
+    const first = q.enqueue({ t: "pong", nonce: "1" } as never);
+    if (first !== "queued") throw new Error(`first=${first}`);
+    await new Promise((res) => setImmediate(res)); // drain 交 send（回调挂起→inflight=1）
+    expect(q.enqueue({ t: "pong", nonce: "2" } as never)).toBe("queued");
+    await new Promise((res) => setImmediate(res));
+    expect(q.enqueue({ t: "pong", nonce: "3" } as never)).toBe("queued");
+    await new Promise((res) => setImmediate(res));
+    // inflight=3（回调全挂起）+第 4 帧→拒收（旧实现只看 q.length=0→会放行）；溢出→终止连接
+    expect(q.enqueue({ t: "pong", nonce: "4" } as never)).toBe("rejected-overflow");
+    await new Promise((res) => setImmediate(res));
+    expect(q.enqueue({ t: "pong", nonce: "5" } as never)).toBe("rejected-overflow"); // 终止态拒收
+    q.dispose();
+    // 槽归还在非溢出流验证：回调兑现后 inflight 归零，后续帧重新可入
+    const held2: Array<(err?: Error | null) => void> = [];
+    const port2: SendPort = {
+      readyState: 1, bufferedAmount: 0,
+      send: (_d: string, cb?: (err?: Error | null) => void): boolean => { held2.push(cb ?? (() => {})); return false; },
+      close: () => {}, terminate: () => {},
+    };
+    const q2 = new ConnectionQueue({ port: port2, maxFrames: 3, maxBytes: 1_000_000 });
+    for (const n of ["1", "2", "3"]) expect(q2.enqueue({ t: "pong", nonce: n } as never)).toBe("queued");
+    await new Promise((res) => setImmediate(res));
+    expect(held2.length).toBe(3);
+    for (const cb of held2.splice(0)) cb(null); // 兑现→inflight 归零+字节释放
+    await new Promise((res) => setImmediate(res));
+    for (const n of ["4", "5", "6"]) expect(q2.enqueue({ t: "pong", nonce: n } as never)).toBe("queued"); // 若归还缺失→第 4 帧即拒
+    q2.dispose();
   });
 });
