@@ -16,12 +16,13 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "vitest run",
- "test:e2e": "PI_E2E=1 vitest run tests/integration/pi-e2e.test.ts",
+    "test:e2e": "PI_E2E=1 vitest run tests/integration/pi-e2e.test.ts",
     "test:watch": "vitest",
     "build": "npm run build -w apps/web -w apps/server"
   },
   "devDependencies": {
     "@types/node": "^24.13.6",
+    "@types/ws": "^8.18.1",
     "eslint": "^9.39.4",
     "prettier": "^3.9.9",
     "typescript": "^5.9.3",
