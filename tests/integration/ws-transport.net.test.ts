@@ -339,6 +339,36 @@ describe("3b-1 真网络：⑤真 send 回调+清理", () => {
     expect(r2.err).toBeInstanceOf(Error);
   });
 
+  it("客户端暂停读 → done 不兑现（绑定真实 flush 非立即返回）；恢复读 → done 兑现", async () => {
+    const h = await makeHarness();
+    const connP = new Promise<WsConnectionPort>((resolve) => { h.adapter.onConnection((conn) => resolve(conn)); });
+    const c = connect(h.url(), { headers: { Origin: ORIGIN } });
+    await c.opened;
+    const conn = await connP;
+    const sock = (c.ws as unknown as { _socket: import("node:net").Socket })._socket;
+    sock.pause(); // 客户端停读：内核/Node 缓冲堆满后 flush 真实受阻
+    let doneCount = 0;
+    let sentCount = 0;
+    const big = "p".repeat(256 * 1024);
+    let settle: (() => void) | undefined;
+    const finish = (): void => { settle?.(); };
+    const sendP = new Promise<void>((resolve) => { settle = resolve; });
+    const sendSerial = (): void => {
+      // 串行发直到 16MB 或传输缓冲堆高（4MiB）：暂停读下必然出现「已发出但未 flush」
+      if (sentCount >= 64 || conn.bufferedAmount > 4 * 1024 * 1024) { finish(); return; }
+      sentCount++;
+      conn.send(big, () => { doneCount++; if (sentCount >= 64 || conn.bufferedAmount > 4 * 1024 * 1024) { finish(); return; } sendSerial(); });
+    };
+    sendSerial();
+    await new Promise<void>((r) => setTimeout(r, 800));
+    expect(doneCount).toBeLessThan(sentCount); // 存在未 flush 的发送：立即返回型实现在此暴露
+    sock.resume();
+    await Promise.race([sendP, new Promise((_, rej) => setTimeout(() => rej(new Error("恢复读后 done 未兑现")), 5_000))]);
+    expect(doneCount).toBeGreaterThanOrEqual(1);
+    c.ws.close();
+    await c.closed;
+  });
+
   it("背压下 done 等真实 flush（64KB 大消息×多，客户端延迟读取）", async () => {
     const h = await makeHarness();
     const connP = new Promise<WsConnectionPort>((resolve) => { h.adapter.onConnection((conn) => resolve(conn)); });
