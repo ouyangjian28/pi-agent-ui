@@ -3,7 +3,7 @@
 //  ① demux：stdout 行分派——type:"response"（含 readiness 探针回执）→协调器 onRpcResponse；
 //     agent_settled→onSettledEvent（无 id 事件=单在途归因，协调器自校验）；其余→onPiEvent。
 //  ② readiness：spawn 成功即写 get_state 探针（TECH §40：pi RPC 无 banner，readiness=ping 往返）。
-//     写入/响应/超时纳入同一有界启动操作（S4-03）：writeP 与 gateP 经 Promise.all 聚合，超时能结束
+//     写入/响应/超时纳入同一有界启动操作（S4-03）：writeP 与 respP 经 Promise.all 聚合，超时能结束
 //     挂起 write 所在的启动等待；所有 Promise 创建即有消费者（无孤立 reject）。
 //     成败续体均复核代次所有权（S4-04）：旧代失败不得退役新代；返回 ready 前确认仍是当前运行代。
 //  ③ 发送帧渲染：commandId↔RPC id（c<commandId>）对账；stdinText 由本层生成（监管器只管首字节身份）。
@@ -48,6 +48,8 @@ export interface RpcSessionOpts {
   readonly onStderr?: (text: string, generation: number) => void;
   /** 轮次完全收口（settled 结算耐久确认后；恰好一次/轮）。 */
   readonly onSettled?: (generation: number) => void;
+  /** 观测面：spawn 成功（探针之后）回调，携带进程句柄（4c：E2E 注入真实退出/诊断用）。异常被隔离。 */
+  readonly onSpawned?: (handle: ProcessHandle, generation: number) => void;
 }
 
 export type SessionStartResult =
@@ -83,7 +85,7 @@ export class RpcSession {
   private readonly settledNotified = new Set<string>(); // intentId → 已发完成通知（恰好一次/轮）
   private cmdSeq = 0;
   private intentSeq = 0;
-  private readonly pollTimer: NodeJS.Timeout | null;
+  private pollTimer: NodeJS.Timeout | null; // dispose 置 null（幂等）
 
   constructor(private readonly opts: RpcSessionOpts) {
     const now = opts.now ?? (() => new Date().toISOString());
@@ -137,6 +139,11 @@ export class RpcSession {
             this.readyPromise.delete(generation); // Y5：完成的启动操作不留 Map（防随重启次数增长）
           });
         this.readyPromise.set(generation, p);
+        try {
+          this.opts.onSpawned?.(handle, generation); // 观测面（4c：E2E/宿主拿句柄注入真实退出）
+        } catch (e: unknown) {
+          safeAudit(`rpc-session spawned-callback-error ${String(e instanceof Error ? e.message : e)}`);
+        }
       },
       now,
       nowMs: () => performance.now(),
@@ -164,9 +171,15 @@ export class RpcSession {
 
   private readonly safeAudit: (line: string) => void;
 
-  /** 释放本地资源（巡检定时器）；进程退役另走 stop()。 */
-  dispose(): void {
-    if (this.pollTimer !== null) clearInterval(this.pollTimer);
+  /** 释放本地资源（Y-C2/s4c：巡检定时器+耐久句柄）；进程退役另走 stop()。幂等。 */
+  async dispose(): Promise<void> {
+    if (this.pollTimer !== null) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+    await this.opts.durability
+      .close?.()
+      .catch((e: unknown) => this.safeAudit(`rpc-session durability-close-failed ${String(e)}`));
   }
 
   /** demux：supervisor 已按代次过滤的 stdout 事件行 → 协调器三入口。 */
@@ -306,10 +319,14 @@ export class RpcSession {
     // onSpawned 在 spawnNext 内同步启动探针并登记 promise（spawned 分支必已存在）
     await this.readyPromise.get(r.generation);
     if (this.readyGeneration !== r.generation) {
-      // 探针失败（超时/被拒/写失败/superseded）：先复核所有权，只退役自己这一代（S4-04）
-      const cur = this.supervisor.getState().generation;
-      if (cur !== r.generation) {
-        this.safeAudit(`rpc-session readiness-failed-superseded generation=${r.generation} current=${cur}（不动当前代）`);
+      // 探针失败（超时/被拒/写失败/superseded）：先复核所有权，只退役自己这一代（S4-04）。
+      // Y-C1（s4c 契约固化）：宿主已 stop/retire（phase=stopping）时本启动操作已作废→superseded；
+      // 不再发 readiness-timeout+retire=stopping（退役已由宿主发起，结果分类不得依赖 exit 送达时序）。
+      const cur = this.supervisor.getState();
+      if (cur.generation !== r.generation || cur.phase !== "running") {
+        this.safeAudit(
+          `rpc-session readiness-failed-superseded generation=${r.generation} current=${cur.phase}/${cur.generation ?? "无"}（不动当前代）`,
+        );
         return { kind: "superseded", generation: r.generation };
       }
       const retire = await this.supervisor.retireCurrent();

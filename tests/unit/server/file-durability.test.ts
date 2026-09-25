@@ -9,9 +9,10 @@ interface WritePlan {
   readonly error?: Error;
 }
 
-/** 受控 fs：逐事件序+逐写计划+可挂 datasync。 */
+/** 受控 fs：逐事件序+逐写计划+可挂 datasync。chunks 以 Buffer 保存（Y-C3/s4c：跨多字节边界
+ *  的字节证据——toString 在撕裂尾会把不完整 UTF-8 序列圆整成替换符，掊盖字节级错位）。 */
 class FakeFs implements DurabilityFsPort {
-  readonly chunks: string[] = [];
+  readonly chunks: Buffer[] = [];
   readonly events: string[] = [];
   writes: WritePlan[] = [];
   datasyncHang = false;
@@ -21,12 +22,12 @@ class FakeFs implements DurabilityFsPort {
   async open(): Promise<DurabilityFileHandleLike> {
     this.events.push("open");
     let wi = 0;
-    const write = async (buf: Buffer, pos?: number): Promise<{ bytesWritten: number }> => {
+    const write = async (buf: Buffer, offset?: number): Promise<{ bytesWritten: number }> => {
       this.events.push("write");
       const plan = this.writes[wi++] as WritePlan | undefined;
-      const start = pos ?? 0; // Y2（s4b）：尊重 offset——部分写重试须从剩余字节起算，不重写已落字节
+      const start = offset ?? 0; // Y2（s4b）：尊重 offset——部分写重试须从剩余字节起算，不重写已落字节
       const n = Math.min(plan?.bytes ?? buf.length - start, buf.length - start);
-      this.chunks.push(buf.subarray(start, start + n).toString("utf8"));
+      this.chunks.push(Buffer.from(buf.subarray(start, start + n)));
       if (plan?.error) throw plan.error;
       return { bytesWritten: n };
     };
@@ -46,7 +47,7 @@ class FakeFs implements DurabilityFsPort {
   }
 
   text(): string {
-    return this.chunks.join("");
+    return Buffer.concat(this.chunks).toString("utf8");
   }
 }
 

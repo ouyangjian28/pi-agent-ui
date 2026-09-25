@@ -86,8 +86,10 @@ class HoldDurability {
 
 const dirs: string[] = [];
 const sessions: RpcSession[] = [];
+const durClose: FileDurability[] = []; // Y-C2（s4c）：独立构造的 FileDurability 也在收尾显式 close（防 DEP0137 句柄泄漏警告）
 afterEach(async () => {
-  for (const s of sessions.splice(0)) s.dispose();
+  await Promise.all(sessions.splice(0).map((s) => s.dispose())); // dispose 现含 durability.close
+  await Promise.all(durClose.splice(0).map((d) => d.close().catch(() => undefined)));
   await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
 });
 
@@ -511,6 +513,37 @@ describe("RpcSession（受控替身）", () => {
     const ra = await startA; // 探针成功路径内已退出：终窗复核不得返回 ready
     expect(ra.kind).not.toBe("ready");
     expect(ra).toMatchObject({ kind: "superseded", generation: 1 });
+  });
+
+  it("S4-YC1 启动中 stop、exit 延迟未达：旧 start=superseded（结果分类不依赖 exit 送达时序）", async () => {
+    // Y-C1（s4c 契约固化）：写永挂+探针未回→stop（SIGTERM 已发，phase=stopping，exit 不送）
+    // →旧 start 不得返回 readiness-timeout+retire=stopping（那是 GPT I2 反例：stop 已发起退役，
+    // 旧启动操作已作废）；应=superseded，且不再二次退役（stopSignals 恰 1）。
+    const dir7 = await mkdtemp(join(tmpdir(), "rpc-s4yc1-"));
+    dirs.push(dir7);
+    const host7 = new FakeRpcHost();
+    host7.writeMode = "hang"; // 写永挂：探针无响应
+    const dur7 = new FileDurability(join(dir7, "journal.jsonl")); // 传入 session→dispose 统一 close（Y-C2）
+    const s7 = new RpcSession({
+      piArgs: ["--mode", "rpc", "--no-session"],
+      journalPath: join(dir7, "journal.jsonl"),
+      sessionId: "s-test",
+      host: host7,
+      durability: dur7,
+      readinessTimeoutMs: 5000, // 不靠超时路径
+      timeoutPollMs: 20,
+    });
+    sessions.push(s7);
+    const startA = s7.start();
+    await until(() => host7.frames.length === 1, "探针写出（挂起）");
+    const stopP = s7.stop(); // SIGTERM 已发；exit 延迟不送→cancelReadiness 使 startA 失败侧落定
+    await until(() => host7.stopSignals.length === 1, "SIGTERM 已发");
+    const ra = await startA;
+    expect(ra).toMatchObject({ kind: "superseded", generation: 1 });
+    expect(host7.stopSignals).toEqual(["SIGTERM"]); // 未二次退役
+    // 收尾：补送 exit 使 stopP 落定（不留在后台悬空）
+    host7.emitExit(0, null);
+    expect((await stopP).kind).toBe("confirmed");
   });
 
   it("S4-05d settled 先缓冲→超时记录收口（recorded-and-settled）：通知恰一次", async () => {

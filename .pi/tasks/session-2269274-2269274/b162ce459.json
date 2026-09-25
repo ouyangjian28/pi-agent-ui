@@ -1,0 +1,18 @@
+{
+  "id": "b162ce459",
+  "name": "独立全套验证",
+  "command": "npm test; a=$?; npm run typecheck; b=$?; npx eslint apps/server/src tests/unit/server; c=$?; printf '\\nAUDIT_EXIT test=%s typecheck=%s lint=%s\\n' \"$a\" \"$b\" \"$c\"; test \"$a$b$c\" = 000",
+  "status": "completed",
+  "outputPath": ".pi/tasks/session-2269274-2269274/b162ce459.output",
+  "cwd": "/home/yyj/ai/repos/pi-agent-ui",
+  "startTime": 1790313218991,
+  "endTime": 1790313233538,
+  "exitCode": 0,
+  "signal": null,
+  "pid": 2281521,
+  "bytesWritten": 861,
+  "isAgent": false,
+  "notified": true,
+  "notifyOnCompletion": true,
+  "triggerOnCompletion": true
+}

@@ -16,7 +16,9 @@ export interface DurabilityFsPort {
   open(path: string, flags: string): Promise<DurabilityFileHandleLike>;
 }
 export interface DurabilityFileHandleLike {
-  write(buf: Buffer, position?: number): Promise<{ bytesWritten: number }>;
+  /** offset=缓冲区偏移（Y-C3/s4c 命名勘误：非文件 position；append 模式下文件位置由实现推进）。
+   *  与 node:fs/promises FileHandle.write(buffer, offset, ...) 重载同构。 */
+  write(buf: Buffer, offset?: number): Promise<{ bytesWritten: number }>;
   datasync(): Promise<void>;
   close(): Promise<void>;
 }

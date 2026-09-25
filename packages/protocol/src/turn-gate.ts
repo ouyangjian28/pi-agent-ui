@@ -32,6 +32,9 @@ export interface TurnIntentInput {
  *  真文件系统实现（含尾修复）归 adapter 后续切片；本接口只约束语义时序。 */
 export interface DurabilityPort {
   append(line: JournalLine): Promise<void>;
+  /** 可选收尾（Y-C2/s4c）：宿主 dispose 时关闭句柄；实现可借此拒绝后续 append。
+   *  可选=纯逻辑测试替身可不提供；不承诺失败态修复（FileDurability.close 不解除 failed）。 */
+  close?(): Promise<void>;
 }
 
 export type GateCloseReason =
