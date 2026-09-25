@@ -86,7 +86,7 @@ export class RpcSession {
   private cmdSeq = 0;
   private intentSeq = 0;
   private pollTimer: NodeJS.Timeout | null; // dispose 置 null
-  private disposeP: Promise<void> | null = null; // 并发 dispose 复用同一收尾 Promise（s4e Y-C2：不能让第二次调用提前返回——那时 close 可能仍挂起）；s4f F3：先发布后运行——同步重入（close 回调里再 dispose）也返回同一 Promise，恰一次 close
+  private disposeP: Promise<void> | null = null; // 并发 dispose 共享同一关闭操作与完成结果（s4e Y-C2：不能让第二次调用提前返回——那时 close 可能仍挂起）；s4f F3：先发布后运行——同步重入（close 回调里再 dispose）也共享同一收尾，恰一次 close；注：async 签名下两次调用返回的外层 Promise 引用不保证 ===，仅共享操作与结果（s4g 契约措辞）
 
   constructor(private readonly opts: RpcSessionOpts) {
     const now = opts.now ?? (() => new Date().toISOString());

@@ -28,7 +28,7 @@ describe("recover（恢复入口受控面）", () => {
     const p = await writeJournal([enq("i-1"), '{"t":"sending","intentId":"i-1"}', '{"t":"settled","intentId":"i-1"}', enq("i-2"), '{"t":"sending","intentId":"i-2"}', '{"t":"settled","intentId":"i-2"}', ""]);
     const r = await recoverFromJournal(p, "s1");
     expect(r.bad).toEqual([]);
-    expect(r.blocked).toBe(false);
+    expect(r.diskBlocked).toBe(false);
     expect(r.intents.map((x) => x.intentId)).toEqual(["i-1", "i-2"]);
     expect(r.settledCount).toBe(2);
     expect(r.unknownEffect).toEqual([]);
@@ -48,7 +48,7 @@ describe("recover（恢复入口受控面）", () => {
   it("R1：enqueue 完整+sending 撕裂尾→阻断恢复授权（blocked+resumable 空）+残片可关联→效果未知", async () => {
     const p = await writeJournal([enq("i-1"), '{"t":"sending","intentId":"i-1"']);
     const r = await recoverFromJournal(p, "s1");
-    expect(r.blocked).toBe(true);
+    expect(r.diskBlocked).toBe(true);
     expect(r.resumable).toEqual([]); // 识别了坏尾≠已处理其影响：不给出任何重发授权
     expect(r.unknownEffect).toEqual(["i-1"]); // 残片可靠关联→保守证据并入
   });
@@ -56,7 +56,7 @@ describe("recover（恢复入口受控面）", () => {
   it("R1b：残片不可关联（撕裂断在 intentId 前）→阻断依旧、不臆造效果未知", async () => {
     const p = await writeJournal([enq("i-1"), '{"t":"send']);
     const r = await recoverFromJournal(p, "s1");
-    expect(r.blocked).toBe(true);
+    expect(r.diskBlocked).toBe(true);
     expect(r.resumable).toEqual([]);
     expect(r.unknownEffect).toEqual([]); // 提取不到意图身份→不并入（blocked 已全局阻断）
   });
@@ -64,7 +64,7 @@ describe("recover（恢复入口受控面）", () => {
   it("R1c：截尾修复后重读须携带先前残片证据（不能把「证据不存在」解释为「从未发送」）", async () => {
     const p = await writeJournal([enq("i-1"), '{"t":"sending","intentId":"i-1"']);
     const r1 = await recoverFromJournal(p, "s1");
-    expect(r1.blocked).toBe(true);
+    expect(r1.diskBlocked).toBe(true);
     expect(r1.unknownEffect).toEqual(["i-1"]);
     const buf = await readFile(p);
     await truncate(p, buf.lastIndexOf(0x0a) + 1); // 宿主截尾修复（字节索引）
@@ -75,7 +75,7 @@ describe("recover（恢复入口受控面）", () => {
     expect(naive.resumable).toEqual(["i-1"]); // ← 这就是 GPT 红线：裸截尾后直接授权=错
     // 正确流程：携带修复前残片证据+显式解除阻断→保守呈现不变
     const fixed = buildRecoverReport(r2.lines, "s1", { fragments: r1.bad, blocked: false });
-    expect(fixed.blocked).toBe(false);
+    expect(fixed.diskBlocked).toBe(false);
     expect(fixed.unknownEffect).toEqual(["i-1"]);
     expect(fixed.resumable).toEqual([]);
   });
@@ -94,6 +94,8 @@ describe("recover（恢复入口受控面）", () => {
     const p = await writeJournal([
       '{"t":"clear","sessionId":"s1"}', // 缺 cleared（GPT 探针：旧版抛 line.cleared is not iterable）
       '{"t":"enqueue","intentId":"i-9","sessionId":"s1","generation":"bad","leafId":"l","matchKey":{},"payload":{}}', // generation 字符串
+      '{"t":"enqueue","intentId":"i-9b","sessionId":"s1","generation":0.5,"leafId":"l","matchKey":{},"payload":{}}', // generation 非安全正整数（s4g 裁量②：0.5 旧版可过）
+      '{"t":"response-timeout","intentId":"i-1","generation":1,"commandId":0}', // commandId=0 非 ≥1
       '{"t":"sending"}', // 缺 intentId
       '{"t":"response-timeout","intentId":"i-1","generation":1}', // 缺 commandId
       '{"t":"future-proof"}', // 未知行型
@@ -106,13 +108,16 @@ describe("recover（恢复入口受控面）", () => {
     expect(r.bad.map((b) => b.error)).toEqual([
       "schema 损坏：缺字段/错类型 cleared",
       "schema 损坏：缺字段/错类型 generation",
+      "schema 损坏：缺字段/错类型 generation", // 0.5 非安全正整数（s4g 裁量②）
+      "schema 损坏：缺字段/错类型 commandId", // 0 非 ≥1
       "schema 损坏：缺字段/错类型 intentId",
       "schema 损坏：缺字段/错类型 commandId",
       "schema 损坏：未知行型 future-proof",
     ]);
+
     expect(r.intents.map((x) => x.intentId)).toEqual(["i-1"]); // 好行照常重放
     expect(r.settledCount).toBe(1);
-    expect(r.blocked).toBe(true); // 有 schema 坏行→仍阻断（修复/裁决后再授权）
+    expect(r.diskBlocked).toBe(true); // 有 schema 坏行→仍阻断（修复/裁决后再授权）
     expect(r.resumable).toEqual([]);
   });
 
@@ -132,7 +137,7 @@ describe("recover（恢复入口受控面）", () => {
     expect(r.unknownEffect).toEqual(["i-1", "i-2", "i-3"]);
     expect(r.resumable).toEqual(["i-4"]);
     expect(r.settledCount).toBe(0);
-    expect(r.blocked).toBe(false);
+    expect(r.diskBlocked).toBe(false);
   });
 
   it("会话过滤：他 session 的 enqueue 不进重放（跨会话 journal 隔离）", async () => {
@@ -190,7 +195,7 @@ describe("recover（恢复入口受控面）", () => {
     const frag: BadJournalEntry = { raw: '{"t":"send', error: "撕裂尾", partialTail: true };
     // 修复后续读：盘面已截齐（好行）+携残片证据+blocked:false——不可关联→恢复范围级阻断
     const r = buildRecoverReport([enqueue], "s1", { fragments: [frag], blocked: false });
-    expect(r.blocked).toBe(false);
+    expect(r.diskBlocked).toBe(false);
     expect(r.unattributableFragments).toEqual([frag]); // 呈现交宿主裁决
     expect(r.resumable).toEqual([]); // 不可关联→不给任何重发授权（两证分离）
     // 宿主人工调查后显式归因到已知意图→并入 unknown+阻断解除
@@ -202,6 +207,91 @@ describe("recover（恢复入口受控面）", () => {
     expect(r2.unattributableFragments).toEqual([]);
     expect(r2.unknownEffect).toEqual(["i-1"]);
     expect(r2.resumable).toEqual([]); // i-1 已发送（残片归因）→仍不可重发
+  });
+
+  it("F1d（G1）：更短残片（{ / {\"t\":\"s / {\"t\":\"sen）同为未裁决证据→阻断，resumable 恒空", () => {
+    const lines: JournalLine[] = [JSON.parse(enq("i-1")), JSON.parse(enq("i-2"))];
+    for (const raw of ["{", '{"t":"s', '{"t":"sen']) {
+      const r = buildRecoverReport(lines, "s1", { fragments: [{ raw, error: "撕裂尾", partialTail: true }], blocked: false });
+      expect(r.diskBlocked).toBe(false); // 盘面已修复
+      expect(r.resumeBlocked).toBe(true); // 未裁决证据仍在→授权阻断
+      expect(r.unattributableFragments).toHaveLength(1);
+      expect(r.resumable).toEqual([]); // G1 探针：旧版此处放出 ["i-1","i-2"]
+    }
+  });
+
+  it("F1e（G1）：双 intentId 异值残片=归属歧义→不可关联阻断（不取首个臆造归属）", () => {
+    const lines: JournalLine[] = [JSON.parse(enq("i-1")), JSON.parse(enq("i-2"))];
+    const raw = '{"t":"sending","intentId":"i-1","intentId":"i-2"';
+    const r = buildRecoverReport(lines, "s1", { fragments: [{ raw, error: "撕裂尾", partialTail: true }], blocked: false });
+    expect(r.unknownEffect).toEqual([]); // 不臆造归 i-1（i-2 证据会被吞）
+    expect(r.unattributableFragments).toHaveLength(1);
+    expect(r.resumable).toEqual([]);
+  });
+
+  it("F1f（G1）：可解析但归属超出重放范围（i-99 不在 map）→不静默消失，进不可关联阻断", () => {
+    const lines: JournalLine[] = [JSON.parse(enq("i-1"))];
+    const raw = '{"t":"sending","intentId":"i-99"';
+    const r = buildRecoverReport(lines, "s1", { fragments: [{ raw, error: "撕裂尾", partialTail: true }], blocked: false });
+    expect(r.unknownEffect).toEqual([]); // 不并入（范围外无呈现面）
+    expect(r.unattributableFragments).toHaveLength(1); // 保留证据阻断
+    expect(r.resumable).toEqual([]);
+  });
+
+  it("F1g（G2a）：归因目标不在重放范围→结构性无效，不解除证据（旧版仍删残片解锁）", () => {
+    const lines: JournalLine[] = [JSON.parse(enq("i-1")), JSON.parse(enq("i-2"))];
+    const raw = '{"t":"send';
+    const r = buildRecoverReport(lines, "s1", {
+      fragments: [{ raw, error: "撕裂尾", partialTail: true }],
+      blocked: false,
+      attributedFragments: [{ raw, intentId: "missing" }],
+    });
+    expect(r.unattributableFragments).toHaveLength(1);
+    expect(r.unknownEffect).toEqual([]);
+    expect(r.resumable).toEqual([]); // G2a 探针：旧版此处放出 ["i-1","i-2"]
+  });
+
+  it("F1h（G2b）：同 raw 双残片→歧义拒绝（位置不可分）；重复裁决幂等（再入 no-op 不解锁另一条）", () => {
+    const lines: JournalLine[] = [JSON.parse(enq("i-1")), JSON.parse(enq("i-2"))];
+    const rawA = '{"t":"sending","x":1';
+    const rawB = '{"t":"sending","x":2';
+    // ①两条不同 raw 的残片，用前缀/任一全等都无法同时匹配→各归各：rawA 精确归 i-1 有效
+    const r1 = buildRecoverReport(lines, "s1", {
+      fragments: [
+        { raw: rawA, error: "撕裂尾", partialTail: true },
+        { raw: rawB, error: "撕裂尾", partialTail: true },
+      ],
+      blocked: false,
+      attributedFragments: [{ raw: rawA, intentId: "i-1" }],
+    });
+    expect(r1.unknownEffect).toEqual(["i-1"]);
+    expect(r1.unattributableFragments.map((b) => b.raw)).toEqual([rawB]); // rawB 保留阻断
+    expect(r1.resumable).toEqual([]);
+    // ②重复同一裁决（幂等）：不会消耗 rawB（旧版前缀匹配可逐条解锁）
+    const r2 = buildRecoverReport(lines, "s1", {
+      fragments: [
+        { raw: rawA, error: "撕裂尾", partialTail: true },
+        { raw: rawB, error: "撕裂尾", partialTail: true },
+      ],
+      blocked: false,
+      attributedFragments: [
+        { raw: rawA, intentId: "i-1" },
+        { raw: rawA, intentId: "i-1" },
+      ],
+    });
+    expect(r2.unattributableFragments.map((b) => b.raw)).toEqual([rawB]);
+    expect(r2.resumable).toEqual([]);
+    // ③两条完全同文本残片：matches.length=2→歧义拒绝，单条裁决不消耗任何一条
+    const r3 = buildRecoverReport(lines, "s1", {
+      fragments: [
+        { raw: rawA, error: "撕裂尾", partialTail: true },
+        { raw: rawA, error: "撕裂尾", partialTail: true },
+      ],
+      blocked: false,
+      attributedFragments: [{ raw: rawA, intentId: "i-1" }],
+    });
+    expect(r3.unattributableFragments).toHaveLength(2);
+    expect(r3.resumable).toEqual([]);
   });
 
   it("F1b：残片 intentId 为 JSON 转义（\\u0069-1=i-1）→字面量解码后正确关联（裸正则提取会漏）", () => {

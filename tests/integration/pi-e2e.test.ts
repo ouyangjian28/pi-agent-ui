@@ -36,6 +36,24 @@ function ensureDirDurable(dir: string): void {
   }
 }
 
+/** s4g：本轮 assistant 完成消息正文提取——只取 message_end 事件中 role==="assistant"
+ *  且 content[].type==="text" 的文本段拼接（排除 user 输入/历史聚合/thinking 段/其它字段）。 */
+function assistantBodyText(ev: unknown): string {
+  if (typeof ev !== "object" || ev === null) return "";
+  const e = ev as { type?: unknown; message?: { role?: unknown; content?: unknown } | null };
+  if (e.type !== "message_end") return "";
+  if (typeof e.message !== "object" || e.message === null || e.message.role !== "assistant") return "";
+  const c = e.message.content;
+  if (!Array.isArray(c)) return "";
+  let out = "";
+  for (const part of c) {
+    if (typeof part === "object" && part !== null && (part as { type?: unknown }).type === "text") {
+      out += typeof (part as { text?: unknown }).text === "string" ? (part as { text: string }).text : "";
+    }
+  }
+  return out;
+}
+
 async function until(cond: () => boolean, what: string, timeoutMs = 90_000): Promise<void> {
   const t0 = Date.now();
   while (!cond()) {
@@ -155,7 +173,8 @@ describe.skipIf(!running)("真 pi E2E（切片4c）", () => {
     dirs.push(dir);
     ensureDirDurable(dir);
     const settledGens: number[] = [];
-    // s4f：口令化两代一致性断言——第一轮用非常见固定口令（PENGUIN-42 不会出现在 pi 系统提示/事件噪声里），
+    // s4g 证据补齐：口令化+**限定 assistant 正文**——从 message_end 事件取 role==="assistant"
+    // 且 content[].type==="text" 的文本段（排除 user 输入/历史聚合/thinking 段/其它字段；谓词负例见文件尾受控 describe）。
     // gen1 捕获 assistant 确实回了口令，gen2 追问后回复同一口令=--session 历史恢复直接证据（两代正文一致）。
     const TOKEN = "PENGUIN-42";
     const gen1Hits: string[] = [];
@@ -175,10 +194,10 @@ describe.skipIf(!running)("真 pi E2E（切片4c）", () => {
       timeoutPollMs: 100,
       onSettled: (g) => settledGens.push(g),
       onPiEvent: (ev, gen) => {
-        const s = JSON.stringify(ev);
-        if (s.includes(TOKEN)) {
-          if (gen === 1) gen1Hits.push(s);
-          if (gen === 2) gen2Hits.push(s);
+        const text = assistantBodyText(ev); // 只取本轮 assistant 完成消息正文（s4g：事件整体含 TOKEN 不算证据）
+        if (text.includes(TOKEN)) {
+          if (gen === 1) gen1Hits.push(text);
+          if (gen === 2) gen2Hits.push(text);
         }
       },
       onSpawned: (h) => {
@@ -361,16 +380,17 @@ describe.skipIf(!running)("真 pi E2E（切片4c）", () => {
       audit: (l) => audits.push(l),
       onProcessEvent: (ev, gen) => routed.push({ ev, gen }),
     });
+    // s4g：清理注册提前到首次 spawn 前（scriptA 有 setInterval 常驻——等待首事件超时/首个 retire 断言失败
+    // 的窗口也不能留子进程；旧版到 scriptB spawn 后才登记）。
+    cleanups.push(async () => {
+      const st = sup.getState() as { phase: string };
+      if (st.phase !== "idle") await sup.retireCurrent().catch(() => undefined);
+    });
     expect(sup.spawnNext(["-e", scriptA]).kind).toBe("spawned");
     await until(() => routed.some((x) => x.gen === 1), "gen1 首事件", 10_000);
     const ret = await sup.retireCurrent(); // SIGTERM→子进程 handler 写完 late 行才退→确认
     expect(ret).toMatchObject({ kind: "confirmed" });
     expect(sup.spawnNext(["-e", scriptB]).kind).toBe("spawned");
-    cleanups.push(async () => {
-      // s4f：断言中途失败不留常驻子进程（scriptB setInterval 保活）
-      const st = sup.getState() as { phase: string };
-      if (st.phase !== "idle") await sup.retireCurrent().catch(() => undefined);
-    });
     await until(() => routed.some((x) => x.gen === 2), "gen2 首事件", 10_000);
     // 不污染断言：gen1 迟到输出只归因 gen1（stopping 期合法路由或 retired 丢弃），gen2 只见自己事件。
     // s4f：gen1-late 为强制迟到（SIGTERM handler 写完回调才 exit）——非空迟到证据非 best-effort。
@@ -383,3 +403,29 @@ describe.skipIf(!running)("真 pi E2E（切片4c）", () => {
   });
 });
 
+
+// s4g：e2e-3 命中谓词的受控负例（不依赖真 LLM；PI_E2E 守卫外始终跑）——
+// 「仅 user/元数据含 TOKEN、assistant 正文不含」必须不命中（旧 stringify(ev).includes 会假命中）。
+describe("assistantBodyText 命中谓词（受控）", () => {
+  const TOKEN = "PENGUIN-42";
+  const userEv = { type: "message_end", message: { role: "user", content: [{ type: "text", text: `请只回复这个口令：${TOKEN}` }] } };
+  const assistantEv = { type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking: "内含口令思考" }, { type: "text", text: TOKEN }] } };
+  const assistantNoToken = { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "别的回答" }] } };
+
+  it("user 消息含 TOKEN（assistant 不含）→不命中（旧版事件整体匹配会假命中）", () => {
+    expect(assistantBodyText(userEv).includes(TOKEN)).toBe(false);
+    expect(assistantBodyText({ ...userEv, message: { ...userEv.message, role: "assistant", content: [{ type: "text", text: "别的回答" }] } }).includes(TOKEN)).toBe(false);
+  });
+
+  it("assistant 正文含 TOKEN（thinking 段口令不计，只认 text 段）→命中", () => {
+    const t = assistantBodyText(assistantEv);
+    expect(t.includes(TOKEN)).toBe(true);
+    expect(assistantBodyText(assistantNoToken).includes(TOKEN)).toBe(false);
+  });
+
+  it("非 message_end / 非 assistant / content 非数组→空串", () => {
+    expect(assistantBodyText({ type: "message_update" })).toBe("");
+    expect(assistantBodyText({ type: "message_end", message: { role: "system", content: [] } })).toBe("");
+    expect(assistantBodyText({ type: "message_end", message: { role: "assistant", content: null } })).toBe("");
+  });
+});

@@ -44,8 +44,12 @@ const INTENT_KINDS: readonly string[] = ["prompt", "steer", "followUp", "abort",
 function lineSchemaError(obj: UnknownRecord): string | null {
   const t = obj["t"];
   const str = (k: string): string | null => (typeof obj[k] === "string" ? null : `缺字段/错类型 ${k}`);
+  // s4g 裁量②收紧：generation/commandId=安全整数且≥1（生产端只写正整数序号，输入面同步收紧）；
+  // ordinal=安全整数且≥0（0 基非负）。
   const finiteNum = (k: string): string | null =>
-    typeof obj[k] === "number" && Number.isFinite(obj[k]) ? null : `缺字段/错类型 ${k}`;
+    typeof obj[k] === "number" && Number.isSafeInteger(obj[k]) && (obj[k] as number) >= 1
+      ? null
+      : `缺字段/错类型 ${k}`;
   const nestedStr = (o: unknown, k: string, label: string): string | null => {
     if (o === null || typeof o !== "object" || Array.isArray(o)) return `嵌套非法 ${label}`;
     return typeof (o as UnknownRecord)[k] === "string" ? null : `嵌套非法 ${label}.${k}`;
@@ -61,7 +65,8 @@ function lineSchemaError(obj: UnknownRecord): string | null {
         return nestedStr(mk, "attachmentIdentity", "matchKey.attachmentIdentity");
       if (
         typeof (mk as UnknownRecord)["ordinal"] !== "number" ||
-        !Number.isInteger((mk as UnknownRecord)["ordinal"] as number)
+        !Number.isSafeInteger((mk as UnknownRecord)["ordinal"] as number) ||
+        ((mk as UnknownRecord)["ordinal"] as number) < 0
       )
         return "嵌套非法 matchKey.ordinal";
       const p = obj["payload"];
@@ -147,8 +152,10 @@ export interface RecoverReport {
   readonly resumable: readonly IntentId[];
   readonly settledCount: number;
   /** 存在未裁决坏行（撕裂尾/schema 损坏）：恢复授权阻断——宿主先修复（截尾/换段+重读）再获得可执行结论。 */
-  readonly blocked: boolean;
-  /** 不可关联 sending 残片（修复后续读仍存在）：恢复范围级阻断 resumable，呈现交宿主人工裁决（attributedFragments 归因后移除）。 */
+  readonly diskBlocked: boolean;
+  /** 恢复授权阻断（s4g 黄项：盘面阻断与授权阻断分立呈现）：diskBlocked 或存在未裁决/不可关联残片→true。WS/UI 判按钮可用性必须用本字段，不得用 diskBlocked。 */
+  readonly resumeBlocked: boolean;
+  /** 不可关联/未裁决坏行证据（修复后续读仍存在）：恢复范围级阻断 resumable，呈现交宿主人工裁决（attributedFragments 精确归因后移除）。 */
   readonly unattributableFragments: readonly BadJournalEntry[];
 }
 
@@ -159,33 +166,45 @@ function isUnknownEffect(rec: IntentRecord): boolean {
   return rec.sending || rec.responseTimeoutRecorded === true;
 }
 
-/** 从坏行残片保守提取 sending 证据（R1/F1）：可靠解析出 intentId（含 JSON 转义解码）→可关联；
- *  解析不出/解码失败→不可关联（恢复范围级阻断，不因盘面修复解锁）。 */
+/** 从坏行提取 sending 证据（R1/F1+s4g G1）：**所有坏行都是未裁决证据，默认阻断**——
+ *  可靠解析出**唯一** intentId（含 JSON 转义解码）且该 id 在当前重放范围内→可关联（并入 unknown）；
+ *  解析不出/多个不同 id/解码失败/id 超出重放范围→不可关联（恢复范围级阻断，不因盘面修复解锁）。
+ *  G1 教训：不能把「未看见足够长的 sending 字样」解释成「可以忽略」——更早字节边界的撕裂（{ / "t":"s）同样进证据集。 */
 function sendingFragmentAttribution(
   bad: readonly BadJournalEntry[],
-): { attributable: Set<IntentId>; unattributable: BadJournalEntry[] } {
-  const attributable = new Set<IntentId>();
+  knownIds: ReadonlySet<IntentId>,
+): { attributed: Array<{ id: IntentId; entry: BadJournalEntry }>; unattributable: BadJournalEntry[] } {
+  const attributed: Array<{ id: IntentId; entry: BadJournalEntry }> = [];
   const unattributable: BadJournalEntry[] = [];
   for (const b of bad) {
-    if (!/"t"\s*:\s*"send/.test(b.raw)) continue; // 非 sending 痕迹（含前缀撕裂 "send）不涉开拴证据
-    // 提取完整字符串字面量再 JSON 解码（"\u0069-1" 转义是合法 JSON 字符串身份——正则裸提取不解码会漏）
-    const m = b.raw.match(/"intentId"\s*:\s*("(?:[^"\\]|\\.)*")/);
-    let id: IntentId | null = null;
-    if (m !== null) {
+    // 提取全部完整 intentId 字符串字面量再逐个 JSON 解码（"\u0069-1" 转义是合法 JSON 字符串身份——正则裸提取会漏）
+    const literals = b.raw.match(/"intentId"\s*:\s*("(?:[^"\\]|\\.)*")/g) ?? [];
+    const ids = new Set<IntentId>();
+    let decodeOk = true;
+    for (const lit of literals) {
       try {
-        const decoded: unknown = JSON.parse(m[1] as string);
-        if (typeof decoded === "string" && decoded.length > 0) id = decoded;
+        const decoded: unknown = JSON.parse(lit.slice(lit.indexOf(":") + 1).trim());
+        if (typeof decoded !== "string" || decoded.length === 0) decodeOk = false;
+        else ids.add(decoded);
       } catch {
-        id = null; // 字面量非法（截断在转义中间等）→不可关联
+        decodeOk = false; // 字面量非法（截断在转义中间等）→不可关联
       }
     }
-    if (id !== null) attributable.add(id);
-    else unattributable.push(b);
+    if (decodeOk && ids.size === 1) {
+      const id = [...ids][0] as IntentId;
+      if (knownIds.has(id)) attributed.push({ id, entry: b }); // 唯一且在重放范围内→可关联
+      else unattributable.push(b); // G1：归属超出重放范围（无法验证）→保守阻断，不静默消失
+    } else {
+      unattributable.push(b); // 无 id/多 id 歧义（含双 intentId 異值）/解码失败→不可关联
+    }
   }
-  return { attributable, unattributable };
+  return { attributed, unattributable };
 }
 
-/** 宿主人工裁决输入（s4f F1：盘面修复与重发裁决分离）：raw=报告呈现的残片原文（或其足够长前缀），intentId=人工调查确认的归因目标。归因后该残片按 unknownEffect 呈现并从不可关联集移除；不在场/不匹配→忽略（阻断保留）。 */
+/** 宿主人工裁决输入（s4f F1+s4g G2）：raw=坏行残片原文（**精确全等匹配**——前缀匹配无法证明唯一性已删）；
+ *  intentId=人工调查确认的归因目标（必须在当前重放范围内）。
+ *  裁决有效条件（全部满足才移除证据）：①raw 与恰一条残片全等（多条同文本=歧义拒绝）②目标在重放范围内。
+ *  无效/歧义/重复裁决→忽略（阻断保留）；重复裁决幂等（同裁决再入→已无匹配→no-op）。 */
 export interface FragmentAttribution {
   readonly raw: string;
   readonly intentId: IntentId;
@@ -200,33 +219,36 @@ export interface RecoverOptions {
 
 export function buildRecoverReport(lines: readonly JournalLine[], sessionId: SessionId, opts: RecoverOptions = {}): RecoverReport {
   const fragments = opts.fragments ?? [];
-  const blocked = opts.blocked ?? fragments.length > 0;
+  const diskBlocked = opts.blocked ?? fragments.length > 0;
   const map = replayIntents(lines, sessionId);
   const intents = [...map.values()];
   const unknown = new Set(intents.filter(isUnknownEffect).map((r) => r.intentId));
-  const { attributable, unattributable } = sendingFragmentAttribution(fragments);
-  for (const id of attributable) {
-    if (map.has(id)) unknown.add(id); // 只并入已知意图（未知 id 无呈现面；blocked 已全局阻断）
-  }
-  // F1 裁决：宿主显式归因（raw 全等或足够长前缀匹配）→并入 unknownEffect+从不可关联集移除；不在场→忽略保留阻断
+  const { attributed, unattributable } = sendingFragmentAttribution(fragments, new Set(map.keys()));
+  for (const { id } of attributed) unknown.add(id); // 唯一且在重放范围内的可靠关联→并入 unknown
+  // G2 裁决：宿主显式归因（raw 精确全等+恰一条匹配+目标在重放范围内）→并入 unknownEffect+从证据集移除；
+  // 否则忽略（阻断保留）；重复裁决幂等（已消耗→无匹配→no-op）；多条同文本残片→歧义拒绝（位置不可分，凭文本归因会误合并）。
   let unattributed = unattributable;
   for (const a of opts.attributedFragments ?? []) {
-    const hit = unattributed.find((b) => b.raw === a.raw || (a.raw.length >= 12 && b.raw.startsWith(a.raw)));
-    if (hit === undefined) continue; // 归因不在场：不信任，保留阻断
-    if (map.has(a.intentId)) unknown.add(a.intentId);
+    const matches = fragments.filter((b) => b.raw === a.raw);
+    if (matches.length !== 1) continue; // 不在场（0）或歧义（>1）→不信任，保留阻断
+    if (!map.has(a.intentId)) continue; // G2a：目标不在重放范围内→结构性无效，不解除证据
+    const hit = unattributed.find((b) => b === matches[0]);
+    if (hit === undefined) continue; // 已被先前裁决消耗→幂等 no-op
+    unknown.add(a.intentId);
     unattributed = unattributed.filter((b) => b !== hit);
   }
-  const resumeBlocked = blocked || unattributed.length > 0; // 修复后仍不可关联→恢复范围级阻断（两证分离）
+  const resumeBlocked = diskBlocked || unattributed.length > 0; // 盘面阻断或仍有未裁决证据→授权阻断（两证分离）
   return {
     intents,
     unknownEffect: intents.filter((r) => unknown.has(r.intentId)).map((r) => r.intentId),
     resumable: resumeBlocked
-      ? [] // R1/F1：有未裁决坏行或不可关联 sending 残片→不给任何重发授权
+      ? [] // R1/F1：有未裁决坏行或不可关联残片→不给任何重发授权
       : intents
           .filter((r) => !unknown.has(r.intentId) && !r.sending && r.lastVerdict === null && !r.responseTimeoutRecorded && !r.cancelled)
           .map((r) => r.intentId), // 残片并入 unknown 的意图同样不可重发
     settledCount: intents.filter((r) => r.lastVerdict === "settled").length,
-    blocked,
+    diskBlocked,
+    resumeBlocked,
     unattributableFragments: unattributed,
   };
 }
