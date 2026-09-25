@@ -239,12 +239,12 @@
 | R3 文档单模型+归因旧锚作废 | session-attribution.test「⑦b 同意图不同锚=最新 consumed 生效（[null,null,I,I]）」 | M-a07 首条生效→⑦⑥ 2 挂（c7 轮已验） |
 | 测试精度（GPT c7 三问） | 稳态例改恒留 1 项待发；3000 意图改 128 字符 ID+estimateFrameBytes UTF-8 断言；limit 例改 300 条输入（999→200+续页 100） | — |
 
-## adapter 切片③-3a（WS 网关受控接线：认证/入站管线/队列/订阅/恢复/心跳；495 it）
+## adapter 切片③-3a（WS 网关受控接线：认证/入站管线/队列/订阅/恢复/心跳；w1 首审 48→修复轮后 502 it）
 | 面 | 断言落点 | 状态 |
 | --- | --- | --- |
 | **认证入站（hello/token/Origin/TLS/窗口/撤销）**（Origin 精确集合缺失默认拒；非 loopback 无 TLS 拒；token timingSafeEqual 摘要；protocolVersion≠1→4403；hello 前窗口可配帧数（默认 3，先于字段验证——与 4404 计数分立）；热轮换 revoked 摘要关既有连接 4401） | ws-gateway.test 9 it（welcome/坏 token/Origin 缺失/非白名单/非 loopback 无 TLS/pv=2→4403/字段非法/未认证非 hello/窗口=1 例/撤销 4401）；ws-support.test token-auth 5 it（fromFile 缺失拒启/reload revoked=旧−新/失败沿用旧+乱序丢弃） | ✅ |
 | **入站管线（二进制/262KB/JSON/未知 t/写类冻结）**（二进制→4404；超长→4404；非 JSON/未知 t→4404 计 3→close 1002；写类集 {prompt,send,stop,resume,takeover,write,execute,spawn,kill}→4405） | ws-gateway.test 入站管线例（二进制/非 JSON/未知 t 三连 4404→1002；prompt→4405） | ✅ |
-| **requestId 在途门**（缺失/非法/^[-\w]{1,64}$/→4404；在途重复→4404；在途≥4→4429；同步占位原子受理） | ws-gateway.test requestId 例（provider 永挂造 4 在途+重复 4404+第 5 个 4429） | ✅ |
+| **requestId 在途门**（缺失/非法/^[-\w]{1,64}$/→4404；在途重复→4404；在途≥4→**4404**〔契约 §369：在途超限=4404 计数关闭，非 4429——w1 修复轮勘定〕；同步占位原子受理） | ws-gateway.test requestId 例（provider 永挂造 4 在途+重复 4404+第 5 个 4404） | ✅ |
 | **订阅三分支+限额**（file FILE_RE+双根域→4404；init/resync 同 file 先退旧→4409 stream-replaced+引擎静默关；≥8 file→4429；page 无活动引擎→4404；全部出帧经 ConnectionQueue） | ws-gateway.test 4 it（越界+非法名/重订阅 4409+第 9 file 4429/page 无引擎/空会话 snapshot 帧） | ✅ |
 | **列表/恢复（semaphore+证据快照）**（list-sessions offset/limit 校验→scanSessions→buildSessionsFrame（semaphore 并发 2 全局）；get-recovery 走证据快照 provider：null→unavailable(no-evidence-snapshot) 禁裸读盘面；有→recoverFromSnapshot→buildRecoveryFrame） | ws-gateway.test 2 it（list 帧+limit 999→4404；无快照 unavailable+有快照 available） | ✅ |
 | **心跳/寿命/清理**（idleMs 无帧→4432+close 1000；maxLifetimeMs→close 1000 lifetime-cap；传输关闭幂等清理 connectionCount 归零） | ws-gateway.test 3 it（4432/lifetime-cap/幂等清理）；ping→pong 经队列 | ✅ |
@@ -253,4 +253,6 @@
 | **会话枚举（scanSessions）**（FILE_RE 过滤+截 1000=partial+total 全数；每文件 openSafeFile O_NOFOLLOW+512KB 预算→partial 占位不吞文件；sanitize 先于截断；稳定排序 lastActiveMs desc+null 最后+file 字典序） | ws-support.test session-scan 5 it | ✅ |
 | **安全打开（safe-open）**（O_NOFOLLOW→ELOOP/ENOTDIR=symlink；ENOENT=missing；同 fd fstat 非常规=not-regular；64KB 循环读超限即刻 too-large；resolveWithinRoots 根绝对+sep 整段边界） | ws-support.test safe-open 5 it（兄弟前缀拒/symlink/目录拒/too-large/闭环） | ✅ |
 | **变异十二组（M-240 基线 09932d0+6f31a81）** | M-a1 token 门→2 挂/M-a2 Origin→1 挂/M-a3 窗口（首版存活→补 helloMaxFrames=1 例击杀）/M-a4 撤销→1 挂/M-c1 形状门（首版存活→补非法名例击杀）/**M-c1b root 门存活=防御层**（FILE_RE 句法上限定单段名，无路径可越界——真执行面=openSafeFile O_NOFOLLOW，如实披露）/M-c2b 4409 通知→1 挂/M-c3 八限→1 挂/M-d1 no-evidence reason→1 挂/M-d2 idle→1 挂/M-d3 lifetime→1 挂/M-d4 dup→1 挂/M-d5 4429→1 挂 | ✅（11 杀+1 防御层） |
+| **w1 修复轮（48/100 十二必修全落；基线 44079a3+de715b3，变异 446af2c）** | W1-01 校验器单入口+错误矩阵（4403→close 1003/4405→1008/4404 计 3→1002；ping 无 requestId；requestId 安全回显仅已验形状；golden 同帧喂校验器与网关）/W1-02 认证截止独立 timer+握手滑窗限速（默认 10/min）+准入 16 连接（超→close 1013）+默认单调时钟/W1-03 在途双计数（send 回调兑现才还帧/字节）+cancelBySubscription/W1-04 HistorySourcePort 数据入口（load+observe→syncIndex 前缀/换流+schedulePump 排空泵；页完成/追平补泵两补强）/W1-05 原子切换（失败不退旧；成功通知 stream-replaced:${oldId} 撤旧帧）/W1-06 evidenceHash= snapshotEvidenceHash(snap) 入 adapter+请求 hash 门（旧 hash→4409 evidence-changed）/W1-07 断开取消排队任务（queued 即归零+grant 后存活复核）/W1-08 审计隔离（gateway safeAudit+token-auth auditFn）/W1-09 O_NONBLOCK（FIFO 立即拒 not-regular 不挂起）/W1-10 opendir 流式枚举+visitCap+保守 total/W1-11 listVersion=目录内容指纹（静态跨请求稳定，新文件才递增）/W1-12 ISO 时间戳+entryCount=header 外全部可解析行 | ws-gateway.test 28 it+ws-support.test 28 it（新增 FIFO/ISO/在途双计数+槽归还三例） | ✅ |
+| **w1 修复轮变异（M-240 基线 de715b3）** | M-01 删 4403→close1003→挂/M-02 认证截止停用→挂/M-03 在途不计数→挂（ws-support）/M-04 数据入口空装载→挂/M-05 替换通知去旧 subId→挂/M-06 hash 恒零→挂/M-07b 传输关闭不取消→挂（D22 强化：排队即归零+provider 不被死任务调用；**closeConn 副本同代码为纵深防御，未单独杀**）/M-08 审计不隔离→挂/M-09 去 O_NONBLOCK→挂（FIFO 例）/M-11 版本无条件递增→挂/M-12 ISO 分支禁用→挂 | ✅（11 杀，07 副本披露） |
 | **真网络传输（ws 库 socket/真实 backpressure/Origin header/TLS）** | 归 3b 真网络分片（w0 对齐：3a 通过措辞=「受控 WS 接线通过」） | 🔴 3b |
