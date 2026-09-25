@@ -141,9 +141,10 @@ describe("idle-reaper（闲置回收受控面）", () => {
     h.reaper.tick(); // 触发（挂起）
     expect(h.retireCalls()).toBe(1);
     h.setNow(1_500);
-    h.reaper.tick(); // reaping 中跳过
+    h.reaper.tick(); // reaping 中跳过（不得重设起点——idle-timer-start 审计恰一条）
     h.reaper.tick();
     expect(h.retireCalls()).toBe(1);
+    expect(h.calls.filter((l) => l.includes("idle-timer-start"))).toHaveLength(1); // M-c 落点：防重入期无新起点
     h.release();
     await new Promise((r) => setTimeout(r, 0));
     h.setNow(2_000);
@@ -152,23 +153,32 @@ describe("idle-reaper（闲置回收受控面）", () => {
     expect(h.calls).toContain("idle-reap-done kind=confirmed");
   });
 
-  it("时钟非有限不推进（不触发也不清零）", () => {
+  it("时钟非有限不推进（不设起点不触发）；恢复有限后从新起点计", () => {
     const h = makeDeps();
     h.reaper.tick(); // since=1000
     const broken = Number.NaN;
     // 构造非有限 now：独立小构造
     const registry = new MapRegistry();
+    const lines: string[] = [];
     let calls = 0;
+    let nowN: number = broken;
     const reaper = new IdleReaper({
       supervisor: { getState: () => ({ generation: 1, phase: "running" }), retireCurrentGraceful: async () => { calls += 1; return { kind: "confirmed" }; } },
       isSessionIdle: () => true,
       registry,
-      now: () => broken,
+      now: () => nowN,
+      audit: (l) => lines.push(l),
       idleMs: 100,
     });
-    reaper.tick(); // NaN→不设起点
+    reaper.tick(); // NaN→不设起点（也无 idle-timer-start 审计——可观测差异，M-a 落点）
     reaper.tick();
     expect(calls).toBe(0);
+    expect(lines).toEqual([]);
+    nowN = 5_000; // 时钟恢复有限
+    reaper.tick(); // 新起点
+    nowN = 5_101;
+    reaper.tick(); // 到期触发
+    expect(calls).toBe(1);
     void h;
   });
 
