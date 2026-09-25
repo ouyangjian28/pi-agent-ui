@@ -6,32 +6,46 @@
 // （PEM/env/Bearer/AKIA/ssh-rsa/含 userinfo 的 URL），最后才跑泛路径规则。
 // 理由：env 值（API_KEY=abcd/efgh/ijkl）与 ssh 公钥（base64 含 /）会被先行的
 // 路径规则撕碎中段，留下残缺形态既泄漏又破坏后续识别（GPT 实测探针）。
+//
+// B07（3b2a 修复轮）：所有内部量词一律有界。无界贪婪类（\w*、[a-z0-9+.-]*、\S+）
+// 在无锚字面（=、://、@、\\）文本上吃到串尾后逐字符回溯，每起点 O(n)、全程
+// O(n²)；65KiB 无分隔符文本实测 ③⑦⑧三条各 ~3s（V8 无占有量词，Node 24
+// `\w*+` 报 Nothing to repeat）。有界=每起点回溯步数封顶 → 总线性。
+// 语义边界（如实声明；预览 limit 200/title 80 下界外字符不可见；machineId
+// 超界输入本就走哈希映射）：
+//   - env 键名 >128 字符：遮蔽从「能触及 = 的最早起点」开始，键名前缀透出（值恒遮）
+//   - URL scheme >32 字符：遮蔽起点后移到 scheme 第 len-32 字符起（scheme 前缀透出，
+//     其余仍遮——RFC 3986 注册 scheme 均 ≤32，界内语义全保）
+//   - userinfo/host >256、URL 全长 >1024：⑦降级⑧整体遮 scheme:[url]；⑧只遮前 1024
+//   - 路径段 >255 字符或 >32 段：超段路径另起匹配分段遮（[path][path] 拼接，
+//     全跨度仍被遮）；超长单段不遮；Windows 路径 >255 只遮前 255
+//   - PEM 标签 >255、Bearer 后空白 >64：不匹配（现实形态均远低于界）
 import type { SanitizedText } from "./contracts.ts";
 
 // --- 形态替换规则（顺序敏感：完整语义单元 → 泛形态） ---
 const SECRET_REPLACEMENTS: readonly { readonly re: RegExp; readonly out: string }[] = [
   // ① PEM 整块（任意大写标签：PRIVATE KEY/CERTIFICATE/…；含多行正文）→ 整块遮蔽
-  { re: /-----BEGIN [A-Z0-9 ]+-----[\s\S]*?-----END [A-Z0-9 ]+-----/g, out: "[secret]" },
+  { re: /-----BEGIN [A-Z0-9 ]{1,255}-----[\s\S]*?-----END [A-Z0-9 ]{1,255}-----/g, out: "[secret]" },
   // ② 截断 PEM（有 BEGIN 无 END）→ 遮到末尾，正文不泄漏
-  { re: /-----BEGIN [A-Z0-9 ]+-----[\s\S]*$/g, out: "[truncated-secret]" },
+  { re: /-----BEGIN [A-Z0-9 ]{1,255}-----[\s\S]*$/g, out: "[truncated-secret]" },
   // ③ env 赋值（完整键值单元；值可为带 / 的路径形态——先于路径规则防撕碎）
-  { re: /[A-Za-z_]\w*=(?:"[^\n"]{4,}"|[\w./-]{8,})/g, out: "[env]" },
+  { re: /[A-Za-z_]\w{0,127}=(?:"[^\n"]{4,}"|[\w./-]{8,})/g, out: "[env]" },
   // ④ Bearer 凭据（整 token）
-  { re: /Bearer\s+\S+/gi, out: "[token]" },
+  { re: /Bearer\s{1,64}\S+/gi, out: "[token]" },
   // ⑤ AWS AKIA 形态
   { re: /AKIA[0-9A-Z]{16}/g, out: "[secret]" },
   // ⑥ ssh 公钥（base64 可含 / 与 + ——先于路径规则防撕碎）
   { re: /ssh-rsa AAAA[0-9A-Za-z+/=]{32,}/g, out: "[secret]" },
   // ⑦ 含 userinfo 的 URL：整条遮蔽（带凭据 URL 比裸 URL 更敏感，不保留 scheme）
-  { re: /[a-z][a-z0-9+.-]*:\/\/\S+@\S+/gi, out: "[url]" },
+  { re: /[a-z][\w+.-]{0,31}:\/\/\S{1,256}@\S{1,256}/gi, out: "[url]" },
   // ⑧ URL 整体（scheme://…）：保留 scheme，余下全部遮蔽（host+路径均保守）
-  { re: /([a-z][a-z0-9+.-]*):\/\/\S+/gi, out: "$1:[url]" },
+  { re: /([a-z][\w+.-]{0,31}):\/\/\S{1,1024}/gi, out: "$1:[url]" },
   // ⑨ POSIX 绝对路径 ≥2 段（段内容=非空白/非引号/非尖括号/非管道；含中文）。
   //    (?<!:) 排除 URL 的 //host 形态；单段如 /secret = 命名性内容，声明允许透出。
-  { re: /(?<!:)(?:\/[^\s"'>|\\]+){2,}\/?/g, out: "[path]" },
+  { re: /(?<!:)(?:\/[^\s"'>|\\]{1,255}){2,32}\/?/g, out: "[path]" },
   // ⑩ Windows 盘符绝对路径 / UNC
-  { re: /[A-Za-z]:\\[^\s"<>|]+/g, out: "[path]" },
-  { re: /\\\\[\w.-]+\\[^\s"]+/g, out: "[path]" },
+  { re: /[A-Za-z]:\\[^\s"<>|]{1,255}/g, out: "[path]" },
+  { re: /\\\\[\w.-]{1,255}\\[^\s"]{1,255}/g, out: "[path]" },
 ];
 
 // --- 不安全字符集（精确 Unicode 集合；存在→整段替换） ---

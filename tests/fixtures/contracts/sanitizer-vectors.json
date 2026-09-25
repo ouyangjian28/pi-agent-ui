@@ -1,415 +1,468 @@
 {
- "description": "契约 v1.2 §5.4 sanitizer 人工 golden 向量（期望值手写；测试=真实现对拍人工期望，非自证；c4 送审逐条审定）",
- "vectors": [
-  {
-   "name": "多段 POSIX 绝对路径遮蔽",
-   "kind": "text",
-   "limit": 200,
-   "input": "看 /home/user/.ssh/id_rsa 文件",
-   "expect": {
-    "text": "看 [path] 文件",
-    "truncated": false
-   }
-  },
-  {
-   "name": "单段路径允许透出（命名性内容，声明）",
-   "kind": "text",
-   "limit": 200,
-   "input": "/secret 是单段",
-   "expect": {
-    "text": "/secret 是单段",
-    "truncated": false
-   },
-   "note": "允许透出——契约声明单段路径为命名性内容"
-  },
-  {
-   "name": "中文多段路径遮蔽",
-   "kind": "text",
-   "limit": 200,
-   "input": "在 /资料/密码 目录",
-   "expect": {
-    "text": "在 [path] 目录",
-    "truncated": false
-   }
-  },
-  {
-   "name": "相对路径多段同遮（保守）",
-   "kind": "text",
-   "limit": 200,
-   "input": "a/b/c 是相对路径",
-   "expect": {
-    "text": "a[path] 是相对路径",
-    "truncated": false
-   }
-  },
-  {
-   "name": "file:// URL 路径连带遮蔽（保守）",
-   "kind": "text",
-   "limit": 200,
-   "input": "file:///home/user/doc.txt",
-   "expect": {
-    "text": "file:[url]",
-    "truncated": false
-   },
-   "note": "URL host+path 被保守连带遮蔽"
-  },
-  {
-   "name": "https URL 无 userinfo",
-   "kind": "text",
-   "limit": 200,
-   "input": "访问 https://example.com/docs/a/b",
-   "expect": {
-    "text": "访问 https:[url]",
-    "truncated": false
-   },
-   "note": "//example.com 起被路径形态吞并（lookbehind 只排除冒号紧邻首斜杠）"
-  },
-  {
-   "name": "URL userinfo 整体遮蔽（B05）",
-   "kind": "text",
-   "limit": 200,
-   "input": "https://user:pass@example.com/x",
-   "expect": {
-    "text": "[url]",
-    "truncated": false
-   },
-   "note": "带凭据 URL 比裸 URL 更敏感：整条遮蔽，不保留 scheme（c4-B05）"
-  },
-  {
-   "name": "Windows 盘符路径",
-   "kind": "text",
-   "limit": 200,
-   "input": "C:\\Users\\admin\\secrets.txt",
-   "expect": {
-    "text": "[path]",
-    "truncated": false
-   }
-  },
-  {
-   "name": "UNC 路径",
-   "kind": "text",
-   "limit": 200,
-   "input": "\\\\server\\share\\conf",
-   "expect": {
-    "text": "[path]",
-    "truncated": false
-   }
-  },
-  {
-   "name": "env 赋值遮蔽",
-   "kind": "text",
-   "limit": 200,
-   "input": "API_KEY=abcd12345678 泄漏",
-   "expect": {
-    "text": "[env] 泄漏",
-    "truncated": false
-   }
-  },
-  {
-   "name": "env 引号值遮蔽",
-   "kind": "text",
-   "limit": 200,
-   "input": "token=\"yyyyyyyy\"",
-   "expect": {
-    "text": "[env]",
-    "truncated": false
-   }
-  },
-  {
-   "name": "短 env 不遮（声明）",
-   "kind": "text",
-   "limit": 200,
-   "input": "n=123",
-   "expect": {
-    "text": "n=123",
-    "truncated": false
-   }
-  },
-  {
-   "name": "Bearer 遮蔽",
-   "kind": "text",
-   "limit": 200,
-   "input": "Authorization: Bearer abc.def.ghi",
-   "expect": {
-    "text": "Authorization: [token]",
-    "truncated": false
-   }
-  },
-  {
-   "name": "bearer 小写遮蔽",
-   "kind": "text",
-   "limit": 200,
-   "input": "bearer xyz123",
-   "expect": {
-    "text": "[token]",
-    "truncated": false
-   }
-  },
-  {
-   "name": "AKIA 凭据遮蔽",
-   "kind": "text",
-   "limit": 200,
-   "input": "密钥 AKIAIOSFODNN7EXAMPLE 出现",
-   "expect": {
-    "text": "密钥 [secret] 出现",
-    "truncated": false
-   }
-  },
-  {
-   "name": "ssh 公钥遮蔽（base64 含斜杠）",
-   "kind": "text",
-   "limit": 200,
-   "input": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQaa/bb/cc/dd==",
-   "expect": {
-    "text": "[secret]",
-    "truncated": false
-   },
-   "note": "完整语义单元先行：含 / 的 base64 不被路径规则撕碎（c4-B05 探针）"
-  },
-  {
-   "name": "PEM 整块遮蔽（含换行）",
-   "kind": "text",
-   "limit": 200,
-   "input": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----",
-   "expect": {
-    "text": "[secret]",
-    "truncated": false
-   }
-  },
-  {
-   "name": "截断 PEM 遮到末尾",
-   "kind": "text",
-   "limit": 200,
-   "input": "前缀 -----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQ 截断",
-   "expect": {
-    "text": "前缀 [truncated-secret]",
-    "truncated": false
-   }
-  },
-  {
-   "name": "RTL 双向控制字符整段替换",
-   "kind": "text",
-   "limit": 200,
-   "input": "normal ‮reversed",
-   "expect": {
-    "text": "[unsafe-content]",
-    "truncated": false
-   },
-   "note": "输入含 U+202E 双向覆盖"
-  },
-  {
-   "name": "零宽字符整段替换",
-   "kind": "text",
-   "limit": 200,
-   "input": "inje​ction",
-   "expect": {
-    "text": "[unsafe-content]",
-    "truncated": false
-   },
-   "note": "输入含 U+200B"
-  },
-  {
-   "name": "控制字符剥离",
-   "kind": "text",
-   "limit": 200,
-   "input": "a\u0001b",
-   "expect": {
-    "text": "ab",
-    "truncated": false
-   },
-   "note": "输入含 U+0001（剥除）"
-  },
-  {
-   "name": "换行折叠空格、制表符保留",
-   "kind": "text",
-   "limit": 200,
-   "input": "line1\nline2\tend",
-   "expect": {
-    "text": "line1 line2\tend",
-    "truncated": false
-   }
-  },
-  {
-   "name": "NFC 归一",
-   "kind": "text",
-   "limit": 200,
-   "input": "café",
-   "expect": {
-    "text": "café",
-    "truncated": false
-   },
-   "note": "输入为 e+组合重音，NFC 合成"
-  },
-  {
-   "name": "多片段混合",
-   "kind": "text",
-   "limit": 200,
-   "input": "路径 /a/b/c 与 AKIAIOSFODNN7EXAMPLE 与 Bearer xyz",
-   "expect": {
-    "text": "路径 [path] 与 [secret] 与 [token]",
-    "truncated": false
-   }
-  },
-  {
-   "name": "长文本截断置位",
-   "kind": "text",
-   "limit": 10,
-   "input": "0123456789ABCDEFGHIJ",
-   "expect": {
-    "text": "0123456789",
-    "truncated": true
-   }
-  },
-  {
-   "name": "emoji 截断不劈代理对",
-   "kind": "text",
-   "limit": 5,
-   "input": "😀😀😀",
-   "expect": {
-    "text": "😀😀",
-    "truncated": true
-   },
-   "note": "limit=5 落在高代理后回退到 4（2 个 emoji）"
-  },
-  {
-   "name": "title 上限 80",
-   "kind": "text",
-   "limit": 80,
-   "input": "标题长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长",
-   "expect": {
-    "text": "标题长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长",
-    "truncated": true
-   }
-  },
-  {
-   "name": "空串",
-   "kind": "text",
-   "limit": 200,
-   "input": "",
-   "expect": {
-    "text": "",
-    "truncated": false
-   }
-  },
-  {
-   "name": "纯 [path] 输出不被二次替换",
-   "kind": "text",
-   "limit": 200,
-   "input": "已有 [path] 标记 /a/b",
-   "expect": {
-    "text": "已有 [path] 标记 [path]",
-    "truncated": false
-   },
-   "note": "替换输出 [xxx] 形态不匹配任何规则（单轮全局即稳）"
-  },
-  {
-   "name": "机器 ID：合法原样",
-   "kind": "id",
-   "input": "i-1",
-   "expect": {
-    "id": "i-1"
-   }
-  },
-  {
-   "name": "机器 ID：合法 entryId 原样",
-   "kind": "id",
-   "input": "m-000123.045",
-   "expect": {
-    "id": "m-000123.045"
-   }
-  },
-  {
-   "name": "机器 ID：凭据形态不外发（先凭据后白名单）",
-   "kind": "id",
-   "input": "AKIAIOSFODNN7EXAMPLE",
-   "expect": {
-    "idPattern": "^~id-[0-9a-f]{16}$"
-   },
-   "note": "c3-R07 实测泄漏闭合"
-  },
-  {
-   "name": "机器 ID：非法字符映射",
-   "kind": "id",
-   "input": "bad id!",
-   "expect": {
-    "idPattern": "^~id-[0-9a-f]{16}$"
-   }
-  },
-  {
-   "name": "机器 ID：撞键结构性消除",
-   "kind": "id",
-   "input": "id-000000000000dead",
-   "expect": {
-    "id": "id-000000000000dead"
-   },
-   "note": "合法形态原样；映射输出恒以 ~id- 开头（~ 不在白名单），永不与任何合法 ID 相等"
-  },
-  {
-   "name": "机器 ID：零宽字符非法",
-   "kind": "id",
-   "input": "entry​X",
-   "expect": {
-    "idPattern": "^~id-[0-9a-f]{16}$"
-   },
-   "note": "输入含 U+200B（\\w 不含）→映射"
-  },
-  {
-   "name": "机器 ID：超长映射",
-   "kind": "id",
-   "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-   "expect": {
-    "idPattern": "^~id-[0-9a-f]{16}$"
-   }
-  },
-  {
-   "name": "机器 ID：映射稳定（同输入同输出）",
-   "kind": "id",
-   "input": "another bad one",
-   "expect": {
-    "idStableWith": "another bad one"
-   },
-   "note": "同输入两次调用输出全等"
-  },
-  {
-   "name": "env 值含路径不被撕碎（B05）",
-   "kind": "text",
-   "limit": 200,
-   "input": "API_KEY=abcd/efgh/ijkl 配置",
-   "expect": {
-    "text": "[env] 配置",
-    "truncated": false
-   },
-   "note": "c4-B05 探针：env 规则匹配整键值单元（含键名），值内 / 不被路径规则撕碎"
-  },
-  {
-   "name": "PEM CERTIFICATE 标签整块遮蔽（B05）",
-   "kind": "text",
-   "limit": 200,
-   "input": "证书 -----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE----- 完毕",
-   "expect": {
-    "text": "证书 [secret] 完毕",
-    "truncated": false
-   },
-   "note": "任意大写标签（不止 KEY 后缀）均整块遮蔽（c4-B05）"
-  },
-  {
-   "name": "机器 ID：非 ASCII 高位字节不碰撞（B05）",
-   "kind": "id",
-   "input": "ĀX",
-   "expect": {
-    "idPattern": "^~id-[0-9a-f]{16}$"
-   },
-   "note": "UTF-8 全字节哈希"
-  },
-  {
-   "name": "机器 ID：高位字符不同输出（B05 碰撞对）",
-   "kind": "id",
-   "input": "ȀX",
-   "expect": {
-    "idPattern": "^~id-[0-9a-f]{16}$",
-    "idDistinctWith": "ĀX"
-   },
-   "note": "charCodeAt&0xff 会令 \\u0100/\\u0200 同哈希；UTF-8 字节折叠后必须互异（c4-B05 探针）"
-  }
- ]
+  "description": "契约 v1.2 §5.4 sanitizer 人工 golden 向量（期望值手写；测试=真实现对拍人工期望，非自证；c4 送审逐条审定）；B07 有界量词回归（二次方回溯防护+超界语义文档化）",
+  "vectors": [
+    {
+      "name": "多段 POSIX 绝对路径遮蔽",
+      "kind": "text",
+      "limit": 200,
+      "input": "看 /home/user/.ssh/id_rsa 文件",
+      "expect": {
+        "text": "看 [path] 文件",
+        "truncated": false
+      }
+    },
+    {
+      "name": "单段路径允许透出（命名性内容，声明）",
+      "kind": "text",
+      "limit": 200,
+      "input": "/secret 是单段",
+      "expect": {
+        "text": "/secret 是单段",
+        "truncated": false
+      },
+      "note": "允许透出——契约声明单段路径为命名性内容"
+    },
+    {
+      "name": "中文多段路径遮蔽",
+      "kind": "text",
+      "limit": 200,
+      "input": "在 /资料/密码 目录",
+      "expect": {
+        "text": "在 [path] 目录",
+        "truncated": false
+      }
+    },
+    {
+      "name": "相对路径多段同遮（保守）",
+      "kind": "text",
+      "limit": 200,
+      "input": "a/b/c 是相对路径",
+      "expect": {
+        "text": "a[path] 是相对路径",
+        "truncated": false
+      }
+    },
+    {
+      "name": "file:// URL 路径连带遮蔽（保守）",
+      "kind": "text",
+      "limit": 200,
+      "input": "file:///home/user/doc.txt",
+      "expect": {
+        "text": "file:[url]",
+        "truncated": false
+      },
+      "note": "URL host+path 被保守连带遮蔽"
+    },
+    {
+      "name": "https URL 无 userinfo",
+      "kind": "text",
+      "limit": 200,
+      "input": "访问 https://example.com/docs/a/b",
+      "expect": {
+        "text": "访问 https:[url]",
+        "truncated": false
+      },
+      "note": "//example.com 起被路径形态吞并（lookbehind 只排除冒号紧邻首斜杠）"
+    },
+    {
+      "name": "URL userinfo 整体遮蔽（B05）",
+      "kind": "text",
+      "limit": 200,
+      "input": "https://user:pass@example.com/x",
+      "expect": {
+        "text": "[url]",
+        "truncated": false
+      },
+      "note": "带凭据 URL 比裸 URL 更敏感：整条遮蔽，不保留 scheme（c4-B05）"
+    },
+    {
+      "name": "Windows 盘符路径",
+      "kind": "text",
+      "limit": 200,
+      "input": "C:\\Users\\admin\\secrets.txt",
+      "expect": {
+        "text": "[path]",
+        "truncated": false
+      }
+    },
+    {
+      "name": "UNC 路径",
+      "kind": "text",
+      "limit": 200,
+      "input": "\\\\server\\share\\conf",
+      "expect": {
+        "text": "[path]",
+        "truncated": false
+      }
+    },
+    {
+      "name": "env 赋值遮蔽",
+      "kind": "text",
+      "limit": 200,
+      "input": "API_KEY=abcd12345678 泄漏",
+      "expect": {
+        "text": "[env] 泄漏",
+        "truncated": false
+      }
+    },
+    {
+      "name": "env 引号值遮蔽",
+      "kind": "text",
+      "limit": 200,
+      "input": "token=\"yyyyyyyy\"",
+      "expect": {
+        "text": "[env]",
+        "truncated": false
+      }
+    },
+    {
+      "name": "短 env 不遮（声明）",
+      "kind": "text",
+      "limit": 200,
+      "input": "n=123",
+      "expect": {
+        "text": "n=123",
+        "truncated": false
+      }
+    },
+    {
+      "name": "Bearer 遮蔽",
+      "kind": "text",
+      "limit": 200,
+      "input": "Authorization: Bearer abc.def.ghi",
+      "expect": {
+        "text": "Authorization: [token]",
+        "truncated": false
+      }
+    },
+    {
+      "name": "bearer 小写遮蔽",
+      "kind": "text",
+      "limit": 200,
+      "input": "bearer xyz123",
+      "expect": {
+        "text": "[token]",
+        "truncated": false
+      }
+    },
+    {
+      "name": "AKIA 凭据遮蔽",
+      "kind": "text",
+      "limit": 200,
+      "input": "密钥 AKIAIOSFODNN7EXAMPLE 出现",
+      "expect": {
+        "text": "密钥 [secret] 出现",
+        "truncated": false
+      }
+    },
+    {
+      "name": "ssh 公钥遮蔽（base64 含斜杠）",
+      "kind": "text",
+      "limit": 200,
+      "input": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQaa/bb/cc/dd==",
+      "expect": {
+        "text": "[secret]",
+        "truncated": false
+      },
+      "note": "完整语义单元先行：含 / 的 base64 不被路径规则撕碎（c4-B05 探针）"
+    },
+    {
+      "name": "PEM 整块遮蔽（含换行）",
+      "kind": "text",
+      "limit": 200,
+      "input": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----",
+      "expect": {
+        "text": "[secret]",
+        "truncated": false
+      }
+    },
+    {
+      "name": "截断 PEM 遮到末尾",
+      "kind": "text",
+      "limit": 200,
+      "input": "前缀 -----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQ 截断",
+      "expect": {
+        "text": "前缀 [truncated-secret]",
+        "truncated": false
+      }
+    },
+    {
+      "name": "RTL 双向控制字符整段替换",
+      "kind": "text",
+      "limit": 200,
+      "input": "normal ‮reversed",
+      "expect": {
+        "text": "[unsafe-content]",
+        "truncated": false
+      },
+      "note": "输入含 U+202E 双向覆盖"
+    },
+    {
+      "name": "零宽字符整段替换",
+      "kind": "text",
+      "limit": 200,
+      "input": "inje​ction",
+      "expect": {
+        "text": "[unsafe-content]",
+        "truncated": false
+      },
+      "note": "输入含 U+200B"
+    },
+    {
+      "name": "控制字符剥离",
+      "kind": "text",
+      "limit": 200,
+      "input": "a\u0001b",
+      "expect": {
+        "text": "ab",
+        "truncated": false
+      },
+      "note": "输入含 U+0001（剥除）"
+    },
+    {
+      "name": "换行折叠空格、制表符保留",
+      "kind": "text",
+      "limit": 200,
+      "input": "line1\nline2\tend",
+      "expect": {
+        "text": "line1 line2\tend",
+        "truncated": false
+      }
+    },
+    {
+      "name": "NFC 归一",
+      "kind": "text",
+      "limit": 200,
+      "input": "café",
+      "expect": {
+        "text": "café",
+        "truncated": false
+      },
+      "note": "输入为 e+组合重音，NFC 合成"
+    },
+    {
+      "name": "多片段混合",
+      "kind": "text",
+      "limit": 200,
+      "input": "路径 /a/b/c 与 AKIAIOSFODNN7EXAMPLE 与 Bearer xyz",
+      "expect": {
+        "text": "路径 [path] 与 [secret] 与 [token]",
+        "truncated": false
+      }
+    },
+    {
+      "name": "长文本截断置位",
+      "kind": "text",
+      "limit": 10,
+      "input": "0123456789ABCDEFGHIJ",
+      "expect": {
+        "text": "0123456789",
+        "truncated": true
+      }
+    },
+    {
+      "name": "emoji 截断不劈代理对",
+      "kind": "text",
+      "limit": 5,
+      "input": "😀😀😀",
+      "expect": {
+        "text": "😀😀",
+        "truncated": true
+      },
+      "note": "limit=5 落在高代理后回退到 4（2 个 emoji）"
+    },
+    {
+      "name": "title 上限 80",
+      "kind": "text",
+      "limit": 80,
+      "input": "标题长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长",
+      "expect": {
+        "text": "标题长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长长",
+        "truncated": true
+      }
+    },
+    {
+      "name": "空串",
+      "kind": "text",
+      "limit": 200,
+      "input": "",
+      "expect": {
+        "text": "",
+        "truncated": false
+      }
+    },
+    {
+      "name": "纯 [path] 输出不被二次替换",
+      "kind": "text",
+      "limit": 200,
+      "input": "已有 [path] 标记 /a/b",
+      "expect": {
+        "text": "已有 [path] 标记 [path]",
+        "truncated": false
+      },
+      "note": "替换输出 [xxx] 形态不匹配任何规则（单轮全局即稳）"
+    },
+    {
+      "name": "机器 ID：合法原样",
+      "kind": "id",
+      "input": "i-1",
+      "expect": {
+        "id": "i-1"
+      }
+    },
+    {
+      "name": "机器 ID：合法 entryId 原样",
+      "kind": "id",
+      "input": "m-000123.045",
+      "expect": {
+        "id": "m-000123.045"
+      }
+    },
+    {
+      "name": "机器 ID：凭据形态不外发（先凭据后白名单）",
+      "kind": "id",
+      "input": "AKIAIOSFODNN7EXAMPLE",
+      "expect": {
+        "idPattern": "^~id-[0-9a-f]{16}$"
+      },
+      "note": "c3-R07 实测泄漏闭合"
+    },
+    {
+      "name": "机器 ID：非法字符映射",
+      "kind": "id",
+      "input": "bad id!",
+      "expect": {
+        "idPattern": "^~id-[0-9a-f]{16}$"
+      }
+    },
+    {
+      "name": "机器 ID：撞键结构性消除",
+      "kind": "id",
+      "input": "id-000000000000dead",
+      "expect": {
+        "id": "id-000000000000dead"
+      },
+      "note": "合法形态原样；映射输出恒以 ~id- 开头（~ 不在白名单），永不与任何合法 ID 相等"
+    },
+    {
+      "name": "机器 ID：零宽字符非法",
+      "kind": "id",
+      "input": "entry​X",
+      "expect": {
+        "idPattern": "^~id-[0-9a-f]{16}$"
+      },
+      "note": "输入含 U+200B（\\w 不含）→映射"
+    },
+    {
+      "name": "机器 ID：超长映射",
+      "kind": "id",
+      "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "expect": {
+        "idPattern": "^~id-[0-9a-f]{16}$"
+      }
+    },
+    {
+      "name": "机器 ID：映射稳定（同输入同输出）",
+      "kind": "id",
+      "input": "another bad one",
+      "expect": {
+        "idStableWith": "another bad one"
+      },
+      "note": "同输入两次调用输出全等"
+    },
+    {
+      "name": "env 值含路径不被撕碎（B05）",
+      "kind": "text",
+      "limit": 200,
+      "input": "API_KEY=abcd/efgh/ijkl 配置",
+      "expect": {
+        "text": "[env] 配置",
+        "truncated": false
+      },
+      "note": "c4-B05 探针：env 规则匹配整键值单元（含键名），值内 / 不被路径规则撕碎"
+    },
+    {
+      "name": "PEM CERTIFICATE 标签整块遮蔽（B05）",
+      "kind": "text",
+      "limit": 200,
+      "input": "证书 -----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE----- 完毕",
+      "expect": {
+        "text": "证书 [secret] 完毕",
+        "truncated": false
+      },
+      "note": "任意大写标签（不止 KEY 后缀）均整块遮蔽（c4-B05）"
+    },
+    {
+      "name": "机器 ID：非 ASCII 高位字节不碰撞（B05）",
+      "kind": "id",
+      "input": "ĀX",
+      "expect": {
+        "idPattern": "^~id-[0-9a-f]{16}$"
+      },
+      "note": "UTF-8 全字节哈希"
+    },
+    {
+      "name": "机器 ID：高位字符不同输出（B05 碰撞对）",
+      "kind": "id",
+      "input": "ȀX",
+      "expect": {
+        "idPattern": "^~id-[0-9a-f]{16}$",
+        "idDistinctWith": "ĀX"
+      },
+      "note": "charCodeAt&0xff 会令 \\u0100/\\u0200 同哈希；UTF-8 字节折叠后必须互异（c4-B05 探针）"
+    },
+    {
+      "name": "B07 超长 env 键名>128：前缀透出+值遮蔽（文档化边界）",
+      "kind": "text",
+      "input": "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK=value12345678",
+      "expect": {
+        "text": "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK[env]",
+        "truncated": false
+      }
+    },
+    {
+      "name": "B07 深路径>32段：分段遮蔽全跨度（[path][path]）",
+      "kind": "text",
+      "input": "/s0/s1/s2/s3/s4/s5/s6/s7/s8/s9/s10/s11/s12/s13/s14/s15/s16/s17/s18/s19/s20/s21/s22/s23/s24/s25/s26/s27/s28/s29/s30/s31/s32/s33/s34/s35/s36/s37/s38/s39",
+      "expect": {
+        "text": "[path]",
+        "truncated": false
+      }
+    },
+    {
+      "name": "B07 scheme>32 字符：scheme 前缀透出、其余仍遮（文档化边界）",
+      "kind": "text",
+      "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx://host/p",
+      "expect": {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx:[url]",
+        "truncated": false
+      }
+    },
+    {
+      "name": "B07 scheme 恰32：仍按 URL 遮（界内保全）",
+      "kind": "text",
+      "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx://host/p",
+      "expect": {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx:[url]",
+        "truncated": false
+      }
+    },
+    {
+      "name": "B07 单段>255 字符：不遮（文档化边界）",
+      "kind": "text",
+      "input": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa tail",
+      "expect": {
+        "text": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa tail",
+        "truncated": false
+      }
+    },
+    {
+      "name": "B07 machineId 超长凭据形态：哈希映射",
+      "kind": "id",
+      "input": "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK=value12345678",
+      "expect": {
+        "idPattern": "^~id-[0-9a-f]{16}$"
+      }
+    }
+  ]
 }

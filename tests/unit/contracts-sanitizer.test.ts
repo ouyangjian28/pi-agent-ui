@@ -53,4 +53,19 @@ describe("脱敏向量（人工 golden）", () => {
   it("向量规模 ≥40（契约冻结门）", () => {
     expect(raw.vectors.length).toBeGreaterThanOrEqual(40);
   });
+
+  // B07 二次方回溯防护（性能门）：65KiB 无分隔符文本曾因无界贪婪类回溯实测
+  // 9.3s（env/⑦/⑧ 各 ~3s）；有界量词后 <50ms。500ms 上限留 10 倍余量防环境抖动。
+  it("B07 性能门：65KiB 无分隔符文本 <500ms", () => {
+    const t0 = performance.now();
+    const out = sanitizeText("a".repeat(65270) + "中文", 200);
+    const ms = performance.now() - t0;
+    expect(ms).toBeLessThan(500);
+    expect(out.truncated).toBe(true);
+    expect(out.text.length).toBe(200);
+    const t1 = performance.now();
+    const id = machineId("a".repeat(65270) + "=value12345678");
+    expect(performance.now() - t1).toBeLessThan(500);
+    expect(id).toMatch(/^~id-[0-9a-f]{16}$/); // 超界凭据形态 → 哈希映射不外发
+  });
 });
