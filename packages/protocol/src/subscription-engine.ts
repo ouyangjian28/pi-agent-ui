@@ -23,7 +23,7 @@ import { LIMITS, estimateFrameBytes, estimateHistoryEventBytes } from "./contrac
 import type {
   EventCursor, HistoryEvent, LiveEvent, ServerFrame, SessionStatus, StreamId,
 } from "./contracts.ts";
-import type { ReadIndex } from "./read-index.ts";
+import type { IndexedEvent, ReadIndex } from "./read-index.ts";
 
 export type SubscribeRequest =
   | { readonly kind: "init"; readonly requestId: string }
@@ -33,9 +33,14 @@ export type SubscribeRequest =
 export type Phase = "init" | "paging" | "live" | "closed";
 
 type OutboxItem =
-  | { readonly kind: "frame"; readonly frame: ServerFrame }   // status 等即时帧（编入序锚点）
-  | { readonly kind: "hist"; readonly ev: HistoryEvent }      // 落盘事件（快照后 journal 追加/缓冲回放）
-  | { readonly kind: "live"; readonly ev: LiveEvent };        // 进程内存事件
+  | { readonly kind: "frame"; readonly frame: ServerFrame; readonly est: number } // status 等即时帧（编入序锚点）
+  | { readonly kind: "hist"; readonly ev: HistoryEvent; readonly est: number }    // 落盘事件（快照后 journal 追加/缓冲回放）
+  | { readonly kind: "live"; readonly ev: LiveEvent; readonly est: number };      // 进程内存事件
+
+/** 入队前形态（分布去 est；Omit 对联合不分发会丢判别字段） */
+type WithoutEst<T> = T extends { est: number } ? Omit<T, "est"> : never;
+type OutboxDraft = WithoutEst<OutboxItem>;
+// est=入队时刻固化的字节估算（C6-04：积压计量=当前待发，出队即扣；搬移不重复计）
 
 /** 页缓存（幂等重发）：页内容 + 游标域 + **status 快照**（C5-05：幂等域含 status，
  *  重试不重调 status()——statusVersion 随页冻结）；envelope 每次按新 requestId 重建（B01） */
@@ -99,14 +104,24 @@ export class SubscriptionEngine {
       if (this.expectNext === null && this.d.now() - this.lastPageAt > LIMITS.snapshotTailGraceMs) {
         return [{ t: "error", code: 4409, message: "快照已释放，请按游标续读", retryable: true, requestId: req.requestId }];
       }
-      // 追平补页（C5-05 收紧）：仅 live 态幂等（空页 done）；paging 期 H+1 属超前（跳页）
-      if (cur.seq === this.barrier + 1) {
-        if (this.phase === "live") return [this.emitPage(req.requestId, cur, [], true, this.d.status())];
-        return [{ t: "error", code: 4409, message: "游标超前于本快照进度（分页未完成）", retryable: true, requestId: req.requestId }];
-      }
-      // 幂等：命中最近 2 页缓存→页内容+status 快照复用+新 envelope（不重调 status、不续命 TTL）
+      // 幂等优先（C6-05）：命中最近 2 页缓存→页内容+status 快照复用+新 envelope（不重调 status、不续命 TTL）
       const cached = this.recentPages.find((p) => p.pageFrom.seq === cur.seq);
       if (cached) return [this.emitPage(req.requestId, cur, cached.events, cached.done, cached.status)];
+      // 追平补页（C5-05 收紧+C6-05 幂等）：仅 live 态（空页 done，生成入缓存——重试同 statusVersion）；paging 期 H+1 属超前（跳页）
+      if (cur.seq === this.barrier + 1) {
+        if (this.phase === "live") {
+          const status = this.d.status(); // 首次生成冻结（C6-05）；重试走上方缓存分支
+          const empty: PageCache = { pageFrom: { streamId: this.streamId, seq: cur.seq }, barrier: this.barrier, events: [], done: true, status };
+          const f = this.emitPage(req.requestId, empty.pageFrom, empty.events, true, status);
+          if ((this.d.estimateFrame ?? estimateFrameBytes)(f) > LIMITS.pageFrameBudgetBytes) {
+            this.close(4431, "事件超预算", false);
+            return [{ t: "error", code: 4431, message: "事件超预算", retryable: false, requestId: req.requestId }];
+          }
+          this.rememberPage(empty);
+          return [f];
+        }
+        return [{ t: "error", code: 4409, message: "游标超前于本快照进度（分页未完成）", retryable: true, requestId: req.requestId }];
+      }
       // 状态门（C5-05 统一）：≠期待下页（未命中缓存）→4409 超前/乱序（可重试）
       if (this.expectNext === null || cur.seq !== this.expectNext.seq || cur.streamId !== this.expectNext.streamId) {
         return [{ t: "error", code: 4409, message: "游标与本快照进度不符", retryable: true, requestId: req.requestId }];
@@ -137,32 +152,46 @@ export class SubscriptionEngine {
     return [{ t: "error", code: 4409, message: "游标超前", retryable: true, requestId }];
   }
 
-  /** 从 cur.seq 起按「整帧字节（信封预留+逐事件+分隔）+条数」双上限装页
-   *  （B04：引擎状态永不超前于已装内容；C5-03：预算域=最终帧大小，非裸事件累计）。 */
+  /** 从 cur.seq 起装页（C6-01：预算域=**最终帧序列化字节**——冻结 status 先取，贪心估算装页，
+   *  整帧 estimateFrameBytes（=JSON.stringify UTF-8 实测）核验，超限收缩末条循环重测；
+   *  引擎状态（expectNext/缓存/相态）在核验通过后才提交。条数上限照旧。 */
   private servePageFrom(requestId: string, from: EventCursor): ServerFrame {
     const est = this.d.estimateEvent ?? estimateHistoryEventBytes;
-    const events: HistoryEvent[] = [];
-    let bytes = LIMITS.envelopeOverheadBytes; // 信封预留（snapshot 帧固定字段+结构开销）
+    const status = this.d.status(); // 冻结先取（C6-01：信封含真实 status，非事后取）
+    const rows: IndexedEvent[] = [];
+    let bytes = LIMITS.envelopeOverheadBytes; // 贪心粗估起点（仅用于快筛；终判=整帧实测）
     let last = from.seq - 1;
-    while (last < this.barrier && events.length < LIMITS.pageMaxEvents) {
+    while (last < this.barrier && rows.length < LIMITS.pageMaxEvents) {
       const next = this.d.index.read(last + 1, 1, this.barrier)[0];
       if (next === undefined) break;
-      const b = est(next.event) + 1; // +1 数组分隔/逗号开销
-      if (bytes + b > LIMITS.pageFrameBudgetBytes) {
-        if (events.length === 0) {
-          // 首条即超整帧预算：无截断/占位规则→显式失败（4431 关订阅，不静默发大帧——C5-03；
-          // 合法投影 ≤32k < 200k 下不可达，防御面）
-          this.close(4431, "事件超预算", true);
-          return { t: "error", code: 4431, message: "事件超预算", retryable: true, requestId };
-        }
-        break; // 装满即止（引擎状态不超前于已装内容）
-      }
-      events.push(next.event); bytes += b; last = next.seq;
+      const b = est(next.event) + 1;
+      if (rows.length > 0 && bytes + b > LIMITS.pageFrameBudgetBytes) break; // 粗估装满即止
+      rows.push(next); bytes += b; last = next.seq;
     }
-    const done = last >= this.barrier;
     const page: EventCursor = { streamId: this.streamId, seq: from.seq };
-    const status = this.d.status(); // 页生成时刻快照（幂等域冻结）
-    const frame = this.emitPage(requestId, page, events, done, status);
+    const measure = this.d.estimateFrame ?? estimateFrameBytes;
+    // 终判循环：整帧实测超页预算→退末条重测（首条不退=显式失败）
+    let events = rows.map((r) => r.event);
+    let done = last >= this.barrier;
+    let frame: ServerFrame | null = null;
+    while (true) {
+      const f = this.emitPage(requestId, page, events, done, status);
+      if (measure(f) <= LIMITS.pageFrameBudgetBytes) { frame = f; break; }
+      if (events.length === 0) {
+        // 首条即超整帧预算：无截断/占位规则→显式失败（4431 关订阅；retryable=false=订阅已亡，恢复=重新订阅）
+        this.close(4431, "事件超预算", false);
+        return { t: "error", code: 4431, message: "事件超预算", retryable: false, requestId };
+      }
+      const dropped = rows.pop()!;
+      events = rows.map((r) => r.event);
+      last = dropped.seq - 1;
+      done = last >= this.barrier;
+    }
+    // 退空仍无成页数据可发（from≤barrier 说明确有待发事件）→首条即超：显式失败（C6-01）
+    if (events.length === 0 && from.seq <= this.barrier) {
+      this.close(4431, "事件超预算", false);
+      return { t: "error", code: 4431, message: "事件超预算", retryable: false, requestId };
+    }
     this.expectNext = done ? null : { streamId: this.streamId, seq: last + 1 };
     this.lastPageAt = this.d.now(); // 固定期限锚点=页生成时刻（C5-05：缓存重试不续命）
     this.rememberPage({ pageFrom: page, barrier: this.barrier, events, done, status });
@@ -195,15 +224,18 @@ export class SubscriptionEngine {
 
   // ---- 服务端事件编入 ----
   /** 内部积压编入（C5-04：条数+字节双门；超限 4431 关订阅——慢客户端语义显式化） */
-  private pushBacklog(queue: OutboxItem[], item: OutboxItem): void {
+  private pushBacklog(queue: OutboxItem[], raw: OutboxDraft): void {
+    const estEv = this.d.estimateEvent ?? estimateHistoryEventBytes;
+    const estFr = this.d.estimateFrame ?? estimateFrameBytes;
+    const b = raw.kind === "frame"
+      ? estFr(raw.frame)
+      : estEv(raw.ev as unknown as HistoryEvent) + 1;
+    const item: OutboxItem = { ...raw, est: b } as OutboxItem; // 入队固化（C6-04：出队扣同一值）
     queue.push(item);
-    const est = this.d.estimateEvent ?? estimateHistoryEventBytes;
-    const b = item.kind === "frame"
-      ? (this.d.estimateFrame ?? estimateFrameBytes)(item.frame)
-      : est(item.ev as unknown as HistoryEvent) + 1;
     this.backlogBytes += b;
     const count = this.buffered.length + this.outbox.length;
     if (count > LIMITS.subscriptionBacklogMax || this.backlogBytes > LIMITS.subscriptionBacklogBytes) {
+      // 恰一份错误：close 清队列后压入唯一 4431 错误帧（drain 取出即客户端收到的唯一通知）
       this.close(4431, "订阅积压超限（慢客户端）", true);
     }
   }
@@ -229,48 +261,60 @@ export class SubscriptionEngine {
     this.pushBacklog(this.phase === "paging" ? this.buffered : this.outbox, { kind: "frame", frame: { t: "status", subscriptionId: this.subscriptionId, status } });
   }
 
-  /** 出队（≤maxFrames 帧；live 合批每帧 ≤maxEventsPerFrame 事件——分立常量，B04） */
+  /** 出队（≤maxFrames 帧；live 合批每帧 ≤maxEventsPerFrame 事件——分立常量，B04）。
+   *  C6-04：积压计量=**当前待发**（出队成功即扣 item.est；unshift 退回不扣；buffered→outbox 搬移不重复计）；
+   *  合批帧构帧后先验字节再提交 liveSeq（未交付不推进序号）；错误出口恰一份（close 不再另排）。 */
   drain(maxFrames: number = LIMITS.liveFramesPerDrain, maxEventsPerFrame: number = LIMITS.maxEventsPerLiveFrame): ServerFrame[] {
     this.purgeExpiredPages();
     const out: ServerFrame[] = [];
     const est = this.d.estimateFrame ?? estimateFrameBytes;
     let histBatch: HistoryEvent[] = [];
+    let liveEst = 0;   // 批内事件字节累计（出队扣减用）
     let liveBatch: LiveEvent[] = [];
-    const flushHist = () => {
+    let failed = false;
+    const overBudget = (): ServerFrame => {
+      failed = true;
+      this.close(4431, "帧超预算", false); // 单一错误出口（C6-04：close 不另排，本帧即返回的那份）
+      return { t: "error", code: 4431, message: "帧超预算", retryable: false, requestId: "" };
+    };
+    const commit = (bytes: number): void => { this.backlogBytes = Math.max(0, this.backlogBytes - bytes); };
+    const flushHist = (batchEst: number): void => {
       if (histBatch.length === 0) return;
       const last = histBatch[histBatch.length - 1]!;
-      out.push({ t: "events", subscriptionId: this.subscriptionId, origin: "history", refSeq: last.seq, events: histBatch });
+      const f: ServerFrame = { t: "events", subscriptionId: this.subscriptionId, origin: "history", refSeq: last.seq, events: histBatch };
+      if (est(f) > LIMITS.frameMaxBytes) { out.push(overBudget()); histBatch = []; return; }
+      out.push(f); commit(batchEst);
       histBatch = [];
     };
-    const flushLive = () => {
+    const flushLive = (): void => {
       if (liveBatch.length === 0) return;
-      this.liveSeq += liveBatch.length;
-      out.push({ t: "events", subscriptionId: this.subscriptionId, origin: "live", liveSeq: this.liveSeq, refSeq: null, events: liveBatch });
-      liveBatch = [];
+      const f: ServerFrame = { t: "events", subscriptionId: this.subscriptionId, origin: "live", liveSeq: this.liveSeq + liveBatch.length, refSeq: null, events: liveBatch };
+      if (est(f) > LIMITS.frameMaxBytes) { out.push(overBudget()); liveBatch = []; liveEst = 0; return; }
+      this.liveSeq += liveBatch.length; // 先验后提交（C6-04：未交付不推进）
+      out.push(f); commit(liveEst);
+      liveBatch = []; liveEst = 0;
     };
-    while (out.length + (histBatch.length > 0 || liveBatch.length > 0 ? 1 : 0) < maxFrames && this.outbox.length > 0) {
+    let histEst = 0;
+    while (!failed && out.length + (histBatch.length > 0 || liveBatch.length > 0 ? 1 : 0) < maxFrames && this.outbox.length > 0) {
       const item = this.outbox.shift()!;
       if (item.kind === "frame") {
-        flushHist(); flushLive(); // 帧前先冲（编入序）
+        flushHist(histEst); flushLive(); histEst = 0; // 帧前先冲（编入序）
+        if (failed) { this.outbox.unshift(item); break; } // 冲批已失败：帧退回队列，错误帧为唯一出口
         if (out.length >= maxFrames) { this.outbox.unshift(item); break; }
-        out.push(item.frame);
+        if (est(item.frame) > LIMITS.frameMaxBytes) { out.push(overBudget()); break; }
+        out.push(item.frame); commit(item.est);
       } else if (item.kind === "hist") {
         if (liveBatch.length > 0) flushLive(); // origin 切换先冲
-        histBatch.push(item.ev);
-        if (histBatch.length >= maxEventsPerFrame) flushHist();
+        histBatch.push(item.ev); histEst += item.est;
+        if (histBatch.length >= maxEventsPerFrame) { flushHist(histEst); histEst = 0; }
       } else {
-        if (histBatch.length > 0) flushHist();
-        liveBatch.push(item.ev);
+        if (histBatch.length > 0) { flushHist(histEst); histEst = 0; }
+        liveBatch.push(item.ev); liveEst += item.est;
         if (liveBatch.length >= maxEventsPerFrame) flushLive();
       }
     }
-    flushHist(); flushLive();
-    if (this.outbox.length === 0 && this.buffered.length === 0) this.backlogBytes = 0; // 队列清空重置计量
-    // 帧预算防御（C5-03：显式失败，不静默丢帧——超限帧存在=关订阅+错误帧；不推进 liveSeq 掩盖）
-    if (out.some((f) => est(f) > LIMITS.frameMaxBytes)) {
-      this.close(4431, "帧超预算", true);
-      return [{ t: "error", code: 4431, message: "帧超预算", retryable: true, requestId: "" }];
-    }
+    if (!failed) { flushHist(histEst); flushLive(); }
+    if (failed) return out; // 唯一错误出口：已成功帧 + 单一 4431 错误帧（overBudget 内已 close，不再补发）
     return out;
   }
 
@@ -288,7 +332,12 @@ export class SubscriptionEngine {
     this.backlogBytes = 0;
     this.recentPages.length = 0;
     this.expectNext = null;
-    if (emitError) this.outbox.push({ kind: "frame", frame: { t: "error", code, message, retryable: false, requestId: "" } });
+    if (emitError) {
+      const frame: ServerFrame = { t: "error", code, message, retryable: false, requestId: "" };
+      const est = (this.d.estimateFrame ?? estimateFrameBytes)(frame);
+      this.outbox.push({ kind: "frame", frame, est });
+      this.backlogBytes = est; // 清零后唯一待发帧（出队即扣回 0）
+    }
   }
 }
 

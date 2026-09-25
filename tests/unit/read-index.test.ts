@@ -87,6 +87,26 @@ describe("读索引不变量（c5 B02）", () => {
     expect(() => reg.get("d.jsonl")).toThrowError(/over budget/);
   });
 
+  it("C6-03：首次触顶换流后——空流/预算内 get 恒放行（不因历史触顶记录误拒）；现流再触顶才拒", () => {
+    const reg = new ReadIndexRegistry(() => `id-${Math.random().toString(16).slice(2, 8)}`, { maxStreams: 2 }, { maxEventsPerStream: 3 });
+    const a = reg.get("a.jsonl");
+    for (let i = 1; i <= 4; i++) a.append("journal", `L${i}`, `L${i}`, ev(i));
+    const a2 = reg.get("a.jsonl"); // 首次触顶→换流（宽容额度消耗）
+    expect(a2.overBudget).toBe(false);
+    // 空流反复 get：恒放行（旧实现第二次 get 即 throw——新流从未被允许填充）
+    expect(reg.get("a.jsonl")).toBe(a2);
+    expect(reg.get("a.jsonl")).toBe(a2);
+    // 预算内填充照常
+    a2.append("journal", "L1", "L1", ev(1));
+    expect(reg.get("a.jsonl").overBudget).toBe(false);
+    // 现流再触顶（额度已用）→拒绝（有限出口不变）
+    a2.append("journal", "L2", "L2", ev(2));
+    a2.append("journal", "L3", "L3", ev(3));
+    a2.append("journal", "L4", "L4", ev(4));
+    expect(a2.overBudget).toBe(true);
+    expect(() => reg.get("a.jsonl")).toThrowError(/over budget/);
+  });
+
   it("boot 默认流 ID：crypto 随机源唯一（两次构造不同 id，非注册序重放）", () => {
     const reg = new ReadIndexRegistry(); // 默认 newId=crypto.getRandomValues
     const a = reg.get("a.jsonl");

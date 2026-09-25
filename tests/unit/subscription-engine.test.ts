@@ -1,6 +1,6 @@
 // ②WS/UI 契约准备包：订阅引擎 13 时序（契约 v1.2 §3.6/§3.7；纯逻辑+假时钟）。
 import { describe, expect, it } from "vitest";
-import { LIMITS, ReadIndex, SubscriptionEngine, type HistoryEvent, type SessionStatus } from "@pi-agent-ui/protocol";
+import { LIMITS, ReadIndex, SubscriptionEngine, estimateFrameBytes, type HistoryEvent, type SessionStatus } from "@pi-agent-ui/protocol";
 
 function hEv(seq: number): HistoryEvent { return { kind: "sending", seq, ts: null, generation: null, intentId: null }; }
 
@@ -23,6 +23,67 @@ function makeEngine(n: number, now = 0) {
   const eng = new SubscriptionEngine({ index: idx, status: () => fakeStatus(1), now: () => now, newId: () => `id-${++idSeq}` });
   return { idx, eng, tick: (t: number) => { now = t; } };
 }
+
+describe("c7 回归（C6-01..05）", () => {
+  it("C6-01：真实 500 中文×450 条——整帧实测装页（每页 ≤pageFrameBudgetBytes，无事件丢失/重复）", () => {
+    const idx = new ReadIndex("s.jsonl", "s-1");
+    const cn = "忆".repeat(500); // 500 中文≈1,500B UTF-8；GPT 探针口径
+    for (let i = 1; i <= 450; i++) {
+      idx.append("journal", `L${i}`, `L${i}`, { kind: "message", seq: i, ts: null, generation: null, intentId: null, entryId: `e-${i}`, role: "user", textPreview: { text: cn, truncated: false }, final: true } as HistoryEvent);
+    }
+    let idSeq = 0;
+    const statusV = 1;
+    const eng = new SubscriptionEngine({ index: idx, status: () => fakeStatus(statusV), now: () => 0, newId: () => `id-${++idSeq}` });
+    const seen: number[] = [];
+    let pages = 0;
+    let cur: { streamId: string; seq: number } | null = null;
+    let snapId = "";
+    for (;;) {
+      const f = (cur === null ? eng.startSnapshot("r-1") : eng.handle({ kind: "page", requestId: `r-${pages + 1}`, snapshotId: snapId, historyNext: cur }))[0] as Record<string, unknown>;
+      if (snapId === "") snapId = f["snapshotId"] as string;
+      if (f["t"] === "error") throw new Error("unexpected error");
+      const frame = f as unknown as import("@pi-agent-ui/protocol").ServerFrame;
+      const bytes = estimateFrameBytes(frame); // UTF-8 实测
+      expect(bytes).toBeLessThanOrEqual(LIMITS.pageFrameBudgetBytes); // 每页整帧有界（旧实现 200,462B 击穿）
+      const page = f["page"] as { seq: number }[];
+      seen.push(...page.map((e) => e.seq));
+      pages += 1;
+      const next = f["historyNext"] as { streamId: string; seq: number } | null;
+      if (next === null) break;
+      cur = next;
+    }
+    expect(pages).toBeGreaterThan(3); // 字节驱动多页（非条数上限 200 一页到顶）
+    expect(seen).toEqual(Array.from({ length: 450 }, (_, i) => i + 1)); // 不丢不重，序连续
+  });
+
+  it("C6-04：稳态队列不误杀——2000 轮 status+drain(1) 恒 live（积压计量=当前待发，非累计流量）", () => {
+    const { eng } = makeEngine(2);
+    eng.startSnapshot("r-1"); // H=2 → 首页即 done 进 live
+    eng.drain(1);
+    for (let i = 0; i < 2000; i++) {
+      eng.onStatus(fakeStatus(2 + i));
+      const out = eng.drain(1);
+      expect(out).toHaveLength(1); // 每轮恰发 1 帧（旧实现第 429 轮起 backlogBytes 误关）
+      expect(eng.state.phase).toBe("live");
+    }
+  });
+
+  it("C6-05：空流 H=0 首页=空 done 页；重试走缓存（statusVersion 冻结，不漂移）", () => {
+    const idx = new ReadIndex("s.jsonl", "s-1"); // 空
+    let idSeq = 0;
+    let statusV = 1;
+    const eng = new SubscriptionEngine({ index: idx, status: () => fakeStatus(statusV), now: () => 0, newId: () => `id-${++idSeq}` });
+    const f1 = eng.startSnapshot("r-1")[0] as Record<string, unknown>;
+    expect(f1["t"]).toBe("snapshot");
+    expect(f1["page"]).toEqual([]);
+    expect(f1["liveFrom"]).toEqual({ streamId: "s-1", seq: 1 });
+    statusV = 9; // 外部状态推进
+    const f2 = eng.handle({ kind: "page", requestId: "r-2", snapshotId: f1["snapshotId"] as string, historyNext: { streamId: f1["streamId"] as string, seq: 1 } })[0] as Record<string, unknown>;
+    expect(f2["t"]).toBe("snapshot");
+    expect((f2["status"] as { statusVersion: number }).statusVersion).toBe(1); // 冻结于页生成时刻（旧实现直调 status=9）
+    expect(f2["page"]).toEqual([]);
+  });
+});
 
 describe("订阅引擎 13 时序", () => {
   it("①正常快照三页→live（首页→续页→末页）", () => {
@@ -278,19 +339,33 @@ describe("订阅引擎 13 时序", () => {
     void f2;
   });
 
-  it("⑲C5-03：单条事件即超页预算→显式失败（4431 关订阅，不静默大帧）", () => {
+  it("⑲C5-03/C6-01：整帧实测超页预算→退末条收缩；首条即超→显式失败（4431，retryable=false）", () => {
     const idx = new ReadIndex("s.jsonl", "s-1");
     for (let i = 1; i <= 3; i++) idx.append("journal", `L${i}`, `L${i}`, hEv(i));
+    // 收缩路径：两事件帧超、单事件帧过 → 退一条后成页（expectNext=2，继续分页）
     let idSeq = 0;
     const eng = new SubscriptionEngine({
       index: idx, status: () => fakeStatus(1), now: () => 0, newId: () => `id-${++idSeq}`,
-      estimateEvent: () => LIMITS.pageFrameBudgetBytes + 1, // 单条即超整页预算
+      estimateFrame: (f) => (f as { t: string; page?: unknown[] }).t === "snapshot" && ((f as { page?: unknown[] }).page?.length ?? 0) >= 2 ? LIMITS.pageFrameBudgetBytes + 1 : 64,
     });
-    const r = eng.startSnapshot("r-1")[0] as Record<string, unknown>;
-    expect(r["t"]).toBe("error");
-    expect(r["code"]).toBe(4431);
-    expect(r["retryable"]).toBe(true);
-    expect(eng.state.phase).toBe("closed");
+    const r1 = eng.startSnapshot("r-1")[0] as Record<string, unknown>;
+    expect(r1["t"]).toBe("snapshot");
+    expect((r1["page"] as unknown[]).length).toBe(1); // 末条被终判退回
+    expect(eng.state.phase).toBe("paging");
+    // 退条后期待下页=2：续页请求 seq=2 正常受页（证明 expectNext 由实装末位决定）
+    const r1b = eng.handle({ kind: "page", requestId: "r-2", snapshotId: r1["snapshotId"] as string, historyNext: { streamId: r1["streamId"] as string, seq: 2 } })[0] as Record<string, unknown>;
+    expect(r1b["t"]).toBe("snapshot");
+    expect((r1b["page"] as unknown[]).length).toBe(1);
+    // 首条即超：单事件帧仍超 → 4431 关订阅（不静默大帧）
+    const eng2 = new SubscriptionEngine({
+      index: idx, status: () => fakeStatus(1), now: () => 0, newId: () => `id-${++idSeq}`,
+      estimateFrame: (f) => (f as { t: string; page?: unknown[] }).t === "snapshot" && ((f as { page?: unknown[] }).page?.length ?? 0) >= 1 ? LIMITS.pageFrameBudgetBytes + 1 : 64,
+    });
+    const r2 = eng2.startSnapshot("r-1")[0] as Record<string, unknown>;
+    expect(r2["t"]).toBe("error");
+    expect(r2["code"]).toBe(4431);
+    expect(r2["retryable"]).toBe(false); // c7 C6-04：4431 统一 retryable=false（订阅已亡，恢复=重新订阅）
+    expect(eng2.state.phase).toBe("closed");
   });
 
   it("⑳C5-04：live 期积压双门——1025 帧 status→超 subscriptionBacklogMax→4431 关订阅", () => {

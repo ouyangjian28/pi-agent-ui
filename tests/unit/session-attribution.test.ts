@@ -47,11 +47,19 @@ describe("会话条目归因（c6 C5-06）", () => {
     expect(r.map((x) => x.intentId)).toEqual(["i", "i", "i"]); // 最新区间到 m2
   });
 
-  it("⑦扫描顺序置换不敏感：consumed 逆序输入同结果（两源扫描先后无关）", () => {
+  it("⑦序前置条件（c7 C5-06 残余收口）：不同意图 consumed 逆序**不保证**同结果——journal 序是前置条件；同锚多次 consumed=数组末项（journal 序最晚）生效", () => {
     const entries = [e("u1", "user"), e("a1", "assistant"), e("u2", "user"), e("a2", "assistant")];
     const fwd = attributeSessionEntries({ consumed: [c("i-1", "u1", "a1"), c("i-2", "u2", "a2")], entries });
     const rev = attributeSessionEntries({ consumed: [c("i-2", "u2", "a2"), c("i-1", "u1", "a1")], entries });
-    expect(rev).toEqual(fwd);
+    // 前置条件（consumed 按 journal 序给定）满足时，两源扫描调度置换不影响结果——
+    // 但**反转数组本身违反前置条件**（撤销旧「任意置换不变」过宽承诺）：非重叠区间时逆序恰巧同结果
+    expect(rev).toEqual(fwd); // 本例区间不重叠：排序无关（结构性）
+    // 同锚多次 consumed：数组末项（journal 序最晚）生效——逆序会选错区间（证前置条件必要）
+    const entries2 = [e("u1", "user"), e("m1", "assistant"), e("m2", "assistant")];
+    const journalOrder = attributeSessionEntries({ consumed: [c("i", "u1", "m1"), c("i", "u1", "m2")], entries: entries2 });
+    expect(journalOrder.map((x) => x.intentId)).toEqual(["i", "i", "i"]); // 最新=到 m2
+    const reversed = attributeSessionEntries({ consumed: [c("i", "u1", "m2"), c("i", "u1", "m1")], entries: entries2 });
+    expect(reversed.map((x) => x.intentId)).toEqual(["i", "i", null]); // 末项=旧区间 m1→m2 不归（前置条件被违反的可见后果）
   });
 
   it("⑧无 consumed→全 null；system/toolResult 同规则归区间", () => {

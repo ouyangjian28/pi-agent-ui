@@ -10,9 +10,10 @@
 //    诚实语义：任何已观测位置的原始内容变化都触发换流（不做部分续读）。
 // 3. 流身份注入——streamId 由注入的 newId 生成（boot 内唯一随机 16B base64url；
 //    无注入源时用 crypto.getRandomValues，再退化为进程内计数器）。
-// 4. 超限出口有限（c6 C5-02 收紧）——同文件**至多一次**触顶换流宽容；再次触顶=文件
-//    本身超出索引预算 → registry 拒绝该文件（FileOverBudgetError，宿主转 4402 会话不可读）。
-//    无内部循环；反复重扫被显式拒绝而非用空流掩盖。内存预算数字=理论估算（非实测）。
+// 4. 超限出口有限（c6 C5-02 收紧 + c7 C6-03 修正）——触顶→换流一次宽容；**现流**再次触顶
+//    且宽容额度已用=文件超出索引预算 → registry 拒绝（FileOverBudgetError，宿主转 4402）。
+//    新流在预算内恒可用（不因历史触顶记录误拒空流）；无内部循环。append 不设硬门（写侧容量
+//    由宿主经 get/overBudget 检查+换流维持——接线验收项）。内存预算数字=理论估算（非实测）。
 import { fnv1a64Hex } from "./sanitizer.ts";
 import type { HistoryEvent, StreamId } from "./contracts.ts";
 
@@ -123,15 +124,17 @@ export class ReadIndexRegistry {
     private readonly indexLimits: ReadIndexLimits = DEFAULT_READ_INDEX_LIMITS,
   ) {}
 
-  /** 取流：超预算的流即时废弃换新（**同文件仅一次**宽容；再次触顶→FileOverBudgetError，见类头注 4）。 */
+  /** 取流（C6-03 修正）：仅当**现流触顶且宽容额度已用**才拒绝；首次触顶→废弃换新（新流从空开始，
+   *  预算内 get 恒放行——不因历史触顶记录误拒空流）。额度按文件记（Set）；LRU 淘汰后重建视为新流
+   *  （重建流再触顶时因 Set 记录仍会被拒——出口有限，无无限重扫环）。 */
   get(file: string): ReadIndex {
-    if (this.overBudgetFiles.has(file)) throw new FileOverBudgetError(file);
     const hit = this.map.get(file);
     if (hit) {
       if (hit.overBudget) {
-        this.map.delete(file); // 触顶换流：新流从空开始（唯一一次宽容）
-        this.overBudgetFiles.add(file); // 若新流再触顶 → 下次 get 拒绝
-      } else { this.map.delete(file); this.map.set(file, hit); return hit; }
+        if (this.overBudgetFiles.has(file)) throw new FileOverBudgetError(file); // 额度已用且现流又触顶
+        this.map.delete(file); // 首次触顶：换流（唯一一次宽容）
+        this.overBudgetFiles.add(file);
+      } else { this.map.delete(file); this.map.set(file, hit); return hit; } // 预算内放行（含曾触顶文件的新流）
     }
     const idx = new ReadIndex(file, this.newId(), this.indexLimits);
     this.map.set(file, idx);

@@ -30,36 +30,72 @@ describe("纯投影装页（c6 C5-07）", () => {
     expect(r!.page.returned).toBe(3);
   });
 
-  it("buildRecoveryFrame：perIntent 按 offset 装页驱动；unknown/resumable 恒整表", () => {
+  it("buildRecoveryFrame：单 offset 驱动三视图（C6-02）——perIntent 装页；unknown/resumable 从本页行派生；blocked 恒空表", () => {
     const perIntent = Array.from({ length: 600 }, (_, i) => row(`i-${i + 1}`));
-    const report = { evidenceHash: "a".repeat(64), resumeBlocked: true, diskBlocked: false, unknownEffect: ["i-2"], resumable: [], perIntent };
-    const f1 = buildRecoveryFrame("r-1", "f.jsonl", report, 0)! as unknown as { t: string; perIntent: { next: { offset: number } | null; total: number }; unknownEffect: { items: string[] } };
+    perIntent[1] = { intentId: "i-2", verdict: "unknown", provisional: true };
+    const report = { evidenceHash: "a".repeat(64), resumeBlocked: true, diskBlocked: false, unknownEffect: ["i-2"], resumable: ["i-1"], perIntent };
+    const f1 = buildRecoveryFrame("r-1", "f.jsonl", report, 0)! as unknown as { t: string; perIntent: { next: { offset: number } | null; total: number }; unknownEffect: { items: string[]; total: number; truncated: boolean }; resumable: { items: string[]; total: number } };
     expect(f1.t).toBe("recovery");
     expect(f1.perIntent.next).toEqual({ offset: 500 }); // recoveryPageSize=500 先到
     expect(f1.perIntent.total).toBe(600);
-    expect(f1.unknownEffect.items).toEqual(["i-2"]);
-    const f2 = buildRecoveryFrame("r-2", "f.jsonl", report, 500)! as unknown as { perIntent: { items: RecoveryIntentRow[]; next: null } };
+    expect(f1.unknownEffect.items).toEqual(["i-2"]); // 本页第 2 行 verdict=unknown → 派生视图含之
+    expect(f1.unknownEffect.total).toBe(1); // total=全集权威计数
+    expect(f1.unknownEffect.truncated).toBe(true); // 与 perIntent 同步
+    expect(f1.resumable.items).toEqual([]); // resumeBlocked=true → resumable 恒空表（即使有 not-evaluated 行）
+    const f2 = buildRecoveryFrame("r-2", "f.jsonl", report, 500)! as unknown as { perIntent: { items: RecoveryIntentRow[]; next: null }; unknownEffect: { items: string[]; total: number; truncated: boolean } };
     expect(f2.perIntent.items).toHaveLength(100);
     expect(f2.perIntent.next).toBeNull();
+    expect(f2.unknownEffect.items).toEqual([]); // 末页无 unknown 行 → 派生空（total 仍=1）
+    expect(f2.unknownEffect.total).toBe(1);
+    expect(f2.unknownEffect.truncated).toBe(false);
   });
 
-  it("buildSessionsFrame：页级 listReliability（本页含 partial→partial）；hasMore 偏移续页", () => {
+  it("buildRecoveryFrame：3000 意图大表逐页有界（C6-02 整表突破反例）+resumable 从本页派生", () => {
+    const perIntent = Array.from({ length: 3000 }, (_, i) =>
+      i % 2 === 0 ? row(`i-${i + 1}`) : { intentId: `i-${i + 1}`, verdict: "not-evaluated" as const, provisional: false });
+    const resumable = perIntent.filter((r) => r.verdict === "not-evaluated").map((r) => r.intentId);
+    const report = { evidenceHash: "a".repeat(64), resumeBlocked: false, diskBlocked: false, unknownEffect: [], resumable, perIntent };
+    const seen: string[] = [];
+    let off = 0;
+    let pages = 0;
+    while (off < 3000) {
+      const f = buildRecoveryFrame(`r-${pages}`, "f.jsonl", report, off)! as unknown as { perIntent: { items: RecoveryIntentRow[]; next: { offset: number } | null }; resumable: { items: string[]; total: number }; [k: string]: unknown };
+      pages += 1;
+      seen.push(...f.resumable.items);
+      expect(JSON.stringify(f).length).toBeLessThan(200_000); // 整帧有界（C6-02）
+      if (f.perIntent.next === null) break;
+      off = f.perIntent.next.offset;
+    }
+    expect(pages).toBe(6); // 3000/recoveryPageSize(500)=6 页（每页整帧有界）
+    expect(seen).toEqual(resumable); // 全量翻页后派生视图拼回全集（顺序=行序）
+  });
+
+  it("buildSessionsFrame：页级聚合（条目 partial→partial）+hasMore 续页+limit（C6-06）", () => {
     const sessions = Array.from({ length: 10 }, (_, i) => sum(`f${i}.jsonl`, i === 1 ? "partial" : "full"));
-    const f1 = buildSessionsFrame("r-1", sessions, 0, 7, 1_200)! as unknown as { t: string; listReliability: string; hasMore: boolean; sessions: unknown[] };
+    const f1 = buildSessionsFrame("r-1", sessions, 0, 7, "full", 3, 1_200_000)! as unknown as { t: string; listReliability: string; hasMore: boolean; sessions: unknown[] };
     expect(f1.t).toBe("sessions");
     expect(f1.listReliability).toBe("partial"); // 页级聚合（本页含 partial 条目）
-    expect(f1.hasMore).toBe(true); // 字节预算切断（1,200B<全量）
-    expect(f1.sessions.length).toBeGreaterThanOrEqual(1);
-    expect(f1.sessions.length).toBeLessThan(10);
-    const offset2 = f1.sessions.length;
-    const f2 = buildSessionsFrame("r-2", sessions, offset2, 7, 100_000)! as unknown as { sessions: unknown[]; hasMore: boolean; listReliability: string };
-    expect(f2.listReliability).toBe("full"); // 第二页无 partial 条目（条目 1 已被首页消费）
-    expect(f2.sessions).toHaveLength(10 - offset2);
+    expect(f1.sessions).toHaveLength(3); // limit=3 条数上限
+    expect(f1.hasMore).toBe(true);
+    const f2 = buildSessionsFrame("r-2", sessions, 3, 7, "full", 200, 1_200_000)! as unknown as { sessions: unknown[]; hasMore: boolean; listReliability: string };
+    expect(f2.listReliability).toBe("full"); // 第二页无 partial 条目
+    expect(f2.sessions).toHaveLength(7);
+    expect(f2.hasMore).toBe(false);
+  });
+
+  it("buildSessionsFrame：目录级 partial 输入→页级 partial（C6-06 目录截断反例）+默认 limit 50+limit 钳位", () => {
+    const sessions = Array.from({ length: 80 }, (_, i) => sum(`f${i}.jsonl`)); // 全 full 条目
+    const f1 = buildSessionsFrame("r-1", sessions, 0, 7, "partial")! as unknown as { listReliability: string; sessions: unknown[]; hasMore: boolean };
+    expect(f1.listReliability).toBe("partial"); // 条目全 full 但目录扫描截断 → 页级 partial（保守聚合）
+    expect(f1.sessions).toHaveLength(50); // 默认 limit=50（非旧固定 200）
+    expect(f1.hasMore).toBe(true);
+    const f2 = buildSessionsFrame("r-2", sessions, 50, 7, "full", 999)! as unknown as { sessions: unknown[]; hasMore: boolean };
+    expect(f2.sessions).toHaveLength(30); // limit=999 钳到 200 → 剩 30 条
     expect(f2.hasMore).toBe(false);
   });
 
   it("单条超预算→null（显式失败，宿主转错误帧）", () => {
     expect(buildRecoveryFrame("r", "f", { evidenceHash: "a".repeat(64), resumeBlocked: false, diskBlocked: false, unknownEffect: [], resumable: [], perIntent: [{ intentId: "i", verdict: "unknown", provisional: false }] }, 0, 100)).toBeNull();
-    expect(buildSessionsFrame("r", [sum("f.jsonl")], 0, 1, 100)).toBeNull();
+    expect(buildSessionsFrame("r", [sum("f.jsonl")], 0, 1, "full", 50, 100)).toBeNull();
   });
 });

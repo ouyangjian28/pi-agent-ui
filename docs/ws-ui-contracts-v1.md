@@ -33,7 +33,7 @@ interface EventCursor { readonly streamId: StreamId; readonly seq: number; }  //
 
 **修订条款**：
 - **源文件指纹=整文件 SHA-256**（读/增量观察时计算；文件变更时重算重扫）。投影前缀校验=重扫结果与索引已编入定位（源+行定位）逐一比对；前缀不符（截短/替换/重写/header.id 变化）→换流。**指纹覆盖完整字节，非首行**（C3-R01）。
-- **索引预算（c5 B02 诚实口径）**：LRU ≤32 流×每流 ≤20_000 事件。**常驻估算按实测**：仅坐标≈48B/事件，含事件投影（预览文本/身份字段）≈数百 B~2KB/事件（500 中文字预览≈1.5KB）→理论最坏 ≈1.2GB；按预览配额典型 ≈100~300MB。触顶出口=**确定性换流**（最久未订阅流/最大流强制卸载→该流客户端 4409 重拉；不循环重扫）；`get` 触达即 LRU 刷新；**boot 隔离**：流 ID=注入随机源 base16(16B)，不随注册序重放（跨 boot 同 s-1 假命中不可能）。
+- **索引预算（c5 B02+c7 C6-03 诚实口径）**：LRU ≤32 流×每流 ≤20_000 事件。**常驻=理论估算（非实测）**：仅坐标≈48B/事件，含事件投影（预览文本/身份字段）≈数百 B~2KB/事件（500 中文字预览≈1.5KB）→理论最坏 ≈1.2GB；按预览配额典型 ≈100~300MB。**触顶状态机（c7 修正）**：现流触顶→废弃换流一次（宽容额度按文件记）；**新流在预算内 `get` 恒放行**（不因历史触顶记录误拒空流）；**现流再次触顶且额度已用**→`FileOverBudgetError`（宿主转 4402；有限出口，不循环重扫）；LRU 淘汰后重建视为新流（重建流再触顶时因额度记录仍会被拒）。`append` **不设硬门**——写侧容量由宿主经 `get`/`overBudget` 检查+换流维持（接线验收项，非本层保证）；`get` 触达即 LRU 刷新；**boot 隔离**：流 ID=注入随机源 base16(16B)，不随注册序重放（跨 boot 同 s-1 假命中不可能）。
 - **索引不变量（c5 B02）**：①`append` 原子赋 seq（输入携带 seq 一律被覆盖统一——引擎/索引坐标恒一致）；②每已编入行保存**内容摘要**（源+定位+事件投影的规范化摘要），前缀比对=位置+定位+摘要三重——**同位内容改写=换流**（不只比位置）；③触顶=换流非标记。
 - **编排保证（时序③口径修正）**：任何事件只在其编入时刻获得 seq>H（快照发起后编入的必然>H）——「分页间新增落 H 前」**不可能发生**；两源新增一律在快照结束后按编入序投递（history 域续读）。时序表 §3.7 已修正。
 - 换流全集：服务重启；journal/session 截短/替换/重写；绑定重建；索引卸载。游标拒绝：streamId≠当前→4409；超前/跨会话→4409；非法 seq→4404。
@@ -158,7 +158,7 @@ type ProgressNote = "thinking" | "tool-start" | "tool-end" | "compacting" | "mes
 - 只读解析 session JSONL（完整行边界=末 `\n`；半行不判坏不发布）；消息正文投影（role/content 块）；**工具调用=宿主消息内内容块**，块键=`entryId:blockIndex`（多 toolCall 共用 entryId 时块索引分立——C3-R04）；异常行占位 `corrupt-entry`（entryId=`corrupt-<byteOffset>`）；零副作用。
 - **归因规则（冻结）**：
   - **用户条目**：hash+attachmentIdentity+ordinal 三元组匹配 journal enqueue（`matchKeyOf` 同构）→携带 intentId+generation。
-  - **assistant/toolResult 条目（c6 C5-06 方向修正）**：归因区间=**[本意图 user 锚（consumed.anchorEntryId 的 entryId 字符串身份）, intervalEnd{entryId,lengthHash}]，从锚向后含两端**（`session-attribution.ts` 纯投影已落地：区间内归该 intentId；user-A/assistant-A/user-B/assistant-B 中 assistant-A 归 A——旧「向前到下一锚」方向反了）。锚=entryId 身份非行号/扫描序；终点=entryId+lengthHash 双身份（防同 id 改写伪造终点）。**不得用跨文件扫描先后当归属**（置换不敏感=纯集合关系，fixture 已证）。区间无效（锚/终点不可见、哈希不符、终点在锚前）→`intentId:null` 不猜；重叠区间=最近锚（内层）优先；同意图多次 consumed=journal 序最新生效。**迟到更正不回改已发布事件**（发布后归属固定；更正只影响后续编入=延迟编入或永久 null）。
+  - **assistant/toolResult 条目（c6 C5-06 方向修正）**：归因区间=**[本意图 user 锚（consumed.anchorEntryId 的 entryId 字符串身份）, intervalEnd{entryId,lengthHash}]，从锚向后含两端**（`session-attribution.ts` 纯投影已落地：区间内归该 intentId；user-A/assistant-A/user-B/assistant-B 中 assistant-A 归 A——旧「向前到下一锚」方向反了）。锚=entryId 身份非行号/扫描序；终点=entryId+lengthHash 双身份（防同 id 改写伪造终点）。**不得用跨文件扫描先后当归属**。**序前置条件（c7 C5-06 残余收口，撤销「任意置换不变」过宽承诺）**：consumed 数组按 **journal 行序**给定（宿主扫描两源的调度顺序任意——纯函数收完整数组，调度置换不影响结果；但数组内部序=journal 序是前置条件，不得反转数组）；同意图多次 consumed 同锚=**journal 序最晚**（数组末项）生效；同意图不同锚=各区间独立生效。区间无效（锚/终点不可见、哈希不符、终点在锚前）→`intentId:null` 不猜；重叠区间=最近锚（内层）优先。**迟到更正不回改已发布事件**（发布后归属固定；更正只影响后续编入=延迟编入或永久 null）。
   - **多 toolCall 块**：同 entryId 的第 n 个 toolCall 块=块键 `entryId:blockIndex`（0 起，编入序）；toolResult 以其 toolCallId 回链（无 toolCallId 的孤儿 toolResult→`intentId:null`）。
   - **分支口径（声明）**：v1 投影=当前文件全量；分支切换=文件替换→换流（§1.3）。
 - **final 逐项映射（冻结）**：stop→`final:true`；length→`final:true`（截断终局，`textPreview.truncated` 标注——SanitizedText 结构体内字段，无独立 previewTruncated 顶层字段=c6 单模型）；aborted→`final:true`（终局非成功）；toolUse→`final:false`（等待工具结果）；无 stopReason 的 user/toolCall→按角色（user 终局 true；toolCall false）。
@@ -196,7 +196,7 @@ interface SnapshotFrame {
 
 **订阅状态机（冻结）**：`init → paging → live → closed`（任一态可→closed）。
 - **初始化**：登记监听→截 H→缓冲 H 后事件→首页→（续页）→历史读完→自动接持续投递（history 帧续流+live 帧）。
-- **续页幂等（修订，消解「必须=期待下页」vs「重复页幂等」）**：快照上下文保存**最近 2 页**（**完整游标键**=streamId+seq 页首+页内容缓存）；续页请求 `historyNext` 满足以下之一→受理：①=期待下页；②=最近已服务页页首（幂等重发）；③=barrier+1（追平补页：空页 done=true 进 live；H=0 空流同）。**缓存键必须含完整游标域**（错 streamId 同 seq 不命中缓存→4404）；**页内容可复用，envelope 回显本次 requestId**（不得整帧 JSON 全等重发旧 requestId）。**游标合法域=[1, H+1]**（0/负数→4404；超前> H+1→4409；H+1 在域内非超前）。其余→4404。
+- **续页幂等（修订，消解「必须=期待下页」vs「重复页幂等」）**：快照上下文保存**最近 2 页**（**完整游标键**=streamId+seq 页首+页内容缓存）；续页请求 `historyNext` 满足以下之一→受理：①=期待下页；②=最近已服务页页首（幂等重发）；③=barrier+1（**追平补页，仅 live 态**受理：空页 done=true 幂等重发；**paging 期 H+1=跳页→4409**；H=0 空流同——首页即空 done 页）。补页同样走页缓存（statusVersion 冻结于首次生成；重试不漂移）。**缓存键必须含完整游标域**（错 streamId 同 seq 不命中缓存→4404）；**页内容可复用，envelope 回显本次 requestId**（不得整帧 JSON 全等重发旧 requestId）。**游标合法域=[1, H+1]**（0/负数→4404；超前> H+1→4409；H+1 在域内非超前）。其余→4404。
 - **同连接同 file 唯一订阅目标（c5 B01）**：一连接对同一 file 至多一个活动订阅（新 subscribe 先退旧（4409 stream-replaced 通知）再建新；A/B 并存禁止；resync 失败旧订阅仍持有→新 subscribe 必须显式替换）。「同连接」配额=8 订阅且每 file 唯一；跨连接并发订阅同 file 允许（各自独立流）。**末页宽限**：历史读完（末页已发）后快照资源保留 60s 供网络重试幂等；之后释放→重试收 `error 4409`（streamId 仍有效；客户端按末页 cursor 直接续读即可，无需重建快照）。requestId 在途重复→4404。快照完成/退订/连接关闭→资源释放（60s 宽限起算=末页发出）。
 - **重同步**：校验 cursor 域→原子终止旧订阅→新 subscriptionId→补齐→接续。域失效→4409（关联 requestId）。
 - **双源屏障声明**：H=读索引水位（两源已并入）；两源各自完整行边界发布；**观察一致非跨文件事务一致**；status 独立 statusVersion。
@@ -208,7 +208,7 @@ interface SnapshotFrame {
 1. 初始化：subscribe(f)→snapshot(H=450,page[1..200],historyNext=201,hasMore)→续页×2→末页(liveFrom=451)→events(history,451..)。
 2. 空流（无 journal 无 session 消息）：snapshot(H=0,historyNext=null,liveFrom=1)→events。
 3. **分页间新增（修正口径）**：两源新增只可能在 H 后编入（编排保证）→历史页止于 H→接续首帧从 H+1 起（含缓冲回放）；无丢失无重复（seq 幂等）。
-3b. **字节装页（c5 B04 精确化）**：页边界在快照服务（servePage）内按**真实 UTF-8 字节预算（200_000B）+条数上限（200）双约束**决定；首条必装（保前进）；`done` 由实际装到的末位决定——**引擎状态（expectNext/live 化）永不超前于已装内容**，发送队列截帧不产生「已进 live 实未送达」。live 事件合批：每帧 ≤`maxEventsPerLiveFrame`(8) 事件（8×32k 单事件上限=256k<262k 帧恒预算内）；帧数（≤16/轮）与每帧事件数**分立常量**。
+3b. **字节装页（c5 B04+c7 C6-01 精确化）**：页边界在快照服务（servePage）内按**条数上限（200）贪心装页 → 整帧序列化实测（UTF-8）≤200_000B 终判**双约束决定——粗估仅快筛，**终判=完整帧（含 requestId/游标/冻结 status 信封）真实序列化字节**，超限退末条循环重测；首条必装（退空仍有待发数据→显式 4431，不静默空页）；`done`/`expectNext` 由**核验通过后的实装末位**决定——引擎状态（expectNext/live 化/页缓存）在核验通过后才提交。live 事件合批：每帧 ≤`maxEventsPerLiveFrame`(7) 事件（7×32k 单事件上限+信封 <262_144B 帧硬上限）；帧数（≤16/轮）与每帧事件数**分立常量**；合批帧同样先验字节再提交 liveSeq。
 4. 断线续读：hello→subscribe(f,cursor{streamId,455})→补 455..H'→接续。
 5. 4409（重启/截断/卸载）：旧 cursor 失配→error 4409→重新初始化。
 6. 4431：缓冲超限→error+close 4431（尽力）→destroy→退避重连→cursor 补齐→追赶节流。
@@ -244,10 +244,15 @@ interface AvailableRecovery {
   readonly resumeBlocked: boolean;          // = diskBlocked || unattributableFragments>0（权威公式原样）
   readonly diskBlocked: boolean;
   readonly blockedReasons: readonly RecoveryBlockReason[];
-  readonly unknownEffect: PageOf<string>;   // ≤500/页
-  readonly resumable: PageOf<string>;       // blocked 时恒空（原样）
+  readonly unknownEffect: PageOf<string>;   // C6-02：单 offset 派生视图——items=本页行中 verdict="unknown" 的 ID
+  readonly resumable: PageOf<string>;       // C6-02：items=本页行中 verdict="not-evaluated" 的 ID；blocked 恒空表
   readonly perIntent: PageOf<RecoveryIntentRow>;
 }
+<!-- C6-02（c7）：三视图由**同一 offset** 驱动——perIntent 按 recoveryPageSize(500)+整帧实测装页；
+     unknownEffect/resumable 从**本页行**按 verdict 派生（不是恒整表）；total=全集权威计数；
+     truncated/next 与 perIntent 同步（客户端翻完 perIntent 即拼回三全集）。任何一页帧大小有界
+     （旧「整表自然有界」假设被 3000 意图=488KB 反例证伪）。blockedReasons 随整帧终判，超限=显式
+     失败（null→宿主转错误帧），不静默截断。 -->
 interface PageOf<T> { items: readonly T[]; total: number; returned: number; truncated: boolean; next: { offset: number } | null; }
 type RecoveryBlockReason =
   | { kind: "bad-line"; count: number } | { kind: "torn-tail" }
@@ -262,11 +267,12 @@ interface RecoveryIntentRow { readonly intentId: string; readonly verdict: "sett
 | IntentRecord 状态 | verdict | provisional |
 | --- | --- | --- |
 | lastVerdict=settled/delivered/unknown | 对应值 | false（终态行是耐久事实；unknown 终裁行同） |
-| 无 lastVerdict 且 sending 或 responseTimeoutRecorded===true（含 sending 残片可靠关联） | unknown | true（provisional=残片/超时记录派生，非耐久终态行） |
+| 无 lastVerdict 且 sending 或 responseTimeoutRecorded===true（**journal 耐久记录**） | unknown | **false**（耐久观测事实派生，非残片） |
+| 无 lastVerdict 且 sending 仅由**坏行残片可靠关联** | unknown | **true** |
 | 无 lastVerdict 且 cancelled | cancelled | false |
 | enqueue 后无 sending（未发起） | not-evaluated | false |
-| id∈unknownEffect 但无 sending 无 verdict | unknown | true |
-（c6 C5-07 对齐 recover.ts 实装：provisional=true 仅当 unknown 由残片可靠关联或人工裁决派生——consumedVerdictIds 在裁决主循环记录；settled/delivered 行恒 false）
+| id∈unknownEffect 且 verdict=unknown 由**人工裁决消耗**（consumedVerdictIds） | unknown | **true** |
+（c7 C6-07 对齐 recover.ts:455-466 实装：provisional=true 仅当 unknown 由**残片可靠关联或人工裁决消耗**派生（provisionals Set）；settled/delivered/cancelled/not-evaluated 行恒 false；**耐久 sending/超时记录**派生的 unknown=false——与上表第 2 行一致，旧「sending/timeout 恒 true」表述作废）
 
 - short-fragment 无源端分类：blockedReasons 保持计数分类（归因分类归写链，读侧不造）。
 - **残片证据口径（c6 单模型）**：坏行残片不随盘面修复消失——权威载体=**RecoveryEvidenceSnapshot**（captureRecoveryEvidence 修复前捕获；recoverFromSnapshot 唯一合法出口；冷启动无快照→unavailable(no-evidence-snapshot)，`recoveryAvailability` 纯选择器可执行门）。旧「索引见过坏行/journal 侧消耗」表述作废。
@@ -297,7 +303,7 @@ JSON 文本帧（UTF-8）；拒二进制；禁 permessage-deflate；单帧 ≤26
 ```ts
 type ServerFrame =
   | { t: "welcome"; serverBootId: string; protocolVersion: 1 }
-  | { t: "sessions"; requestId: string; sessions: SessionSummaryDTO[]; total: number; offset: number; hasMore: boolean; listVersion: number }
+  | { t: "sessions"; requestId: string; sessions: SessionSummaryDTO[]; total: number; offset: number; hasMore: boolean; listVersion: number; listReliability: "full" | "partial" } // C6-06：页级聚合（目录级输入与条目级保守聚合：任一 partial→partial）
   | { t: "snapshot"; } & SnapshotFrame
   | { t: "events"; subscriptionId: SubscriptionId; origin: "history";
       refSeq: number; events: HistoryEvent[] }                                     // history 续页+快照后落盘续流
@@ -362,13 +368,13 @@ type ServerFrame =
 - **在途请求上限**：每连接并发请求级操作（list/get-recovery/subscribe 初始化）≤4（超→4404）。
 - **计算并发上限（修订）**：get-recovery 恢复投影与 list 目录扫描共享全局信号量 ≤2 并发；排队超 5s→`error 4409 retryable`（计算繁忙）。
 - **有界读取**：恢复投影单次读取 ≤8MB（journal+session 合计）→超=`availability:"unavailable"; reason:"oversized"`；list 目录枚举 ≤1000 文件→超出 total=1000+`listReliability:"partial"`。
-- **字节装页规则（修订）**：snapshot/recovery/sessions 帧组装时逐条序列化，逼近 200_000B 预算即截页（page/next 指示续拉；**不甩 4404**）；单条事件序列化 >32KB→文本字段再截断；仍超→`{kind:"unknown-line"}` 占位（计数不丢）。
+- **字节装页规则（c7 C6-01/C6-07 分层修订）**：分三层——①**投影层**（宿主编入前）：单事件序列化 >32KB→文本字段再截断；仍超→`{kind:"unknown-line"}` 占位（计数不丢）；②**装页层**（snapshot/recovery/sessions 帧组装）：贪心逐条粗估→**整帧序列化实测终判**（≤200_000B 页预算），超限退末条循环重测（page/next 指示续拉；**不甩 4404**）；首条即超（退空仍有待发数据/单行）→**显式 4431**（纯函数返 null，宿主转错误帧；不静默空页）；③**硬帧层**：任何帧序列化 >262_144B→4431 关订阅（引擎先验后提交——liveSeq/expectNext 不推进）。
 - socket bufferedAmount≥4MB→destroy；drain 每轮 ≤16 帧或 ≤8ms→setImmediate；断开释放全部资源；4431 恢复=退避 1s×2 上限 60s ±20% 抖动，稳定 120s 重置；追赶 ≥50ms/页；支持条件=可追赶负载。
 - 心跳：30s ping 建议；90s 无帧→close 1000+error 4432 帧尽力先发。
 
 ### 5.7 限额汇总（逐字段表=contracts.ts 冻结源）
 
-订阅 8/连接；列表页 ≤200（默认 50；目录枚举 ≤1000）；事件页 ≤200 条且整帧 ≤200_000B；连接队列 1024 帧/1MB；bufferedAmount 4MB；帧 262_144B；连接 16；在途请求 4；计算并发 2（超时 5s）；恢复读取 8MB；恢复数组 ≤500/页；字符串上限：file ≤120（`/^[\w.-]{1,114}\.jsonl$/`）、requestId `/^[\w-]{1,64}$/`、nonce ≤64、streamId/subscriptionId/snapshotId ≤64、title 80、preview 200|500、note 120；心跳 30s/90s；连接 24h；流 LRU 32 流×20k 事件（含投影实测≈100~300MB 典型/1.2GB 理论最坏，§1.3）。
+订阅 8/连接；列表页 ≤200（默认 50；目录枚举 ≤1000）；事件页 ≤200 条且整帧 ≤200_000B（整帧实测终判）；连接队列 1024 帧/1MB；bufferedAmount 4MB；帧 262_144B；连接 16；在途请求 4；计算并发 2（超时 5s）；恢复读取 8MB；恢复视图=单 offset 派生三视图（perIntent ≤500/页整帧实测；unknown/resumable 从本页行派生，§4）；字符串上限：file ≤120（`/^[\w.-]{1,114}\.jsonl$/`）、requestId `/^[\w-]{1,64}$/`、nonce ≤64、streamId/subscriptionId/snapshotId ≤64、title 80、preview 200|500、note 120；心跳 30s/90s；连接 24h；流 LRU 32 流×20k 事件（含投影**理论估算**≈100~300MB 典型/1.2GB 理论最坏，§1.3；触顶状态机=现流触顶+额度已用才拒）。
 
 ### 5.8 列表分页（弱一致+C3 黄项）
 
