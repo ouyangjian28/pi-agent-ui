@@ -985,6 +985,10 @@ describe("ws-gateway w1b：B 系阻断回归", () => {
       const ids = [...p1.items, ...p2.items].map((x) => x.intentId);
       expect(ids.length).toBe(501); // 两页拼回恰 501 条（无缺）
       expect(new Set(ids).size).toBe(501); // 无重
+      // 完整集合对照（长度+唯一数+首末条仍不能证中间恰为期望集——与 i-1..i-501 全集比对）
+      const remain = new Set(Array.from({ length: 501 }, (_, i) => `i-${i + 1}`));
+      for (const id of ids) remain.delete(id);
+      expect(remain.size).toBe(0);
       expect(calls).toBe(1);
       // 缓存内容页的 hash 门：携与冻结快照不同的 hash→4409（客户端须以新快照重启）
       await c.say({ t: "get-recovery", requestId: "rec-1", file: "rec.jsonl", offset: 0, evidenceHash: "ab".repeat(32) });
@@ -1114,7 +1118,7 @@ describe("ws-gateway w1c：R 系阻断回归", () => {
     }
   });
 
-  it("R3a 初装触顶：4402 无快照；二次 init 仍 4402（统一容量出口）；observe 追加不逸出异常", async () => {
+  it("R3a 初装触顶：三连 init（宽容换流+registry 拒建路径）统一 4402 无快照；observe 追加面归 Q6 例", async () => {
     const r = await makeRig({ indexLimits: { maxEventsPerStream: 5 } });
     try {
       r.history.put("big.jsonl", makeRows(6));
@@ -1294,8 +1298,38 @@ describe("ws-gateway w1d：D 系阻断回归", () => {
       r.history.put("w.jsonl", rows2 as unknown as ScanRow[]);
       c.sent.length = 0;
       await c.say({ t: "subscribe", requestId: "w2", file: "w.jsonl" });
-      expect(errFrames(c).some((f) => f.code === 4402 && f.retryable === true)).toBe(true);
+      // 逐请求关联断言（不只 some()——空 requestId 的内联关旧帧也带 true，须证明 w2 自身出口帧）
+      const w2err = errFrames(c).find((f) => f.code === 4402 && f.requestId === "w2");
+      expect(w2err?.retryable).toBe(true);
+      const inline = errFrames(c).find((f) => f.code === 4402 && f.requestId === "");
+      expect(inline?.retryable).toBe(true); // 关旧通知内联帧同 true
+      expect(errFrames(c).every((f) => f.code !== 4402 || f.retryable === true)).toBe(true);
       expect(c.frames().some((x) => x.t === "snapshot")).toBe(false); // 无新快照
+      expect(c.readyState).toBe(1);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("D2b 前缀增量出口：盘面同流增长跨阈（3→6）→重 init 走增量 append→4402+retryable=true+无新快照", async () => {
+    const r = await makeRig({ indexLimits: { maxEventsPerStream: 5 } });
+    try {
+      r.history.put("p.jsonl", makeRows(3));
+      const c = await authed(r);
+      await c.say({ t: "subscribe", requestId: "p1", file: "p.jsonl" });
+      expect(c.frames().some((x) => x.t === "snapshot")).toBe(true);
+      // 同流前缀追加（不动已有 3 行，续 3 行 seq4-6）→第三个 append 出口（前缀增量，非 observe 非改写）
+      const grown = [...makeRows(3)];
+      for (let i = 4; i <= 6; i++) {
+        grown.push({ source: "journal", locator: String(i), raw: JSON.stringify({ t: "sending", seq: i }),
+          event: { seq: i, ts: i - 1, generation: null, intentId: null, kind: "sending" } });
+      }
+      r.history.put("p.jsonl", grown as unknown as ScanRow[]);
+      c.sent.length = 0;
+      await c.say({ t: "subscribe", requestId: "p2", file: "p.jsonl" });
+      const p2err = errFrames(c).find((f) => f.code === 4402 && f.requestId === "p2");
+      expect(p2err?.retryable).toBe(true);
+      expect(c.frames().some((x) => x.t === "snapshot")).toBe(false);
       expect(c.readyState).toBe(1);
     } finally {
       await r.dispose();
