@@ -47,6 +47,8 @@ export interface ProcessHostPort {
   /** 返回的 Promise resolve=字节已交给宿主（背压含）；reject 呈现给 submitTurn 调用方。 */
   writeStdin(h: ProcessHandle, text: string): Promise<void>;
   stop(h: ProcessHandle, signal: "SIGTERM" | "SIGKILL"): void;
+  /** 可选优雅关闭面：关闭 stdin（EOF）。pi rpc 模式实测 EOF→自然退出 code 0（~30ms）；无此面的宿主直接走信号链。 */
+  closeStdin?(h: ProcessHandle): void;
 }
 
 /** 协调器端口（结构化：监管器用到面）。 */
@@ -217,6 +219,59 @@ export class ProcessSupervisor {
       }
       // 退役幂等：onExit 可能已先收口（含已允许新 spawn）——旧续体不覆盖新代次
       this.finalizeRetire(entry, "handover");
+      this.toIdle(entry);
+      return { kind: "confirmed", exit };
+    } finally {
+      entry.retireInFlight = false;
+    }
+  }
+
+  /**
+   * 优雅变体（闲置回收链）：EOF 优先（closeStdin→EOF 宽限→自然退出）→未退升级 SIGTERM→宽限→SIGKILL→总截止。
+   * 总预算与 retireCurrent 同构（自发起起算绝对截止，EOF 段计入）；前置/互斥/幂等语义不变。
+   * TECH:26 写「session_shutdown 命令」与 rpc.md 实测冲突（无此命令）；本链以 m01879 实测 EOF 口径为准。
+   */
+  async retireCurrentGraceful(eofGraceMs = 3_000): Promise<RetireOutcome> {
+    if (this.phase === "idle" || this.current === null) return { kind: "no-process" };
+    const entry = this.current;
+    if (this.phase === "stopping" || entry.retireInFlight) return { kind: "stopping" };
+    this.phase = "stopping";
+    entry.retireInFlight = true;
+    const deadlineMs = Math.max(this.opts.exitDeadlineMs ?? 10_000, 1);
+    const rawStart = this.nowMs();
+    const startMs = Number.isFinite(rawStart) ? rawStart : 0;
+    try {
+      if (this.opts.host.closeStdin !== undefined && entry.handle !== null) {
+        try {
+          this.opts.host.closeStdin(entry.handle);
+        } catch (err) {
+          this.audit(`process-retire-eof-failed generation=${entry.generation} err=${String(err)}`);
+        }
+        const eofEnd = startMs + Math.min(Math.max(eofGraceMs, 1), deadlineMs);
+        const eofExit = await this.raceExit(entry, this.remainMs(eofEnd, startMs));
+        if (eofExit !== null) {
+          this.finalizeRetire(entry, "idle-eof");
+          this.toIdle(entry);
+          return { kind: "confirmed", exit: eofExit };
+        }
+        this.audit(`process-retire-eof-timeout generation=${entry.generation} escalating=SIGTERM`);
+      }
+      // 升级链：与 retireCurrent 同构；startMs 不重置（EOF 段计入总预算）
+      const graceMs = this.opts.graceMs ?? 2_000;
+      const graceEnd = startMs + Math.min(graceMs, deadlineMs);
+      const deadlineEnd = startMs + deadlineMs;
+      this.stopSignal(entry, "SIGTERM");
+      let exit = await this.raceExit(entry, this.remainMs(graceEnd, startMs));
+      if (exit === null) {
+        this.stopSignal(entry, "SIGKILL");
+        exit = await this.raceExit(entry, this.remainMs(deadlineEnd, startMs));
+        if (exit === null && entry.exit !== null) exit = entry.exit;
+      }
+      if (exit === null) {
+        this.audit(`process-retire-deadline-exceeded generation=${entry.generation}`);
+        return { kind: "deadline-exceeded" };
+      }
+      this.finalizeRetire(entry, "idle-eof-escalated");
       this.toIdle(entry);
       return { kind: "confirmed", exit };
     } finally {

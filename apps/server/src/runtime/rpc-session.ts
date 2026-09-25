@@ -23,6 +23,7 @@ import {
   type RetireOutcome,
   type TurnKey,
 } from "@pi-agent-ui/protocol";
+import { IdleReaper, MapRegistry } from "./idle-reaper.js";
 
 export interface RpcSessionOpts {
   /** pi 参数（默认 ["--mode","rpc","--no-session"]）。 */
@@ -39,6 +40,14 @@ export interface RpcSessionOpts {
   readonly readinessTimeoutMs?: number;
   /** 超时巡检周期（默认 250ms；驱动协调器 response/turn 双超时检查）。 */
   readonly timeoutPollMs?: number;
+  /** 闲置期限（默认 30 分钟；双条件=agent_settled+登记表空才开始计时）。 */
+  readonly idleMs?: number;
+  /** 后台任务登记表（闲置回收双条件之一；默认空 MapRegistry，扩展任务接入后替换）。 */
+  readonly idleRegistry?: import("./idle-reaper.js").BackgroundTaskRegistry;
+  /** EOF 宽限（闲置回收优雅链首选 EOF；超时升级 SIGTERM）。 */
+  readonly eofGraceMs?: number;
+  /** 显式禁用闲置回收器（测试/特殊宿主）。 */
+  readonly disableIdleReaper?: boolean;
   readonly audit?: (line: string) => void;
   readonly now?: () => string;
   /** 交付面：run-open 期事件直交（含 buffered/dropped 处置，供 UI）。异常被隔离。 */
@@ -77,6 +86,7 @@ export class RpcSession {
   private readonly gate: TurnGate;
   private readonly coordinator: DispatchCoordinator;
   private readonly supervisor: ProcessSupervisor;
+  private reaper: IdleReaper | null = null; // dispose 置 null
   private readonly readiness = new Map<string, ReadinessWaiter>();
   private readonly readinessCancels = new Map<number, ReadinessCancel>();
   private readyGeneration: number | null = null;
@@ -152,7 +162,21 @@ export class RpcSession {
       audit: (l: string) => safeAudit(`supervisor ${l}`),
     });
     const pollMs = opts.timeoutPollMs ?? 250;
+    // 切片5①：闲置回收器（双条件同满足才开始连续计时；回收=EOF 优先优雅链）
+    this.reaper =
+      opts.disableIdleReaper === true
+        ? null
+        : new IdleReaper({
+            supervisor: this.supervisor,
+            isSessionIdle: () => this.gate.getState().kind === "idle",
+            registry: opts.idleRegistry ?? new MapRegistry(),
+            now: () => performance.now(),
+            audit: (l) => safeAudit(l),
+            ...(opts.idleMs !== undefined ? { idleMs: opts.idleMs } : {}),
+            ...(opts.eofGraceMs !== undefined ? { eofGraceMs: opts.eofGraceMs } : {}),
+          });
     this.pollTimer = setInterval(() => {
+      this.reaper?.tick();
       void this.coordinator
         .checkResponseTimeout()
         .then((r) => {
@@ -191,6 +215,8 @@ export class RpcSession {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
+    this.reaper?.dispose();
+    this.reaper = null;
     await this.opts.durability
       .close?.()
       .catch((e: unknown) => this.safeAudit(`rpc-session durability-close-failed ${String(e)}`));
@@ -357,7 +383,13 @@ export class RpcSession {
 
   /** 发一轮用户消息（三写硬序在纯逻辑层；本层只渲染帧+对账 id）。 */
   async send(message: string): Promise<SessionSendResult> {
-    const st = this.supervisor.getState();
+    let st = this.supervisor.getState();
+    // 切片5①：闲置回收后无进程——send=明确申请执行，冷启动拉起（查看不拉起；原会话文件+readiness）
+    if (st.phase === "idle") {
+      const sr = await this.start();
+      if (sr.kind !== "ready") return { kind: "not-ready" };
+      st = this.supervisor.getState();
+    }
     const gen = st.generation;
     // B2 面：ready 标志之外还须现态 running（stopping/已退出不开真实派发）
     if (gen === null || st.phase !== "running" || this.readyGeneration !== gen) return { kind: "not-ready" };

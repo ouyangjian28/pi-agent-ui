@@ -429,6 +429,52 @@ describe("assistantBodyText 命中谓词（受控）", () => {
     expect(assistantBodyText({ type: "message_end", message: { role: "assistant", content: null } })).toBe("");
   });
 
+  it("e2e-7（切片5①）：闲置到期→真 EOF 自然退出（code 0）→send 冷启动 gen2 原会话续跑", { timeout: 180_000 }, async () => {
+    const dir = await mkdtemp(join(tmpdir(), "e2e7-"));
+    dirs.push(dir);
+    ensureDirDurable(dir);
+    const audits: string[] = [];
+    const settledGens: number[] = [];
+    const host = new PiProcessHost({ piBin: PI_BIN });
+    const dur = new FileDurability(join(dir, "journal.jsonl"));
+    const s = new RpcSession({
+      piArgs: piArgsFor(join(dir, "session.jsonl")),
+      journalPath: join(dir, "journal.jsonl"),
+      sessionId: "e2e",
+      host,
+      durability: dur,
+      readinessTimeoutMs: 15_000,
+      timeoutPollMs: 100,
+      idleMs: 2_500,
+      eofGraceMs: 5_000,
+      audit: (l) => audits.push(l),
+      onSettled: () => settledGens.push(1),
+    });
+    cleanups.push(async () => {
+      if ((s.getState().supervisor as { phase: string }).phase === "running") await s.stop().catch(() => undefined);
+      await s.dispose();
+    });
+    const r1 = await s.start();
+    expect(r1).toMatchObject({ kind: "ready", generation: 1 });
+    const l1 = await s.send("请只回复：OK");
+    expect(l1.kind).toBe("launched");
+    await until(() => settledGens.length === 1, "第一轮 settled（双条件之一成立）");
+    await until(() => audits.some((l) => l.includes("idle-reap-start")), "闲置到期触发回收", 20_000);
+    await until(() => audits.some((l) => l.includes("idle-reap-done kind=confirmed")), "真 EOF 自然退出+回收确认", 20_000);
+    expect((s.getState().supervisor as { phase: string }).phase).toBe("idle");
+    expect(audits.some((l) => l.includes("process-retire-eof-timeout"))).toBe(false); // EOF 宽限内真退（未升级信号）
+    // 回收≠销毁+journal 保留：send=明确申请执行→冷启动 gen2（原会话文件）→新一轮真往返
+    const l2 = await s.send("请只回复：DONE");
+    expect(l2.kind).toBe("launched");
+    expect((s.getState().supervisor as { generation: number }).generation).toBe(2);
+    await until(() => settledGens.length === 2, "冷启动第二轮 settled", 120_000);
+    const rep = await recoverFromJournal(join(dir, "journal.jsonl"), "e2e");
+    expect(rep.bad).toEqual([]);
+    expect(rep.intents).toHaveLength(2);
+    expect(rep.settledCount).toBe(2);
+    expect((await s.stop()) as unknown).toMatchObject({ kind: "confirmed" });
+  });
+
   it("s4h 补：thinking-only（content 只有 thinking 段含口令）→不命中；metadata-only（message_update 带 metadata 含口令）→不命中", () => {
     const thinkingOnly = { type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking: `口令思考 ${TOKEN}` }] } };
     expect(assistantBodyText(thinkingOnly)).toBe(""); // 无 text 段→空串→不命中

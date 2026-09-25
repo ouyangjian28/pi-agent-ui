@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { DurabilityPort, ProcessHandle, ProcessHostPort, ProcessSpawnHandlers } from "@pi-agent-ui/protocol";
 import { FileDurability } from "../../../apps/server/src/runtime/file-durability.js";
 import { RpcSession } from "../../../apps/server/src/runtime/rpc-session.js";
+import { MapRegistry } from "../../../apps/server/src/runtime/idle-reaper.js";
 
 /** 假 pi 进程宿主：记录写出的 stdin 帧；测试用 emitEvent/emitExit 注入进程输出。
  *  writeMode：ok=正常受理；fail=write reject（S4-03 写入失败）；hang=write 永不兑现（S4-03 挂起窗口）。 */
@@ -34,6 +35,12 @@ class FakeRpcHost implements ProcessHostPort {
     void h;
     this.stopped.push(signal);
     this.stopped = this.stopped;
+  }
+
+  /** 切片5①：EOF 优雅关闭面（记录；测试在此后手动 emitExit 模拟 pi EOF 自然退出）。 */
+  closedStdinCount = 0;
+  closeStdin(_h: ProcessHandle): void {
+    this.closedStdinCount += 1;
   }
 
   /** 注入 stdout JSON 行（经真 demux 路径）。 */
@@ -577,6 +584,65 @@ describe("RpcSession（受控替身）", () => {
     const ra = await startA; // 探针成功路径内已退出：终窗复核不得返回 ready
     expect(ra.kind).not.toBe("ready");
     expect(ra).toMatchObject({ kind: "superseded", generation: 1 });
+  });
+
+  it("切片5①：settled 后闲置到期→EOF 优雅回收（无信号）→send 自动冷启动 gen2（journal 保留续写）", async () => {
+    const { session, host, audits } = await makeSession({ idleMs: 80, eofGraceMs: 600, graceMs: 300, exitDeadlineMs: 1_200 });
+    const p0 = session.start();
+    await until(() => host.frames.some((f) => f.includes('"type":"get_state"')), "探针写出");
+    host.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true });
+    expect((await p0).kind).toBe("ready");
+    await runTurn(host, session, "第一轮", 1);
+    await until(() => audits.some((l) => l.includes("idle-reap-start")), "闲置到期触发回收");
+    await until(() => host.closedStdinCount > 0, "EOF 已发（closeStdin）");
+    host.emitExit(0, null); // pi EOF 自然退出（m01879 实测形态）
+    await until(() => audits.some((l) => l.includes("idle-reap-done kind=confirmed")), "回收确认");
+    expect(host.stopSignals).toEqual([]); // EOF 优先链：无 SIGTERM/SIGKILL
+    expect(session.getState().supervisor.phase).toBe("idle");
+    expect(session.getState().gate.kind).toBe("idle");
+    // 回收≠销毁：durability 未关（journal 由第二轮续写证明）；send=明确申请执行→冷启动 gen2
+    const before2 = host.frames.filter((f) => f.includes('"type":"prompt"')).length;
+    const cmd = session.send("第二轮");
+    await until(() => host.frames.some((f) => f.includes('"id":"ready-2"')), "gen2 探针写出");
+    host.emitEvent({ id: "ready-2", type: "response", command: "get_state", success: true });
+    await until(() => host.frames.filter((f) => f.includes('"type":"prompt"')).length === before2 + 1, "gen2 prompt 帧写出");
+    const frame = JSON.parse(host.frames.filter((f) => f.includes('"prompt"')).slice(-1)[0]!) as { id: string };
+    host.emitEvent({ id: frame.id, type: "response", command: "prompt", success: true });
+    host.emitEvent({ type: "agent_settled" });
+    expect((await cmd).kind).toBe("launched");
+    expect(session.getState().supervisor.generation).toBe(2);
+  });
+
+  it("切片5①：登记表活跃阻断闲置回收；完成后再到期回收", async () => {
+    const registry = new MapRegistry();
+    const { session, host, audits } = await makeSession({ idleMs: 60, eofGraceMs: 400, idleRegistry: registry });
+    const p0 = session.start();
+    await until(() => host.frames.some((f) => f.includes('"type":"get_state"')), "探针写出");
+    host.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true });
+    expect((await p0).kind).toBe("ready");
+    await runTurn(host, session, "任务前置轮", 1);
+    registry.register("bg-export", "导出会话");
+    await new Promise((r) => setTimeout(r, 150)); // 远超 idleMs 的等待
+    expect(audits.some((l) => l.includes("idle-reap-start"))).toBe(false); // 阻断
+    expect(host.closedStdinCount).toBe(0);
+    registry.complete("bg-export");
+    await until(() => audits.some((l) => l.includes("idle-reap-start")), "登记完成后到期触发");
+    await until(() => host.closedStdinCount > 0, "EOF 已发");
+    host.emitExit(0, null);
+    await until(() => audits.some((l) => l.includes("idle-reap-done kind=confirmed")), "回收确认");
+  });
+
+  it("切片5①：EOF 宽限超时→升级 SIGTERM（优雅链降级）", async () => {
+    const { session, host, audits } = await makeSession({ idleMs: 60, eofGraceMs: 60, graceMs: 250, exitDeadlineMs: 1_000 });
+    const p0 = session.start();
+    await until(() => host.frames.some((f) => f.includes('"type":"get_state"')), "探针写出");
+    host.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true });
+    expect((await p0).kind).toBe("ready");
+    await runTurn(host, session, "降级前置轮", 1);
+    await until(() => host.closedStdinCount > 0, "EOF 已发");
+    await until(() => host.stopSignals.includes("SIGTERM"), "EOF 宽限超时升级 SIGTERM");
+    host.emitExit(null, "SIGTERM");
+    await until(() => audits.some((l) => l.includes("idle-reap-done kind=confirmed")), "回收确认（降级链）");
   });
 
   it("S4-YC1 启动中 stop、exit 延迟未达：旧 start=superseded（结果分类不依赖 exit 送达时序）", async () => {
