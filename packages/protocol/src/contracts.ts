@@ -12,6 +12,8 @@ export const LIMITS = {
   subscriptionBacklogMax: 1_024,
   subscriptionBacklogBytes: 262_144,
   frameMaxBytes: 262_144,
+  /** 3b-1 传输接收硬门（GPT 3b-0 对齐裁定）：ws maxPayload=1MiB 重组兜底——超限由接收器 close 1009（可无应用 error 帧；契约例外条款见 docs/ws-ui-contracts-v1.md §5.1/§5.3）。262,145B..1MiB 的合法重组文本仍归网关 4404 门（应用上限不变）。 */
+  transportMaxPayloadBytes: 1_048_576,
   pageMaxEvents: 200,
   pageFrameBudgetBytes: 200_000,
   singleEventBytes: 32_768,
