@@ -90,6 +90,8 @@ export interface WsGatewayOpts {
   };
   /** B4（w1b）：读索引预算注入（受控测试可小阈；生产默认 20000/流）。 */
   readonly indexLimits?: { maxEventsPerStream: number };
+  /** D1（w1d）：registry 流数上限注入（受控测试小值替 33 活动流挤出场景） */
+  readonly registryMaxStreams?: number;
   readonly heartbeat?: { pingMs?: number; idleMs?: number }; // 默认 30s/90s；0=禁用（受控测试）
   readonly maxLifetimeMs?: number; // 默认 24h
   readonly helloWindowMs?: number; // 默认 10s
@@ -168,7 +170,20 @@ export class WsGateway {
     // W1-02：默认单调时钟（performance.now 单调；缺失环境回落 Date.now——墙钟回拨仅影响相对间隔的下界）
     this.now = opts.now ?? (typeof performance !== "undefined" && typeof performance.now === "function" ? () => performance.now() : () => Date.now());
     this.newIdFn = opts.newId ?? (() => `id-${++this.seq}`);
-    this.registry = new ReadIndexRegistry(this.newIdFn, undefined, this.opts.indexLimits); // B4：预算可注入（受控测试可小阈）
+    // B4：预算可注入（受控测试可小阈）；D1（w1d）：maxStreams 可注入+流身份静默丢失钩子——
+    // LRU 挤出/宽容换流必须协调旧持有者（4409 退旧+撤帧+清理），不得让旧引擎接收新流坐标
+    this.registry = new ReadIndexRegistry(
+      this.newIdFn,
+      this.opts.registryMaxStreams !== undefined ? { maxStreams: this.opts.registryMaxStreams } : undefined,
+      this.opts.indexLimits,
+      (file, index, reason) => {
+        // 钩子异常不回灌 registry（get/evict 路径保持纯逻辑语义）
+        try {
+          const retired = this.retireEnginesForFile(file, null, `index-${reason}`);
+          this.audit(`index-dropped file=${file} streamId=${index.streamId} reason=${reason} retired=${retired}`);
+        } catch { /* 协调失败不影响 registry 语义；后续订阅入口的身份防线兜底 */ }
+      },
+    );
     this.tmr = opts.timers?.setTimeout ?? ((cb, ms) => setTimeout(cb, ms));
     this.clr = opts.timers?.clearTimeout ?? ((t) => clearTimeout(t as ReturnType<typeof setTimeout>));
     this.pingMs = opts.heartbeat?.pingMs ?? LIMITS.heartbeatSuggestMs;
@@ -324,9 +339,10 @@ export class WsGateway {
     this.closeConn(st, 1008, "auth");
   }
 
-  /** 协议错误帧统一出口（W1-01 错误矩阵：4403→close 1003、4405→close 1008、4404 计数 3→close 1002）。 */
+  /** 协议错误帧统一出口（W1-01 错误矩阵：4403→close 1003、4405→close 1008、4404 计数 3→close 1002）。
+   *  D2（w1d）：4402 容量错 retryable=true（契约 §5.3 错误矩阵——换流/冷凉后可重订阅）；其余 false。 */
   private errFrame(st: ConnState, code: 4401 | 4402 | 4403 | 4404 | 4405, message: string, requestId: string): void {
-    this.enqueue(st, { t: "error", code, message, retryable: false, requestId });
+    this.enqueue(st, { t: "error", code, message, retryable: code === 4402, requestId });
     if (code === 4403) { this.closeConn(st, 1003, "protocol-version"); return; }
     if (code === 4405) { this.closeConn(st, 1008, "write-frozen"); return; }
     if (code === 4404) {
@@ -358,7 +374,8 @@ export class WsGateway {
         return;
       }
       // B1（w1b）：错流门先行——resync 游标必须指向当前流（冻结契约 §1.3：streamId≠当前→4404）。
-      // 无已知流（waterMark=0）同拒；盘面改写后的换流判定在 syncIndex 后二验。
+      // R1（w1c）：已装载空流（waterMark=0）保身份——同 streamId+seq1 按 H+1 追平受理；从未装载（peek=null）→4404。
+      // 盘面改写后的换流判定在 syncIndex 后二验。
       if ("cursor" in frame) {
         const curStream = this.currentStreamId(file);
         if (curStream === null || curStream !== frame.cursor.streamId) {
@@ -478,6 +495,10 @@ export class WsGateway {
     if (index.waterMark === 0) {
       for (const row of rows) index.append(row.source, row.locator, row.raw, row.event);
       if (index.overBudget) { this.closeSubscriptionsFor(file, "index-over-budget"); return WsGateway.INDEX_BUDGET; }
+      // D1（w1d）身份防线：空索引装载（新流/挤出重建/宽容换流）不得喂仍持旧身份的引擎
+      // （正常路径已由 onStreamDropped 钩子退役；此处兜底协调漏网，幂等 no-op）
+      const stale = this.retireEnginesForFile(file, index.streamId, "identity-change");
+      if (stale > 0) this.audit(`stream-identity-guard file=${file} newStream=${index.streamId} retired=${stale}`);
       return index;
     }
     if (index.isPrefixOf(rows)) {
@@ -500,8 +521,9 @@ export class WsGateway {
   }
 
   /** R2（w1c）：换流时退役该文件上全部非目标流身份的订阅（4409 stream-replaced:${oldId} 通知+撤帧+清理）。
-   * 触发连接自身的旧订阅同样经此退役（其新引擎随后照常装入）。 */
-  private retireEnginesForFile(file: string, keepStreamId: string, reason: string): number {
+   * 触发连接自身的旧订阅同样经此退役（其新引擎随后照常装入）。
+   * D1（w1d）：keepStreamId=null 表示退役该文件全部订阅（流身份已静默丢失——LRU 挤出/宽容换流，无新流可保）。 */
+  private retireEnginesForFile(file: string, keepStreamId: string | null, reason: string): number {
     const w = this.watchers.get(file);
     if (w === undefined) return 0;
     let retired = 0;
@@ -509,7 +531,7 @@ export class WsGateway {
       if (c.closed) continue;
       const sub = c.subs.get(file);
       if (sub === undefined) continue;
-      if (sub.engine.streamId === keepStreamId) continue;
+      if (keepStreamId !== null && sub.engine.streamId === keepStreamId) continue;
       const oldId = sub.engine.subscriptionId;
       this.enqueue(c, { t: "error", code: 4409, message: `stream-replaced:${oldId}`, retryable: true, requestId: "" });
       sub.engine.close(4431, `stream-replaced-${reason}`, false);
@@ -550,6 +572,9 @@ export class WsGateway {
           // B2：分发用索引规范化后的统一坐标（丢弃外部 seq，引擎/索引恒一致）
           const indexed = index.read(seq, 1)[0];
           if (indexed === undefined) { this.audit(`history-append-lost file=${file} seq=${seq}`); return; }
+          // D1（w1d）身份防线：分发前退役仍持异身份的引擎（纵深兜底；正常路径钩子已协调，幂等 no-op）
+          const stale = this.retireEnginesForFile(file, index.streamId, "identity-change");
+          if (stale > 0) this.audit(`onappend-identity-guard file=${file} streamId=${index.streamId} retired=${stale}`);
           this.forEachEngine(file, (e) => e.onHistoryAppend(indexed.event));
           // B4（w1b）：observe 通路容量出口——触顶即关流（4402 通知+清理），不靠慢客户端门掩盖索引无限增长
           if (index.overBudget) {
@@ -901,7 +926,8 @@ function sha256Hex(s: string): string {
   return createHash("sha256").update(s, "utf8").digest("hex");
 }
 
-/** 目录内容指纹（W1-11）：file|size|entries|lastActive 的稳定序列哈希（内容态代理；同指纹→版本不变）。 */
+/** 目录内容指纹（W1-11+B5）：全部 DTO 可见字段（file|sessionId|title|lastActiveMs|entryCount|sizeBytes|
+ *  hasRecoveryNotice|listReliability）+目录可靠性的稳定序列哈希（内容态代理；同指纹→版本不变）。 */
 function listFingerprint(items: readonly ReturnType<typeof toDto>[], dirReliability: string): string {
   // B5：覆盖全部 DTO 可见字段（file/sessionId/title/lastActiveMs/entryCount/sizeBytes/hasRecoveryNotice/listReliability）+目录可靠性
   const parts = items.map((s) => `${s.file}|${s.sessionId ?? "x"}|${s.title.text}|${s.lastActiveMs ?? "x"}|${s.entryCount}|${s.sizeBytes}|${s.hasRecoveryNotice}|${s.listReliability}`);

@@ -113,6 +113,10 @@ export class FileOverBudgetError extends Error {
   constructor(readonly file: string) { super(`read-index: file over budget (twice): ${file}`); this.name = "FileOverBudgetError"; }
 }
 
+/** 流身份静默丢失原因：LRU 挤出 / 首次触顶宽容换流（get 内删旧建新）。
+ *  D1（w1d）：宿主经 onStreamDropped 协调旧持有者（退役旧引擎+通知），不得让旧引擎接收新流坐标。 */
+export type StreamDropReason = "lru" | "budget-swap";
+
 export class ReadIndexRegistry {
   private readonly map = new Map<string, ReadIndex>(); // Map 迭代序=插入序；重插=LRU 刷新
   /** 已触顶过一次的文件（第二次触顶→拒绝，有限出口） */
@@ -122,6 +126,9 @@ export class ReadIndexRegistry {
     private readonly newId: () => StreamId = defaultStreamId,
     private readonly limits: ReadIndexRegistryLimits = DEFAULT_REGISTRY_LIMITS,
     private readonly indexLimits: ReadIndexLimits = DEFAULT_READ_INDEX_LIMITS,
+    /** D1（w1d）：索引被静默移除（挤出/宽容换流）时回调——宿主必须协调仍持该流身份的订阅。
+     *  回调异常由宿主自防；replace()（盘面改写，宿主主动调用并自行协调）不触发本钩子。 */
+    private readonly onStreamDropped?: (file: string, index: ReadIndex, reason: StreamDropReason) => void,
   ) {}
 
   /** 取流（C6-03 修正）：仅当**现流触顶且宽容额度已用**才拒绝；首次触顶→废弃换新（新流从空开始，
@@ -132,7 +139,9 @@ export class ReadIndexRegistry {
     if (hit) {
       if (hit.overBudget) {
         if (this.overBudgetFiles.has(file)) throw new FileOverBudgetError(file); // 额度已用且现流又触顶
-        this.map.delete(file); // 首次触顶：换流（唯一一次宽容）
+        // 首次触顶：换流（唯一一次宽容）——D1：宽容换流=流身份丢失，先通知宿主协调旧持有者
+        this.onStreamDropped?.(file, hit, "budget-swap");
+        this.map.delete(file);
         this.overBudgetFiles.add(file);
       } else { this.map.delete(file); this.map.set(file, hit); return hit; } // 预算内放行（含曾触顶文件的新流）
     }
@@ -163,6 +172,9 @@ export class ReadIndexRegistry {
     while (this.map.size > this.limits.maxStreams) {
       const oldest = this.map.keys().next().value as string | undefined;
       if (oldest === undefined) break; // 有限出口
+      const evicted = this.map.get(oldest);
+      // D1（w1d）：LRU 挤出=流身份丢失——先通知宿主协调（退役旧引擎+通知），再移除
+      if (evicted !== undefined) this.onStreamDropped?.(oldest, evicted, "lru");
       this.map.delete(oldest);
     }
   }
