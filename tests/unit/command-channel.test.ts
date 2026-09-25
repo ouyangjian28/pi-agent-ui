@@ -93,6 +93,11 @@ describe("通用命令通道（CommandChannel）", () => {
     });
     expect(out.kind).toBe("placeholder-durability-failed");
     expect(sent).toBe(false); // 未发送：副作用通道从未开栓
+    // 回滚证据：同通道重试同 opId=重新受理（非 unknown-effect）——占位耐久失败不留内存脏占位
+    ledger.failPlaceholder = false;
+    const out1b = await channel.dispatch("op-1", "argsA", async () => ({ ok: true }));
+    expect(out1b).toEqual({ kind: "ok", result: { ok: true } });
+    expect(ledger.placeholders).toHaveLength(1); // 仅重试成功这一次落占位
     // 重新派发同 opId=正常受理（盘上无占位=事实一致）
     const ledger2 = new FakeLedger();
     const d2 = make(ledger2);
