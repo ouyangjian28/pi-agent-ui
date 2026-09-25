@@ -197,3 +197,14 @@
 | 订阅引擎 13 时序（快照三页/幂等 2 页缓存/跳页/末页宽限 60s/缓冲回放/4431 超限/resync 超前/封闭态/交织序） | subscription-engine.test（13 it）；M7（幂等）4 挂/M8（barrier 冻结）6 挂/M9r2（编入序，需 drain(3)——批次满提前 flush 掩盖 maxFrames=2 窗口）杀 | ✅ |
 | 快照字节预算（pageFrameBudgetBytes 200k/单事件 32k） | 引擎 PAGE_MAX=条数上限；字节装页归接线层（发送队列） | 🔴 归接线 |
 | 连接级发送队列/在途限流/计算并发 | 未实现（归 WS 接线层） | 🔴 归接线 |
+
+## adapter 切片②-c5（B01–B07 修复轮：引擎/索引/恢复/脱敏强化；42+21+18+34+6 it）
+| 面 | 断言落点 | 状态 |
+| --- | --- | --- |
+| **B01 游标/缓存身份**（合法域 [1,H+1]：追平补页空页 done 进 live；空流 H=0 cursor=1 同；缓存匹配含完整游标域（错流同 seq 不命中→4404）；幂等=内容复用+**新 requestId envelope**（不回显旧帧整帧）） | subscription-engine.test ⑬⑭⑮+③⑤（内容幂等+新 requestId）；M-b01-cursor→1 挂/M-b01-cache→4 挂/M-b01-reqid→2 挂 | ✅ |
+| **B02 索引不变量**（append 原子赋 seq 覆盖输入携带 seq；isPrefixOf=位置+locator+**内容摘要**（同位改写→换流）；scanDigest 源+定位+事件三要素；注册表 boot 隔离注入 ID；触顶 get 废弃换新流（有限出口）；LRU get 触达刷新；replace 换流） | read-index.test 6 it；M-b02-seq/M-b02-digest/M-b02-evict 各 1 挂 | ✅ |
+| **B04 字节装页**（servePageFrom=字节+条数双上限：每事件 estimateHistoryEventBytes，首条必装保前进，超预算即止；done/expectNext 由实装末位决定——引擎状态不超前；live 分批分立常量 maxEventsPerLiveFrame=8） | subscription-engine.test ⑯（estimateEvent 注入 100k→2/2/1 三页）+⑬（8/8/4 三帧 liveSeq=[10,18,22]）；M-b04-bytes→1 挂 | ✅ |
+| **B03 恢复证据快照**（captureRecoveryEvidence 修复前捕获（lines+bad+残片+归因修订+repaired+createdAt）；recoverFromSnapshot=快照语义裁决；**修复盘面后同一快照结论不变（防洗白核心）**；冷启动裸读假安全反例固化（宿主规则=unavailable no-evidence-snapshot）；evidenceHash=sha256 hex64 canonical；perIntent 穷尽表（settled/delivered/unknown/cancelled/not-evaluated 优先级）+provisional（unknown 由残片关联或人工裁决派生）） | recover.test 快照 4 fixture（34 it）；M-b03-resume/M-b03-prov/M-b03-cancel 各 2 挂 | ✅ |
+| **B05 脱敏链重排**（完整语义单元先行：①PEM 整块（任意大写标签）②截断 PEM ③env 赋值 ④Bearer ⑤AKIA ⑥ssh-rsa ⑦userinfo URL ⑧URL 整体 ⑨POSIX≥2 段 ⑩Windows/UNC——env 值/公钥/带凭据 URL 不被路径规则撕碎；fnv1a64Hex=**UTF-8 全字节折叠**（charCodeAt&0xff 丢高 8 位→\u0100/\u0200 整类碰撞修复）） | sanitizer-vectors 41 例（userinfo 改整 URL 遮蔽/env 含路径/PEM CERTIFICATE/ssh 含斜杠/id 碰撞对 idDistinctWith）；M-b05-order2（env 挪 POSIX 后）→3 挂/M-b05-hash（单字节化复活）→1 挂 | ✅ |
+| **B06 归因宿主锚**（assistant/toolResult 归属=consumed 宿主锚（anchorEntryId=consume 时 session 行号）+同 generation 锚窗口——不用跨文件扫描序；锚缺失→intentId:null 不猜；迟到更正不回改已发布） | 契约文档 §3.5 冻结（projection fixture 归接线面） | 📄 文档面 |
+| **B07 文档/代码单模型**（RecoveryInfo 扁平单模型+PageOf 五字段+no-evidence-snapshot reason+未知 t 固定消息（不回显）+liveSeq=末项序号首项=liveSeq-events.length+1+live refSeq 显式 null+hello 版本层 4403 口径统一+file 正则精确） | contracts-validate 21 it（回显净化断言）+文档 python 单点对齐 | ✅ |
