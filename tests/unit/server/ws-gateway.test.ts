@@ -336,26 +336,37 @@ describe("ws-gateway w1：A 认证入站（W1-01/02）", () => {
       audit: (l) => audits.push(l),
     });
     try {
-      // 1024 个不同 IP 各一次失败（limit=1：首败即封锁）→ 全表封锁
+      // 1024 个不同 IP 各一次失败（limit=1：首败即封锁），时钟逐条递增 1ms → blockedUntil 严格递增（可断言淘汰对象）
       for (let i = 1; i <= 1024; i++) {
+        t = i;
         const c = r.conn({ clientIp: `10.0.${Math.floor(i / 250)}.${(i % 250) + 1}` }).c;
         await c.say({ t: "hello", protocolVersion: 1, token: "bad" });
       }
       expect(audits.filter((l) => l.includes("auth-rate-blocked")).length).toBe(1024);
       expect(audits.some((l) => l.includes("auth-rate-table-evict-blocked"))).toBe(false); // 未满表前不淘汰
-      // 第 1025 个新 IP：满表+全封锁 → 显式淘汰最早到期者+审计（容量是 set 前硬条件）
+      // C2（3b1c）：断言真实容量而非仅审计——白盒读表，容量是 set 前硬条件（去 delete 只留审计的变异必须被杀）
+      const table = (): number => (r.gw as unknown as { authFailures: Map<string, unknown> }).authFailures.size;
+      expect(table()).toBe(1024);
+      // 第 1025 个新 IP：满表+全封锁 → 显式淘汰最早到期者（t=1 的 ip=10.0.0.2，until=600001）+审计；容量仍 1024
+      t = 1_030;
       const c25 = r.conn({ clientIp: "20.0.0.1" }).c;
       await c25.say({ t: "hello", protocolVersion: 1, token: "bad" });
       const evict = audits.find((l) => l.includes("auth-rate-table-evict-blocked"));
       expect(evict).toBeDefined();
-      expect(evict).toMatch(/size=1024/);
+      expect(evict).toMatch(/ip=10\.0\.0\.2 until=600001 size=1024/); // 淘汰对象=最早到期（非任意/非最新）
+      expect(table()).toBe(1024); // 真实容量不增（M-B2-delete 变异在此暴露：无 delete 则 1025）
       expect(audits.some((l) => l.includes("auth-rate-blocked ip=20.0.0.1"))).toBe(true); // 新观测照常记账
-      // 部分过期路径：时间推进过封锁期（全部解封）→ 新 IP 记账走非封锁淘汰分支（无 evict-blocked 审计新增）
-      t = 600_001;
+      // 部分过期与活动封锁共存：t=600002 → 仅 i≤2（blockedUntil≤600002）过期；满表新 IP 走非封锁淘汰分支
+      t = 600_002;
       const c26 = r.conn({ clientIp: "30.0.0.1" }).c;
       await c26.say({ t: "hello", protocolVersion: 1, token: "bad" });
-      expect(audits.some((l) => l.includes("auth-rate-table-evict-blocked") && l.includes("ip=30"))).toBe(false);
+      expect(audits.filter((l) => l.includes("auth-rate-table-evict-blocked")).length).toBe(1); // 淘汰审计数不增（走非封锁分支）
+      expect(table()).toBe(1024);
       expect(audits.some((l) => l.includes("auth-rate-blocked ip=30.0.0.1"))).toBe(true);
+      // 活动封锁保留：i=1024（blockedUntil=601024>600002 仍封锁）的正确令牌 hello 也拒（4401）
+      const cLate = r.conn({ clientIp: "10.0.4.25" }).c; // i=1024 → 10.0.4.25
+      await cLate.say({ t: "hello", protocolVersion: 1, token: "tok-ok" });
+      expect(cLate.frames().some((f) => f.t === "error" && (f as { code?: number }).code === 4401)).toBe(true);
     } finally {
       await r.dispose();
     }

@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import { createServer as createHttpsServer } from "node:https";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { Server } from "node:http";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -284,9 +285,9 @@ describe("3b-1 真网络：③continuation+多字节 UTF-8 分界+控制帧", ()
     const sock = await rawHandshake(h.port, ORIGIN);
     await origConn;
     const full = Buffer.from("前😀中𝄞后", "utf8");
-    // 碎在 😀 代理对中间（UTF-8 4 字节码点第 3 字节处）+ 再碎在 𝄞 中间；中间插 ping 控制帧
+    // 碎在 😀 代理对中间（UTF-8 4 字节码点第 3 字节处）+ 再碎在「中」第 1B；中间插 ping 控制帧
     const cut1 = 3 + 2; // "前"=3B + 😀前2B
-    const cut2 = cut1 + 2 + 1; // 😀后2B + 𝄞第1B
+    const cut2 = cut1 + 2 + 1; // 😀后2B + 「中」第1B
     sock.write(maskFrame(0x1, false, full.subarray(0, cut1))); // 首帧 text fin=0
     sock.write(maskFrame(0x9, true, Buffer.from("probe"))); // 控制帧插入（ping，可出现在分片间）
     sock.write(maskFrame(0x0, false, full.subarray(cut1, cut2))); // continuation fin=0
@@ -404,7 +405,7 @@ describe("3b-1 真网络：⑤真 send 回调+清理", () => {
     await c.closed;
   });
 
-  it("背压下 done 等真实 flush（64KB 大消息×多，客户端延迟读取）", async () => {
+  it("背压下 done 等真实 flush（64KB 大消息×多，客户端持续读取）", async () => {
     const h = await makeHarness();
     const connP = new Promise<WsConnectionPort>((resolve) => { h.adapter.onConnection((conn) => resolve(conn)); });
     const c = connect(h.url(), { headers: { Origin: ORIGIN } });
@@ -490,6 +491,39 @@ describe("3b-1 真网络：⑤真 send 回调+清理", () => {
     } finally {
       blocker.close();
     }
+  });
+
+  it("C1/3b1c 单次取消：listen 启动中 dispose → 临时监听器全部摘除（error/listening 计数归零）", async () => {
+    const adapter = new WsServerAdapter({ allowedOrigins: [ORIGIN], disposeWaitMs: 200, audit: () => {} });
+    const server = (adapter as unknown as { ownServer: Server }).ownServer;
+    const before = { err: server.listenerCount("error"), lis: server.listenerCount("listening") };
+    const starting = adapter.listen(0, "127.0.0.1");
+    const stopping = adapter.dispose();
+    await expect(starting).rejects.toThrow(/监听启动中止|dispose/);
+    await stopping;
+    // GPT 3b1c C1 探针：旧实现残留 error +1/listening +1（取消分支不摘临时监听器）
+    expect(server.listenerCount("error")).toBe(before.err);
+    expect(server.listenerCount("listening")).toBe(before.lis);
+  });
+
+  it("C1/3b1c 重复启动拒绝：启动中/同步参数错误的二次 listen 均拒且不破坏首次启动的结算", async () => {
+    const adapter = new WsServerAdapter({ allowedOrigins: [ORIGIN], disposeWaitMs: 200, audit: () => {} });
+    const p = adapter.listen(0, "127.0.0.1");
+    await expect(adapter.listen(0, "127.0.0.1")).rejects.toThrow(/启动中/); // 并发重复：拒绝（不覆盖槽）
+    await expect(adapter.listen(-1, "127.0.0.1")).rejects.toThrow(/启动中/); // 同步参数错误同轮也不碰首次启动
+    const stopping = adapter.dispose();
+    await expect(p).rejects.toThrow(/监听启动中止/); // 首次启动仍可被 dispose 结算（不悬空）
+    await stopping;
+  });
+
+  it("C1/3b1c 已监听后重复 listen 拒绝；失败后顺序重试可正常获得端口", async () => {
+    // 同步参数错误自身拒绝（ERR_SOCKET_BAD_PORT 同步 throw 路径）→ 槽位清理 → 顺序重试成功
+    const adapter = new WsServerAdapter({ allowedOrigins: [ORIGIN], disposeWaitMs: 200, audit: () => {} });
+    await expect(adapter.listen(-1, "127.0.0.1")).rejects.toThrow(/port|RangeError/i);
+    const r1 = await adapter.listen(0, "127.0.0.1"); // 失败后顺序重试：正常监听
+    await expect(adapter.listen(0, "127.0.0.1")).rejects.toThrow(/已在监听/); // 成功后重复：拒绝
+    await adapter.dispose();
+    await expect(adapter.listen(r1.port, "127.0.0.1")).rejects.toThrow(/dispose/); // 终态不复活
   });
 
   it("R4/3b1b binary 真网络回归（真 adapter+真 gateway 组合）：已认证连接发二进制→error 4403+close 1003", async () => {
@@ -668,15 +702,24 @@ describe("3b-1 真网络：⑦关闭竞态+无句柄悬挂", () => {
     const sock = (c.ws as unknown as { _socket: Socket })._socket; // ws 客户端底层 socket
     sock.pause(); // 暂停读：服务端 close(1009) 握手永完不成，只能靠截止 terminate
     const t0 = Date.now();
-    c.ws.send(Buffer.alloc(LIMITS.transportMaxPayloadBytes + 1, 0x61)); // 超限→服务端接收器 error→自启 close
-    const fin = await serverClosedP; // 服务端终局（closeTimeout 到点 terminate→close 1006）
-    expect(fin.code).toBe(1006); // 异常关闭（terminate），非优雅握手收口
-    const elapsed = fin.at - t0;
-    // closeHandshakeMs=400：须在截止+余量内完成（30s 回归变异会在此超限被杀）
-    expect(elapsed).toBeLessThan(2_400);
-    expect(elapsed).toBeGreaterThan(300); // 不是瞬时 TCP 收口（排除假绿路径：正常 FIN 应答会在毫秒级完成）
-    sock.resume();
-    await c.closed.catch(() => {}); // terminate 后客户端异常关闭=预期
+    try {
+      c.ws.send(Buffer.alloc(LIMITS.transportMaxPayloadBytes + 1, 0x61)); // 超限→服务端接收器 error→自启 close
+      // C3（3b1c）：显式有界等待（vitest 5s 超时是兕底而非主证据；断言失败路径也走 finally 清理）
+      const fin = await Promise.race([
+        serverClosedP,
+        new Promise<never>((_, rej) => { const to = setTimeout(() => rej(new Error("服务端终局未在 4s 内到达")), 4_000); to.unref?.(); }),
+      ]);
+      expect(fin.code).toBe(1006); // 异常关闭（terminate），非优雅握手收口
+      const elapsed = fin.at - t0;
+      // closeHandshakeMs=400：须在截止+余量内完成（closeTimeout→30s 变异在此被杀；实际失败方式=4s 有界等待超限）
+      expect(elapsed).toBeLessThan(2_400);
+      expect(elapsed).toBeGreaterThan(300); // 不是瞬时 TCP 收口（排除假绿路径：正常 FIN 应答会在毫秒级完成）
+    } finally {
+      // 失败/超时路径同样清理：恢复读+终止客户端，防已暂停的 socket 挂住夹具
+      sock.resume();
+      try { c.ws.terminate(); } catch { /* 已关 */ }
+      await c.closed.catch(() => {});
+    }
   });
 
   it("upgrade 握手中途 socket 早关 → 无泄漏无崩溃（审计记录）", async () => {

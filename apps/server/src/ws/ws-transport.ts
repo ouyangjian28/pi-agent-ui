@@ -107,7 +107,8 @@ export function deriveConnMeta(req: IncomingMessage, socket: Duplex, trustedProx
   if (!trusted) {
     return { origin, loopback: isLoopbackIp(remote), tls: sockTls, clientIp: remote, remoteAddress: remote, proxied: false };
   }
-  // 可信代理：XFF 左端=有效客户端；XFP 决定有效协议（回程 TLS 与外部协议分立：proxied=true 时 tls=XFP 事实，头缺失保守 false）
+  // 可信代理：XFF 左端=有效客户端；XFP 决定有效协议（回程 TLS 与外部协议分立：proxied=true 时 tls=XFP 事实，头缺失保守 false 不回退 socket TLS）
+  // 部署约束（契约 §5.5 代理头信任边界）：可信代理必须在转发时覆盖/清洗 XFF/XFP（用户可控追加链不得当身份）；多级代理逐跳配置信任边界
   const xff = headerSingle(req.headers["x-forwarded-for"]);
   const clientIp = xff !== null ? (xff.split(",")[0] ?? "").trim() : remote;
   const effectiveIp = clientIp.length > 0 ? clientIp : remote;
@@ -260,6 +261,8 @@ export class WsServerAdapter implements WsTransportPort {
   private disposePromise: Promise<void> | null = null;
   /** B3（3b1b）：启动中的 listen 结算钩子——dispose 同轮交错时显式拒绝，防悬空启动 Promise。 */
   private pendingListen: { settle: () => void } | null = null;
+  /** C1（3b1c）：自建 server 是否已进入监听态（重复 listen 拒绝依据；dispose 后随 disposed 一并失效） */
+  private listening = false;
   /** 测试/受控注入：server 实际监听地址（port 模式 listen 后可读）。 */
   readonly address: () => { port: number; host: string } | null;
 
@@ -313,34 +316,54 @@ export class WsServerAdapter implements WsTransportPort {
     }
   }
 
-  /** 自建模式：显式启动监听（默认 host=127.0.0.1，port=0 随机）。终态后拒绝（R02：dispose 后不得复活监听）。 */
+  /** 自建模式：显式启动监听（默认 host=127.0.0.1，port=0 随机）。终态后拒绝（R02：dispose 后不得复活监听）。
+   *  C1（3b1c）：重复调用规则——启动中/已监听均显式拒绝（单槽所有权：不得覆盖他次启动的结算钩子）；
+   *  成功/异步 error/同步 throw/dispose 取消四路均恰一次结算并清理临时监听器（listening 由显式监听器接管，可被取消路径摘除）。 */
   listen(port: number = 0, host: string = "127.0.0.1"): Promise<{ port: number; host: string }> {
     if (this.ownServer === null) throw new Error("外部 server 模式无 listen 所有权");
     if (this.disposed) return Promise.reject(new Error("适配器已 dispose，拒绝重新监听"));
-    // B3（3b1b）：启动中的 listen 可被同轮 dispose 结算——Node 在 bind 完成前 close() 不会触发
-    // listening 回调也不触发 error，若不显式结算，调用方的启动 Promise 将悬空（监听器残留）。
+    if (this.pendingListen !== null) return Promise.reject(new Error("适配器监听启动中，拒绝重复 listen"));
+    if (this.listening) return Promise.reject(new Error("适配器已在监听，拒绝重复 listen"));
+    const server = this.ownServer;
     return new Promise((resolve, reject) => {
       let settled = false;
-      const onErr = (err: Error): void => {
+      const cleanup = (): void => {
+        server.off("error", onErr);
+        server.off("listening", onListening);
+      };
+      const finishReject = (err: Error): void => {
         if (settled) return; settled = true;
-        this.pendingListen = null;
+        cleanup();
+        if (this.pendingListen === op) this.pendingListen = null; // 所有权：只清自己的槽
         reject(err);
       };
-      this.pendingListen = {
-        settle: () => {
+      const onErr = (err: Error): void => { finishReject(err); };
+      const onListening = (): void => {
+        if (settled) return; settled = true;
+        cleanup();
+        this.pendingListen = null; // 成功路径：槽必属本 op（若已被 dispose 结算则 settled 先行，此路不达）
+        this.listening = true;
+        const a = server.address();
+        resolve(typeof a === "object" && a !== null ? { port: a.port, host: a.address } : { port, host });
+      };
+      const op = {
+        settle: (): void => {
+          // dispose 取消：bind 可能已完成（listening 稍后才发）——close 使 server 终态化，防残留监听句柄
           if (settled) return; settled = true;
-          this.pendingListen = null;
+          cleanup();
+          if (this.pendingListen === op) this.pendingListen = null;
+          try { server.close(); } catch { /* 已关闭 */ }
           reject(new Error("适配器已 dispose，监听启动中止"));
         },
       };
-      this.ownServer!.once("error", onErr);
-      this.ownServer!.listen(port, host, () => {
-        this.ownServer!.off("error", onErr);
-        if (settled) return; settled = true;
-        this.pendingListen = null;
-        const a = this.ownServer!.address();
-        resolve(typeof a === "object" && a !== null ? { port: a.port, host: a.address } : { port, host });
-      });
+      this.pendingListen = op;
+      server.once("error", onErr);
+      server.once("listening", onListening);
+      try {
+        server.listen(port, host); // 不传回调：listening 事件由显式监听器接管（可被取消路径摘除）
+      } catch (err) {
+        finishReject(err instanceof Error ? err : new Error(String(err)));
+      }
     });
   }
 
@@ -409,6 +432,7 @@ export class WsServerAdapter implements WsTransportPort {
 
   private async doDispose(): Promise<void> {
     this.disposed = true;
+    this.listening = false;
     // B3（3b1b）：同轮交错的启动中 listen 显式结算（否则 Node bind 前 close 不触发任何回调，调用方永远 pending）
     this.pendingListen?.settle();
     const waitMs = this.opts.disposeWaitMs ?? DEFAULT_DISPOSE_WAIT_MS;
