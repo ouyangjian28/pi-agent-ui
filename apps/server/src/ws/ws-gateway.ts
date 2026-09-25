@@ -86,6 +86,8 @@ export interface WsGatewayOpts {
     setTimeout?: (cb: () => void, ms: number) => unknown;
     clearTimeout?: (t: unknown) => void;
   };
+  /** B4（w1b）：读索引预算注入（受控测试可小阈；生产默认 20000/流）。 */
+  readonly indexLimits?: { maxEventsPerStream: number };
   readonly heartbeat?: { pingMs?: number; idleMs?: number }; // 默认 30s/90s；0=禁用（受控测试）
   readonly maxLifetimeMs?: number; // 默认 24h
   readonly helloWindowMs?: number; // 默认 10s
@@ -118,6 +120,7 @@ interface ConnState {
   readonly subs: Map<string, SubEntry>; // file → 订阅（每 file 唯一；≤8）
   readonly inflight: Set<string>; // requestId 在途（≤4；第 5 个=4404）
   readonly tasks: Map<string, ComputeTask>; // 计算任务所有者（断开取消；W1-07）
+  readonly recoveryPages: Map<string, { hash: string; adapted: ReturnType<typeof recoverFromSnapshot> & { evidenceHash: string; blockedReasons: RecoveryBlockReason[] } }>; // B8：恢复内容页冻结缓存（≤RECOVERY_PAGE_CACHE_MAX，FIFO 驱逐）
 }
 
 export interface ConnHandle {
@@ -130,6 +133,7 @@ export interface ConnHandle {
 }
 
 const HANDSHAKE_WINDOW_MS = 60_000;
+const RECOVERY_PAGE_CACHE_MAX = 8; // B8：每连接恢复页缓存上界（FIFO 驱逐；连接关闭全清）
 
 export class WsGateway {
   private readonly conns = new Map<string, ConnState>();
@@ -157,12 +161,12 @@ export class WsGateway {
   private disposed = false;
 
   constructor(private readonly opts: WsGatewayOpts) {
-    this.registry = new ReadIndexRegistry();
     this.sem = opts.semaphore ?? new ComputeSemaphore();
     this.auditFn = opts.audit ?? (() => {});
     // W1-02：默认单调时钟（performance.now 单调；缺失环境回落 Date.now——墙钟回拨仅影响相对间隔的下界）
     this.now = opts.now ?? (typeof performance !== "undefined" && typeof performance.now === "function" ? () => performance.now() : () => Date.now());
     this.newIdFn = opts.newId ?? (() => `id-${++this.seq}`);
+    this.registry = new ReadIndexRegistry(this.newIdFn, undefined, this.opts.indexLimits); // B4：预算可注入（受控测试可小阈）
     this.tmr = opts.timers?.setTimeout ?? ((cb, ms) => setTimeout(cb, ms));
     this.clr = opts.timers?.clearTimeout ?? ((t) => clearTimeout(t as ReturnType<typeof setTimeout>));
     this.pingMs = opts.heartbeat?.pingMs ?? LIMITS.heartbeatSuggestMs;
@@ -209,18 +213,22 @@ export class WsGateway {
       err4404Count: 0, closed: false,
       lastFrameAt: this.now(), connectedAt: this.now(),
       subs: new Map(), inflight: new Set(), tasks: new Map(),
+      recoveryPages: new Map(),
     };
     // W1-02：握手滑窗（单调时钟；先记后判——被拒的接入也计入滑窗）
+    // B6（w1b）：有界记账——饱和期拒接不再存时间戳（窗内已有 ≥limit 个样本即足以判拒；
+    // 拒接不存储不损滑窗语义：饱和状态由已存样本维持，样本老化退出后自然恢复接收）
     const t0 = this.now();
-    this.handshakeTimes.push(t0);
     while (this.handshakeTimes.length > 0 && t0 - (this.handshakeTimes[0] ?? 0) > HANDSHAKE_WINDOW_MS) this.handshakeTimes.shift();
+    const saturated = this.handshakeTimes.length >= this.handshakePerMinute;
+    if (!saturated) this.handshakeTimes.push(t0);
     if (this.disposed || this.conns.size >= this.maxConnections) {
       st.closed = true;
       queue.close(1013, this.disposed ? "server-shutdown" : "server-full");
       this.audit(`conn-refused id=${id} reason=${this.disposed ? "disposed" : "server-full"} conns=${this.conns.size}`);
       return { id, inbound: () => {}, transportClosed: () => {}, close: () => {} };
     }
-    if (this.handshakeTimes.length > this.handshakePerMinute) {
+    if (saturated) {
       st.closed = true;
       queue.close(1013, "handshake-rate");
       this.audit(`conn-refused id=${id} reason=handshake-rate window=${this.handshakeTimes.length}`);
@@ -347,6 +355,16 @@ export class WsGateway {
         this.enqueue(st, { t: "error", code: 4429, message: "订阅数超限", retryable: false, requestId });
         return;
       }
+      // B1（w1b）：错流门先行——resync 游标必须指向当前流（冻结契约 §1.3：streamId≠当前→4404）。
+      // 无已知流（waterMark=0）同拒；盘面改写后的换流判定在 syncIndex 后二验。
+      if ("cursor" in frame) {
+        const curStream = this.currentStreamId(file);
+        if (curStream === null || curStream !== frame.cursor.streamId) {
+          this.errFrame(st, 4404, "请求与订阅状态不符", requestId);
+          this.audit(`resync-wrong-stream conn=${st.id} file=${file} cursor=${frame.cursor.streamId} current=${curStream ?? "<none>"}`);
+          return;
+        }
+      }
       const source = this.opts.historySource;
       if (source === undefined) {
         this.enqueue(st, { t: "error", code: 4402, message: "会话不可读", retryable: true, requestId });
@@ -368,6 +386,12 @@ export class WsGateway {
       let frames: readonly ServerFrame[];
       try {
         const index = this.syncIndex(file, rows);
+        // B1 二验：syncIndex 换流后（盘面改写）当前流身份已变——旧游标不再有效（统一 4404，不静默跳过错流门）
+        if ("cursor" in frame && index.streamId !== frame.cursor.streamId) {
+          this.errFrame(st, 4404, "请求与订阅状态不符", requestId);
+          this.audit(`resync-stream-replaced-disk conn=${st.id} file=${file} cursor=${frame.cursor.streamId} current=${index.streamId}`);
+          return;
+        }
         engine = new SubscriptionEngine({
           index,
           status: () => this.opts.statusFor?.(file) ?? unknownStatus(file),
@@ -396,11 +420,18 @@ export class WsGateway {
         }
         return;
       }
-      // 成功：退旧（通知关联旧 subscriptionId+撤未发旧帧）再装新
-      if (existing !== undefined) {
-        const oldId = existing.engine.subscriptionId;
+      // B3（w1b）：提交点重验——await 载入窗口内状态可能已变；旧快照 existing 不得作为唯一依据
+      const current = st.subs.get(file);
+      if (current === undefined && st.subs.size >= LIMITS.subscriptionsPerConn) {
+        engine.close(4431, "quota-lost-race", false);
+        this.enqueue(st, { t: "error", code: 4429, message: "订阅数超限", retryable: false, requestId });
+        return;
+      }
+      // 成功：退旧（通知关联旧 subscriptionId+撤未发旧帧）再装新（退的是【当前】旧订阅，非 await 前快照）
+      if (current !== undefined) {
+        const oldId = current.engine.subscriptionId;
         this.enqueue(st, { t: "error", code: 4409, message: `stream-replaced:${oldId}`, retryable: true, requestId });
-        existing.engine.close(4431, "stream-replaced", false);
+        current.engine.close(4431, "stream-replaced", false);
         st.queue.cancelBySubscription(oldId);
         st.subs.delete(file);
       }
@@ -410,6 +441,16 @@ export class WsGateway {
       this.schedulePump(file); // 单页即追平（hasMore=false）时 buffered 已入 outbox——需排空
     } finally {
       st.inflight.delete(requestId);
+    }
+  }
+
+  /** B1（w1b）：当前流身份（无已知流→null；预算尽/异常→null 由调用方按 4404 拒）。 */
+  private currentStreamId(file: string): string | null {
+    try {
+      const index = this.registry.get(file);
+      return index.waterMark > 0 ? index.streamId : null;
+    } catch {
+      return null;
     }
   }
 
@@ -443,11 +484,21 @@ export class WsGateway {
     }
     w.refs.add(st);
     if (w.unobserve === null && this.opts.historySource?.observe !== undefined) {
-      const index = this.registry.get(file); // touch LRU（观察活跃=索引保活）
+      this.registry.get(file); // touch LRU（观察活跃=索引保活）
       w.unobserve = this.opts.historySource.observe(file, {
         onAppend: (row) => {
-          index.append(row.source, row.locator, row.raw, row.event);
-          this.forEachEngine(file, (e) => e.onHistoryAppend(row.event));
+          // B2（w1b）：事件时取【当前】索引（换流 replace 后旧闭包索引不得再接收追加）
+          const index = this.registry.get(file);
+          const seq = index.append(row.source, row.locator, row.raw, row.event);
+          // B2：分发用索引规范化后的统一坐标（丢弃外部 seq，引擎/索引恒一致）
+          const indexed = index.read(seq, 1)[0];
+          if (indexed === undefined) { this.audit(`history-append-lost file=${file} seq=${seq}`); return; }
+          this.forEachEngine(file, (e) => e.onHistoryAppend(indexed.event));
+          // B4（w1b）：observe 通路容量出口——触顶即关流（4402 通知+清理），不靠慢客户端门掩盖索引无限增长
+          if (index.overBudget) {
+            this.audit(`index-over-budget file=${file} waterMark=${index.waterMark}`);
+            this.closeSubscriptionsFor(file, "index-over-budget");
+          }
           this.schedulePump(file);
         },
         onLive: (ev) => {
@@ -459,6 +510,21 @@ export class WsGateway {
           this.schedulePump(file);
         },
       });
+    }
+  }
+
+  /** B4：文件触顶——对该 file 所有活跃订阅发 4402+静默关引擎+退观察引用（下次重订阅走换流）。 */
+  private closeSubscriptionsFor(file: string, reason: string): void {
+    const w = this.watchers.get(file);
+    if (w === undefined) return;
+    for (const c of [...w.refs]) {
+      const sub = c.subs.get(file);
+      if (sub === undefined) continue;
+      this.enqueueIfOpen(c, { t: "error", code: 4402, message: "会话索引超预算，请重新订阅", retryable: true, requestId: "" });
+      sub.engine.close(4431, reason, false);
+      c.queue.cancelBySubscription(sub.engine.subscriptionId);
+      c.subs.delete(file);
+      this.releaseWatcher(c, file);
     }
   }
 
@@ -535,10 +601,10 @@ export class WsGateway {
       try {
         const scan = await scanSessions(this.opts.scanDir);
         if (st.closed) return;
-        // W1-11：版本=目录内容指纹（同指纹不递增——跨页/跨请求/跨连接稳定；真变才推进）
-        const fp = listFingerprint(scan);
-        if (fp !== this.listFingerprint) { this.listFingerprint = fp; this.listVersion++; }
         const items = scan.sessions.map(toDto);
+        // W1-11+B5（w1b）：版本=实际可见列表态指纹（含 title/sessionId/可靠性等全部 DTO 可见字段+目录可靠性——同长改题也推进；静态跨页/跨连接稳定）
+        const fp = listFingerprint(items, scan.dirReliability);
+        if (fp !== this.listFingerprint) { this.listFingerprint = fp; this.listVersion++; }
         const out = buildSessionsFrame(requestId, items, offset, this.listVersion, scan.dirReliability, limit);
         if (out === null) this.enqueueIfOpen(st, { t: "error", code: 4431, message: "列表帧超预算", retryable: false, requestId });
         else this.enqueueIfOpen(st, out);
@@ -560,6 +626,22 @@ export class WsGateway {
     try {
       if (resolveWithinRoots(file, this.opts.roots) === null) {
         this.errFrame(st, 4404, "file 越界", requestId);
+        return;
+      }
+      // B8（w1b）：恢复内容页缓存（契约 §4：首响应冻结+内容页缓存）——续页直接从冻结投影出帧，
+      // 不重调 provider、不占计算槽；缓存有界（每连接 ≤8，FIFO 驱逐）+连接关闭即清。
+      const cacheKey = `${requestId}|${file}`;
+      const cached = st.recoveryPages.get(cacheKey);
+      if (cached !== undefined) {
+        if (frame.evidenceHash !== undefined && frame.evidenceHash !== cached.hash) {
+          this.enqueueIfOpen(st, { t: "error", code: 4409, message: "evidence-changed", retryable: true, requestId });
+          return;
+        }
+        const cont = buildRecoveryFrame(requestId, file, cached.adapted, frame.offset ?? 0);
+        if (cont === null) this.enqueueIfOpen(st, { t: "error", code: 4431, message: "恢复帧超预算", retryable: false, requestId });
+        else this.enqueueIfOpen(st, cont);
+        st.recoveryPages.delete(cacheKey); // LRU 触碰（重插入尾部）
+        st.recoveryPages.set(cacheKey, cached);
         return;
       }
       const task = this.registerTask(st, requestId);
@@ -588,6 +670,13 @@ export class WsGateway {
         }
         const report = recoverFromSnapshot(snap);
         const adapted = { ...report, evidenceHash: hash, blockedReasons: mapBlockedReasons(snap, report) };
+        // B8：首响应冻结——缓存投影（同 hash 续页确定性拼回；≥501 意图跨页不依赖盘面不变）
+        st.recoveryPages.set(cacheKey, { hash, adapted });
+        while (st.recoveryPages.size > RECOVERY_PAGE_CACHE_MAX) {
+          const oldest = st.recoveryPages.keys().next().value;
+          if (oldest === undefined) break;
+          st.recoveryPages.delete(oldest);
+        }
         const out = buildRecoveryFrame(requestId, file, adapted, frame.offset ?? 0);
         if (out === null) this.enqueueIfOpen(st, { t: "error", code: 4431, message: "恢复帧超预算", retryable: false, requestId });
         else this.enqueueIfOpen(st, out);
@@ -671,6 +760,8 @@ export class WsGateway {
         hooks.ping();
         entry.lastPing = now;
       }
+      // B7（w1b）：安静连接资源主动释放——末页宽限过期无需等 drain/下一请求
+      for (const [, sub] of c.subs) sub.engine.purge();
       entry.tick = this.tmr(tick, tickMs);
     };
     if (tickMs > 0) entry.tick = this.tmr(tick, tickMs);
@@ -686,6 +777,7 @@ export class WsGateway {
       }
     }
     st.tasks.clear();
+    st.recoveryPages.clear(); // B8：恢复页缓存随连接终结
     for (const [file] of st.subs) {
       const sub = st.subs.get(file);
       sub?.engine.close(4431, "", false);
@@ -712,6 +804,7 @@ export class WsGateway {
       }
     }
     st.tasks.clear();
+    st.recoveryPages.clear(); // B8：恢复页缓存随连接终结
     for (const [file] of st.subs) {
       const sub = st.subs.get(file);
       sub?.engine.close(4431, "", false);
@@ -749,9 +842,10 @@ function sha256Hex(s: string): string {
 }
 
 /** 目录内容指纹（W1-11）：file|size|entries|lastActive 的稳定序列哈希（内容态代理；同指纹→版本不变）。 */
-function listFingerprint(scan: { sessions: readonly { file: string; sizeBytes: number; entryCount: number; lastActiveMs: number | null }[] }): string {
-  const parts = scan.sessions.map((s) => `${s.file}|${s.sizeBytes}|${s.entryCount}|${s.lastActiveMs ?? "x"}`);
-  return sha256Hex(parts.join("\n"));
+function listFingerprint(items: readonly ReturnType<typeof toDto>[], dirReliability: string): string {
+  // B5：覆盖全部 DTO 可见字段（file/sessionId/title/lastActiveMs/entryCount/sizeBytes/hasRecoveryNotice/listReliability）+目录可靠性
+  const parts = items.map((s) => `${s.file}|${s.sessionId ?? "x"}|${s.title.text}|${s.lastActiveMs ?? "x"}|${s.entryCount}|${s.sizeBytes}|${s.hasRecoveryNotice}|${s.listReliability}`);
+  return sha256Hex(`${dirReliability}\n${parts.join("\n")}`);
 }
 
 /** W1-06：证据快照→阻断理由映射（torn-tail/bad-line/unattributable-fragment；来源=快照证据，确定性映射）。 */

@@ -79,12 +79,18 @@ class FakeHistory implements HistorySourcePort {
   readonly files = new Map<string, ScanRow[] | null>();
   readonly sinks = new Map<string, HistorySinks>();
   loadCalls: string[] = [];
+  observeCalls: string[] = [];
+  /** B3：受控挂起——文件名命中时 load 等待对应 resolver（造 await 窗口） */
+  gates = new Map<string, () => void>();
   async load(file: string): Promise<readonly ScanRow[] | null> {
     this.loadCalls.push(file);
+    const gate = this.gates.get(file);
+    if (gate !== undefined) await new Promise<void>((res) => { this.gates.set(file, () => { gate(); res(); }); });
     const v = this.files.get(file);
     return v === undefined ? null : v;
   }
   observe(file: string, sinks: HistorySinks): () => void {
+    this.observeCalls.push(file);
     this.sinks.set(file, sinks);
     return () => { this.sinks.delete(file); };
   }
@@ -94,6 +100,9 @@ class FakeHistory implements HistorySourcePort {
     return v as ScanRow[];
   }
   put(file: string, rows: ScanRow[]): void { this.files.set(file, rows); }
+  /** B3：挂起闸门——首次调用返回闸门对象，再调才放行（同一文件后续 load 立即过）。 */
+  gate(file: string): void { this.gates.set(file, () => {}); }
+  release(file: string): void { const g = this.gates.get(file); if (g) { g(); this.gates.delete(file); } }
   missing(file: string): void { this.files.set(file, null); }
   append(file: string, row: ScanRow): void {
     this.rows(file).push(row);
@@ -153,9 +162,9 @@ async function makeRig(over: Partial<WsGatewayOpts> = {}): Promise<Rig> {
   return { gw, conn, roots: d, scanDir: d, evidence, history, dispose: async () => { gw.dispose(); await rm(d, { recursive: true, force: true }); } };
 }
 
-async function authed(r: Rig): Promise<FakeConn> {
+async function authed(r: Rig, token = "tok-ok"): Promise<FakeConn> {
   const { c } = r.conn();
-  await c.say({ t: "hello", protocolVersion: 1, token: "tok-ok" });
+  await c.say({ t: "hello", protocolVersion: 1, token });
   return c;
 }
 
@@ -188,6 +197,10 @@ describe("ws-gateway w1：A 认证入站（W1-01/02）", () => {
       await c1.say({ t: "hello", protocolVersion: 1, token: "tok-ok" });
       expect(c1.frames().some((f) => f.code === 4401)).toBe(true);
       expect(lastClose(c1)?.[0]).toBe(1008);
+      const c2 = new FakeConn();
+      r.gw.attach(c2, c2.hooks(), { origin: "http://evil.example", loopback: true, tls: false });
+      await c2.say({ t: "hello", protocolVersion: 1, token: "tok-ok" });
+      expect(c2.frames().some((f) => f.code === 4401)).toBe(true); // 非白名单（非子串匹配）
       const c3 = new FakeConn();
       r.gw.attach(c3, c3.hooks(), { origin: "http://localhost:5173", loopback: false, tls: false });
       await c3.say({ t: "hello", protocolVersion: 1, token: "tok-ok" });
@@ -271,19 +284,19 @@ describe("ws-gateway w1：A 认证入站（W1-01/02）", () => {
         { t: "subscribe", requestId: "r2", file: "a.jsonl", cursor: { streamId: "s", seq: 1 } },
         { t: "subscribe", requestId: "r2", file: "a.jsonl", cursor: { streamId: "s" } },
       ];
+      let idx = 0;
       for (const g of golden) {
+        idx++;
+        const cc = await authed(r); // 每帧独立已认证连接（共享连接会被 4404 计数关闭→假绿）
         const validatorSays = validateClientFrame(g).ok;
-        const before = c.sent.length;
-        await c.sayRaw(JSON.stringify(g));
+        const before = cc.sent.length;
+        await cc.sayRaw(JSON.stringify(g));
+        await until(() => cc.sent.length > before || cc.readyState !== 1, 1000);
         if (validatorSays) {
-          // 接受帧：响应可能异步（真实 fs/信号量）——等到有新帧或连接关闭
-          await until(() => c.sent.length > before || c.readyState !== 1, 1000);
-          if (c.readyState === 1 && c.sent.length === before) throw new Error(`校验器接受但网关无响应: ${JSON.stringify(g)}`);
+          if (cc.readyState === 1 && cc.sent.length === before) throw new Error(`#${idx} 校验器接受但网关无响应: ${JSON.stringify(g)}`);
         } else {
-          // 拒绝帧：必有 4404/4403/4405 之一（或已关闭）；未被接受静默吞
-          await until(() => c.sent.length > before || c.readyState !== 1, 1000);
-          const last = c.frames()[c.frames().length - 1];
-          expect(last === undefined || last.code === 4404 || last.code === 4403 || last.code === 4405).toBe(true);
+          const last = cc.frames()[cc.frames().length - 1];
+          expect(last !== undefined && (last.code === 4404 || last.code === 4403 || last.code === 4405) || cc.readyState !== 1).toBe(true);
         }
       }
     } finally {
@@ -454,26 +467,33 @@ describe("ws-gateway w1：C 订阅接线（W1-04/05）", () => {
     }
   });
 
-  it("C16 W1-05 原子重同步：失败 resync 不销毁旧订阅；旧订阅续页仍可用；成功替换关联旧 subscriptionId+撤旧帧", async () => {
+  it("C16 W1-05 原子重同步：错流→4404 不动旧订阅；同流超前→4409 保旧；旧订阅真实续页可用；成功替换关联旧 subscriptionId", async () => {
     const r = await makeRig();
     try {
-      r.history.put("a.jsonl", makeRows(5));
+      r.history.put("a.jsonl", makeRows(205)); // 两页：真实续页游标
       const c = await authed(r);
       await c.say({ t: "subscribe", requestId: "s1", file: "a.jsonl" });
       const snap1 = c.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
       const subId1 = snap1.subscriptionId as string;
       const snapId1 = snap1.snapshotId as string;
-      // 失败 resync：游标远超前（seq=9999>barrier+1）→4409；旧订阅必须存活
+      // B1：错流 resync（foreign streamId+合法 seq）→4404；旧订阅必须存活且无 stream-replaced
       c.sent.length = 0;
-      await c.say({ t: "subscribe", requestId: "s2", file: "a.jsonl", cursor: { streamId: "s-foreign", seq: 9999 } });
+      await c.say({ t: "subscribe", requestId: "s2", file: "a.jsonl", cursor: { streamId: "s-foreign", seq: 1 } });
+      expect(errFrames(c).some((f) => f.code === 4404)).toBe(true);
+      expect(errFrames(c).some((f) => f.code === 4431 || f.code === 4409)).toBe(false); // 未退旧
+      // 同流超前（seq=9999>barrier+1）→4409；旧订阅仍存活
+      c.sent.length = 0;
+      await c.say({ t: "subscribe", requestId: "s2b", file: "a.jsonl", cursor: { streamId: snap1.streamId as string, seq: 9999 } });
       expect(errFrames(c).some((f) => f.code === 4409)).toBe(true);
-      expect(errFrames(c).some((f) => f.code === 4431)).toBe(false); // 旧流未被关
-      // 旧订阅续页仍命中（引擎活着才回页/4409——而非 4431 关闭）
+      expect(errFrames(c).some((f) => f.code === 4431)).toBe(false);
+      // 旧订阅续页：真实第二页内容（snapshot+旧 sid+seq 201）——非仅排除 4431
+      c.sent.length = 0;
       await c.say({ t: "subscribe", requestId: "s3", file: "a.jsonl", snapshotId: snapId1, historyNext: snap1.historyNext });
-      const tail = c.frames().pop();
-      expect(tail).toBeDefined();
-      expect((tail as { code?: number }).code).not.toBe(4431); // 旧流未被关（W1-05 核心）
-      expect(c.readyState).toBe(1);
+      const tail = c.frames().pop() as Record<string, unknown>;
+      expect(tail.t).toBe("snapshot");
+      expect(tail.subscriptionId).toBe(subId1); // 还是旧订阅
+      const page = tail.page as Array<{ seq: number }>;
+      expect(page.some((e) => e.seq === 201)).toBe(true); // 真实内容
       // 成功替换：通知关联旧 subscriptionId
       c.sent.length = 0;
       await c.say({ t: "subscribe", requestId: "s4", file: "a.jsonl" });
@@ -486,21 +506,28 @@ describe("ws-gateway w1：C 订阅接线（W1-04/05）", () => {
     }
   });
 
-  it("C17 换流（盘面改写）：非前缀重扫→replace 新 streamId；旧事件不重复", async () => {
+  it("C17 换流（盘面改写）：非前缀重扫→replace 新 streamId；旧游标→4404（不再按位置映射）；重新 init 换流可用", async () => {
     const r = await makeRig();
     try {
       r.history.put("rw.jsonl", makeRows(3));
       const c = await authed(r);
       await c.say({ t: "subscribe", requestId: "s1", file: "rw.jsonl" });
       const snap1 = c.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
-      // 盘面改写：行 2 变化（非前缀）→resync 换流
+      // 盘面改写：行 2 变化（非前缀）
       const rows2 = makeRows(3);
       rows2[1] = { ...rows2[1]!, raw: '{"t":"sending","seq":2,"mutated":true}' };
       r.history.files.set("rw.jsonl", rows2);
+      // B1 二验：盘面改写→流身份已变；旧游标 resync→4404（错流门不静默跳过）
+      c.sent.length = 0;
       await c.say({ t: "subscribe", requestId: "s2", file: "rw.jsonl", cursor: { streamId: snap1.streamId as string, seq: 1 } });
+      expect(errFrames(c).some((f) => f.code === 4404)).toBe(true);
+      // 重新 init：新流可用，barrier 重读
+      c.sent.length = 0;
+      await c.say({ t: "subscribe", requestId: "s3", file: "rw.jsonl" });
       const snap2 = c.frames().filter((f) => f.t === "snapshot").pop() as Record<string, unknown>;
       expect(snap2.streamId).not.toBe(snap1.streamId); // 换流
       expect(snap2.barrier).toBe(3);
+      expect(errFrames(c).some((f) => f.code === 4409 && String(f.message).includes("stream-replaced:" + (snap1.subscriptionId as string)))).toBe(true);
     } finally {
       await r.dispose();
     }
@@ -599,15 +626,23 @@ describe("ws-gateway w1：D 恢复与列表（W1-06/07/11）", () => {
   it("D21 W1-11 listVersion 稳定：静态目录两次请求（含跨页）版本不变；文件新增才递增", async () => {
     const r = await makeRig();
     try {
-      await writeFile(join(r.scanDir, "a.jsonl"), JSON.stringify({ type: "session", id: "sid-a", timestamp: 100 }) + "\n" + JSON.stringify({ type: "message", timestamp: 200, message: { role: "user", content: "hello" } }) + "\n");
+      // 55 个会话文件：首页 50 条+第二页 5 条（真跨页）
+      for (let i = 1; i <= 55; i++) {
+        await writeFile(join(r.scanDir, `s${String(i).padStart(2, "0")}.jsonl`),
+          JSON.stringify({ type: "session", id: `sid-${i}`, timestamp: 100 + i }) + "\n" +
+          JSON.stringify({ type: "message", timestamp: 200 + i, message: { role: "user", content: `hello-${i}` } }) + "\n");
+      }
       const c = await authed(r);
-      await c.say({ t: "list-sessions", requestId: "l1" });
+      await c.say({ t: "list-sessions", requestId: "l1", offset: 0 });
       await until(() => c.frames().some((x) => x.t === "sessions"), 2000); // 真实 fs→异步扫描
       const f1 = c.frames().find((x) => x.t === "sessions") as Record<string, unknown>;
-      await c.say({ t: "list-sessions", requestId: "l2", offset: 0, limit: 10 });
+      expect((f1.sessions as unknown[]).length).toBe(50); // 首页=50
+      expect(f1.hasMore).toBe(true);
+      await c.say({ t: "list-sessions", requestId: "l2", offset: 50 });
       await until(() => c.frames().filter((x) => x.t === "sessions").length >= 2, 2000);
       const f2 = c.frames().filter((x) => x.t === "sessions").pop() as Record<string, unknown>;
-      expect(f2.listVersion).toBe(f1.listVersion); // 同内容→同版本
+      expect((f2.sessions as unknown[]).length).toBe(5); // 第二页
+      expect(f2.listVersion).toBe(f1.listVersion); // 同内容跨页→同版本
       // 新文件→版本递增
       await writeFile(join(r.scanDir, "b.jsonl"), JSON.stringify({ type: "session", id: "sid-b", timestamp: 300 }) + "\n");
       await c.say({ t: "list-sessions", requestId: "l3" });
@@ -649,10 +684,11 @@ describe("ws-gateway w1：D 恢复与列表（W1-06/07/11）", () => {
     // 可变 token 文件：初始含 tok-a/tok-b；reload 后只剩 tok-b→撤销 tok-a
     let tokens = ["tok-a", "tok-b"];
     const readFile = async (): Promise<Buffer> => Buffer.from(JSON.stringify({ version: 1, tokens }));
-    const authority = await TokenAuthority.fromFile("/virtual/tokens.json", { readFile });
+    const authority = await TokenAuthority.fromFile("/virtual/tokens.json", { readFile }, () => { throw new Error("authority audit boom"); });
     const r = await makeRig({ tokens: authority, audit: () => { throw new Error("audit boom"); } });
     try {
-      const c = await authed(r); // tok-a 认证
+      const c = await authed(r, "tok-a"); // tok-a 真认证成功（权改变量先复位再 hello）
+      expect(c.frames().some((f) => f.t === "welcome")).toBe(true); // 未被 4401 假绿
       tokens = ["tok-b"];
       await r.gw.applyTokenReload(); // 审计在 reload 内抛错——但撤销必须仍然发生
       await until(() => c.closes.length > 0 || c.frames().some((f) => f.code === 4401), 1000);
@@ -722,3 +758,223 @@ function snapOf(seed = 1): RecoveryEvidenceSnapshot {
     createdAt: 1_000 + seed,
   } as unknown as RecoveryEvidenceSnapshot;
 }
+
+// ==== w1b：B 系阻断回归（B1 已并入 C16/C17）====
+describe("ws-gateway w1b：B 系阻断回归", () => {
+  it("B2 换流观察器绑当前索引+seq 规范化传播+双连接同文件", async () => {
+    const r = await makeRig();
+    try {
+      // 外部 seq=99/5 → 快照页规范化为 1/2
+      const rows = [
+        { source: "journal", locator: "1", raw: '{"t":"sending","seq":99}', event: { seq: 99, ts: 0, generation: null, intentId: null, kind: "sending" } },
+        { source: "journal", locator: "2", raw: '{"t":"sending","seq":5}', event: { seq: 5, ts: 1, generation: null, intentId: null, kind: "sending" } },
+      ] as unknown as ScanRow[];
+      r.history.put("b2.jsonl", rows);
+      const c1 = await authed(r);
+      await c1.say({ t: "subscribe", requestId: "s1", file: "b2.jsonl" });
+      const snap1 = c1.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      expect((snap1.page as Array<{ seq: number }>).map((e) => e.seq)).toEqual([1, 2]);
+      const stream1 = snap1.streamId as string;
+      // 盘面改写→重新 init 换流
+      const rows2 = makeRows(3);
+      rows2[0] = { ...rows2[0]!, raw: '{"t":"sending","seq":1,"mutated":true}' };
+      r.history.files.set("b2.jsonl", rows2 as unknown as ScanRow[]);
+      const c2 = await authed(r);
+      await c2.say({ t: "subscribe", requestId: "s2", file: "b2.jsonl" });
+      const snap2 = c2.frames().filter((f) => f.t === "snapshot").pop() as Record<string, unknown>;
+      expect(snap2.streamId).not.toBe(stream1);
+      // 换流后追加（外部 seq=777）→ 新索引规范化为 4，且旧观察器闭包不再喂旧索引
+      r.history.append("b2.jsonl", { source: "journal", locator: "4", raw: '{"t":"sending","seq":777}', event: { seq: 777, ts: 3, generation: null, intentId: null, kind: "sending" } } as unknown as ScanRow);
+      await until(() => c2.frames().some((f) => f.t === "events" && f.origin === "history"), 1000);
+      const ev = c2.frames().find((f) => f.t === "events" && f.origin === "history") as { events: Array<{ seq: number }> };
+      expect(ev.events.some((e) => e.seq === 4)).toBe(true); // 规范化统一坐标（非 777）
+      expect(ev.events.some((e) => e.seq === 777)).toBe(false);
+      // 观察器恰一份（换流未重新 observe——事件时取当前索引）
+      expect(r.history.observeCalls.filter((f) => f === "b2.jsonl").length).toBe(1);
+      // 双连接：c1 也收到（同一索引/同一泵）
+      await until(() => c1.frames().some((f) => f.t === "events" && ((f.events as Array<{ seq: number }> | undefined) ?? []).some((e: { seq: number }) => e.seq === 4)), 1000);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("B3a 同 file 并发双 init：后提交者替换前者（stream-replaced 恰一次，单引擎）", async () => {
+    const r = await makeRig();
+    try {
+      r.history.put("race.jsonl", makeRows(205));
+      r.history.gate("race.jsonl"); // 两请求同挂 load
+      const c = await authed(r);
+      void c.say({ t: "subscribe", requestId: "r1", file: "race.jsonl" });
+      void c.say({ t: "subscribe", requestId: "r2", file: "race.jsonl" });
+      await tick();
+      r.history.release("race.jsonl"); // 两 load 同时放行
+      await until(() => c.frames().some((f) => f.t === "snapshot") && errFrames(c).some((f) => f.code === 4409), 1000);
+      const replaced = errFrames(c).filter((f) => f.code === 4409 && String(f.message).startsWith("stream-replaced:"));
+      expect(replaced.length).toBe(1); // 后提交替换先提交（非静默覆盖）——先提交快照可能已被撤（cancelBySubscription）
+      expect(c.frames().filter((f) => f.t === "snapshot").length).toBeGreaterThanOrEqual(1);
+      expect(c.readyState).toBe(1);
+      // 单引擎：后提交者的快照可真实续页
+      const snap2 = c.frames().filter((f) => f.t === "snapshot").pop() as Record<string, unknown>;
+      c.sent.length = 0;
+      await c.say({ t: "subscribe", requestId: "r3", file: "race.jsonl", snapshotId: snap2.snapshotId, historyNext: snap2.historyNext });
+      const page = c.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      expect(page).toBeDefined();
+      expect((page.page as Array<{ seq: number }>).some((e) => e.seq === 201)).toBe(true);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("B3b 7+2 并发新 file：提交点重验守住 8 订阅上限（恰一个 4429）", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      for (let i = 1; i <= 7; i++) {
+        r.history.put(`f${i}.jsonl`, makeRows(1));
+        await c.say({ t: "subscribe", requestId: `s${i}`, file: `f${i}.jsonl` });
+      }
+      r.history.put("f8.jsonl", makeRows(1));
+      r.history.put("f9.jsonl", makeRows(1));
+      r.history.gate("f8.jsonl");
+      r.history.gate("f9.jsonl");
+      void c.say({ t: "subscribe", requestId: "s8", file: "f8.jsonl" });
+      void c.say({ t: "subscribe", requestId: "s9", file: "f9.jsonl" });
+      await tick();
+      r.history.release("f8.jsonl");
+      r.history.release("f9.jsonl");
+      await until(() => errFrames(c).some((f) => f.code === 4429), 1000);
+      expect(errFrames(c).filter((f) => f.code === 4429).length).toBe(1); // 恰一个超限
+      const snaps = c.frames().filter((f) => f.t === "snapshot");
+      expect(snaps.length).toBe(8); // 7+1（第 9 个被拒）
+      expect(c.readyState).toBe(1);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("B4 observe 通路容量出口：触顶→4402+订阅清理+停观察", async () => {
+    const r = await makeRig({ indexLimits: { maxEventsPerStream: 5 } });
+    try {
+      r.history.put("ov.jsonl", makeRows(4));
+      const c = await authed(r);
+      await c.say({ t: "subscribe", requestId: "s1", file: "ov.jsonl" });
+      // 第 5 条：不触顶（5>5 假）——正常交付
+      r.history.append("ov.jsonl", rowAt(5));
+      await until(() => c.frames().some((f) => f.t === "events"), 1000);
+      // 第 6 条：watermark=6>5 → 4402+清理
+      r.history.append("ov.jsonl", rowAt(6));
+      await until(() => errFrames(c).some((f) => f.code === 4402), 1000);
+      expect(r.history.sinks.has("ov.jsonl")).toBe(false); // 观察已停
+      // 订阅已清：续页→4404
+      const snap1 = c.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      c.sent.length = 0;
+      await c.say({ t: "subscribe", requestId: "s2", file: "ov.jsonl", snapshotId: snap1.snapshotId, historyNext: snap1.historyNext });
+      expect(errFrames(c).some((f) => f.code === 4404)).toBe(true);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("B5 同长改题推进 listVersion（指纹含 title 等可见字段）", async () => {
+    const r = await makeRig();
+    try {
+      const mk = (title: string): string =>
+        JSON.stringify({ type: "session", id: "sid-t", timestamp: 100 }) + "\n" +
+        JSON.stringify({ type: "message", timestamp: 200, message: { role: "user", content: title } }) + "\n";
+      await writeFile(join(r.scanDir, "t.jsonl"), mk("alpha"));
+      const c = await authed(r);
+      await c.say({ t: "list-sessions", requestId: "l1" });
+      await until(() => c.frames().some((x) => x.t === "sessions"), 2000);
+      const f1 = c.frames().find((x) => x.t === "sessions") as Record<string, unknown>;
+      await writeFile(join(r.scanDir, "t.jsonl"), mk("bravo")); // 同长
+      await c.say({ t: "list-sessions", requestId: "l2" });
+      await until(() => c.frames().filter((x) => x.t === "sessions").length >= 2, 2000);
+      const f2 = c.frames().filter((x) => x.t === "sessions").pop() as Record<string, unknown>;
+      expect(Number(f2.listVersion)).toBeGreaterThan(Number(f1.listVersion));
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("B6 握手记账有界：饱和期拒接不存时间戳（60 连接后账本≤限额）", async () => {
+    const r = await makeRig({ now: () => 0, handshakePerMinute: 2, maxConnections: 1000 });
+    try {
+      for (let i = 0; i < 60; i++) r.conn();
+      const ledger = (r.gw as unknown as { handshakeTimes: number[] }).handshakeTimes;
+      expect(ledger.length).toBeLessThanOrEqual(2); // 有界（旧实现=60）
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("B7 安静连接末页缓存主动释放（监督 tick 触发 purge）", async () => {
+    let clock = 0;
+    const scheduled: Array<() => void> = [];
+    const r = await makeRig({
+      now: () => clock,
+      timers: { setTimeout: (cb) => { scheduled.push(cb); return scheduled.length; }, clearTimeout: () => {} },
+      heartbeat: { pingMs: 1_000, idleMs: 0 },
+    });
+    try {
+      r.history.put("q.jsonl", makeRows(3));
+      const c = await authed(r);
+      await c.say({ t: "subscribe", requestId: "s1", file: "q.jsonl" });
+      expect(c.frames().some((f) => f.t === "snapshot")).toBe(true);
+      const conns = (r.gw as unknown as { conns: Map<string, { subs: Map<string, { engine: unknown }> }> }).conns;
+      const st = conns.values().next().value!;
+      const engine = st.subs.get("q.jsonl")!.engine as unknown as { recentPages?: unknown[] };
+      expect((engine.recentPages ?? []).length).toBe(1); // 末页缓存尚在
+      clock += 61_000; // 越过 60s 宽限
+      (scheduled[scheduled.length - 1]!)(); // 触发监督 tick
+      expect((engine.recentPages ?? []).length).toBe(0); // 已释放
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("B8 恢复内容页缓存：provider 恰一次+续页拼回 501 意图+证据变→4409", async () => {
+    const snaps = new Map<string, RecoveryEvidenceSnapshot>();
+    let calls = 0;
+    const r = await makeRig({
+      recoveryEvidence: (file) => { calls++; return snaps.get(file) ?? null; },
+    });
+    try {
+      const mkSnap = (salt: number): RecoveryEvidenceSnapshot => {
+        const lines = [];
+        for (let i = 1; i <= 501; i++) {
+          lines.push({ t: "enqueue", intentId: `i-${i}`, sessionId: "sid-1", leafId: "leaf-1", generation: 1,
+            matchKey: { textHash: `h-${i}-${salt}`, attachmentIdentity: "none", ordinal: 0 },
+            payload: { kind: "prompt", rawText: `msg-${i}`, attachments: [], sentAt: "2026-09-28T00:00:00Z" } });
+        }
+        return { version: 1, file: "rec.jsonl", sessionId: "sid-1", lines, bad: [], attributedFragments: [], repaired: [], createdAt: 2_000 } as unknown as RecoveryEvidenceSnapshot;
+      };
+      snaps.set("rec.jsonl", mkSnap(1));
+      const c = await authed(r);
+      await c.say({ t: "get-recovery", requestId: "rec-1", file: "rec.jsonl", offset: 0 });
+      const f1 = c.frames().find((x) => x.t === "recovery" && x.availability === "available") as Record<string, unknown>;
+      expect(f1).toBeDefined();
+      const h = f1.evidenceHash as string;
+      expect(h).toMatch(/^[0-9a-f]{64}$/);
+      const next = (f1.perIntent as { next: { offset: number } | null } | undefined)?.next;
+      expect(next).not.toBeNull(); // 截断（501>页大小）
+      expect(JSON.stringify(f1)).toContain("i-1");
+      // 续页（同 requestId+同 hash）→缓存命中（provider 不重调）
+      await c.say({ t: "get-recovery", requestId: "rec-1", file: "rec.jsonl", offset: next!.offset, evidenceHash: h });
+      const f2 = c.frames().filter((x) => x.t === "recovery" && x.availability === "available").pop() as Record<string, unknown>;
+      expect(JSON.stringify(f2)).toContain("i-501"); // 拼回末条
+      expect(calls).toBe(1);
+      // 缓存内容页的 hash 门：携与冻结快照不同的 hash→4409（客户端须以新快照重启）
+      await c.say({ t: "get-recovery", requestId: "rec-1", file: "rec.jsonl", offset: 0, evidenceHash: "ab".repeat(32) });
+      expect(errFrames(c).some((x) => x.code === 4409)).toBe(true);
+      expect(calls).toBe(1); // 未重调 provider（缓存帧仍完整）
+      // 证据真变（新快照）→新 requestId 现算（calls=2，新 hash 不同于旧）
+      snaps.set("rec.jsonl", mkSnap(2));
+      await c.say({ t: "get-recovery", requestId: "rec-2", file: "rec.jsonl", offset: 0 });
+      const f3 = c.frames().filter((x) => x.t === "recovery" && x.availability === "available").pop() as Record<string, unknown>;
+      expect(calls).toBe(2);
+      expect(f3.evidenceHash).not.toBe(h);
+    } finally {
+      await r.dispose();
+    }
+  });
+});

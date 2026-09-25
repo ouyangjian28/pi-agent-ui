@@ -332,6 +332,11 @@ export class SubscriptionEngine {
   }
 
   /** 末页宽限过期的缓存真实释放（B04 时序意见：不只在下次 handle 检查） */
+  /** B7（w1b）：公开清理口——宿主监督 tick 对安静连接主动释放过期页缓存（无事件时不等 drain）。 */
+  purge(): void {
+    this.purgeExpiredPages();
+  }
+
   private purgeExpiredPages(): void {
     if (this.expectNext === null && this.d.now() - this.lastPageAt > LIMITS.snapshotTailGraceMs) {
       this.recentPages.length = 0;
