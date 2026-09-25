@@ -71,6 +71,8 @@ export interface SupervisorDeps {
   onProcessEvent?(ev: unknown, generation: number): void;
   /** stderr 诊断（已按代次过滤，非当前/退役代次不转发）。 */
   onStderr?(text: string, generation: number): void;
+  /** spawn 成功后回调（接线层在此写 readiness 探针等自管 stdin 交互；同步签名，异步工作自行 catch）。 */
+  onSpawned?(handle: ProcessHandle, generation: number): void;
   now(): string;
   sleep(ms: number): Promise<void>;
   /** 单调毫秒时钟（预算口径；缺省 performance.now()——非单调注入时 remainMs 钳位不放大但前跳仍过早耗尽，宿主应注入单调源）。 */
@@ -177,6 +179,7 @@ export class ProcessSupervisor {
       return { kind: "spawn-exited", generation: entry.generation, exit: entry.exit };
     }
     this.audit(`process-spawned generation=${entry.generation}`);
+    this.opts.onSpawned?.(handle, entry.generation);
     return { kind: "spawned", generation: entry.generation };
   }
 

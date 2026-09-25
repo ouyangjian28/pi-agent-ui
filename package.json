@@ -12,7 +12,7 @@
     "packages/*"
   ],
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p packages/protocol --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p packages/protocol --noEmit && tsc -p apps/server --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "vitest run",

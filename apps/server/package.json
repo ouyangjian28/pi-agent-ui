@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -p . --noEmit"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "0.86.1"
+    "@earendil-works/pi-coding-agent": "0.86.1",
+    "@pi-agent-ui/protocol": "*"
   }
 }
