@@ -609,30 +609,58 @@ describe("FileHistorySource 真盘（3b-2a+R7 证据分级）", () => {
     stop4!();
   });
 
-  it("UTF-8 多字节字符跨 64KiB 块界：撕裂两半不发布、补全成行", async () => {
+  it("UTF-8 精确切点（3b2c-B7）：中文首字节=65535，半字符截断不发布、补全逐字无损", async () => {
     const root = await tmpRoot();
     const file = join(root, "cross.jsonl");
     const head = jline(1);
-    // 构造第 2 行使其跨越 65536 字节界：中文每字 3 字节
-    const prefixLen = 65530 - head.length - 1; // 第 2 行内、界前的字节数
-    const pad = "a".repeat(Math.max(0, prefixLen - 60));
-    const line2 = jline(2, `${pad}中文跨界中文跨界`); // 多字节字符大概率跨界
+    const zh = "中文跨界中文跨界"; // 每字 3 字节
+    // 精确切点：首个多字节字符首字节=绝对偏移 65535——文件恰写满 64KiB（[0,65536)）时
+    // 只含其首字节（余二字节缺=半字符悬挂文件尾；读端 toString 出 U+FFFD 替换尾）。
+    const headBytes = Buffer.byteLength(head) + 1;
+    const zhFirstInLine = jline(2, zh).indexOf(zh); // JSON 前缀全 ASCII → 字符数=字节数
+    const padLen = 65535 - headBytes - zhFirstInLine;
+    expect(padLen).toBeGreaterThan(0);
+    const line2 = jline(2, "a".repeat(padLen) + zh);
+    expect(headBytes + zhFirstInLine + padLen).toBe(65535); // 构造自证：切点精确落在首字节
+    const lineBytes = Buffer.from(`${line2}\n`, "utf8");
+    expect(headBytes + lineBytes.length).toBeGreaterThan(65536); // 界外还有余量（zh 第 2/3 字节+JSON 尾）
     await writeFile(file, `${head}\n`, "utf8");
     const w = new FakeWatcher();
     const src = new FileHistorySource({ roots: [root], watcher: w, audit: () => {} });
     await src.load(file);
     const sk = makeSinks();
     src.observe(file, sk.s);
-    const bytes = Buffer.from(`${line2}\n`, "utf8");
-    // 先写前 65530 字节（恰好停在某个多字节字符中间附近）→通知→不发布
-    await appendFile(file, bytes.subarray(0, 65530 - head.length - 1));
+    // 追加段从 line2 自身字节 0 起（head 已在文件内）——切点=绝对 65536：恰含 zh 首字节、余二字节缺
+    await appendFile(file, lineBytes.subarray(0, 65536 - headBytes));
     w.handles[0]?.triggerNotice();
     await drain();
-    expect(sk.log.appends).toHaveLength(0); // 撕裂（可能停在多字节中间）不发布
-    await appendFile(file, bytes.subarray(65530 - head.length - 1));
+    expect(sk.log.appends).toHaveLength(0); // 半字符+行未完 → 挂起不发布（U+FFFD 不入流）
+    await appendFile(file, lineBytes.subarray(65536 - headBytes));
     activeHandles(w)[0]?.triggerNotice(); // 撕裂重扫已 rearm——用当前活跃句柄
     await until(() => sk.log.appends.length === 1);
     expect(sk.log.appends[0]?.event.kind).toBe("turn-enqueued");
+    // 逐字核：补全成行后原文无损——无替换符、无丢字
+    const parsed = JSON.parse(sk.log.appends[0]?.raw ?? "{}") as { payload: { rawText: string } };
+    expect(parsed.payload.rawText).toBe("a".repeat(padLen) + zh);
+    expect(parsed.payload.rawText.includes("\uFFFD")).toBe(false);
+  });
+
+  it("N13（3b2c-B7）：默认真工厂（RealWatcher）建立失败→load=null+reader 零调用", async () => {
+    const root = await tmpRoot();
+    const reads: string[] = [];
+    const src = new FileHistorySource({
+      roots: [root],
+      reader: {
+        read: (abs: string) => {
+          reads.push(abs); // 断言用计数器；正常路径应零调用（watch 先于 read）
+          return Promise.reject(new Error("不应读盘"));
+        },
+      },
+      audit: () => {},
+    }); // 不注 watcher → 默认 RealWatcher：fs.watch 对不存在路径同步 throw（ENOENT）
+    const out = await src.load(join(root, "absent.jsonl"));
+    expect(out).toBeNull(); // fail-closed：装载失败（不降级空句柄、不伪快照）
+    expect(reads).toHaveLength(0); // 建立失败在读取之前——绝不读盘（杀窄 M-R6：静默降级会先读）
   });
 
   it("maxScanBytes 硬限：超限→load=null（scan-over-budget 面在重扫）", async () => {

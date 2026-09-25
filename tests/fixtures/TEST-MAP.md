@@ -300,12 +300,24 @@
 | 面 | 断言落点 | 状态 |
 | --- | --- | --- |
 | **R1 扫描所有权（P3/P4/P9）** | load=活跃代 join（baselineRows 副本+增量由 append 补齐+load-joined-after-scan 审计）；双订阅共享初扫（双 sink 各自收同批追加）；release 配对（released-unobserved 审计）；初扫在飞 release→装载即弃 fail-closed（槽关+无孤儿句柄）；unobserve 后待配对引用保留；observe 无活跃代→null；网关级：load 挂起期间 transport 关闭→release 配对+observeCalls 无该文件；observe-missed→4409 显式退订（快照撤回不投死流）+observe-missed 审计+sinks 撤+release | history-source R1 组 7 it+ws-gateway +2 it | ✅ |
-| **R2 单飞+折叠（P2）** | 旧扫描挂起/新扫描先完成→旧前缀恢复不误判 truncate（identity+前缀双核对）；3 通知=1 跟进（reader 恰 2 调）；读挂起期间换代旧读丢弃（superseded）；onAppend 抛错隔离（append-cb-error 审计+源续推进） | R2 组 4 it | ✅ |
+| **R2 单飞+折叠（P2）** | 重扫挂起期间通知折 dirtyPending（单飞串行——不并发第二扫）；挂起重扫返回旧前缀→不误判 truncate（identity+前缀双核对）+恰一次跟进补齐（reader 共 3 调=初扫+挂起重扫+跟进，3b2c-B7 勘正：原文「恰 2 调」不符）；读挂起期间换代旧读丢弃（await 后复核）；onAppend 抛错隔离（append-cb-error 审计+源续推进） | R2 组 4 it | ✅ |
 | **R3 网关身份门（P5）** | 旧代三型闭包（onAppend seq99/onInvalidate/onUnavailable）全被身份门丢弃+新代 onAppend 照常收；retired 旧闭包迟到 onAppend→零新帧+连接存活（FileOverBudgetError 路径对退役回调结构性不可达=语义改进，D1c 尾段重写） | ws-gateway +2 it（R3 组+D1c 重标） | ✅ |
 | **R4 失效废弃索引（P8）** | invalidate→registry.replace（旧流身份作废，同内容重订阅 streamId 必变——失效事件=权威信号，非内容寻址） | invalidate 例断言改 NOT toBe | ✅ |
 | **R5 投影防御（P1/P1b/P6）** | 共享校验器 journal-schema.ts（recover.ts 逐字迁移+index 导出）；projectLine 接入——rawText:123/sending intentId:{} 等 14 型坏行→journal-corrupt 不抛；投影夹具合法化（sentAt 字符串/consumedLine 带 intervalEnd/clear 带 sessionId+cleared）；同权威对照（journalLineSchemaError 直测） | history-projection 重写 15 it | ✅ |
-| **R6 watch 建立/重挂失败（P7）** | 初扫建立失败→load=null 不读盘；活跃期 error→先 rearm 再补扫；重扫后 rearm 失败→unavailable(watch-failed)；邻文件隔离 | R6 组 4 it | ✅ |
-| **B07 脱敏二次方回溯（性能）** | 65KiB 无分隔符 9.3s→37ms（全量词有界）；性能门 <500ms（text+machineId）；超长 env 键名前缀透出+值恒遮/深路径分段遮全跨度/scheme 界两侧/超长单段不遮/超长凭据 ID 哈希映射=6 新 golden 向量（47→53 总） | contracts-sanitizer +7 it（49） | ✅ |
+| **R6 watch 建立/重挂失败（P7）** | 初扫建立失败→load=null 不读盘；活跃期 error→先 rearm 再补扫；重扫后 rearm 失败→unavailable(watch-failed)；邻文件隔离（3b2c-B7 勘正：本组实 5 it） | R6 组 5 it | ✅ |
+| **B07 脱敏二次方回溯（性能）** | 65KiB 无分隔符 9.3s→37ms；性能门 <500ms（text+machineId）；超长 env 键名前缀透出+值恒遮/深路径分段遮全跨度/scheme 界两侧/超长单段不遮/超长凭据 ID 哈希映射=6 新 golden 向量（47→53 总）。（**3b2c-B6 勘正：「全量词有界→总线性」不成立——PEM ①重复 BEGIN 仍二次方+替换缩短回拉界外尾；已改 maskPem 线性扫描器+尾随 \S* 整体消费，见 3b2c 段**） | contracts-sanitizer +7 it（49） | ✅ |
 | **实现期自抓三 bug** | ①scanInFlight 注册晚于同步前缀→读取期通知丢失（窗口①抓到）→微任务化注册先于执行；②初扫 onError 绑早期路径→提交后活跃期错误走不到 rearm→slotError 阶段感知；③GenEntry.sinks 单值→P4 双订阅互吞→Set 扇出 | 修复轮内嵌（无独立 it，行为被 R1/R2 组覆盖） | ✅ |
 | **变异七组（基线 d11fa59 全杀）** | M-R1 初扫去微任务化（注册窗口重开）→窗口①挂；M-R2b 在飞通知不折叠+无跟进→2 挂（**首版 M-R2 双 queueRescan 存活=被 rescanQueued 幂等性自然消解，非测试缺——如实披露**）；M-R3 onAppend 身份门移除→R3 例挂；M-R4 invalidate 去 registry.replace→断言挂；M-R5 投影去 schema 守卫→坏行例挂；M-R6 watch 建立失败静默降级→3 挂；M-B07 env 去界→性能门+超长键向量挂 | 七杀（M-R2 首版披露） | ✅ |
-| **证据升级（R7）** | P1-P10 全部由真实测试复现（首审探针 12/13 挂→修复后全绿）；真盘组补 UTF-8 跨 64KiB 撕裂（B07 修复后 316ms 过）+maxScanBytes 硬限+初扫挂起 release；四窗口主证据仍 FakeReader/FakeWatcher 受控调度（真 watcher E2E=组装后） | 31+15 it 重写 | ✅ |
+| **证据升级（R7）** | 首审探针 12/13 挂→修复后除 P10 外由真实测试复现；**P10 原夹具不真（首非 ASCII 实落 65650，非 65535 切点）——3b2c-B7 已按精确切点重写固化**；真盘组补 UTF-8 跨 64KiB 撕裂+maxScanBytes 硬限+初扫挂起 release；四窗口主证据仍 FakeReader/FakeWatcher 受控调度（真 watcher E2E=组装后） | 31+15 it 重写 | ✅ |
+
+## adapter 切片③-3b2c 修复轮（GPT 3b2b 复审 70/100 七必修 B1-B7；基线 c436814）
+| 面 | 断言落点 | 状态 |
+| --- | --- | --- |
+| **B5 投影额外字段（N7）** | baseEvent 不再 `in` 盲取——按行型传参只投影 schema 已验证字段；sending+generation 对象/数组/字符串/负数/非安全整数→event.generation=null；engaged/delivered/settled/cancelled 额外 generation→null；clear 额外 intentId 对象→null；enqueue/response-timeout 正控制照常投影 | history-projection +5 it | ✅ |
+| **B6 sanitizer 补全（N8/N9）** | maskPem 线性扫描器（indexOf 单调推进：重复 BEGIN 无 END 512KiB 5.7s→27ms）；env/ssh/userinfo/URL/Windows+UNC 六规则尾随 \\S* 整体消费（已识别单元整体遮——替换缩短不再把界外敏感尾拉回预览）；golden 47→57（N8 两条/N9/超长 UNC/env 冒号续值/limit 恰含整替换/limit 截断/PEM 标签不匹配最近 END 胜/小写标签非 PEM/重复 BEGIN 无 END）；多规模阶梯性能门（32K→512K 各 <500ms+伸缩比 <64+成对 PEM 190KiB <500ms） | contracts-sanitizer +2 it | ✅ |
+| **B1 槽位代次隔离（N1/N2/N6）** | LoadTicket 票据（release 先撤票→该 load 返 null）；pendingEntry 身份票据；releaseCarry 结转+下一代成功 load 吸收（网关每 load 恰一次结算⇒总量守恒）；earlyWatchErrors 每代清零；无主槽 maybeReapSlot 有界回收。反例：N1 失败后 release 不再永真拒装；N2 新初扫不带旧错误；N6 旧 release 不取消新在飞装载 | history-source +7 it | ✅ |
+| **B2 源层回调身份门（N3/N4）** | watch/rearm 回调捕获 entry 本体（非 slot），不匹配即丢弃；FakeWatchHandle.rawNotice/rawError 直调**原始回调闭包**（绕过替身 closed 门——B7 ②「旧通知假打进」证据升级入仓）。反例：N3 旧代 rawError 不杀新代初扫（watch-error-stale-dropped 审计）；N4 旧代 rawNotice 不驱动新代重读（reader 调用数不变） | history-source +7 it（同上组分列） | ✅ |
+| **B3 网关恰一次结算（N11）** | watchFile 返 consumedRef（本流 observe 是否消费 load 引用）；settleLoadRef 恰一次——已消费不 release（旧「observe 后又 release」=对本流双结算，多扣他方匿名计数→关流后 watcher 误归零）；rows===null 先于 st.closed 判（不释放未取得引用）；真源组合例：他方裸 load+网关订阅+关流→真观察句柄不归零，他方结算后才收 | ws-gateway +2 it（B3 双订阅恰一次+真源 N11） | ✅ |
+| **B4 observe 同步终止（N12）** | unobserve 先赋值再复核 rec 在位；同步终止（onUnavailable/onInvalidate 摘 rec）→立即停孤儿 stop+observe-sync-terminated 审计；handleSubscribe 复核 st.subs→不发死快照不排泵。反例：无 snapshot 帧+4402+stop 恰 1 次 | ws-gateway +1 it | ✅ |
+| **B7 证据真实化** | ①UTF-8 精确切点：中文首字节=绝对 65535、切 65536=半字符悬挂文件尾（构造自证 expect=65535；补全后逐字核 rawText 无损无 U+FFFD）——替换原不真夹具；②原始闭包直调入仓（B2 轮 rawNotice/rawError）；③TEST-MAP 行文勘正（R2 行串行语义+reader 3 调、R6 组 5 it、R7 行 P10 表述、B07 行线性声明）；④N13 真工厂：默认 RealWatcher（不注替身）对不存在路径 fs.watch 同步 throw→load=null+reader 零调用（杀窄 M-R6 静默降级变异）；⑤M6-oldread 存活披露：旧读结果替换新读计算在网关面无可观察消费者（同型风险由 superseded 丢弃+槽代次隔离覆盖），存活=证据边界非语义缺口；⑥B07 声明按 B6 勘正 | history-source 真盘组重写+N13 新 it | ✅ |
+| **再送审最低条件对照（3b2b 报告原文）** | B1-B7 反例（N1-N4/N6-N9/N11-N13）固化转绿 ✅；原 615 及类型/lint 过（现 643+7，tsc/lint 0）✅；M4 继续被杀（R6 组原网保留）✅；M6 边界披露 ✅；真 N13 入仓杀窄 M-R6 ✅；精确 UTF-8 ✅；真实旧闭包入仓 ✅；B07 尾部不泄漏（N8/N9 向量）✅；多规模重复 PEM 测试 ✅ | 待 GPT 复审 | 🟡 |
