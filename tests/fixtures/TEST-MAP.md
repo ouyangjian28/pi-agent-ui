@@ -281,3 +281,17 @@
 | **3b1d 修复轮（88/100 C1/C2/C3）** | C1 listen 单槽所有权：启动中/已监听重复调用显式拒绝；成功/异步 error/同步 throw/dispose 取消四路恰一次结算+临时监听器摘除（listening 改显式监听器可被取消路径 off）；C2 A6-B2 重写=白盒真实容量断言（fill 后 size=1024；1025 后仍 1024）+淘汰对象=最早到期（t=1→until=600001）+部分过期与活动封锁共存（淘汰审计数不增+晚封锁 IP 正确令牌仍 4401）；C3 B4 补 try/finally（失败/超时路径恢复读+terminate 客户端）+显式 4s 有界等待；契约 §5.5 缺头回退分立（缺 XFF→socket 对端；缺 XFP→tls=false 不回退 socket TLS）+源码注释补代理覆盖/清洗条款；continuation 切点注释勘正（第二切点=「中」第 1B 非 𝄞）+64KB×32 例名改「持续读取」 | +3 it（integration 30）=554 总；变异 M-C1a（取消不摘监听器）/M-C1b（重复启动不拒）/M-B2-delete（去实际 delete 只留审计）全杀 | ✅ |
 | **修复轮变异十二组（基线 2a234ce，全部 KILLED）** | M-R01a message-cb-rethrow→进程崩挂；M-R01b send-done 去隔离→挂；M-R02a listen 复活→挂；M-R02b GET 无处理器→挂；M-R02c guard 只 finish 不销毁→**首跑存活**→强化「截止后强制销毁」断言→杀；M-R03 maxPayload 4MiB→1009 例挂；M-R04 binary 4404→A5 挂；M-R06a 封锁检查禁用→A6+真网络挂；M-R06b 阈值+1000→同挂；M-deflate 启用压缩→双证据挂；M-bytegate 应用门禁用→B8+双门挂；M-rotation 撤销不关连接→D23+真轮换挂 | 十二杀（M-R02c 经强化） | ✅ |
 | **遗留（3b-1 边界）** | clientError 吸收无专测；403 XFF 混合回程归 3b-2 复核；真进程/真源接线归 3b-2~3b-5 | 如实披露 | 🟡 |
+
+## adapter 切片③-3b2a（真源 HistorySource：journal 投影+FileHistorySource+网关源事件接线+clientIp 映射；3b-0 §V 验收前四组+第五组盘面分；基线 9eb0bb4）
+| 面 | 断言落点 | 状态 |
+| --- | --- | --- |
+| **投影器（journalToScanRows）** | enqueue→turn-enqueued{preview:SanitizedText{text,truncated},ordinal}；九 kind 全映射；response-timeout/clear 缺省 0；撕裂尾不发布/补全成行；坏行四型（解析失败/非对象/null/缺 t/未知 t）→journal-corrupt；preview 200 限+truncated 标；坏行占行号；100 行单调；同文本两行=两行；控制字符剥后进 preview；baseEvent 跨行不串扰 | history-projection.test 12 it | ✅ |
+| **真源基线+四窗口（§V①）** | load=快照+observe 绑定+前缀追加逐行 onAppend；窗口①读取期通知→装载后 dirty 激活补扫（监视先于读取=窗口无漏）；窗口②激活前多次通知=一次重扫合并（reader 恰 2 调）；窗口③退役重挂=重扫后旧句柄关+恰一活跃（多轮无泄漏）；窗口④换代（stop+重 load）后旧句柄迟到通知不进新流 | history-source.test §V① 5 it | ✅ |
+| **盘面分型（§V②）** | 同位置 raw 变（投影不变）→invalidate(rewrite) 非续读；变短→truncate+旧代已停（后续通知零事件）；同尺寸 replace（dev:ino 变）→replace；重复通知无变化→幂等零事件；同文本不同两行→两行各自 onAppend（去重键=locator+digest 非文本） | §V② 5 it | ✅ |
+| **新旧流隔离（§V③）** | 读挂起期间换代：旧读恢复后丢弃（skA/skB 零 append+superseded 审计）；onAppend 回调抛错不逸出（源存活续推进+append-cb-error 审计） | §V③ 2 it | ✅ |
+| **不可用分型+fail-closed（§V④）** | missing→deleted+观察全收口；too-large→scan-over-budget/open-denied+symlink+泛错→unreadable；watch 建立失败→load=null 不降快照；装载期早期 watch 错误→load=null（watch-error-early）；重挂失败→watch-failed+旧观察关；越界→outside-roots 拒 | §V④ 6 it | ✅ |
+| **真盘集成（§V①⑤真 fs）** | 真装载/追加/截短/rename 替换重装载/删除 fail-closed；半行跨块（无换行不发布+补全发布）；UTF-8 字节级撕裂分两写（先半行不发布+补全成 sending 行）；坏完整行→corrupt 占位；maxScanBytes 读中硬限→null | 真盘 2 it | ✅ |
+| **网关源事件接线** | onInvalidate(rewrite)→该文件订阅 4409 stream-replaced:{subId}+撤观察（sinks 删）+不自动重装载（loadCalls 不增）；重订阅→新 subId+内容寻址同 streamId（真实 rewrite 内容必变→换流=C17 已覆盖）+load+1+观察重建；onUnavailable(deleted)→4402「历史源不可用（deleted）」retryable=true+撤观察+邻文件订阅不受波及（b 追加照常投递） | ws-gateway.test 3b-2 组 2 it | ✅ |
+| **clientIp 映射（gatewayMetaFrom）** | 直连全链映射；可信代理派生 IP 透传（不退 unknown）；origin 缺失→undefined（网关默认拒路径） | ws-support.test 3 it | ✅ |
+| **变异十组（基线 9eb0bb4 全杀）** | M-A1 去改写检测→rewrite 例挂；M-A2 去截短→2 挂；M-B 去身份→replace 挂；M-C missing 误映射→挂；M-D watch 失败降空快照（语义版 return []）→挂；M-E 追加全量重放（i=0 起）→8 挂；M-F 激活不收敛 dirty→2 挂；M-G 关观察跳过→2 挂；M-H 网关失效误走 4402→4409 例挂；M-I 撕裂尾发布→8 挂 | 十杀 | ✅ |
+| **边界披露（3b-2a→2b/3）** | session 投影+双源合序未冻结=3b-2b；组装层 onConnection 实际接线（gatewayMetaFrom 唯一映射点已备）+慢客户端=3b-3；RecoveryEvidenceProvider typed=3b-4/5；真 fs.watch 时序稳定性以 FakeWatcher 替身驱动+真盘读路径全覆盖（真 watcher 端到端=组装后 E2E） | 如实披露 | 🟡 |
