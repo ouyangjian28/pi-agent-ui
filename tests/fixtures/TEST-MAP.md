@@ -264,7 +264,7 @@
 | **w1e 复审 93/100 GO（3a 受控 WS 接线通过；报告=audits/gpt-adapter-w1e-review-2026-09-28.md）+黄项清理** | GPT 独立验证：默认 32 流第 33 流挤出真反例复现+全量重扫/容量矩阵（初装三连/前缀增量/raw 改写/observe 触顶+宽容重建+迟到回调）/非容量构建失败（newId 抛错→4402 retryable=true 请求关联）/P-VALID 非法 file+limit999 公开入口 4404/四变异同型全杀/两道身份防线单拆存活=与纵深披露一致。黄项清理：R3a 改名（observe 面归 Q6）/D2 逐请求关联断言（w2 出口帧+内联帧分立）/D2b 前缀增量例补真/B8 全集对照（i-1..i-501 逐条删空）/MAP golden 归属勘正（校验器单测非 golden）/M-240 二踩事故补记 | gateway 47 it；全套 521 passed+7 skipped | ✅ |
 | **真网络传输（ws 库 socket/真实 backpressure/Origin header/TLS）** | 归 3b 真网络分片（w0 对齐：3a 通过措辞=「受控 WS 接线通过」） | 归 3b-1 ✅（下段） |
 
-## adapter 切片③-3b1（真 WS 传输适配层：WsServerAdapter/WsConnectionPort/WsTransportPort；3b-0 对齐 §IV.A/B/C 冻结签名；tests/integration/ws-transport.net.test.ts 17 it；repo 2a05321+强化 commit）
+## adapter 切片③-3b1（真 WS 传输适配层：WsServerAdapter/WsConnectionPort/WsTransportPort；3b-0 对齐 §IV.A/B/C 冻结签名；首提交 72/100 NO-GO→修复轮；tests/integration/ws-transport.net.test.ts 24 it + ws-gateway A5/A6 重写；repo 2a234ce+0ce90a6）
 | 面 | 断言落点 | 状态 |
 | --- | --- | --- |
 | **①Origin 门+无 deflate（upgrade 前 HTTP 403）** | Origin 缺失/null/子串伪造（evil.example/localhost:3000 与 localhost:3000.evil.example）→裸 socket 探测 HTTP 403+审计 rule=origin；精确匹配→101；ws 客户端主动提 perMessageDeflate→响应头无扩展（未协商） | ①组 2 it | ✅ |
@@ -275,4 +275,7 @@
 | **⑥token 三态（真 TokenAuthority 组合）** | fromFile 缺失文件→构造抛错（fail-closed 拒启动）；version:1 令牌文件→hello（含 protocolVersion）→welcome；错令牌→4401→close 1008 | ⑥组 2 it | ✅ |
 | **⑦关闭竞态+句柄释放** | dispose→存量连接收 1001；同端口立即可再监听（句柄真释放）；dispose 幂等；upgrade 握手中途裸断→无崩溃+适配器仍可用 | ⑦组 2 it | ✅ |
 | **变异六组（M-240 基线 2a05321+强化 commit）** | M-a 代理头无条件采信（trusted=true）→伪造拒挂；M-b Origin 前缀包含匹配（allowed.some(a=>origin.includes(a))）→子串伪造挂（**首版「allowed 子串包含 origin」方向存活=该方向不弱于已测输入的防御，如实披露**）；M-c 传输门放宽 4MiB→1009 例挂；M-d send 立即兑现（done(null) 脱绑 ws 回调）→暂停读例挂；M-e dispose 不收口存量→1001 例挂；M-f 403 静默不写响应→裸探测挂 | 六杀（M-b 两方向披露） | ✅ |
-| **遗留（3b-1 边界）** | close 握手截止 5s 默认（超时 terminate）有实现无专测例（dispose 例覆盖其终止路径）；clientError 吸收无专测；真进程/真源接线归 3b-2~3b-5 | 如实披露 | 🟡 |
+| **修复轮（72/100 六阻断 R01-R06）** | R01 回调隔离：message/pong/error/send-done 抛错→审计+连接存活（R01×2 真网络）+超限 error 隔离→1009 终局；R02 dispose 整体有界：GET→404+Connection:close、裸 socket 挂着→dispose<3s+**截止后强制销毁断言**（M-R02c 强化）、dispose 后 listen rejects、接收器 closeTimeout=closeHandshakeMs 统一（非响应客户端 1MiB+1→400ms 内 terminate）；R03 接收门冻结：maxPayload 选项删除（TS 面无绕过）；R04 binary→4403+close 1003（A5 重写+真网络）；R06 clientIp 接线 per-IP 限速（A6 受控+真网络 limit3/backoff260ms 恢复+serverBuildId 断言） | 修复轮新增 9 it+A5/A6 重写 | ✅ |
+| **R05 假绿三修** | deflate：客户端 extensions==="" **且**裸握手带 Sec-WebSocket-Extensions: permessage-deflate→101 响应无该头（双证据）；双门：262,143/144B 合法 ping→pong 按 nonce 关联+errBefore 基线计数（262,145→恰一条**新** 4404）；token 真轮换：A/B 双连接在线→撤 A→applyTokenReload→A 4401+1008+B ping 存活→写损坏文件→reload **resolves** {changed:false}+审计 token-reload-failed keep=old→B 仍认证 A 仍拒；错令牌独立例（固定消息不回显） | R05 三测重写+2 新例 | ✅ |
+| **修复轮变异十二组（基线 2a234ce，全部 KILLED）** | M-R01a message-cb-rethrow→进程崩挂；M-R01b send-done 去隔离→挂；M-R02a listen 复活→挂；M-R02b GET 无处理器→挂；M-R02c guard 只 finish 不销毁→**首跑存活**→强化「截止后强制销毁」断言→杀；M-R03 maxPayload 4MiB→1009 例挂；M-R04 binary 4404→A5 挂；M-R06a 封锁检查禁用→A6+真网络挂；M-R06b 阈值+1000→同挂；M-deflate 启用压缩→双证据挂；M-bytegate 应用门禁用→B8+双门挂；M-rotation 撤销不关连接→D23+真轮换挂 | 十二杀（M-R02c 经强化） | ✅ |
+| **遗留（3b-1 边界）** | clientError 吸收无专测；403 XFF 混合回程归 3b-2 复核；真进程/真源接线归 3b-2~3b-5 | 如实披露 | 🟡 |
