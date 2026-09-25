@@ -427,6 +427,131 @@ describe("RpcSession（受控替身）", () => {
     await cmd;
     await until(() => settledCalls.length === 1, "回绑即结算后通知");
     expect(settledCalls).toEqual([1]);
-    await until(() => (s3.getState().gate as { kind: string }).kind === "idle", "gate idle");
+  });
+
+  // ---- s4b B1：响应先到不撤销总截止/取消口（写+响应=同一有界操作） ----
+  it("S4-B1a 响应先到+写永久挂起：总截止仍终结启动（readiness-timeout，非永久 pending）", async () => {
+    const { session, host } = await makeSession({ readinessTimeoutMs: 100 });
+    host.writeMode = "hang"; // 写永不兑现
+    const r = session.start();
+    await until(() => host.frames.length === 1, "探针写出");
+    host.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true }); // 响应先到（旧代码此处会清 timer）
+    await until(() => host.stopSignals.includes("SIGTERM"), "总截止仍触发退役", 1000); // 100ms 超时驱动
+    host.emitExit(null, "SIGTERM");
+    expect((await r)).toMatchObject({ kind: "readiness-timeout", generation: 1 });
+    expect(session.getState().supervisor).toMatchObject({ phase: "idle" });
+  });
+
+  it("S4-B1b 响应已到+写挂起：stop 取消口仍有效（superseded 不永久等待）", async () => {
+    const { session, host } = await makeSession({ readinessTimeoutMs: 5_000 });
+    host.writeMode = "hang";
+    const startA = session.start();
+    await until(() => host.frames.length === 1, "探针写出");
+    host.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true }); // 响应已到
+    const stopP = session.stop(); // 取消口必须仍在（旧代码 waiter 已删=找不到取消入口）
+    await until(() => host.stopSignals.includes("SIGTERM"), "stop→SIGTERM");
+    host.emitExit(null, "SIGTERM");
+    expect((await stopP).kind).toBe("confirmed");
+    expect((await startA)).toMatchObject({ kind: "superseded", generation: 1 });
+    expect(host.stopSignals.length).toBe(1);
+  });
+
+  // ---- s4b B2：ready 不得对应 stopping/已退出进程 ----
+  it("S4-B2a 响应后同段 stop：start 不返回 ready（P4），旧启动失效", async () => {
+    const { session, host } = await makeSession();
+    const startA = session.start();
+    await until(() => host.frames.length === 1, "探针写出");
+    host.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true });
+    const stopP = session.stop(); // 同一同步段（探针续体微任务未跑）
+    await until(() => host.stopSignals.includes("SIGTERM"), "SIGTERM");
+    host.emitExit(null, "SIGTERM");
+    expect((await stopP).kind).toBe("confirmed");
+    const ra = await startA; // 旧代码此处=ready(1) 而 supervisor=stopping（P4 反例）
+    expect(ra.kind).not.toBe("ready");
+    expect(ra).toMatchObject({ kind: "superseded", generation: 1 });
+  });
+
+  it("S4-B2b 探针成功与 start 返回之间退出（P2 终窗）：返回前复核，不报 ready", async () => {
+    const { session, host } = await makeSession();
+    const startA = session.start();
+    await until(() => host.frames.length === 1, "探针写出");
+    host.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true });
+    // 探针续体微任务与退出微任务交替：退出在 start 最终返回前落定
+    queueMicrotask(() => host.emitExit(0, null));
+    const ra = await startA; // 旧代码=ready(1) 而 supervisor=idle/generation=null（P2 反例）
+    expect(ra.kind).not.toBe("ready");
+    expect(ra).toMatchObject({ kind: "superseded", generation: 1 });
+  });
+
+  it("S4-05d settled 先缓冲→超时记录收口（recorded-and-settled）：通知恰一次", async () => {
+    const dir4 = await mkdtemp(join(tmpdir(), "rpc-s405d-"));
+    dirs.push(dir4);
+    const settledCalls: number[] = [];
+    const host4 = new FakeRpcHost();
+    const dur4 = new FileDurability(join(dir4, "journal.jsonl"));
+    const s4 = new RpcSession({
+      piArgs: ["--mode", "rpc", "--no-session"],
+      journalPath: join(dir4, "journal.jsonl"),
+      sessionId: "s-test",
+      host: host4,
+      durability: dur4,
+      readinessTimeoutMs: 500,
+      responseTimeoutMs: 60,
+      timeoutPollMs: 20,
+      onSettled: (g) => settledCalls.push(g),
+    });
+    sessions.push(s4);
+    const p = s4.start();
+    await until(() => host4.frames.length === 1, "探针");
+    host4.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true });
+    await p;
+    const cmd = s4.send("settled 先缓冲后超时");
+    await until(() => host4.frames.some((f) => f.includes('"prompt"')), "prompt 写出");
+    host4.emitEvent({ type: "agent_settled" }); // response 未到：缓冲
+    await new Promise((r) => setTimeout(r, 140)); // 超时（60ms）→记录→缓冲 settled 合并结算=recorded-and-settled
+    await cmd;
+    await until(() => settledCalls.length === 1, "recorded-and-settled 通知");
+    expect(settledCalls).toEqual([1]);
+    await until(() => (s4.getState().gate as { kind: string }).kind === "idle", "gate idle");
+  });
+
+  it("S4-05e settled 耐久 reject：零通知（settle-durability-failed 不发完成通知）", async () => {
+    const dir5 = await mkdtemp(join(tmpdir(), "rpc-s405e-"));
+    dirs.push(dir5);
+    const host5 = new FakeRpcHost();
+    const dur5 = new HoldDurability();
+    const settledCalls: number[] = [];
+    const audits: string[] = [];
+    const s5 = new RpcSession({
+      piArgs: ["--mode", "rpc", "--no-session"],
+      journalPath: join(dir5, "journal.jsonl"),
+      sessionId: "s-test",
+      host: host5,
+      durability: dur5 as unknown as DurabilityPort,
+      readinessTimeoutMs: 500,
+      responseTimeoutMs: 5_000,
+      timeoutPollMs: 20,
+      audit: (l) => audits.push(l),
+      onSettled: (g) => settledCalls.push(g),
+    });
+    sessions.push(s5);
+    dur5.holdAt = 3; // settled 行 append 挂起
+    const p = s5.start();
+    await until(() => host5.frames.length === 1, "探针");
+    host5.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true });
+    await p;
+    const cmd = s5.send("耐久拒绝");
+    await until(() => host5.frames.some((f) => f.includes('"prompt"')), "prompt 写出");
+    host5.emitEvent({ id: "c1", type: "response", command: "prompt", success: true });
+    host5.emitEvent({ type: "agent_settled" }); // settled append 挂起中
+    await until(() => (s5.getState().gate as { kind: string }).kind === "settling", "settling");
+    dur5.release(new Error("EIO: 模拟磁盘错误")); // 拒绝（非兑现）
+    await new Promise((r) => setTimeout(r, 60));
+    expect(settledCalls).toEqual([]); // 耐久失败零通知
+    await until(
+      () => audits.some((l) => l.includes("settle-held") || l.includes("settle-durability-failed")),
+      "耐久失败审计可见",
+    );
+    void cmd;
   });
 });

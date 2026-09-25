@@ -61,16 +61,22 @@ export type SessionStartResult =
 export type SessionSendResult = LaunchOutcome | { readonly kind: "no-process" } | { readonly kind: "invalidated"; readonly stage: "first-byte" } | { readonly kind: "not-ready" };
 
 interface ReadinessWaiter {
+  /** 响应已到→标记布尔（S4-B1：只标记；不清 timer 不删入口——总截止约束写+响应整体） */
   resolve(ok: boolean): void;
-  reject(err: Error): void;
-  timer: NodeJS.Timeout;
 }
+
+/** 完成通知去重集容量（Y3/s4b）：长会话有界；超额淘汏最旧 intentId。 */
+const SETTLED_NOTIFIED_CAP = 1024;
+
+/** 启动操作的取消口（S4-B1/B2）：独立于响应 waiter——响应已到仍可取消（stop/换代）。 */
+type ReadinessCancel = (reason: Error) => void;
 
 export class RpcSession {
   private readonly gate: TurnGate;
   private readonly coordinator: DispatchCoordinator;
   private readonly supervisor: ProcessSupervisor;
   private readonly readiness = new Map<string, ReadinessWaiter>();
+  private readonly readinessCancels = new Map<number, ReadinessCancel>();
   private readyGeneration: number | null = null;
   private readonly ordinals = new Map<string, number>();
   private readonly readyPromise = new Map<number, Promise<void>>();
@@ -169,9 +175,7 @@ export class RpcSession {
     if (o !== null && typeof o === "object" && o.type === "response" && typeof o.id === "string") {
       const waiter = this.readiness.get(o.id);
       if (waiter !== undefined) {
-        this.readiness.delete(o.id);
-        clearTimeout(waiter.timer);
-        waiter.resolve(o.success === true);
+        waiter.resolve(o.success === true); // B1：响应只标记收到；入口/timer/取消口保留到整体落定
         return;
       }
       if (o.id.startsWith("c")) {
@@ -205,61 +209,86 @@ export class RpcSession {
     }
     const r = this.coordinator.onPiEvent(ev, generation);
     try {
-      this.opts.onPiEvent?.(ev, generation, r.kind);
+      const ret = this.opts.onPiEvent?.(ev, generation, r.kind) as unknown;
+      if (ret instanceof Promise) void ret.catch((e: unknown) => this.safeAudit(`rpc-session pi-event-async-error ${String(e instanceof Error ? e.message : e)}`));
     } catch (e: unknown) {
       this.safeAudit(`rpc-session pi-event-error ${String(e instanceof Error ? e.message : e)}`);
     }
   }
 
-  /** 完成通知（S4-05）：绑定轮身份（TurnKey），按 intentId 恰好一次。 */
+  /** 完成通知（S4-05）：绑定轮身份（TurnKey），按 intentId 恰好一次。
+   *  Y3（s4b）：集合有界（插入序淘汏，容量 1024）——长会话不无限增长；超额淘汏最旧项
+   *  （防御层：协调器已门控全部通知路径，淘汏旧 intentId 的碰撞风险=旧轮重放同 id，不可达）。 */
   private notifySettled(key: TurnKey): void {
     if (this.settledNotified.has(key.intentId)) {
       this.safeAudit(`rpc-session settled-notify-duplicate intentId=${key.intentId}（已通知，丢弃）`);
       return;
     }
     this.settledNotified.add(key.intentId);
+    if (this.settledNotified.size > SETTLED_NOTIFIED_CAP) {
+      const oldest = this.settledNotified.values().next().value; // 插入序首项
+      if (oldest !== undefined) this.settledNotified.delete(oldest);
+    }
+    // Y4（s4b）：同步异常隔离 + 异步返回值（Promise）拒绝也入审计（不吞 unhandled）
     try {
-      this.opts.onSettled?.(key.generation);
+      const ret = this.opts.onSettled?.(key.generation) as unknown;
+      if (ret instanceof Promise) void ret.catch((e: unknown) => this.safeAudit(`rpc-session settled-callback-async-error ${String(e instanceof Error ? e.message : e)}`));
     } catch (e: unknown) {
       this.safeAudit(`rpc-session settled-callback-error ${String(e instanceof Error ? e.message : e)}`);
     }
   }
 
-  /** readiness 探针（S4-03/S4-04）：写入+响应+超时=同一有界启动操作。
-   *  - writeP 与 gateP 从创建起都有消费者（Promise.all），无孤立 rejection；
-   *  - 超时/写失败/被拒都能让 start 的等待结束并进入所有权复核；
-   *  - 成功侧复核当前运行代（superseded→抛错，不置 readyGeneration）；
-   *  - finally 清 waiter 与 timer（write 失败路径也要收 timer）。 */
+  /** readiness 探针（S4-03/04 + s4b B1/B2）：写入+响应+超时+取消=同一有界启动操作。
+   *  - 总截止 timer 约束**写+响应整体**：响应先到不清除（B1），直到整体落定才清；
+   *  - finish 幂等单结算：超时/取消/写失败/被拒/成功任一先到，其余路径不再改写结果；
+   *  - 取消口独立于响应标记（readinessCancels）：响应已到仍可取消（B2：stop 失效启动操作）；
+   *  - 成功侧复核当前代**与相态 running**（B2：stopping/已退出不得报 ready）；
+   *  - 成功不置 readyGeneration 若已 finish（晚到续体不复活结果）。 */
   private probeReadiness(handle: ProcessHandle, generation: number): Promise<void> {
     const id = `ready-${generation}`;
     const timeoutMs = this.opts.readinessTimeoutMs ?? 15_000;
-    let waiter!: ReadinessWaiter;
-    const gateP = new Promise<boolean>((resolve, reject) => {
-      const timer = setTimeout(() => {
+    return new Promise<void>((resolveOuter, rejectOuter) => {
+      let done = false;
+      const finish = (err?: Error): void => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
         this.readiness.delete(id);
-        reject(new Error(`readiness 探针超时（${timeoutMs}ms）`));
+        this.readinessCancels.delete(generation);
+        if (err === undefined) resolveOuter();
+        else rejectOuter(err);
+      };
+      const timer = setTimeout(() => {
+        finish(new Error(`readiness 启动超时（${timeoutMs}ms，写+响应整体）`)); // B1：写挂起也到点终止
       }, timeoutMs);
-      waiter = { resolve, reject, timer };
-      this.readiness.set(id, waiter);
-    });
-    void gateP.catch(() => undefined); // 双保险：all 已消费 gateP，此行防御性标注（无操作成本）
-    const writeP = this.opts.host.writeStdin(handle, `${JSON.stringify({ id, type: "get_state" })}\n`);
-    return Promise.all([writeP, gateP])
-      .then(([, ok]) => {
-        if (!ok) throw new Error("readiness 探针被拒（get_state success=false）");
-        // S4-04：返回 ready 前确认仍是当前运行代（探针等待期内换代/退出→superseded，不得报 ready）
-        const cur = this.supervisor.getState().generation;
-        if (cur !== generation) throw new Error(`readiness-superseded（探针完成时当前代=${cur}）`);
-        this.readyGeneration = generation;
-        this.safeAudit(`rpc-session ready generation=${generation}`);
-      })
-      .finally(() => {
-        // 收尾：清 waiter 槽位与 timer（write 失败/超时/被拒路径同样执行）
-        if (this.readiness.get(id) === waiter) {
-          this.readiness.delete(id);
-          clearTimeout(waiter.timer);
-        }
+      this.readinessCancels.set(generation, (reason) => finish(reason));
+      let respResolve!: (ok: boolean) => void;
+      const respP = new Promise<boolean>((res) => {
+        respResolve = res;
       });
+      this.readiness.set(id, { resolve: respResolve });
+      const writeP = this.opts.host.writeStdin(handle, `${JSON.stringify({ id, type: "get_state" })}\n`);
+      Promise.all([writeP, respP])
+        .then(([, ok]) => {
+          if (done) return; // 晚到续体：整体已由超时/取消落定，不得置 ready
+          if (!ok) {
+            finish(new Error("readiness 探针被拒（get_state success=false）"));
+            return;
+          }
+          // B2：ready 要求当前代匹配且相态 running（stopping/已退出=superseded）
+          const st = this.supervisor.getState();
+          if (st.generation !== generation || st.phase !== "running") {
+            finish(new Error(`readiness-superseded（探针完成时 ${st.phase}/${st.generation ?? "无"}）`));
+            return;
+          }
+          this.readyGeneration = generation;
+          this.safeAudit(`rpc-session ready generation=${generation}`);
+          finish();
+        })
+        .catch((e: unknown) => {
+          finish(e instanceof Error ? e : new Error(String(e)));
+        });
+    });
   }
 
   /** 启动（或意外退出后重启）：gate 若因上代关闭先 reopen→spawn→readiness 往返。 */
@@ -286,13 +315,21 @@ export class RpcSession {
       const retire = await this.supervisor.retireCurrent();
       return { kind: "readiness-timeout", generation: r.generation, retire };
     }
+    // B2（P2 终窗）：返回 ready 前再复核现态——探针成功与 start 返回之间退出/退役不得报 ready
+    const fin = this.supervisor.getState();
+    if (fin.generation !== r.generation || fin.phase !== "running") {
+      this.safeAudit(`rpc-session ready-superseded-at-return generation=${r.generation} current=${fin.phase}/${fin.generation ?? "无"}`);
+      return { kind: "superseded", generation: r.generation };
+    }
     return { kind: "ready", generation: r.generation };
   }
 
   /** 发一轮用户消息（三写硬序在纯逻辑层；本层只渲染帧+对账 id）。 */
   async send(message: string): Promise<SessionSendResult> {
-    const gen = this.supervisor.getState().generation;
-    if (gen === null || this.readyGeneration !== gen) return { kind: "not-ready" };
+    const st = this.supervisor.getState();
+    const gen = st.generation;
+    // B2 面：ready 标志之外还须现态 running（stopping/已退出不开真实派发）
+    if (gen === null || st.phase !== "running" || this.readyGeneration !== gen) return { kind: "not-ready" };
     const commandId = (this.cmdSeq += 1);
     const intentId = `i-${(this.intentSeq += 1)}`;
     const mk = matchKeyOf(message, [], this.takeOrdinal(message));
@@ -324,12 +361,11 @@ export class RpcSession {
   }
 
   private cancelReadiness(generation: number): void {
-    const id = `ready-${generation}`;
-    const waiter = this.readiness.get(id);
-    if (waiter === undefined) return;
-    this.readiness.delete(id);
-    clearTimeout(waiter.timer);
-    waiter.reject(new Error("readiness-canceled（退役/停止）"));
+    // B1/B2：取消口独立于响应标记——响应已到（waiter 已兑现）仍能终结整体（stop 失效启动操作）
+    const cancel = this.readinessCancels.get(generation);
+    if (cancel === undefined) return;
+    this.readinessCancels.delete(generation);
+    cancel(new Error("readiness-canceled（退役/停止）"));
   }
 
   /** 观测面：gate/协调器/监管器状态（UI/诊断用）。 */

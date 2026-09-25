@@ -49,12 +49,18 @@ export class FileDurability implements DurabilityPort {
   }
 
   append(line: JournalLine): Promise<void> {
+    // B3（s4b）：接收判定在入口同步完成——close 只拦「之后」的调用，已接收任务照常执行；
+    // 已接收任务在前序写入失败（failed）时仍拒绝执行（不越过不确定的尾）。
+    if (this.closed) {
+      return Promise.reject(new Error(`FileDurability: 已关闭，拒绝追加（${this.path}）`));
+    }
+    if (this.failed) {
+      // 首次失败后未修复即续写：拒绝（保守；上层须先重放裁决/换段）
+      return Promise.reject(new Error(`FileDurability: 处于未修复失败态（${this.path}）`));
+    }
     const run = async (): Promise<void> => {
-      if (this.closed) {
-        throw new Error(`FileDurability: 已关闭，拒绝追加（${this.path}）`);
-      }
       if (this.failed) {
-        // 首次失败后未修复即续写：拒绝（保守；上层须先重放裁决/换段）
+        // 执行时前序任务已失败：本任务不越过不确定的尾（拒绝而非静默丢）
         throw new Error(`FileDurability: 处于未修复失败态（${this.path}）`);
       }
       try {

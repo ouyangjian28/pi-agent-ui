@@ -21,11 +21,12 @@ class FakeFs implements DurabilityFsPort {
   async open(): Promise<DurabilityFileHandleLike> {
     this.events.push("open");
     let wi = 0;
-    const write = async (buf: Buffer): Promise<{ bytesWritten: number }> => {
+    const write = async (buf: Buffer, pos?: number): Promise<{ bytesWritten: number }> => {
       this.events.push("write");
       const plan = this.writes[wi++] as WritePlan | undefined;
-      const n = plan?.bytes ?? buf.length;
-      this.chunks.push(buf.subarray(0, n).toString("utf8"));
+      const start = pos ?? 0; // Y2（s4b）：尊重 offset——部分写重试须从剩余字节起算，不重写已落字节
+      const n = Math.min(plan?.bytes ?? buf.length - start, buf.length - start);
+      this.chunks.push(buf.subarray(start, start + n).toString("utf8"));
       if (plan?.error) throw plan.error;
       return { bytesWritten: n };
     };
@@ -101,5 +102,44 @@ describe("FileDurability（受控 fsPort）", () => {
     fs.writes = [{ bytes: 0 }];
     const dur = new FileDurability("/fake/j.jsonl", { fsPort: fs });
     await expect(dur.append(line("enqueue"))).rejects.toThrow(/零进展/);
+  });
+
+  it("S4-B3a 同段 append→close：已接收 append 照常完成（close 只拦后来调用）", async () => {
+    const fs = new FakeFs();
+    const dur = new FileDurability("/fake/j.jsonl", { fsPort: fs });
+    const a = dur.append(line("enqueue")); // 已接收（旧代码：run 内查 closed 而 close 同步置位→误拒）
+    const c = dur.close(); // 同一同步段紧随
+    await a; // 不得 reject「已关闭」
+    await c;
+    expect(fs.text()).toBe(`${JSON.stringify(line("enqueue"))}\n`);
+    expect(fs.events).toEqual(["open", "write", "datasync", "close"]);
+    await expect(dur.append(line("sending"))).rejects.toThrow(/已关闭/); // close 后新调用仍拒
+  });
+
+  it("S4-B3b 挂起中 append×2→close：两任务都完成，close 后才关 fd", async () => {
+    const fs = new FakeFs();
+    fs.datasyncHang = true;
+    const dur = new FileDurability("/fake/j.jsonl", { fsPort: fs });
+    const a1 = dur.append(line("enqueue"));
+    const a2 = dur.append(line("sending")); // 排队（尚未执行）
+    const c = dur.close();
+    await new Promise((r) => setTimeout(r, 10)); // 确保都已在队列里
+    fs.datasyncHang = false; // 后续 datasync 不再挂（只挂第一次）
+    fs.releaseDatasync();
+    await a1; // 两任务都完成
+    await a2;
+    await c;
+    expect(fs.text()).toBe(`${JSON.stringify(line("enqueue"))}\n${JSON.stringify(line("sending"))}\n`);
+    expect(fs.events).toEqual(["open", "write", "datasync", "write", "datasync", "close"]);
+    expect(fs.closeCalls).toBe(1);
+  });
+
+  it("Y2 部分写重试字节正确性：offset 尊重，盘面逐字节无重写/无丢字节", async () => {
+    const fs = new FakeFs();
+    fs.writes = [{ bytes: 4 }, { bytes: 2 }]; // 第一次吸收 4 字节，重试再吸收 2 字节，第三次余量
+    const dur = new FileDurability("/fake/j.jsonl", { fsPort: fs });
+    await dur.append(line("enqueue"));
+    expect(fs.text()).toBe(`${JSON.stringify(line("enqueue"))}\n`); // 逐字节与完整行一致（无重复前缀）
+    expect(fs.events.filter((e) => e === "write").length).toBe(3);
   });
 });
