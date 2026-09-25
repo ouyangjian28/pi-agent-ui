@@ -141,3 +141,20 @@
 | 正常序两轮（防御不误伤：同进程两轮首字节各写各、事件路由带代次、stdin-written 审计） | process-supervisor.test@正常序两轮 | ✅（逻辑面） |
 
 接线面（真 pi 子进程 spawn/真信号/真 waitpid 退出确认/真 stdin 背压/接管恢复流）仍 🔴，归切片 4 接线。
+
+### adapter 切片 4（真进程接线：ProcessHost 适配+组装 RpcSession；4a/4b 两步；受控替身 16 it+协调器/网关纯逻辑测试不变）
+
+| 编号 | 断言落点 | 状态 |
+| --- | --- | --- |
+| 真子进程适配 writeStdin（Node 流背压：write false→等 drain 才 resolve；EPIPE/带错 destroy/关闭→reject 呈现调用方；多源竞态单结算；destroyed 预检；每次 spawn 新句柄不可复用） | process-host.test@真背压（64KB>16KB HWM 未读=挂起，读走 drain 后 resolve+全字节断言）+EPIPE destroy | ✅（PassThrough 真流语义；变异：M-a 背压不等 drain 立即 resolve→例挂；**M-241 教训：首轮变异假存活=陈旧编译产物遮蔽源码，清理后六杀全中**） |
+| 真子进程退出证据（exit 事件=唯一退出证据；异步 spawn 失败 error 事件（ENOENT 无伴随 exit）折算 onExit(null,null)=保守意外退出；句柄级去重（error+exit 只报一次）；退出后 writeStdin 拒；残尾 flush） | process-host.test@ENOENT 折算+后到 exit 不重复+exit 后写拒+正常退出残尾 | ✅（变异：M-b 去折算→例挂） |
+| 行分帧（StringDecoder 跨块多字节+\n 拆行；坏行分流 [stdout-nonjson]；stderr 透传；大块多行一次解析） | process-host.test@好行/坏行/撕裂+stderr+50 行大块 | ✅（沿用 r8 LinePump） |
+| stop 信号透传+未知句柄 no-op；closeStdin=stdin.end() 写完成面（finish 事件非 end） | process-host.test@stop+closeStdin | ✅ |
+| FileDurability（append=JSONL+open a+循环写部分写重试+fdatasync；内部 Promise 队列串行化保行原子；任一失败 fail-closed 拒续写直到 close 重置） | rpc-session.test@FileDurability JSONL 落盘+EISDIR 首错+次错「未修复失败态」+close 重置 | ✅（变异：M-c 去失败置位→例挂；写不确定语义=s1b 续加契约，恢复以重放裁决） |
+| 组装 demux（type:"response"+id 字符串→readiness waiter 或 c<commandId>→onRpcResponse；agent_settled→onSettledEvent；其余→onPiEvent；未知 id response 丢弃） | rpc-session.test@两轮正常序（response 归因+settled 结算+gate 回 idle+journal enqueue/sending/settled 各 2 行）+探针回执不进事件流 | ✅（变异：M-d 去归因→两轮例挂） |
+| readiness（spawn 后写 get_state 探针；success 回执→ready；超时→自动 retireCurrent 返回 readiness-timeout 不留活进程；重试探针 gen2 成功） | rpc-session.test@探针往返+readiness 超时（SIGTERM 观察→并行放行退出确认；不能先 await start——内部 retire 等退出确认会死锁=测试设计面）+重试 | ✅（变异：M-e 去超时退役→例挂；探针 id=ready-<gen>） |
+| 意外退出重组装（exit→gate closed(generation-retired)+supervisor idle；start=reopen+spawn gen2+新探针；新代次整链路跑通） | rpc-session.test@意外退出后重开新轮 | ✅（supervisor 语义透传） |
+| 双超时驱动（RpcSession 巡检 interval 定期 checkResponseTimeout+checkTurnTimeout（后者同步 void 签名——.catch 属类型错误且运行时 TypeError 炸 interval，实修为 try/catch）；响应超时后 settled 仍收口；晚到 response=ignored-late 不炸） | rpc-session.test@响应超时不阻断收口 | ✅（变异：M-f 去巡检驱动→例挂；dispose() 清 interval=测试隔离） |
+| stop（=retireCurrent：SIGTERM→退出确认 confirmed） | rpc-session.test@stop confirmed | ✅（优雅 stdin EOF 面=host.closeStdin 已备，v1 会话级 stop 走信号路径，EOF 归闲置回收后续） |
+| 帧渲染（send→{id:"c<N>",type:"prompt"}JSON 行；matchKey=matchKeyOf(text,[],ordinal)；commandId/intentId 递增） | rpc-session.test@两轮（帧 id 递增+prompt 类型断言，经 runTurn 帧计数基准） | 🟡（steer/followUp 流中行为 streamingBehavior 归消费接线；attachments 传递归 UI 层） |
+| 真 pi 进程 E2E（readiness→连续两轮→retire→SIGKILL 恢复重放） | —— | 🔴（未落；s3c 验收表八项归本切片接线证据：handle 不可复用/退出证据/异步 spawn 失败清理/spawn-exited 分支/真实背压/携代次事件泵/日志失败后安全续加/readiness+连续两轮） |
