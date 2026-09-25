@@ -361,7 +361,7 @@ function scanTopLevelIntentId(raw: string): TopLevelIdScan {
 
 /** 从坏行提取 sending 证据（R1/F1+s4g G1+s4h H1）：**所有坏行都是未裁决证据，默认阻断**——
  *  受限结构扫描（scanTopLevelIntentId）证得顶层唯一身份且在当前重放范围内→可关联（并入 unknown）；
- *  无身份/结构冲突（嵌套键/转义键/截断值/二次键）/越出重放范围→不可关联（恢复范围级阻断，不因盘面修复解锁）。
+ *  无身份/结构冲突（嵌套键/解码后重复键/截断值/二次键）/越出重放范围→不可关联（恢复范围级阻断，不因盘面修复解锁）。
  *  G1 教训：不能把「未看见足够长的 sending 字样」解释成「可以忽略」；
  *  H1 教训：已匹配身份唯一不等于整条残片归属唯一——正则只收完整字面量会漏掉截断的第二身份/嵌套身份。 */
 function sendingFragmentAttribution(
