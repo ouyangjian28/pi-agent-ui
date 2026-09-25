@@ -490,8 +490,8 @@ describe("assistantBodyText 命中谓词（受控）", () => {
     expect(sessionText).toContain(`请只回复这个标记：${gen1Marker}`); // 用户指令原文入会话历史（第一代上下文留痕）
     const rep = await recoverFromJournal(join(dir, "journal.jsonl"), "e2e");
     expect(rep.bad).toEqual([]);
-    expect(rep.intents).toHaveLength(2);
-    expect(rep.settledCount).toBe(2);
+    expect(rep.intents).toHaveLength(3); // 两代三轮（含标记轮）
+    expect(rep.settledCount).toBe(3);
     expect((await s.stop()) as unknown).toMatchObject({ kind: "confirmed" });
   });
 
