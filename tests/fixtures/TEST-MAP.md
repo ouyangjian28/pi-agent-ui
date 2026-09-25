@@ -187,3 +187,13 @@
 | 恢复判据三分档（unknownEffect=sending 无终态/超时未结算/已判 unknown/**sending+cancelled=副作用未知仍呈现**；resumable=非 sending 无终态且非 cancelled（取消是终局）且非残片并入；settled 计数；cancelled/delivered=终局不进两档） | recover.test@三分档+cancelled/delivered 终态+**sending+cancelled 拆例** | ✅（变异：M-r2 判据废→挂；M-r3 去 cancelled 过滤→挂） |
 | 会话过滤（他 session 的 enqueue 不进重放；**前提演示：非 enqueue 行无会话身份，同文件跨 session 终态可越界——输入前提=每会话独立 journal 文件由组装层保证**） | recover.test@会话过滤+**前提演示** | ✅（前提由 RpcSession 每会话一 journalPath 结构保证） |
 | 恢复不改盘面（只读呈现；撕裂尾修复/换段授权归宿主：截尾+（失败态另须）markRepaired） | E2E e2e-3（截尾修复流程落地+截后 fsync+**口令化两代一致性（TOKEN=PENGUIN-42，gen1 捕获实际答案+gen2 回同一口令）**） | ✅（E2E 接线证据非变异面） |
+
+## adapter 切片②-c4（契约准备包：contracts/sanitizer/read-index/subscription-engine）
+| 面 | 断言落点 | 状态 |
+| --- | --- | --- |
+| 入站帧校验（判别优先级/写类短路 4405/版本 4403/分支互斥/逐字段） | contracts-validate.test（24 it）；M5/M6 杀 | ✅ |
+| 脱敏向量（37 例人工 golden：路径/URL/PEM/凭据/RTL/零宽/NFC/截断） | contracts-sanitizer.test（38 it）；M1/M2/M3 杀；M4（凭据先检）防御冗余披露（白名单拒 [xxx] 语义等价） | ✅ |
+| 读索引（append-only/waterMark/read 域/前缀投影/LRU 32） | 随引擎时序间接覆盖（换流判定归接线层测试） | 🟡 |
+| 订阅引擎 13 时序（快照三页/幂等 2 页缓存/跳页/末页宽限 60s/缓冲回放/4431 超限/resync 超前/封闭态/交织序） | subscription-engine.test（13 it）；M7（幂等）4 挂/M8（barrier 冻结）6 挂/M9r2（编入序，需 drain(3)——批次满提前 flush 掩盖 maxFrames=2 窗口）杀 | ✅ |
+| 快照字节预算（pageFrameBudgetBytes 200k/单事件 32k） | 引擎 PAGE_MAX=条数上限；字节装页归接线层（发送队列） | 🔴 归接线 |
+| 连接级发送队列/在途限流/计算并发 | 未实现（归 WS 接线层） | 🔴 归接线 |
