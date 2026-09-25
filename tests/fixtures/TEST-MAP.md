@@ -38,7 +38,7 @@
 | W1b SIGKILL 未退出（截止冻结+核验转正）                        | writer-authority.test@W1b×2（全链 frozen→核验→可接管+正常 confirmExit）+frozen 期命令拒 | ✅（逻辑面）|
 | opId 通用命令去重（占位/缓存/不同参拒/崩溃闭环）               | command-dedup.test@6（admitted/cached/different-args/unknown-effect 重放/24h sweep/无占位 settle） | ✅（逻辑面）|
 | 会话列表扫描（§6 查看≠接管：标题/排序/坏行/缺目录/watch）      | session-list.test@6（tmpdir 真测：倒序+首个 user 标题+撕裂尾跳过+(无标题)+空目录+titleMax 截断+fs.watch 新文件） | ✅（真 IO 面）|
-| 事件泵行缓冲（§5 事实 6 stdout 常驻排空）                      | line-pump.test@5（整块多行/半行跨块/CRLF/flush 撕裂尾/reset） | ✅（逻辑面）|
+| 事件泵行缓冲（§5 事实 6 stdout 常驻排空）                      | line-pump.test@8（整块多行/半行跨块/CRLF/多字节跨块（StringDecoder，中文+4字节 emoji）/撕裂尾置换符/flush/reset） | ✅（逻辑面；变异验证：逐块独立 decode 旧实现→多字节三用例挂）|
 | pi 子进程冒烟（--mode json 事件流真跑）                        | integration/pi-child.smoke.test.ts | ✅（集成面；真 spawn 事件流+agent_settled+exit 0；根因=stdin 须 EOF+timeout 勿当 wrapper——主仓 research/pi-bash-tool-ask-hang §⑥ 追加）|
 | 六审① 历史终局+同组 sending 歧义优先                           | r4.regressions@六审①×2（delivered/settled+B 同组 sending→unknown+untrusted 非直输出） | ✅（变异验证：换回旧顺序→两用例挂）      |
 | 变异验证（四审轮）                                              | 删 finalizedIds 隔离→四审①挂；删 untrustedEarly 占位过滤→四审③×2 挂；还原 68/68    | ✅                                        |

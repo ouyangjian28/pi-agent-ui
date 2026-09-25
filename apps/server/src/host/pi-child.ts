@@ -35,8 +35,8 @@ export function attachPumps(child: ChildProcessWithoutNullStreams, h: PiChildHan
     }
   });
   const stderr = new LinePump((line) => h.onStderr(line));
-  child.stdout.on("data", (d: Buffer) => stdout.feed(d.toString("utf8")));
-  child.stderr.on("data", (d: Buffer) => stderr.feed(d.toString("utf8")));
+  child.stdout.on("data", (d: Buffer) => stdout.feed(d));
+  child.stderr.on("data", (d: Buffer) => stderr.feed(d));
   child.stdout.on("close", () => stdout.flush());
   child.stderr.on("close", () => stderr.flush());
   child.on("exit", (code, signal) => h.onExit(code, signal));
