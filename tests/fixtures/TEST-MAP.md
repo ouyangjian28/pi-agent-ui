@@ -7,7 +7,7 @@
 
 | 编号                                                           | 断言落点                                                                                | 状态                                      |
 | -------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------- |
-| N6 迟到重投墓碑                                                | notification.monotonic@迟到重投墓碑（done/derived 拒绝再派生；expired 终态拒绝再派生=lateReplayAfterDone 已断言）——注意：收口幂等≠重投拒绝，二者分立断言 | 🟡（expired 收口后重投直断未单列——挂 N6 补测）|
+| N6 迟到重投墓碑                                                | notification.monotonic@迟到重投墓碑（done/derived 拒绝再派生；expired 终态拒绝再派生=lateReplayAfterDone 已断言）——注意：收口幂等≠重投拒绝，二者分立断言 | 🟡（r8 复核：derived 重投测试实为 accepted=true 断言；expired 重投直拒未单独断言——挂 N6 补测）|
 | N12 三 ACK 分立                                                | notification.monotonic@done 收口裁决（零/二缺一/三齐/未开栓/终态单调）                  | ✅                                        |
 | N12b expired 独立收口                                          | notification.monotonic@expired 独立终态（证据驱动+迟到 ACK 不升 done）                  | ✅                                        |
 | N14 done 单调（迟到 started 不降）                             | notification.monotonic@主线跃迁+done 单调                                               | ✅                                        |
@@ -33,13 +33,16 @@
 | 四审③ untrusted 不占候选排他位（预扫）                          | r4.regressions@四审③×2（[B,A]/[A,B] 双顺序：B 错锚不挡 A 落锚）                      | ✅                                        |
 | 四审④ 超时开终裁窗（终裁 vs 暂定区分）                          | r4.regressions@四审④（同文本组歧义→untrusted 终裁+单意图完整轮 delivered 正例）      | ✅                                        |
 | 五审① 无 clear 历史终局不降级                                  | r4.regressions@五审①×2（delivered/settled 无 clear：如数输出 delivered+无更新行+水位 null） | ✅（变异验证：删该分支→两用例挂）        |
-| W1 双 tab 写权代次（让位广播+旧代次拒）                        | writer-authority.test@W1（B 接管代次+1+yield 广播+A 旧 epoch 提交 stale-epoch+not-holder） | ✅（逻辑面；双 tab 集成=W2 段）|
-| W1a 在飞接管=转接（无双写者）                                   | writer-authority.test@W1a（进程存活转接：signal 未调用=不停进程不 spawn） | ✅（逻辑面）|
-| W1b SIGKILL 未退出（截止冻结+核验转正）                        | writer-authority.test@W1b×2（全链 frozen→核验→可接管+正常 confirmExit）+frozen 期命令拒 | ✅（逻辑面）|
-| opId 通用命令去重（占位/缓存/不同参拒/崩溃闭环）               | command-dedup.test@6（admitted/cached/different-args/unknown-effect 重放/24h sweep/无占位 settle） | ✅（逻辑面）|
-| 会话列表扫描（§6 查看≠接管：标题/排序/坏行/缺目录/watch）      | session-list.test@6（tmpdir 真测：倒序+首个 user 标题+撕裂尾跳过+(无标题)+空目录+titleMax 截断+fs.watch 新文件） | ✅（真 IO 面）|
+| W1 双 tab 写权代次（让位广播+旧代次拒）                        | writer-authority.test@W1（B 接管代次+1+yield 广播+A 旧 epoch 提交 stale-epoch+not-holder） | ✅（逻辑面；双 tab 集成=WS 层后置，W2 是断网重连非双 tab——r8 勘误）|
+| W1a 在飞接管=转接（无双写者）                                   | writer-authority.test@W1a（进程存活转接：signal 未调用=不停进程不 spawn） | ✅（逻辑面；真实在飞轮+延迟落盘无双写者验证=adapter 集成面，r8 复核降级）|
+| W1b SIGKILL 未退出（截止冻结+核验转正）                        | writer-authority.test@W1b×2（全链 frozen→核验→可接管+正常 confirmExit）+frozen 期命令拒 | ✅（逻辑面；核验=受信通知接口，非本模块核验闭环）|
+| r8-01 交接期提交门（terminating/killed 拒；complete 清 holder） | writer-authority.test@r8-01×3（逐阶段拒+转正后 not-holder+默认转接不受影响） | ✅（逻辑面；变异验证：去门+不清 holder→两用例挂）|
+| opId 通用命令去重（占位/缓存/不同参拒/崩溃闭环）               | command-dedup.test@6（admitted/cached/different-args/unknown-effect 重放（占位记录重建的逻辑测试，非耐久链路）/无占位 settle/sweep） | ✅（逻辑面；耐久 fsync=adapter 面）|
+| r8-02 去重清理=会话活跃期+24h 双条件                           | command-dedup.test@sweep（活跃超 24h 不删/缺判据保守不删/退出活跃期满 24h 才删/清理前不重新 admitted） | ✅（逻辑面；变异验证：去活跃期保护→挂）|
+| 会话列表扫描（§6 查看≠接管：身份/排序/坏 header/缺目录/watch）  | session-list.test@8（tmpdir 真测：身份=header.id 与 file 定位键分离（真实命名格式）/坏 header 不吞行（sessionId:null 显式）/首行非 session 不吞/倒序+首 user 标题+多 user 不覆盖/撕裂尾跳过/limit/watch 门铃） | ✅（真 IO 面；变异验证：位置法 header→四用例挂）|
 | 事件泵行缓冲（§5 事实 6 stdout 常驻排空）                      | line-pump.test@8（整块多行/半行跨块/CRLF/多字节跨块（StringDecoder，中文+4字节 emoji）/撕裂尾置换符/flush/reset） | ✅（逻辑面；变异验证：逐块独立 decode 旧实现→多字节三用例挂）|
-| pi 子进程冒烟（--mode json 事件流真跑）                        | integration/pi-child.smoke.test.ts | ✅（集成面；真 spawn 事件流+agent_settled+exit 0；根因=stdin 须 EOF+timeout 勿当 wrapper——主仓 research/pi-bash-tool-ask-hang §⑥ 追加）|
+| pi 子进程冒烟（--mode json 事件流真跑）                        | integration/pi-child.smoke.test.ts | ✅（集成面；真 spawn 事件流+agent_end 或 agent_settled 任一+exit 0——settled 必现未断言，r8 复核如实降级；根因=stdin 须 EOF+timeout 勿当 wrapper——主仓 research/pi-bash-tool-ask-hang §⑥ 追加）|
+| pi-child 泵接三路径分离（解析错/无 type/回调错）               | pi-child-pumps.test@1（[stdout-nonjson]/[handler-error]/泵继续交付） | ✅（逻辑面；r8 建议：回调错不误报格式问题）|
 | 六审① 历史终局+同组 sending 歧义优先                           | r4.regressions@六审①×2（delivered/settled+B 同组 sending→unknown+untrusted 非直输出） | ✅（变异验证：换回旧顺序→两用例挂）      |
 | 变异验证（四审轮）                                              | 删 finalizedIds 隔离→四审①挂；删 untrustedEarly 占位过滤→四审③×2 挂；还原 68/68    | ✅                                        |
 | 三审⑥ R2-03 区间排他真命中（候选在他人既有 C 区间内不落锚）    | r3.regressions@三审⑥ 区间排他段（组内两 user 真命中——旧用例走超界分支已弃）          | ✅                                        |
@@ -85,4 +88,4 @@
 
 ## W/J/R/B/D 行（服务端机制面）
 
-全部 🔴 缺测——RPC adapter/journal 耐久/通知执行链未开工（一审指令 5-7 序）；本表不虚报。
+全部 🔴 缺测——RPC adapter/journal 耐久/通知执行链未开工（一审指令 5-7 序；范围=服务端端到端机制验收，与上方 W1/W1a/W1b/opId 等【纯逻辑局部】✅不冲突）；本表不虚报。
