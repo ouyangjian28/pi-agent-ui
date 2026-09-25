@@ -104,19 +104,35 @@ interface GenEntry {
  * 每文件槽（R1/R2 核心）：单飞扫描+引用计数。
  *  scanInFlight：在飞扫描 promise（初扫/重扫共用；非 null 时新扫描/新 rescan 一律排队不并发）。
  *  dirtyPending：在飞扫描期间/未绑定期的变化待补位（恰一次跟进重扫收敛）。
- *  awaitingBind：已解析但尚未配对（observe/release）的 load 引用数。
- *  releasePending：初扫在飞期间被 release——装载完成即弃（不留无主 watcher）。
+ *  awaitingBind：已返回快照但尚未配对（observe/release）的 load 引用数（跨代延续——
+ *    旧代未配对引用不因换代失效，也不取消新装载，3b2c-B1/N6）。
+ *  earlyWatchErrors：仅当次初扫有效（初扫启动清零——上一代错误不污染下一代，3b2c-B1/N2）。
+ *  releaseCarry：换代间隙到达的 release 结转数——无 entry 可扣、无在飞票据可撤时记账，
+ *    由下一代成功 load 的计数增量吸收（网关每 load 恰一次结算 ⇒ 总量守恒；新代装载
+ *    不被旧 release 杀死，3b2c-B1/N6）。
+ *  pendingEntry：初扫在飞期间的待提交代——观察回调的**身份票据**（3b2c-B2）：回调携带
+ *    entry 本体，slot.pendingEntry/slot.entry 任一不匹配即丢弃（旧代原始 notice/error
+ *    不得驱动/杀伤新代，GPT 3b2b N3/N4）。
+ *  pendingTickets：在飞初扫参与者票据集（load 取票/成功结算/失败自动撤销/release 撤票）。
  */
+/** 装载票据（3b2c-B1）：在飞初扫的每个 load 参与者各持一票；release 先撤票据
+ *  （该 load 结算时返回 null），不再用布尔/计数跨代猜测。 */
+interface LoadTicket {
+  released: boolean;
+}
+
 interface FileSlot {
   readonly file: string;
   abs: string;
   entry: GenEntry | null;
+  pendingEntry: GenEntry | null;
   scanInFlight: Promise<boolean> | Promise<void> | null;
   dirtyPending: boolean;
   rescanQueued: boolean;
   earlyWatchErrors: number;
   awaitingBind: number;
-  releasePending: boolean;
+  pendingTickets: Set<LoadTicket>;
+  releaseCarry: number;
 }
 
 export class FileHistorySource implements HistorySourcePort {
@@ -145,7 +161,7 @@ export class FileHistorySource implements HistorySourcePort {
     }
     let slot = this.slots.get(file);
     if (slot === undefined) {
-      slot = { file, abs, entry: null, scanInFlight: null, dirtyPending: false, rescanQueued: false, earlyWatchErrors: 0, awaitingBind: 0, releasePending: false };
+      slot = { file, abs, entry: null, pendingEntry: null, scanInFlight: null, dirtyPending: false, rescanQueued: false, earlyWatchErrors: 0, awaitingBind: 0, pendingTickets: new Set(), releaseCarry: 0 };
       this.slots.set(file, slot);
     }
     slot.abs = abs;
@@ -161,21 +177,27 @@ export class FileHistorySource implements HistorySourcePort {
     if (slot === null) return null;
     const active = slot.entry;
     if (active !== null && !active.disposed && active.state === "active") {
-      slot.awaitingBind += 1;
+      this.takeHeldCount(slot);
       this.audit(`load-joined file=${file} rows=${active.baselineRows.length} awaiting=${slot.awaitingBind}`);
       return [...active.baselineRows];
     }
     if (slot.scanInFlight !== null) {
+      // 加入在飞初扫：取票（3b2c-B1）——release 到达先撤票；失败自动销票
+      const ticket: LoadTicket = { released: false };
+      slot.pendingTickets.add(ticket);
       const ok = await slot.scanInFlight;
-      if (!ok) return null;
+      slot.pendingTickets.delete(ticket);
+      if (!ok || ticket.released) { this.maybeReapSlot(slot); return null; } // 票据被撤=fail-closed，不再计数
       const e = slot.entry;
-      if (e === null || e.disposed) return null; // 提交后立被弃（releasePending/早期错误）→fail-closed
-      slot.awaitingBind += 1;
+      if (e === null || e.disposed) return null; // 提交后立被弃（全撤/早期错误）→fail-closed
+      this.takeHeldCount(slot);
       this.audit(`load-joined-after-scan file=${file} rows=${e.baselineRows.length}`);
       return [...e.baselineRows];
     }
     // 初扫：注册先于执行（微任务推迟扫描体——watch 建立/读调用都在 scanInFlight 赋值之后，
     // 读期间通知才有 dirty 可折；迟到的 load 走上面的单飞分支）
+    const ticket: LoadTicket = { released: false };
+    slot.pendingTickets.add(ticket);
     const run = Promise.resolve().then(() => this.initialScan(slot));
     slot.scanInFlight = run;
     let ok: boolean;
@@ -184,25 +206,54 @@ export class FileHistorySource implements HistorySourcePort {
     } finally {
       if (slot.scanInFlight === run) slot.scanInFlight = null;
     }
-    if (!ok) return null;
+    slot.pendingTickets.delete(ticket);
+    if (!ok || ticket.released) { this.maybeReapSlot(slot); return null; }
     const e = slot.entry;
-    if (e === null || e.disposed) return null;
-    slot.awaitingBind += 1;
+    if (e === null || e.disposed) { this.maybeReapSlot(slot); return null; }
+    this.takeHeldCount(slot);
     this.audit(`load-committed file=${file} rows=${e.baselineRows.length} awaiting=${slot.awaitingBind}`);
     return [...e.baselineRows];
+  }
+
+  /** 成功结算取引用计数：releaseCarry 优先吸收（换代间隙结转的 release——总量守恒，
+   *  3b2c-B1/N6）；吸收后无人要且未绑定→关闭（不留无主 watcher）。 */
+  private takeHeldCount(slot: FileSlot): void {
+    if (slot.releaseCarry > 0) {
+      slot.releaseCarry -= 1;
+      const e = slot.entry;
+      const wants = [...slot.pendingTickets].some((t) => !t.released); // 仍有未撤在飞参与者：不关
+      if (!wants && slot.releaseCarry === 0 && slot.awaitingBind === 0 && e !== null && !e.disposed && e.state === "active" && e.sinks === null) {
+        this.closeEntry(slot, e, `released-unobserved-carry file=${slot.file}`);
+      }
+      return;
+    }
+    slot.awaitingBind += 1;
   }
 
   /** 初扫（在 scanInFlight 内运行）：先建 watcher→读→投影防御→提交。任何失败→false（load=null）。 */
   private async initialScan(slot: FileSlot): Promise<boolean> {
     const { file, abs } = slot;
+    slot.earlyWatchErrors = 0; // B1/N2：每次初扫清零——上一代错误不污染本代
+    // 3b2c-B2：观察票据=entry 本体（提交前由 slot.pendingEntry 认领；回调不捕获 slot 现态）
+    const entry: GenEntry = {
+      file, abs, disposed: false, state: "active",
+      identity: "",
+      baseline: [],
+      baselineRows: [],
+      watchers: [],
+      sinks: null,
+    };
+    slot.pendingEntry = entry;
     let handle: { close(): void };
     try {
       handle = this.watcherFactory().watch(
         abs,
-        () => this.slotNotice(slot),
-        (e) => this.slotError(slot, e),
+        () => this.genNotice(slot, entry),
+        (e) => this.genError(slot, entry, e),
       );
+      entry.watchers.push(handle);
     } catch (e) {
+      slot.pendingEntry = null;
       this.audit(`watch-setup-failed file=${file} kind=${errKind(e)}`);
       return false;
     }
@@ -210,25 +261,32 @@ export class FileHistorySource implements HistorySourcePort {
     try {
       read = await this.reader().read(abs);
     } catch (e) {
+      slot.pendingEntry = null;
       try { handle.close(); } catch { /* 已关 */ }
       this.audit(`load-read-failed file=${file} kind=${errKind(e)}`);
       return false;
     }
+    if (slot.pendingEntry !== entry) { // 读期间已被取代（防御——scanInFlight 单飞下理论不可达）
+      try { handle.close(); } catch { /* 已关 */ }
+      this.audit(`initial-scan-superseded file=${file}`);
+      return false;
+    }
     const rows = this.projectSafely(read.text);
     if (rows === null) {
+      slot.pendingEntry = null;
       try { handle.close(); } catch { /* 已关 */ }
       return false; // project-failed 已审计
     }
-    const entry: GenEntry = {
-      file, abs, disposed: false, state: "active",
-      identity: read.identity,
-      baseline: rows.map((r) => ({ locator: r.locator, digest: scanDigest(r) })),
-      baselineRows: [...rows],
-      watchers: [handle],
-      sinks: null,
-    };
+    entry.identity = read.identity;
+    entry.baseline = rows.map((r) => ({ locator: r.locator, digest: scanDigest(r) }));
+    entry.baselineRows = [...rows];
+    slot.pendingEntry = null;
     slot.entry = entry; // 提交（无 await 间隙——本行到核账之间是同步的）
-    if (slot.releasePending) { // 初扫期间被 release：装载即弃（不留无主 watcher）
+    let wantsIt = false;
+    for (const t of slot.pendingTickets) { // 票据账（B1/N1）：全部被撤=装载即弃
+      if (!t.released) { wantsIt = true; break; }
+    }
+    if (!wantsIt) {
       this.closeEntry(slot, entry, `released-unobserved file=${file}`);
       return false;
     }
@@ -261,16 +319,41 @@ export class FileHistorySource implements HistorySourcePort {
   release(file: string): void {
     const slot = this.slots.get(file);
     if (slot === undefined) return;
-    const entry = slot.entry;
-    if (entry === null) {
-      if (slot.scanInFlight !== null) slot.releasePending = true; // 初扫在飞：完成即弃
+    // 结算序（3b2c-B1）：① 已提交计数（跨代延续——旧代未配对引用先结算，B1/N6：
+    //    A 死后 C 的 release 扣 C 的计数，不撤 B 的在飞票、不结转）→ ② 在飞票据
+    //    （结算对象=在飞 load 本身；多参与者 FIFO 定序——网关单订阅场景在飞参与者
+    //    恒 ≤1，歧义退化不存在）→ ③ 结转下一代（releaseCarry：重复/迟到结算吸收，
+    //    总量守恒，新代装载不被杀）。
+    if (slot.awaitingBind > 0) {
+      slot.awaitingBind -= 1;
+      const entry = slot.entry;
+      if (slot.awaitingBind === 0 && entry !== null && !entry.disposed && entry.state === "active" && entry.sinks === null) {
+        this.closeEntry(slot, entry, `released-unobserved file=${slot.file}`);
+      }
+      this.maybeReapSlot(slot);
       return;
     }
-    if (entry.disposed || entry.state !== "active") return;
-    if (slot.awaitingBind > 0) slot.awaitingBind -= 1;
-    if (slot.awaitingBind === 0 && entry.sinks === null) {
-      this.closeEntry(slot, entry, `released-unobserved file=${slot.file}`);
+    for (const t of slot.pendingTickets) {
+      if (!t.released) {
+        t.released = true;
+        this.audit(`release-pending file=${slot.file}`);
+        return;
+      }
     }
+    slot.releaseCarry += 1;
+    this.audit(`release-carry file=${slot.file} carry=${slot.releaseCarry}`);
+    this.maybeReapSlot(slot);
+  }
+
+  /** 槽静默回收（3b2c-B1）：完全静止（无代/无在飞/无票/无结转）时移除槽——
+   *  退役槽不留 Map（有界回收；下次 load 全新建槽=零状态继承）。 */
+  private maybeReapSlot(slot: FileSlot): void {
+    if (
+      slot.entry !== null || slot.pendingEntry !== null || slot.scanInFlight !== null ||
+      slot.pendingTickets.size > 0 || slot.releaseCarry > 0 || slot.awaitingBind > 0
+    ) return;
+    this.slots.delete(slot.file);
+    this.audit(`slot-reaped file=${slot.file}`);
   }
 
   private unbind(slot: FileSlot, entry: GenEntry, sinks: HistorySinks): void {
@@ -280,17 +363,21 @@ export class FileHistorySource implements HistorySourcePort {
     if (slot.awaitingBind === 0 && entry.sinks === null) {
       this.closeEntry(slot, entry, `unobserved file=${slot.file}`);
     }
+    this.maybeReapSlot(slot);
     // 引用未清：待配对的 load 还在——槽保留，后续 observe 绑定或 release 关闭
   }
 
-  private slotNotice(slot: FileSlot): void {
-    const e = slot.entry;
-    if (e !== null && !e.disposed && e.state === "active") {
-      if (e.sinks === null || slot.scanInFlight !== null) { slot.dirtyPending = true; return; } // 未绑定/扫描在飞：折待补扫
-      this.queueRescan(slot, "notice");
+  /** 观察通知（票据=entry 本体，3b2c-B2）：初扫期（pendingEntry===entry）折 dirty；
+   *  提交期（slot.entry===entry 且活跃）按绑定态推进；其余=旧代票据，丢弃。
+   *  原始回调直调（绕过句柄 close 门）同样被本身份门挡下——GPT 3b2b N4。 */
+  private genNotice(slot: FileSlot, entry: GenEntry): void {
+    if (slot.pendingEntry === entry) {
+      slot.dirtyPending = true; // 本代初扫在飞：折给完成后的跟进
       return;
     }
-    if (slot.scanInFlight !== null) slot.dirtyPending = true; // 初扫在飞：折给完成后的跟进
+    if (slot.entry !== entry || entry.disposed || entry.state !== "active") return; // 旧代票据：丢弃
+    if (entry.sinks === null || slot.scanInFlight !== null) { slot.dirtyPending = true; return; } // 未绑定/扫描在飞：折待补扫
+    this.queueRescan(slot, "notice");
   }
 
   /** 排队重扫（微任务合并）：未绑定/在飞一律不排（折 dirtyPending 由激活/完成侧收敛）。 */
@@ -332,7 +419,7 @@ export class FileHistorySource implements HistorySourcePort {
       this.deliverUnavailable(slot, entry, unavailableReasonOf(e));
       return;
     }
-    if (entry.disposed || entry.state !== "active") return; // 读期间失效/换代：丢弃（await 后复核）
+    if (entry.disposed || entry.state !== "active" || slot.entry !== entry) return; // 读期间失效/换代：丢弃（await 后复核）
     if (read.identity !== entry.identity) {
       this.deliverInvalidate(slot, entry, "replace");
       return;
@@ -376,7 +463,7 @@ export class FileHistorySource implements HistorySourcePort {
     if (slot.entry !== entry || entry.disposed || entry.state !== "active") return;
     let fresh: { close(): void };
     try {
-      fresh = this.watcherFactory().watch(entry.abs, () => this.slotNotice(slot), (e) => this.slotError(slot, e));
+      fresh = this.watcherFactory().watch(entry.abs, () => this.genNotice(slot, entry), (e) => this.genError(slot, entry, e));
     } catch (e) {
       this.audit(`watch-rearm-failed file=${entry.file} kind=${errKind(e)}`);
       this.deliverUnavailable(slot, entry, "watch-failed");
@@ -389,16 +476,20 @@ export class FileHistorySource implements HistorySourcePort {
   }
 
   /** watcher 错误：初扫期（entry 未提交）计入早期核账（装载 fail-closed）；活跃期先重叠挂新（关事件丢失窗口；失败→unavailable），再排重扫核实。 */
-  private slotError(slot: FileSlot, err: unknown): void {
-    if (slot.entry === null) { // 初扫期错误：不给可疑快照（提交后核账关停）
+  /** 观察错误（票据=entry 本体，3b2c-B2/N3）：初扫期计入本代核账；活跃期重叠挂新；
+   *  旧代票据直调（绕过句柄 close 门）丢弃——不得杀伤新代。 */
+  private genError(slot: FileSlot, entry: GenEntry, err: unknown): void {
+    if (slot.pendingEntry === entry) { // 本代初扫期错误：不给可疑快照（提交后核账关停）
       slot.earlyWatchErrors += 1;
       this.audit(`watch-error-early file=${slot.file} kind=${errKind(err)}`);
-      this.slotNotice(slot);
+      slot.dirtyPending = true;
+      return;
+    }
+    if (slot.entry !== entry || entry.disposed || entry.state !== "active") {
+      this.audit(`watch-error-stale-dropped file=${slot.file} kind=${errKind(err)}`); // 旧代票据：丢弃（N3）
       return;
     }
     this.audit(`watch-error file=${slot.file} kind=${errKind(err)}`);
-    const entry = slot.entry;
-    if (entry === null || entry.disposed || entry.state !== "active") return;
     try {
       this.rearmWatcher(slot, entry);
     } catch {
@@ -451,6 +542,7 @@ export class FileHistorySource implements HistorySourcePort {
       try { w.close(); } catch { /* 已关 */ }
     }
     if (auditLine !== "") this.audit(auditLine);
+    this.maybeReapSlot(slot);
   }
 }
 

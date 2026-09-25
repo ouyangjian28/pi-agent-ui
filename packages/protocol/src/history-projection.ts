@@ -13,14 +13,13 @@ import type { ScanRow } from "./read-index.ts";
 /** 预览截断上限（契约 §5.4：preview 200 代码单元）。 */
 export const HISTORY_PREVIEW_LIMIT = 200;
 
-/** 事件基底（v1 披露：ts=null；seq=0 占位——ReadIndex.append 以分配值覆盖）。 */
-function baseEvent(line?: JournalLine): { seq: number; ts: number | null; generation: number | null; intentId: string | null } {
-  return {
-    seq: 0,
-    ts: null,
-    generation: line !== undefined && "generation" in line ? (line as { generation: number }).generation : null,
-    intentId: line !== undefined && "intentId" in line ? (line as { intentId: string }).intentId : null,
-  };
+/** 事件基底（v1 披露：ts=null；seq=0 占位——ReadIndex.append 以分配值覆盖）。
+ *  3b2c-B5：按行型只投影被验证的字段——generation 仅 enqueue/response-timeout 声明且经
+ *  schema 校验；其余行型（sending/engaged/…）不读 generation，即使盘面带同名字段（未验证额外
+ *  字段）也恒 null——额外字段可被恢复侧忽略，但不得回流进事件（GPT 3b2b B5/N7：
+ *  sending+generation:{bad:1} 曾把对象漏进 event.generation）。intentId 除 clear 外均声明且校验。 */
+function evBase(gen: number | null, intentId: string | null): { seq: number; ts: number | null; generation: number | null; intentId: string | null } {
+  return { seq: 0, ts: null, generation: gen, intentId };
 }
 
 /** 单行投影：合法 JournalLine→对应事件；不可解析/schema 非法/未知形状→journal-corrupt（完整行不静默丢弃）。
@@ -32,40 +31,39 @@ function projectLine(raw: string, lineNo: number): ScanRow {
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return { source: "journal", locator, raw, event: { ...baseEvent(), kind: "journal-corrupt" } };
+    return { source: "journal", locator, raw, event: { ...evBase(null, null), kind: "journal-corrupt" } };
   }
   if (parsed === null || typeof parsed !== "object" || typeof (parsed as UnknownRecord)["t"] !== "string") {
-    return { source: "journal", locator, raw, event: { ...baseEvent(), kind: "journal-corrupt" } };
+    return { source: "journal", locator, raw, event: { ...evBase(null, null), kind: "journal-corrupt" } };
   }
   if (journalLineSchemaError(parsed as UnknownRecord) !== null) {
-    return { source: "journal", locator, raw, event: { ...baseEvent(), kind: "journal-corrupt" } };
+    return { source: "journal", locator, raw, event: { ...evBase(null, null), kind: "journal-corrupt" } };
   }
   const j = parsed as JournalLine;
-  const b = () => baseEvent(j);
   switch (j.t) {
     case "enqueue":
-      return { source: "journal", locator, raw, event: { ...b(), kind: "turn-enqueued", preview: sanitizeText(j.payload?.rawText ?? "", HISTORY_PREVIEW_LIMIT), ordinal: j.matchKey?.ordinal ?? 0 } };
+      return { source: "journal", locator, raw, event: { ...evBase(j.generation, j.intentId), kind: "turn-enqueued", preview: sanitizeText(j.payload?.rawText ?? "", HISTORY_PREVIEW_LIMIT), ordinal: j.matchKey?.ordinal ?? 0 } };
     case "sending":
-      return { source: "journal", locator, raw, event: { ...b(), kind: "sending" } };
+      return { source: "journal", locator, raw, event: { ...evBase(null, j.intentId), kind: "sending" } };
     case "engaged":
-      return { source: "journal", locator, raw, event: { ...b(), kind: "turn-engaged" } };
+      return { source: "journal", locator, raw, event: { ...evBase(null, j.intentId), kind: "turn-engaged" } };
     case "consumed":
-      return { source: "journal", locator, raw, event: { ...b(), kind: "turn-consumed" } };
+      return { source: "journal", locator, raw, event: { ...evBase(null, j.intentId), kind: "turn-consumed" } };
     case "cancelled":
-      return { source: "journal", locator, raw, event: { ...b(), kind: "turn-cancelled" } };
+      return { source: "journal", locator, raw, event: { ...evBase(null, j.intentId), kind: "turn-cancelled" } };
     case "clear":
-      return { source: "journal", locator, raw, event: { ...b(), kind: "clear", clearedCount: Array.isArray(j.cleared) ? j.cleared.length : 0 } };
+      return { source: "journal", locator, raw, event: { ...evBase(null, null), kind: "clear", clearedCount: Array.isArray(j.cleared) ? j.cleared.length : 0 } };
     case "delivered":
-      return { source: "journal", locator, raw, event: { ...b(), kind: "verdict-delivered" } };
+      return { source: "journal", locator, raw, event: { ...evBase(null, j.intentId), kind: "verdict-delivered" } };
     case "settled":
-      return { source: "journal", locator, raw, event: { ...b(), kind: "verdict-settled" } };
+      return { source: "journal", locator, raw, event: { ...evBase(null, j.intentId), kind: "verdict-settled" } };
     case "unknown":
-      return { source: "journal", locator, raw, event: { ...b(), kind: "verdict-unknown" } };
+      return { source: "journal", locator, raw, event: { ...evBase(null, j.intentId), kind: "verdict-unknown" } };
     case "response-timeout":
-      return { source: "journal", locator, raw, event: { ...b(), kind: "response-timeout", commandId: typeof j.commandId === "number" ? j.commandId : 0 } };
+      return { source: "journal", locator, raw, event: { ...evBase(j.generation, j.intentId), kind: "response-timeout", commandId: j.commandId } };
     default:
       // 结构合法但 t 未知（未来版本行）：保守 corrupt 占位（不猜语义）。
-      return { source: "journal", locator, raw, event: { ...b(), kind: "journal-corrupt" } };
+      return { source: "journal", locator, raw, event: { ...evBase(null, null), kind: "journal-corrupt" } };
   }
 }
 

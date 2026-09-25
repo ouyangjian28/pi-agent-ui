@@ -66,6 +66,9 @@ class FakeWatchHandle {
   constructor(_abs: string, private readonly onNotice: () => void, private readonly onError: (e: unknown) => void) {}
   triggerNotice(): void { if (!this.closed) { this.notices += 1; this.onNotice(); } }
   triggerError(e: unknown): void { if (!this.closed) this.onError(e); }
+  /** 直调原始回调——**绕过本替身 closed 门**（GPT 3b2b B2/B7：真闭包泄漏必须可模拟）。 */
+  rawNotice(): void { this.notices += 1; this.onNotice(); }
+  rawError(e: unknown): void { this.onError(e); }
   close(): void { this.closed = true; }
 }
 
@@ -662,10 +665,153 @@ describe("FileHistorySource 真盘（3b-2a+R7 证据分级）", () => {
     });
     const p = src.load(file);
     await drain(6); // 初扫挂起中（真读未返回）
-    src.release(file); // 置 releasePending
+    src.release(file); // 撤在飞票据（3b2c-B1）
     gateOpen = true; // 放行读
     expect(await p).toBeNull(); // 装载即弃（fail-closed，不给无主快照）
     await drain();
     expect(activeHandles(w)).toHaveLength(0); // 无主 watcher=0
+  });
+});
+
+describe("FileHistorySource 3b2c-B1/B2——槽位代次隔离+原始回调身份门（GPT 3b2b 反例）", () => {
+  const text = `${jline(1)}\n${jline(2)}\n`;
+
+  it("N1：初扫挂起→release→装载即弃；后续 load=全新初照成功（不残留）", async () => {
+    const r = new FakeReader();
+    const held = new HeldRead();
+    r.reads.push(held, { text, identity: "1:1" });
+    const h = harness({ reader: r });
+    const p1 = h.src.load("a.jsonl");
+    await drain(); // 初扫挂起
+    h.src.release("a.jsonl"); // 撤票（B1/N1：不再置跨代布尔）
+    held.resolve({ text, identity: "1:1" });
+    expect(await p1).toBeNull(); // 该装载 fail-closed
+    await drain();
+    expect(activeHandles(h.watcher)).toHaveLength(0); // 无主 watcher=0
+    expect(h.audits.some((l) => l.includes("released-unobserved"))).toBe(true);
+    // 反例核心：后续正常 load 不被上一代 release 污染
+    const rows2 = await h.src.load("a.jsonl");
+    expect(rows2?.map((x) => x.event.kind)).toEqual(["turn-enqueued", "turn-enqueued"]);
+    expect(activeHandles(h.watcher)).toHaveLength(1);
+  });
+
+  it("N2：初扫期 watch 错误关闭本代；新初扫不被上一代错误计数污染", async () => {
+    const r = new FakeReader();
+    const held = new HeldRead();
+    r.reads.push(held, { text, identity: "1:1" });
+    const h = harness({ reader: r });
+    const p1 = h.src.load("a.jsonl");
+    await drain();
+    (h.watcher.handles[0] as FakeWatchHandle).triggerError(new Error("early boom")); // 本代初扫期错误
+    held.resolve({ text, identity: "1:1" });
+    expect(await p1).toBeNull(); // watch-error-early fail-closed
+    expect(h.audits.some((l) => l.includes("watch-error-early"))).toBe(true);
+    // 反例核心：错误计数随代清零，新初扫正常
+    const rows2 = await h.src.load("a.jsonl");
+    expect(rows2).not.toBeNull();
+    expect(activeHandles(h.watcher)).toHaveLength(1);
+  });
+
+  it("N3：直调旧代原始 onError（绕过 closed 门）不杀新代初扫", async () => {
+    const r = new FakeReader();
+    const heldB = new HeldRead();
+    r.reads.push({ text, identity: "1:1" }, heldB);
+    const h = harness({ reader: r });
+    expect(await h.src.load("a.jsonl")).not.toBeNull();
+    const stop = h.src.observe("a.jsonl", makeSinks().s);
+    stop?.(); // unobserve → A 代关闭（句柄 close）
+    // B 新初扫挂起
+    const p2 = h.src.load("a.jsonl");
+    await drain();
+    expect(h.watcher.handles.length).toBeGreaterThanOrEqual(2);
+    // 直调 A 原始错误闭包（真回调，非替身门）
+    (h.watcher.handles[0] as FakeWatchHandle).rawError(new Error("old-era boom"));
+    heldB.resolve({ text, identity: "1:1" });
+    const rows2 = await p2;
+    expect(rows2).not.toBeNull(); // 旧代错误不得杀新代装载
+    expect(h.audits.some((l) => l.includes("watch-error-stale-dropped"))).toBe(true);
+  });
+
+  it("N4：直调旧代原始 notice（绕过 closed 门）不驱动新代重读", async () => {
+    const r = new FakeReader();
+    r.reads.push({ text, identity: "1:1" }, { text, identity: "1:1" });
+    const h = harness({ reader: r });
+    expect(await h.src.load("a.jsonl")).not.toBeNull();
+    const stopA = h.src.observe("a.jsonl", makeSinks().s);
+    stopA?.(); // A 代关闭
+    // B 新代：load+observe 活跃
+    const b = makeSinks();
+    expect(await h.src.load("a.jsonl")).not.toBeNull();
+    const stopB = h.src.observe("a.jsonl", b.s);
+    await drain();
+    const callsBefore = r.calls;
+    (h.watcher.handles[0] as FakeWatchHandle).rawNotice(); // 旧代原始通知
+    await drain(8);
+    expect(r.calls).toBe(callsBefore); // 旧通知被身份门丢弃：不触发新代重扫
+    expect(b.log.invalidates).toHaveLength(0);
+    expect(b.log.unavailables).toHaveLength(0);
+    stopB?.();
+  });
+
+  it("N6：旧代未配对引用的 release 扣旧账，不取消新代在飞装载", async () => {
+    const r = new FakeReader();
+    const heldB = new HeldRead();
+    r.reads.push({ text, identity: "1:1" }, new Error("disk gone"), heldB);
+    const h = harness({ reader: r });
+    expect(await h.src.load("a.jsonl")).not.toBeNull(); // A 代 read#1
+    const a = makeSinks();
+    h.src.observe("a.jsonl", a.s);
+    expect(await h.src.load("a.jsonl")).not.toBeNull(); // C：join 活跃代（awaitingBind=1）
+    // A 代死于重扫读失败（read#2 Error → unavailable）
+    (h.watcher.handles[0] as FakeWatchHandle).triggerNotice();
+    await until(() => r.calls >= 2);
+    await drain();
+    expect(a.log.unavailables).toEqual(["unreadable"]);
+    // B 新初扫挂起（read#3）
+    const pB = h.src.load("a.jsonl");
+    await drain();
+    h.src.release("a.jsonl"); // C 的结算（旧账）
+    heldB.resolve({ text, identity: "1:1" });
+    const rowsB = await pB;
+    expect(rowsB).not.toBeNull(); // 反例核心：新代装载不被旧 release 杀死
+    expect(h.audits.some((l) => l.includes("release-carry"))).toBe(false); // 走的是计数扣减，非结转
+    const bb = makeSinks();
+    const stopB = h.src.observe("a.jsonl", bb.s);
+    expect(stopB).not.toBeNull();
+    stopB?.();
+    await drain();
+    expect(activeHandles(h.watcher)).toHaveLength(0); // 全配对后无泄漏
+  });
+
+  it("releaseCarry：无账可扣的 release 结转，由下一代成功 load 吸收（计数不为负、槽不泄漏）", async () => {
+    const r = new FakeReader();
+    r.reads.push({ text, identity: "1:1" });
+    const h = harness({ reader: r });
+    expect(await h.src.load("a.jsonl")).not.toBeNull();
+    const a = makeSinks();
+    const stopA = h.src.observe("a.jsonl", a.s); // observe 已消耗计数
+    h.src.release("a.jsonl"); // 无账无票：结转 carry=1
+    expect(h.audits.some((l) => l.includes("release-carry"))).toBe(true);
+    expect(activeHandles(h.watcher)).toHaveLength(1); // 已绑定：结转不得关活观察
+    // 下一代 load：carry 吸收（不增计数但快照正常给）
+    const c = makeSinks();
+    expect(await h.src.load("a.jsonl")).not.toBeNull();
+    const stopC = h.src.observe("a.jsonl", c.s); // 绑定照常（clamp 不为负）
+    expect(stopC).not.toBeNull();
+    stopC?.();
+    stopA?.();
+    await drain();
+    expect(activeHandles(h.watcher)).toHaveLength(0); // 全解绑后关闭
+  });
+
+  it("槽静默回收：失败装载结算后 slot-reaped；再 load=全新槽", async () => {
+    const r = new FakeReader();
+    r.reads.push(new Error("first boom"));
+    const h = harness({ reader: r });
+    expect(await h.src.load("a.jsonl")).toBeNull(); // 初扫失败
+    expect(h.audits.some((l) => l.includes("slot-reaped"))).toBe(true); // 无主槽即时回收
+    // 再 load：全新初扫（read#2 默认空文本→空快照）
+    const rows2 = await h.src.load("a.jsonl");
+    expect(rows2).toEqual([]);
   });
 });

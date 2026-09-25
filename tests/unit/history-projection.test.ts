@@ -167,4 +167,45 @@ describe("journalToScanRows（3b-2a 投影；R5 严格 schema）", () => {
     const good = JSON.parse(simple("sending", { intentId: "i" })) as Record<string, unknown>;
     expect(journalLineSchemaError(good)).toBeNull();
   });
+
+  // 3b2c-B5（GPT 3b2b N7）：额外字段不得回流——按行型只投影被验证字段
+  describe("3b2c-B5 额外字段安全 null 投影", () => {
+    const jline = (body: string) => body + "\n";
+    it("N7 精确输入：sending+generation 对象→kind=sending、generation=null（对象不逃入事件）", () => {
+      const rows = journalToScanRows(jline('{"t":"sending","intentId":"ok","generation":{"bad":1}}'));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.event.kind).toBe("sending");
+      expect(rows[0]!.event.generation).toBeNull();
+      expect(rows[0]!.event.intentId).toBe("ok");
+    });
+    it("sending+generation 数组/字符串/负数/非安全整数→一律 null（不猜语义）", () => {
+      for (const gen of ["[1]", '"2"', "-3", "9007199254740993", "1.5"]) {
+        const rows = journalToScanRows(jline(`{"t":"sending","intentId":"i","generation":${gen}}`));
+        expect(rows[0]!.event.generation, `generation=${gen}`).toBeNull();
+      }
+    });
+    it("engaged/delivered/settled 带额外 generation→null（生命周期行不声明该字段）", () => {
+      for (const t of ["engaged", "delivered", "settled", "cancelled"]) {
+        const rows = journalToScanRows(jline(`{"t":"${t}","intentId":"i","generation":7}`));
+        expect(rows[0]!.event.generation, `t=${t}`).toBeNull();
+        expect(rows[0]!.event.intentId).toBe("i");
+      }
+    });
+    it("clear+额外 intentId（错型对象）→事件 intentId=null（clear 不声明 intentId）", () => {
+      const rows = journalToScanRows(jline('{"t":"clear","sessionId":"s","cleared":["a"],"intentId":{"x":1}}'));
+      expect(rows[0]!.event.kind).toBe("clear");
+      expect(rows[0]!.event.intentId).toBeNull();
+      expect(rows[0]!.event.generation).toBeNull();
+    });
+    it("enqueue/response-timeout 的 generation=已验证字段→照常投影（正控制）", () => {
+      const rows = journalToScanRows(
+        jline('{"t":"response-timeout","intentId":"i","generation":3,"commandId":2}') +
+        jline(JSON.stringify({ t: "enqueue", intentId: "i2", sessionId: "s", generation: 4, leafId: "l", matchKey: { textHash: "h", attachmentIdentity: "a", ordinal: 0 }, payload: { kind: "prompt", rawText: "x", attachments: [], sentAt: "1" } })),
+      );
+      expect(rows[0]!.event.generation).toBe(3);
+      expect((rows[0]!.event as { commandId?: number }).commandId).toBe(2);
+      expect(rows[1]!.event.generation).toBe(4);
+    });
+  });
 });
+
