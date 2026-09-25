@@ -6,10 +6,10 @@
 //   - responseTimeoutRecorded 且无终态行 →「超时未结算，效果未知」
 //   - lastVerdict==="unknown" → 上轮已判效果未知
 //   - 非 sending 且无终态 →「已受理未发送」（同 matchKey 重发=幂等安全；仅当无坏行时才输出——见 blocked）
-// 损坏阻断（s4e R1+s4f F1）：存在未裁决坏行（含撕裂尾）时 blocked=true、resumable 恒空——
+// 损坏阻断（s4e R1+s4f F1）：存在未裁决坏行（含撕裂尾）时 diskBlocked=true、resumable 恒空——
 //   「识别了坏尾」不等于「已处理坏尾对判据的影响」：被剔除的残片可能已承载 sending，
 //   证据不存在不能重新解释为「从未发送」。宿主先修复盘面（截尾/换段+重读）再获得恢复授权。
-//   修复后续读（blocked=false）时：可关联残片（可靠解析出 intentId）→并入 unknownEffect；
+//   修复后续读（RecoverOptions.blocked:false→diskBlocked=false）时：可关联残片（受限结构扫描证得顶层唯一身份）→并入 unknownEffect；
 //   **不可关联 sending 残片→恢复范围级阻断（resumable 仍恒空）+unattributableFragments 呈现**——
 //   盘面修复（截尾解锁）只证明「可续写」，不构成「旧意图允许重发」的裁决事实（s4f F1：两证分离）。
 //   宿主确有额外裁决依据（字节偏移/时间线人工调查）→ attributedFragments 显式归因，

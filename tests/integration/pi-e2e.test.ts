@@ -428,4 +428,11 @@ describe("assistantBodyText 命中谓词（受控）", () => {
     expect(assistantBodyText({ type: "message_end", message: { role: "system", content: [] } })).toBe("");
     expect(assistantBodyText({ type: "message_end", message: { role: "assistant", content: null } })).toBe("");
   });
+
+  it("s4h 补：thinking-only（content 只有 thinking 段含口令）→不命中；metadata-only（message_update 带 metadata 含口令）→不命中", () => {
+    const thinkingOnly = { type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking: `口令思考 ${TOKEN}` }] } };
+    expect(assistantBodyText(thinkingOnly)).toBe(""); // 无 text 段→空串→不命中
+    const metaOnly = { type: "message_update", metadata: { text: TOKEN } };
+    expect(assistantBodyText(metaOnly)).toBe(""); // 非 message_end→空串→不命中（旧版 stringify 整体匹配会假命中）
+  });
 });
