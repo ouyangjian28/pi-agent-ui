@@ -34,7 +34,14 @@ export type JournalLine =
   | { readonly t: "cancelled"; readonly intentId: IntentId } // 执行侧取消终态（身份确定且已 written；由 clear 行分派落）
   | { readonly t: "delivered"; readonly intentId: IntentId }
   | { readonly t: "settled"; readonly intentId: IntentId }
-  | { readonly t: "unknown"; readonly intentId: IntentId; readonly reason: string }; // 终裁 unknown（含归组原因）
+  | { readonly t: "unknown"; readonly intentId: IntentId; readonly reason: string } // 终裁 unknown（含归组原因）
+  | {
+      /** 超时未结算发送记录（TECH §169④ 事件归属屏障：响应超时=先耐久本行，再移出在途集合；此后晚到 success 不回绑不开 run；晚到 settled 到达由 settled 行结算本记录）。 */
+      readonly t: "response-timeout";
+      readonly intentId: IntentId;
+      readonly generation: number;
+      readonly commandId: number;
+    };
 
 /** 意图恢复视图（对账算法输入：由 journal 行重放聚合）。 */
 export interface IntentRecord {
@@ -109,6 +116,10 @@ export function replayIntents(lines: readonly JournalLine[], sessionId: SessionI
         break;
       case "unknown":
         byId.set(rec.intentId, { ...rec, lastVerdict: "unknown" });
+        break;
+      case "response-timeout":
+        // 观测记录行（§169④）：不改变意图重放状态——终态仍由 settled/unknown 行承载；
+        // 恢复对账按「response-timeout 行在+无 settled 行=效果未知」呈现，协调器运行时消费
         break;
       default:
         break; // consumed/sending/cancelled 已在上方处理
