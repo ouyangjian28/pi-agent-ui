@@ -15,7 +15,7 @@ interface ServerIdentity { readonly serverBootId: string; readonly protocolVersi
 
 ### 1.2 双层会话身份与命名域
 
-- `sessionId`=pi header.id；`file`=basename 定位键：`/^[\w.-]{1,114}\.jsonl$/`（**整串 ≤120 字符**，含 6 字符后缀；与 §5.7 逐字段表一致——C3-R09）；拒绝绝对路径/`..`/分隔符；打开时 O_NOFOLLOW 等价校验（符号链接拒绝）。v1 单根 `sessionRoot`+`journalRoot`；journal 路径=确定函数 `file→journalRoot/<file>`。
+- `sessionId`=pi header.id；`file`=basename 定位键：`/^[\w.-]{1,114}\.jsonl$/`（**精确规则**：basename 单段、字符集 [A-Za-z0-9_.-]、主名 1..114、后缀 `.jsonl`、整串 ≤120；与 §5.7 逐字段表一致——C3-R09）。**字符集语义**：字面 `..` 作为主名字符串合法（`a..b.jsonl` 通过——正则按字符集匹配，非路径语义）；拒绝的是**路径形态**：分隔符 `/`、`\`、绝对路径前缀（正则字符集不含分隔符即天然拒绝）；打开时 O_NOFOLLOW 等价校验（符号链接拒绝）；打开时 O_NOFOLLOW 等价校验（符号链接拒绝）。v1 单根 `sessionRoot`+`journalRoot`；journal 路径=确定函数 `file→journalRoot/<file>`。
 - `adapterSessionId:null`≠磁盘历史不存在。
 
 ```ts
@@ -33,7 +33,8 @@ interface EventCursor { readonly streamId: StreamId; readonly seq: number; }  //
 
 **修订条款**：
 - **源文件指纹=整文件 SHA-256**（读/增量观察时计算；文件变更时重算重扫）。投影前缀校验=重扫结果与索引已编入定位（源+行定位）逐一比对；前缀不符（截短/替换/重写/header.id 变化）→换流。**指纹覆盖完整字节，非首行**（C3-R01）。
-- **索引预算（冻结）**：LRU ≤32 流×每流 ≤20_000 事件×约 48B/事件 ≈32MB 常驻；任一维度超限=最久未订阅流/最大流**强制卸载→换流**（4409 出口；Y03）。
+- **索引预算（c5 B02 诚实口径）**：LRU ≤32 流×每流 ≤20_000 事件。**常驻估算按实测**：仅坐标≈48B/事件，含事件投影（预览文本/身份字段）≈数百 B~2KB/事件（500 中文字预览≈1.5KB）→理论最坏 ≈1.2GB；按预览配额典型 ≈100~300MB。触顶出口=**确定性换流**（最久未订阅流/最大流强制卸载→该流客户端 4409 重拉；不循环重扫）；`get` 触达即 LRU 刷新；**boot 隔离**：流 ID=注入随机源 base16(16B)，不随注册序重放（跨 boot 同 s-1 假命中不可能）。
+- **索引不变量（c5 B02）**：①`append` 原子赋 seq（输入携带 seq 一律被覆盖统一——引擎/索引坐标恒一致）；②每已编入行保存**内容摘要**（源+定位+事件投影的规范化摘要），前缀比对=位置+定位+摘要三重——**同位内容改写=换流**（不只比位置）；③触顶=换流非标记。
 - **编排保证（时序③口径修正）**：任何事件只在其编入时刻获得 seq>H（快照发起后编入的必然>H）——「分页间新增落 H 前」**不可能发生**；两源新增一律在快照结束后按编入序投递（history 域续读）。时序表 §3.7 已修正。
 - 换流全集：服务重启；journal/session 截短/替换/重写；绑定重建；索引卸载。游标拒绝：streamId≠当前→4409；超前/跨会话→4409；非法 seq→4404。
 
@@ -149,7 +150,7 @@ type PiEventType = "agent_start"|"turn_start"|"message_start"|"message_update"|"
 type ProgressNote = "thinking" | "tool-start" | "tool-end" | "compacting" | "message-start" | "message-end";  // 受控模板；禁正文透传
 ```
 
-- `liveSeq`：订阅实例内每 LiveEvent 递增（首=1）；status 帧不占；**非恢复游标**；重同步重置。
+- `liveSeq`：订阅实例内每 LiveEvent 递增（首=1）；status 帧不占；**非恢复游标**；重同步重置。**帧语义（精确）**：events 帧的 liveSeq=本批末项序号——帧内首项=liveSeq-events.length+1（客户端呈现须按此回推）。`refSeq`：history 分支=本批末项 seq（帧内首项同法回推）；live 分支=**显式 null 字段**（非「无字段」——判别联合两分支均携带，序列化恒出现）。
 
 ### 3.5 宿主历史读取器（C3-R04 修订：归因三元组+块键+final 映射）
 
@@ -157,7 +158,8 @@ type ProgressNote = "thinking" | "tool-start" | "tool-end" | "compacting" | "mes
 - 只读解析 session JSONL（完整行边界=末 `\n`；半行不判坏不发布）；消息正文投影（role/content 块）；**工具调用=宿主消息内内容块**，块键=`entryId:blockIndex`（多 toolCall 共用 entryId 时块索引分立——C3-R04）；异常行占位 `corrupt-entry`（entryId=`corrupt-<byteOffset>`）；零副作用。
 - **归因规则（冻结）**：
   - **用户条目**：hash+attachmentIdentity+ordinal 三元组匹配 journal enqueue（`matchKeyOf` 同构）→携带 intentId+generation。
-  - **assistant/toolResult 条目**：按代次边界邻接——consumed 行之后、下一 enqueue 之前编入的该 generation 条目归该 intentId；无可靠锚（无 journal/无 consumed/外部写者/同文重复匹配多轮）→`intentId:null` 照常输出，不猜。
+  - **assistant/toolResult 条目（可执行定义，c5 B06）**：归属锚=**consumed 行的宿主锚**（`anchorEntryId`： RpcSession 写 consumed 时记录的 session 侧行号/字节偏移；`intervalEnd` 同构）。判定=「同 generation 且 session 条目序 ∈ (上一意图锚, consumed 锚]」→归该 intentId。**不得用跨文件扫描先后当归属**（session 先扫/journal 后扫/B 已 enqueue 等待都会错归属——扫描序是读取时序非事实时序）。锚缺失（写链未接/旧 journal 无锚字段/外部写者）→`intentId:null` 照常输出，不猜；**迟到更正不回改已发布事件**（发布后归属固定；更正只影响后续编入=延迟编入或永久 null）。
+  - **多 toolCall 块**：同 entryId 的第 n 个 toolCall 块=块键 `entryId:blockIndex`（0 起，编入序）；toolResult 以其 toolCallId 回链（无 toolCallId 的孤儿 toolResult→`intentId:null`）。
   - **分支口径（声明）**：v1 投影=当前文件全量；分支切换=文件替换→换流（§1.3）。
 - **final 逐项映射（冻结）**：stop→`final:true`；length→`final:true`（截断终局，previewTruncated 标注）；aborted→`final:true`（终局非成功）；toolUse→`final:false`（等待工具结果）；无 stopReason 的 user/toolCall→按角色（user 终局 true；toolCall false）。
 - 消息 DTO：
@@ -194,7 +196,8 @@ interface SnapshotFrame {
 
 **订阅状态机（冻结）**：`init → paging → live → closed`（任一态可→closed）。
 - **初始化**：登记监听→截 H→缓冲 H 后事件→首页→（续页）→历史读完→自动接持续投递（history 帧续流+live 帧）。
-- **续页幂等（修订，消解「必须=期待下页」vs「重复页幂等」）**：快照上下文保存**最近 2 页**（页游标+已序列化页内容缓存）；续页请求 `historyNext` ∈{期待下页, 最近已服务页}→受理（后者=幂等重发缓存内容）；其余→4404。**末页宽限**：历史读完（末页已发）后快照资源保留 60s 供网络重试幂等；之后释放→重试收 `error 4409`（streamId 仍有效；客户端按末页 cursor 直接续读即可，无需重建快照）。requestId 在途重复→4404。快照完成/退订/连接关闭→资源释放（60s 宽限起算=末页发出）。
+- **续页幂等（修订，消解「必须=期待下页」vs「重复页幂等」）**：快照上下文保存**最近 2 页**（**完整游标键**=streamId+seq 页首+页内容缓存）；续页请求 `historyNext` 满足以下之一→受理：①=期待下页；②=最近已服务页页首（幂等重发）；③=barrier+1（追平补页：空页 done=true 进 live；H=0 空流同）。**缓存键必须含完整游标域**（错 streamId 同 seq 不命中缓存→4404）；**页内容可复用，envelope 回显本次 requestId**（不得整帧 JSON 全等重发旧 requestId）。**游标合法域=[1, H+1]**（0/负数→4404；超前> H+1→4409；H+1 在域内非超前）。其余→4404。
+- **同连接同 file 唯一订阅目标（c5 B01）**：一连接对同一 file 至多一个活动订阅（新 subscribe 先退旧（4409 stream-replaced 通知）再建新；A/B 并存禁止；resync 失败旧订阅仍持有→新 subscribe 必须显式替换）。「同连接」配额=8 订阅且每 file 唯一；跨连接并发订阅同 file 允许（各自独立流）。**末页宽限**：历史读完（末页已发）后快照资源保留 60s 供网络重试幂等；之后释放→重试收 `error 4409`（streamId 仍有效；客户端按末页 cursor 直接续读即可，无需重建快照）。requestId 在途重复→4404。快照完成/退订/连接关闭→资源释放（60s 宽限起算=末页发出）。
 - **重同步**：校验 cursor 域→原子终止旧订阅→新 subscriptionId→补齐→接续。域失效→4409（关联 requestId）。
 - **双源屏障声明**：H=读索引水位（两源已并入）；两源各自完整行边界发布；**观察一致非跨文件事务一致**；status 独立 statusVersion。
 - 快照期缓冲：H 后事件 ≤1024 帧/1MB；超→快照加速流化或 4431。
@@ -205,6 +208,7 @@ interface SnapshotFrame {
 1. 初始化：subscribe(f)→snapshot(H=450,page[1..200],historyNext=201,hasMore)→续页×2→末页(liveFrom=451)→events(history,451..)。
 2. 空流（无 journal 无 session 消息）：snapshot(H=0,historyNext=null,liveFrom=1)→events。
 3. **分页间新增（修正口径）**：两源新增只可能在 H 后编入（编排保证）→历史页止于 H→接续首帧从 H+1 起（含缓冲回放）；无丢失无重复（seq 幂等）。
+3b. **字节装页（c5 B04 精确化）**：页边界在快照服务（servePage）内按**真实 UTF-8 字节预算（200_000B）+条数上限（200）双约束**决定；首条必装（保前进）；`done` 由实际装到的末位决定——**引擎状态（expectNext/live 化）永不超前于已装内容**，发送队列截帧不产生「已进 live 实未送达」。live 事件合批：每帧 ≤`maxEventsPerLiveFrame`(8) 事件（8×32k 单事件上限=256k<262k 帧恒预算内）；帧数（≤16/轮）与每帧事件数**分立常量**。
 4. 断线续读：hello→subscribe(f,cursor{streamId,455})→补 455..H'→接续。
 5. 4409（重启/截断/卸载）：旧 cursor 失配→error 4409→重新初始化。
 6. 4431：缓冲超限→error+close 4431（尽力）→destroy→退避重连→cursor 补齐→追赶节流。
@@ -222,8 +226,10 @@ interface SnapshotFrame {
 
 ```ts
 type RecoveryInfo =
-  | { availability: "available"; report: AvailableRecovery }
-  | { availability: "unavailable"; reason: "read-failed" | "concurrent-modification" | "oversized" };
+  | AvailableRecovery        // 扁平（availability 判别字段直接携带——与 contracts.ts 单模型，c5 B07）
+  | { availability: "unavailable"; reason: "read-failed" | "concurrent-modification" | "oversized" | "no-evidence-snapshot" };
+// no-evidence-snapshot（c5 B03）：盘面曾修复且无权威证据快照——恢复结论只对快照负责（recover.ts
+// RecoveryEvidenceSnapshot；capture 于任何修复动作之前），冷启动/LRU 重建无快照不得以裸读盘面出结论。
 
 interface RecoverySummary {
   readonly availability: "available" | "unavailable";
@@ -239,14 +245,15 @@ interface AvailableRecovery {
   readonly blockedReasons: readonly RecoveryBlockReason[];
   readonly unknownEffect: PageOf<string>;   // ≤500/页
   readonly resumable: PageOf<string>;       // blocked 时恒空（原样）
-  readonly perIntent: PageOf<IntentVerdict>;
-  readonly perIntentNext: { offset: number } | null;
+  readonly perIntent: PageOf<RecoveryIntentRow>;
 }
 interface PageOf<T> { items: readonly T[]; total: number; returned: number; truncated: boolean; next: { offset: number } | null; }
 type RecoveryBlockReason =
   | { kind: "bad-line"; count: number } | { kind: "torn-tail" }
   | { kind: "short-fragment"; count: number } | { kind: "unattributable-fragment"; count: number };
-interface IntentVerdict { readonly intentId: string; readonly verdict: "settled"|"delivered"|"unknown"|"cancelled"|"not-evaluated"; readonly provisional: boolean; }
+interface RecoveryIntentRow { readonly intentId: string; readonly verdict: "settled"|"delivered"|"unknown"|"cancelled"|"not-evaluated"; readonly provisional: boolean; }
+// verdict 优先级（穷尽不重叠）：unknown>cancelled>settled>delivered>not-evaluated；provisional=true 仅当
+// unknown 由残片归因/人工裁决派生（非耐久终态事实）。not-evaluated=无终态且非 sending/超时/取消（可重发候选）。
 ```
 
 **perIntent 穷尽映射表（冻结；C3-R05）**：
@@ -330,13 +337,10 @@ type ServerFrame =
 **SanitizedText（结构化）**：`{ text: string; truncated: boolean }`——所有预览/标题/注记统一结构体（title/note 同样带 truncated；消除「要求置位却无字段」不一致）。
 
 **Sanitizer 规范（冻结；顺序=NFC→剥控制→形态替换→不安全集合→截断→置位）**：
-1. **剥控制**：Unicode 类别 Cc/Cf/Co/Cs+U+2028/2029，除 `\n`（折叠空格）与 `\t`（保留）。
-2. **形态替换（全局多次；保证范围据实）**：
-   - POSIX 绝对路径 `/(?:\/[\w@+=,.:/-]+){2,}\/?/g`→`[path]`；**单段路径（如 `/secret`、`/资料/密码` 单段形态）= 命名性内容，声明为允许透出**（向量标注「允许透出」——不宣称遮蔽所有路径样内容）。
-   - Windows `C:\...`/UNC 同前版→`[path]`。
-   - env 赋值/Bearer/AKIA/`ssh-rsa AAAA…`→`[env]`/`[token]`/`[secret]`。
-   - **PEM 整块**：`/-----BEGIN [A-Z ]+-----[\s\S]*?-----END [A-Z ]+-----/g`→`[secret]`；**截断 PEM**（有 BEGIN 无 END）→`/-----BEGIN [A-Z ]+-----[\s\S]*$/g`→`[truncated-secret]`（遮到末尾，正文不泄漏）。
-   - URL userinfo→`[userinfo-removed]`。
+1. **剥控制**：Unicode 类别 Cc+软连字符 U+00AD+U+2028/2029，除 `\n`（折叠空格）与 `\t`（保留）。**Cf 其余成员（RTL/零宽类）不剥除**——剥除会让恶意混入静默通过，一律走第 3 条整段拒绝。
+2. **形态替换（全局多次；保证范围据实；c5 B05 顺序=完整语义单元先行）**——替换顺序冻结（前序规则撕碎后序语义单元是 c4 实测缺陷）：
+   ① **PEM 整块**（任意大写标签 `[A-Z0-9 ]+`，含 CERTIFICATE/PRIVATE KEY 等）→`[secret]`；② **截断 PEM**（有 BEGIN 无 END）→遮到末尾 `[truncated-secret]`（正文不泄漏）；③ **env 赋值**（`KEY=value`，值可含 `/`）→`[env]`；④ Bearer→`[token]`；⑤ AKIA→`[secret]`；⑥ **ssh-rsa 公钥**（base64 可含 `/`）→`[key]`；⑦ **含 userinfo 的 URL 整条**→`[url]`；⑧ URL 整体（`scheme://…`）→`scheme:[url]`；⑨ POSIX ≥2 段路径→`[path]`（**单段路径=命名性内容，声明允许透出**——不宣称遮蔽所有路径样内容）；⑩ Windows 盘符/UNC→`[path]`。顺序理由：env 值/ssh 公钥/带凭据 URL 若先被 ⑨ 路径规则命中会被撕碎中段（c4 GPT 实测探针）。
+   - 机器 ID 哈希（第 5 条）：**UTF-8 全字节折叠**（TextEncoder；`charCodeAt&0xff` 丢高 8 位致 U+0100/U+0200 整类碰撞——c4 实测），不声称 64 位无碰撞。
 3. **不安全字符集（精确 Unicode 集合）**：RTL/双向（U+061C,U+200E-200F,U+202A-202E,U+2066-2069）与零宽（U+200B-200D,U+2060,U+FEFF）存在→整段 `[unsafe-content]`。
 4. **截断**：preview 200/500、title 80、note 120（代码单元）；置 truncated。
 5. **机器 ID（修订：先凭据形态、后白名单、撞键结构性消除）**：字符串 ID 字段（intentId/entryId/toolCallId/streamId 外的传输 ID）：**先跑第 2 条凭据形态替换**（AKIA… 已被替换，不会过白名单——C3-R07 实测泄漏消除）；再白名单 `/^[\w:.-]{1,128}$/`→原样；否则映射 `~id-<FNV-1a64 hex16>`（非密码学哈希；稳定关联所需）——**前缀 `~` 不在白名单字符集**，故映射输出**永不等于任何合法 ID**（撞键结构性消除）。`number` 字段（commandId/generation/ordinal）=数字安全，不映射（澄清）。
@@ -361,7 +365,7 @@ type ServerFrame =
 
 ### 5.7 限额汇总（逐字段表=contracts.ts 冻结源）
 
-订阅 8/连接；列表页 ≤200（默认 50；目录枚举 ≤1000）；事件页 ≤200 条且整帧 ≤200_000B；连接队列 1024 帧/1MB；bufferedAmount 4MB；帧 262_144B；连接 16；在途请求 4；计算并发 2（超时 5s）；恢复读取 8MB；恢复数组 ≤500/页；字符串上限：file ≤120（`/^[\w.-]{1,114}\.jsonl$/`）、requestId `/^[\w-]{1,64}$/`、nonce ≤64、streamId/subscriptionId/snapshotId ≤64、title 80、preview 200|500、note 120；心跳 30s/90s；连接 24h；流 LRU 32 流×20k 事件≈32MB。
+订阅 8/连接；列表页 ≤200（默认 50；目录枚举 ≤1000）；事件页 ≤200 条且整帧 ≤200_000B；连接队列 1024 帧/1MB；bufferedAmount 4MB；帧 262_144B；连接 16；在途请求 4；计算并发 2（超时 5s）；恢复读取 8MB；恢复数组 ≤500/页；字符串上限：file ≤120（`/^[\w.-]{1,114}\.jsonl$/`）、requestId `/^[\w-]{1,64}$/`、nonce ≤64、streamId/subscriptionId/snapshotId ≤64、title 80、preview 200|500、note 120；心跳 30s/90s；连接 24h；流 LRU 32 流×20k 事件（含投影实测≈100~300MB 典型/1.2GB 理论最坏，§1.3）。
 
 ### 5.8 列表分页（弱一致+C3 黄项）
 
@@ -392,7 +396,7 @@ type ServerFrame =
 | C3-R03 线协议 | §5.2 events 判别联合（history 无 liveSeq/live 无 refSeq）+origin 统一字面量+note 受控枚举+turn-state 带 statusVersion+快照后落盘走 history 帧 |
 | C3-R04 归因/块 | §3.5 三元组匹配（用户）+代次边界邻接（assistant）+blockIndex 块键+分支口径声明+final 逐项映射 |
 | C3-R05 残片证据 | §4 concurrent-modification 不可用出口+evidenceHash 完整输入域+perIntent 穷尽表（含 cancelled/not-evaluated/unknownEffect-only 行）+不落新裁决 |
-| C3-R06 恢复分页 | §4 evidenceHash 参数续页+4409 证据变更+PageOf 四字段+§5.6 字节装页（不甩 4404）+recovery 帧保 unavailable |
+| C3-R06 恢复分页 | §4 evidenceHash 参数续页+4409 证据变更+PageOf 五字段+§5.6 字节装页（不甩 4404）+recovery 帧保 unavailable；**恢复三 PageOf（unknownEffect/resumable/perIntent）各自独立 next 驱动**（一次请求返回同 offset 切片的三页，续页按各页 next 分别请求——不做全局 offset，c5 B04） |
 | C3-R07 脱敏 | §5.4 单段路径允许透出声明+PEM 整块/截断遮蔽+先凭据后白名单+`~` 前缀撞键消除+number 澄清+精确 Unicode 集+SanitizedText 结构化+人工 golden |
 | C3-R08 请求预算 | §5.6 连接级统一队列+在途 4+计算并发 2+5s 排队超时+有界读取 8MB/1000 文件 |
 | C3-R09 错误矩阵 | §5.3 版本层 4403（合法整数≠1）+有界包络先识别 t+写类不论字段 4405+4432 close 1000+requestId 缺失不回显+file 正则统一 |

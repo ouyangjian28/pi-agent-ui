@@ -220,7 +220,8 @@ export interface AvailableRecovery {
 
 export interface UnavailableRecovery {
   readonly availability: "unavailable";
-  readonly reason: "read-failed" | "concurrent-modification" | "oversized";
+  /** no-evidence-snapshot（B03）：盘面曾修复且无权威证据快照——不得以裸读盘面出恢复结论（防洗白）。 */
+  readonly reason: "read-failed" | "concurrent-modification" | "oversized" | "no-evidence-snapshot";
 }
 
 export type RecoveryInfo = AvailableRecovery | UnavailableRecovery;
@@ -308,6 +309,7 @@ export function validateClientFrame(raw: unknown): FrameCheck {
   if (typeof t !== "string") return bad(4404, "t 必须是字符串");
   // 第 4 级（写类）在格式基本可判后立即短路：t 合法字符串+属写类集合→4405（不论其余字段）
   if (WRITE_FRAME_TYPES.includes(t)) return bad(4405, "只读协议拒绝写类帧");
+  // 未知 t：固定消息（不回显输入——恶意超长值不得借错误帧透传；c5 B07）
   switch (t) {
     case "hello": {
       const r0 = requireExact(obj, ["t", "protocolVersion", "token"]); if (r0) return r0;
@@ -372,7 +374,7 @@ export function validateClientFrame(raw: unknown): FrameCheck {
       return ok({ t: "ping", nonce });
     }
     default:
-      return bad(4404, `未知帧类型 ${t.length > 16 ? t.slice(0, 16) + "…" : t}`);
+      return bad(4404, "未知帧类型");
   }
 }
 

@@ -19,7 +19,12 @@
 // 范围口径（s4e 第五节）：本入口覆盖「子进程重启」面（同 RpcSession 重组装）；
 //   完整服务重启（内存 intentSeq/ordinal 丢失+新对象续写旧 journal）会重复分配 i-1 身份，
 //   需身份恢复或持久唯一 ID（后续切片，未支持）。
+// 证据快照（c5 B03）：盘面修复后重读会丢失残片证据——「证据不存在」≠「从未发送」。
+//   恢复结论的唯一合法入口=recoverFromSnapshot（对快照负责）；裸读当前盘面出结论只允许
+//   在「从未修复过」的首次读取（captureRecoveryEvidence）。冷启动/LRU 重建无快照→
+//   宿主必须呈现 unavailable(no-evidence-snapshot)，不得以 resumable 假安全替代。
 import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { replayIntents, type IntentId, type IntentRecord, type JournalLine, type SessionId } from "@pi-agent-ui/protocol";
 
 /** 坏行/撕裂尾记录：raw=原始文本（撕裂尾可能是不完整 UTF-8→以 utf8 读入后含替换符，字节面由宿主另行核对）。 */
@@ -157,6 +162,18 @@ export interface RecoverReport {
   readonly resumeBlocked: boolean;
   /** 不可关联/未裁决坏行证据（修复后续读仍存在）：恢复范围级阻断 resumable，呈现交宿主人工裁决（attributedFragments 精确归因后移除）。 */
   readonly unattributableFragments: readonly BadJournalEntry[];
+  /** 每意图穷尽行（B03：not-evaluated 与 unknown 重叠消除——优先级 unknown>cancelled>settled/delivered>not-evaluated）。 */
+  readonly perIntent: readonly PerIntentRow[];
+  /** 本报告实际消耗的残片归因修订（快照证据域成分；evidenceHash 输入）。 */
+  readonly attributedFragments: readonly FragmentAttribution[];
+}
+
+/** perIntent 行（contracts.RecoveryIntentRow 同构）：verdict 按优先级取值；
+ *  provisional=true 仅当 unknown 由残片归因/人工裁决派生（非耐久终态事实）。 */
+export interface PerIntentRow {
+  readonly intentId: IntentId;
+  readonly verdict: "settled" | "delivered" | "unknown" | "cancelled" | "not-evaluated";
+  readonly provisional: boolean;
 }
 
 /** 由重放记录判定效果未知（sending 无终态/超时未结算/已判 unknown；取消不改副作用未知呈现——cancelled 挡 resumable，sending 照旧触发 unknown）。 */
@@ -422,16 +439,32 @@ export function buildRecoverReport(lines: readonly JournalLine[], sessionId: Ses
     targetsByRaw.set(a.raw, set);
   }
   let unattributed = unattributable;
+  const consumedVerdictIds = new Set<IntentId>(); // 人工裁决有效消耗→其 unknown 为派生（provisional）
   for (const [raw, targets] of targetsByRaw) {
     if (targets.size > 1) continue; // H2：冲突裁决集→该证据不消耗，保留阻断（与顺序无关）
     const matches = fragments.filter((b) => b.raw === raw);
     if (matches.length !== 1) continue; // 不在场（0）或歧义（>1 同文本残片）→不信任，保留阻断
     const hit = unattributed.find((b) => b === matches[0]);
     if (hit === undefined) continue; // 已被先前裁决消耗→幂等 no-op
-    unknown.add([...targets][0] as IntentId);
+    const target = [...targets][0] as IntentId;
+    unknown.add(target);
+    consumedVerdictIds.add(target);
     unattributed = unattributed.filter((b) => b !== hit);
   }
   const resumeBlocked = diskBlocked || unattributed.length > 0; // 盘面阻断或仍有未裁决证据→授权阻断（两证分离）
+  // 派生 unknown（provisional）：残片可靠关联或人工裁决消耗——非耐久终态事实
+  const provisionals = new Set<IntentId>(attributed.map((a) => a.id)); // 可靠关联（结构证得）
+  for (const id of consumedVerdictIds) provisionals.add(id); // 有效人工裁决
+  // perIntent 穷尽表（优先级：unknown>cancelled>settled/delivered>not-evaluated）
+  const perIntent: PerIntentRow[] = intents.map((r) => {
+    let verdict: PerIntentRow["verdict"];
+    if (unknown.has(r.intentId)) verdict = "unknown";
+    else if (r.cancelled) verdict = "cancelled";
+    else if (r.lastVerdict === "settled") verdict = "settled";
+    else if (r.lastVerdict === "delivered") verdict = "delivered";
+    else verdict = "not-evaluated";
+    return { intentId: r.intentId, verdict, provisional: verdict === "unknown" && provisionals.has(r.intentId) };
+  });
   return {
     intents,
     unknownEffect: intents.filter((r) => unknown.has(r.intentId)).map((r) => r.intentId),
@@ -444,12 +477,60 @@ export function buildRecoverReport(lines: readonly JournalLine[], sessionId: Ses
     diskBlocked,
     resumeBlocked,
     unattributableFragments: unattributed,
+    perIntent,
+    attributedFragments: opts.attributedFragments ?? [],
   };
 }
 
-/** 恢复全流程：读文件+解析+重放呈现（不改盘面；坏行/撕裂尾随报告交宿主裁决；当前盘面坏行→阻断）。 */
+/** 恢复全流程：读文件+解析+重放呈现（不改盘面；坏行/撕裂尾随报告交宿主裁决；当前盘面坏行→阻断）。
+ *  仅限首次读取（未修复过）；修复后的结论必须走 recoverFromSnapshot（B03 防洗白）。 */
 export async function recoverFromJournal(path: string, sessionId: SessionId): Promise<JournalReadResult & RecoverReport> {
   const { lines, bad } = await readJournalFile(path);
   const report = buildRecoverReport(lines, sessionId, { fragments: bad, blocked: bad.length > 0 });
   return { lines, bad, ...report };
+}
+
+// ---------------------------------------------------------------------------
+// 证据快照（c5 B03）：恢复结论只对快照负责
+// ---------------------------------------------------------------------------
+
+/** 只读权威证据快照：盘面行+坏行残片+归因修订+边界/版本。宿主在**任何修复动作之前**捕获；
+ *  修复后重读当前文件不能替代快照（残片丢失=证据灭失）。 */
+export interface RecoveryEvidenceSnapshot {
+  readonly version: 1;
+  readonly file: string;
+  readonly sessionId: SessionId;
+  /** 快照时可解析行（顺序=盘面序）。 */
+  readonly lines: readonly JournalLine[];
+  /** 快照时坏行/撕裂残片（修复后仍以此为准）。 */
+  readonly bad: readonly BadJournalEntry[];
+  /** 宿主已批准的人工归因修订（追加只增不减；重放消耗见 buildRecoverReport）。 */
+  readonly attributedFragments: readonly FragmentAttribution[];
+  /** true=快照后盘面已修复（修复事实入证据链）。 */
+  readonly repaired: boolean;
+  readonly createdAt: number;
+}
+
+/** 捕获快照（宿主入口：修复前调用；幂等只读）。 */
+export async function captureRecoveryEvidence(path: string, sessionId: SessionId, now: () => number = Date.now): Promise<RecoveryEvidenceSnapshot> {
+  const { lines, bad } = await readJournalFile(path);
+  return { version: 1, file: path, sessionId, lines, bad, attributedFragments: [], repaired: false, createdAt: now() };
+}
+
+/** 快照证据哈希（完整权威输入域：版本+边界+行+残片+归因修订+修复标记）。 */
+export function snapshotEvidenceHash(snap: RecoveryEvidenceSnapshot): string {
+  const canonical = JSON.stringify([
+    snap.version, snap.file, snap.sessionId, snap.lines, snap.bad, snap.attributedFragments, snap.repaired,
+  ]);
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+
+/** 由快照出恢复结论（B03 唯一合法入口：盘面修复后仍保留残片证据；归因修订随快照输入）。 */
+export function recoverFromSnapshot(snap: RecoveryEvidenceSnapshot): RecoverReport {
+  const report = buildRecoverReport(snap.lines, snap.sessionId, {
+    fragments: snap.bad,
+    blocked: false, // 快照语义=修复后裁决；盘面阻断由残片证据决定
+    attributedFragments: snap.attributedFragments,
+  });
+  return report;
 }

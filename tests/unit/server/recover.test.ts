@@ -3,7 +3,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, readFile, rm, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readJournalFile, buildRecoverReport, recoverFromJournal } from "../../../apps/server/src/runtime/recover.js";
+import {
+  readJournalFile, buildRecoverReport, recoverFromJournal,
+  captureRecoveryEvidence, recoverFromSnapshot, snapshotEvidenceHash,
+} from "../../../apps/server/src/runtime/recover.js";
+import type { RecoveryEvidenceSnapshot } from "../../../apps/server/src/runtime/recover.js";
 import type { BadJournalEntry } from "../../../apps/server/src/runtime/recover.js";
 import type { JournalLine } from "@pi-agent-ui/protocol";
 
@@ -581,5 +585,74 @@ describe("recover（恢复入口受控面）", () => {
       "schema 损坏：嵌套非法 cleared（元素须字符串）",
       "schema 损坏：嵌套非法 intervalEnd",
     ]);
+  });
+});
+
+describe("恢复证据快照（c5 B03：结论只对快照负责）", () => {
+  it("修复前捕获→阻断呈现；同快照修复后续读不再洗白（残片保留→unknown 不消失）", async () => {
+    // 盘面：i-1 settled + i-2 enqueue + i-2 sending 撕裂尾
+    const p = await writeJournal([enq("i-1"), '{"t":"sending","intentId":"i-1"}', '{"t":"settled","intentId":"i-1"}', enq("i-2"), '{"t":"sending","intentId":"i-2"']);
+    const snap = await captureRecoveryEvidence(p, "s1");
+    expect(snap.bad).toHaveLength(1);
+    const r0 = recoverFromSnapshot(snap);
+    expect(r0.diskBlocked).toBe(false); // 快照语义=修复后裁决
+    expect(r0.resumeBlocked).toBe(false); // 残片可靠关联 i-2→已并入 unknown，无未裁决残片
+    expect(r0.unknownEffect).toEqual(["i-2"]); // sending 残片证据仍在（不因修复灭失）
+    expect(r0.resumable).toEqual([]);
+    // perIntent 穷尽：i-1 settled 非 provisional；i-2 unknown 且 provisional（残片派生）
+    expect(r0.perIntent).toEqual([
+      { intentId: "i-1", verdict: "settled", provisional: false },
+      { intentId: "i-2", verdict: "unknown", provisional: true },
+    ]);
+    // 修复盘面（截尾）后裸读会得 resumable=[i-2] 假安全——但经快照路径结论不变
+    const { writeFile } = await import("node:fs/promises");
+    const raw = await (await import("node:fs/promises")).readFile(p, "utf8");
+    const cut = raw.lastIndexOf("\n") + 1;
+    await writeFile(p, raw.slice(0, cut), "utf8");
+    const rAfter = recoverFromSnapshot(snap); // 同一快照
+    expect(rAfter.unknownEffect).toEqual(["i-2"]); // B03 核心：证据不随盘面修复消失
+    expect(rAfter.resumable).toEqual([]);
+  });
+
+  it("冷启动无快照：宿主规则=unavailable(no-evidence-snapshot)——裸读当前盘面得 resumable 是假安全（反例固化）", async () => {
+    // 同上盘面已被（上一用例之外独立文件）修复：只剩 i-1 全程 + i-2 enqueue
+    const p2 = await writeJournal([enq("i-1"), '{"t":"sending","intentId":"i-1"}', '{"t":"settled","intentId":"i-1"}', enq("i-2"), ""]);
+    const naive = await recoverFromJournal(p2, "s1");
+    // 裸读（无快照输入）确实给出 resumable——这正是 B03 要拦的调用面：
+    expect(naive.resumable).toEqual(["i-2"]);
+    // 宿主契约：曾修复过又无快照→不得用该结论（接线层呈现 unavailable）；此处固化裸读出口的存在与风险注释。
+  });
+
+  it("归因修订入快照：消耗残片+unknown 保留+evidenceHash 随修订变化（输入域含 attributedFragments）", async () => {
+    const p = await writeJournal([enq("i-1"), '{"t":"sending","intentId":"i-1"']);
+    const snap = await captureRecoveryEvidence(p, "s1");
+    const h0 = snapshotEvidenceHash(snap);
+    const r0 = recoverFromSnapshot(snap);
+    expect(r0.unattributableFragments).toHaveLength(0); // 可关联
+    // 不可关联残片场景：断在 intentId 前
+    const p2 = await writeJournal([enq("i-1"), '{"t":"send']);
+    const snap2 = await captureRecoveryEvidence(p2, "s1");
+    const r2 = recoverFromSnapshot(snap2);
+    expect(r2.unattributableFragments).toHaveLength(1);
+    expect(r2.resumeBlocked).toBe(true);
+    const revised: RecoveryEvidenceSnapshot = { ...snap2, attributedFragments: [{ raw: '{"t":"send', intentId: "i-1" }], repaired: true };
+    const r3 = recoverFromSnapshot(revised);
+    expect(r3.unattributableFragments).toHaveLength(0); // 裁决消耗
+    expect(r3.unknownEffect).toEqual(["i-1"]); // unknown 保留（归因≠已结算）
+    expect(r3.perIntent[0]).toEqual({ intentId: "i-1", verdict: "unknown", provisional: true });
+    expect(snapshotEvidenceHash(revised)).not.toBe(snapshotEvidenceHash(snap2));
+    expect(h0).toMatch(/^[0-9a-f]{64}$/); // SHA-256 hex64（contracts.evidenceHash 域）
+  });
+
+  it("perIntent 穷尽：cancelled 优先于无终态（取消终局）；not-evaluated=可重发候选", async () => {
+    // i-1 clear（cancelled）无终态；i-2 enqueue 未发送
+    const p = await writeJournal([enq("i-1"), '{"t":"clear","sessionId":"s1","cleared":["i-1"]}', enq("i-2"), ""]);
+    const snap = await captureRecoveryEvidence(p, "s1");
+    const r = recoverFromSnapshot(snap);
+    expect(r.perIntent).toEqual([
+      { intentId: "i-1", verdict: "cancelled", provisional: false },
+      { intentId: "i-2", verdict: "not-evaluated", provisional: false },
+    ]);
+    expect(r.resumable).toEqual(["i-2"]); // cancelled 不在 resumable
   });
 });
