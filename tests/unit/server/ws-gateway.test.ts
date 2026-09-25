@@ -1117,9 +1117,14 @@ describe("ws-gateway w1c：R 系阻断回归", () => {
       expect(errFrames(c).some((f) => f.code === 4402 && String(f.message).includes("超预算"))).toBe(true);
       expect(c.frames().some((f) => f.t === "snapshot")).toBe(false); // 不发绑定超限索引的快照
       expect(c.readyState).toBe(1);
-      // 第二次 init：registry 拒建路径（get 抛 FileOverBudgetError）→ 同样 4402
+      // 第二次 init：get 首次宽容（删旧标+新空索引）→ 重装 6 行仍触顶 → 同样 4402
       c.sent.length = 0;
       await c.say({ t: "subscribe", requestId: "s2", file: "big.jsonl" });
+      expect(errFrames(c).some((f) => f.code === 4402 && String(f.message).includes("超预算"))).toBe(true);
+      expect(c.frames().some((f) => f.t === "snapshot")).toBe(false);
+      // 第三次 init：registry 拒建路径（hit 触顶+已标记→get 抛 FileOverBudgetError）→ sentinel→4402
+      c.sent.length = 0;
+      await c.say({ t: "subscribe", requestId: "s3", file: "big.jsonl" });
       expect(errFrames(c).some((f) => f.code === 4402 && String(f.message).includes("超预算"))).toBe(true);
       expect(c.frames().some((f) => f.t === "snapshot")).toBe(false);
       // observe 追加（P4b 场景）：FileOverBudgetError 被容量出口吸收，不逸出到宿主（测试不被未捕获异常杀死即证）
