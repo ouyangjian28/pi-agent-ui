@@ -54,12 +54,16 @@ describe("订阅引擎 13 时序", () => {
     expect(((again[0] as unknown) as { page: unknown[] }).page).toHaveLength(200);
   });
 
-  it("③重复中间页→幂等重发", () => {
+  it("③重复中间页→内容幂等+新 requestId（B01）", () => {
     const { eng } = makeEngine(450);
     const f1 = eng.startSnapshot("r-1")[0] as { snapshotId: string; historyNext: { streamId: string; seq: number } };
-    const first = eng.handle({ kind: "page", requestId: "r-2", snapshotId: f1.snapshotId, historyNext: f1.historyNext });
-    const again = eng.handle({ kind: "page", requestId: "r-3", snapshotId: f1.snapshotId, historyNext: f1.historyNext });
-    expect(JSON.stringify(again[0])).toBe(JSON.stringify(first[0]));
+    const first = eng.handle({ kind: "page", requestId: "r-2", snapshotId: f1.snapshotId, historyNext: f1.historyNext })[0] as Record<string, unknown>;
+    const again = eng.handle({ kind: "page", requestId: "r-3", snapshotId: f1.snapshotId, historyNext: f1.historyNext })[0] as Record<string, unknown>;
+    // envelope 回显本次 requestId；页内容（除 requestId 外全字段）幂等
+    expect(again["requestId"]).toBe("r-3");
+    const { ["requestId"]: _a, ...rest } = again;
+    const { ["requestId"]: _b, ...orig } = first;
+    expect(rest).toEqual(orig);
   });
 
   it("④跳页（≠期待下页）→4404", () => {
@@ -72,13 +76,16 @@ describe("订阅引擎 13 时序", () => {
     expect(ok2[0]).toMatchObject({ t: "snapshot" });
   });
 
-  it("⑤末页后重复末页（60s 内）→幂等", () => {
+  it("⑤末页后重复末页（60s 内）→内容幂等+新 requestId", () => {
     const { eng } = makeEngine(100);
     const f1 = eng.startSnapshot("r-1")[0] as { snapshotId: string };
-    const last = eng.handle({ kind: "page", requestId: "r-2", snapshotId: f1.snapshotId, historyNext: { streamId: "s-1", seq: 1 } });
-    expect((last[0] as { hasMore: boolean }).hasMore).toBe(false);
-    const again = eng.handle({ kind: "page", requestId: "r-3", snapshotId: f1.snapshotId, historyNext: { streamId: "s-1", seq: 1 } });
-    expect(JSON.stringify(again[0])).toBe(JSON.stringify(last[0]));
+    const last = eng.handle({ kind: "page", requestId: "r-2", snapshotId: f1.snapshotId, historyNext: { streamId: "s-1", seq: 1 } })[0] as Record<string, unknown>;
+    expect(last["hasMore"]).toBe(false);
+    const again = eng.handle({ kind: "page", requestId: "r-3", snapshotId: f1.snapshotId, historyNext: { streamId: "s-1", seq: 1 } })[0] as Record<string, unknown>;
+    expect(again["requestId"]).toBe("r-3");
+    const { ["requestId"]: _a, ...rest } = again;
+    const { ["requestId"]: _b, ...orig } = last;
+    expect(rest).toEqual(orig);
   });
 
   it("⑥末页宽限过期→4409（retryable）", () => {
@@ -104,9 +111,9 @@ describe("订阅引擎 13 时序", () => {
     // live 期实时事件
     eng.onLiveEvent({ kind: "pi-progress", piType: "message_update", note: "thinking" });
     const frames = eng.drain(16);
-    expect(frames[0]).toMatchObject({ t: "events", origin: "history", refSeq: 101, events: [expect.objectContaining({ seq: 101 })] });
-    expect(frames[1]).toMatchObject({ t: "events", origin: "history", refSeq: 102 });
-    expect(frames[2]).toMatchObject({ t: "events", origin: "live", liveSeq: 1 });
+    // B03/R03：落盘事件回放走 history 帧（同源可合批）；live 事件走 live 帧，顺序在后
+    expect(frames[0]).toMatchObject({ t: "events", origin: "history", refSeq: 102, events: [expect.objectContaining({ seq: 101 }), expect.objectContaining({ seq: 102 })] });
+    expect(frames[1]).toMatchObject({ t: "events", origin: "live", liveSeq: 1 });
   });
 
   it("⑧快照期缓冲超限→4431+closed", () => {
@@ -173,14 +180,93 @@ describe("订阅引擎 13 时序", () => {
     expect(b2[1]).toMatchObject({ t: "status", status: { statusVersion: 3 } });
     // 再 drain 空
     expect(eng.drain(16)).toHaveLength(0);
-    // 超量分批：20 条 live→两批（帧1=16 事件 liveSeq=18；帧2=4 事件 liveSeq=22）
+    // 超量分批（B04）：20 条 live→每帧≤maxEventsPerLiveFrame(8)→三帧（8/8/4），liveSeq=8/16/20
     for (let i = 0; i < 20; i++) eng.onLiveEvent({ kind: "pi-progress", piType: "message_update", note: "thinking" });
     const p1 = eng.drain(16);
-    expect(p1).toHaveLength(2);
-    expect(((p1[0] as unknown) as { events: unknown[]; liveSeq: number }).events).toHaveLength(16);
-    expect((p1[0] as { liveSeq: number }).liveSeq).toBe(18);
-    expect(((p1[1] as unknown) as { events: unknown[]; liveSeq: number }).events).toHaveLength(4);
-    expect((p1[1] as { liveSeq: number }).liveSeq).toBe(22);
+    expect(p1).toHaveLength(3);
+    const lens = p1.map((f) => ((f as unknown) as { events: unknown[] }).events.length);
+    const seqs = p1.map((f) => (f as { liveSeq: number }).liveSeq);
+    expect(lens).toEqual([8, 8, 4]);
+    expect(seqs).toEqual([10, 18, 22]); // 前文已交付 2 条 live（liveSeq=2 起点）
     expect(eng.drain(16)).toHaveLength(0);
+  });
+
+  it("⑭追平补页 H+1→空页 done 进 live（B01）；H=0 同", () => {
+    const { eng } = makeEngine(100);
+    const f1 = eng.startSnapshot("r-1")[0] as { snapshotId: string };
+    const catchUp = eng.handle({ kind: "page", requestId: "r-2", snapshotId: f1.snapshotId, historyNext: { streamId: "s-1", seq: 101 } })[0] as Record<string, unknown>;
+    expect(catchUp["t"]).toBe("snapshot");
+    expect((catchUp["page"] as unknown[]).length).toBe(0);
+    expect(catchUp["hasMore"]).toBe(false);
+    expect(catchUp["liveFrom"]).toEqual({ streamId: "s-1", seq: 101 });
+    expect(eng.state.phase).toBe("live");
+    // 空流（H=0）：首页即空页，游标 1=H+1 域内
+    const { eng: e0 } = makeEngine(0);
+    const z = e0.startSnapshot("r-0")[0] as Record<string, unknown>;
+    expect((z["page"] as unknown[]).length).toBe(0);
+    expect(z["hasMore"]).toBe(false);
+    expect(z["liveFrom"]).toEqual({ streamId: "s-1", seq: 1 });
+    expect(e0.state.phase).toBe("live");
+  });
+
+  it("⑮缓存域完整游标：错流同 seq 不命中（B01）", () => {
+    const { eng } = makeEngine(450);
+    const f1 = eng.startSnapshot("r-1")[0] as { snapshotId: string; historyNext: { streamId: string; seq: number } };
+    eng.handle({ kind: "page", requestId: "r-2", snapshotId: f1.snapshotId, historyNext: f1.historyNext }); // 已入缓存
+    const wrong = eng.handle({ kind: "page", requestId: "r-3", snapshotId: f1.snapshotId, historyNext: { streamId: "s-other", seq: 201 } })[0] as Record<string, unknown>;
+    expect(wrong["t"]).toBe("error");
+    expect(wrong["code"]).toBe(4404);
+  });
+
+  it("⑯字节装页先于条数（B04）：预算切断+done 由实装决定", () => {
+    const idx = new ReadIndex("s.jsonl", "s-1");
+    for (let i = 1; i <= 5; i++) idx.append("journal", `L${i}`, hEv(i));
+    let idSeq = 0;
+    const eng = new SubscriptionEngine({
+      index: idx, status: () => fakeStatus(1), now: () => 0, newId: () => `id-${++idSeq}`,
+      estimateEvent: () => 100_000, // 每事件 100k（预算 200k→每页 2 条）
+    });
+    const p1 = eng.startSnapshot("r-1")[0] as Record<string, unknown>;
+    expect((p1["page"] as unknown[]).length).toBe(2);
+    expect(p1["historyNext"]).toEqual({ streamId: "s-1", seq: 3 });
+    expect(p1["hasMore"]).toBe(true);
+    const p2 = eng.handle({ kind: "page", requestId: "r-2", snapshotId: p1["snapshotId"] as string, historyNext: { streamId: "s-1", seq: 3 } })[0] as Record<string, unknown>;
+    expect((p2["page"] as unknown[]).length).toBe(2);
+    const p3 = eng.handle({ kind: "page", requestId: "r-3", snapshotId: p1["snapshotId"] as string, historyNext: { streamId: "s-1", seq: 5 } })[0] as Record<string, unknown>;
+    expect((p3["page"] as unknown[]).length).toBe(1);
+    expect(p3["hasMore"]).toBe(false);
+    expect(eng.state.phase).toBe("live");
+  });
+
+  it("⑰多页分页期间缓冲回放（B01 矩阵：真实双源分页③）", () => {
+    const { idx, eng } = makeEngine(450);
+    const f1 = eng.startSnapshot("r-1")[0] as { snapshotId: string; historyNext: { streamId: string; seq: number } };
+    // 停在 paging（已读 1..200）期间两源追加
+    idx.append("journal", "J451", hEv(451));
+    eng.onHistoryAppend(hEv(451));
+    idx.append("session", "off=9000", hEv(452));
+    eng.onHistoryAppend(hEv(452));
+    // 拉完剩余页
+    let cur: { streamId: string; seq: number } | null = f1.historyNext;
+    let guard = 0;
+    while (cur !== null && guard++ < 10) {
+      if (cur === null) break;
+      const f = eng.handle({ kind: "page", requestId: `r-${guard}`, snapshotId: f1.snapshotId, historyNext: cur })[0] as { historyNext: { streamId: string; seq: number } | null };
+      cur = f.historyNext;
+    }
+    expect(eng.state.phase).toBe("live");
+    const frames = eng.drain(16);
+    const hist = frames.find((f) => (f as { origin?: string }).origin === "history") as unknown as { events: { seq: number }[] };
+    expect(hist.events.map((e) => e.seq)).toEqual([451, 452]); // 快照后落盘事件按编入序回放
+  });
+
+  it("⑱两页淘汰：第 3 页后重复第 1 页→4404（缓存窗口=最近 2 页）", () => {
+    const { eng } = makeEngine(450);
+    const f1 = eng.startSnapshot("r-1")[0] as { snapshotId: string; historyNext: { streamId: string; seq: number } };
+    const f2 = eng.handle({ kind: "page", requestId: "r-2", snapshotId: f1.snapshotId, historyNext: f1.historyNext })[0] as { historyNext: { streamId: string; seq: number } };
+    eng.handle({ kind: "page", requestId: "r-3", snapshotId: f1.snapshotId, historyNext: f2.historyNext }); // 页3→缓存=[p2,p3]
+    const stale = eng.handle({ kind: "page", requestId: "r-4", snapshotId: f1.snapshotId, historyNext: { streamId: "s-1", seq: 1 } })[0] as Record<string, unknown>;
+    expect(stale["code"]).toBe(4404); // 页1 已淘汰且≠期待下页
+    void f2;
   });
 });

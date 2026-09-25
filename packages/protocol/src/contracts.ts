@@ -29,6 +29,9 @@ export const LIMITS = {
   streamLruStreams: 32,
   streamLruEvents: 20_000,
   snapshotTailGraceMs: 60_000,
+  snapshotBufferMax: 1024,
+  liveFramesPerDrain: 16,
+  maxEventsPerLiveFrame: 8,   // 8×singleEventBytes(32k)=256k < frameMaxBytes(262k)，批帧恒在预算内（B04）
   filePattern: /^[\w.-]{1,114}\.jsonl$/,
   requestIdPattern: /^[\w-]{1,64}$/,
   idPattern: /^[\w:.-]{1,128}$/,
@@ -270,6 +273,11 @@ export function estimateFrameBytes(frame: ServerFrame): number {
   try { return byteLength(JSON.stringify(frame)); } catch { return LIMITS.frameMaxBytes + 1; }
 }
 
+/** 单事件字节预估（B04 字节装页用；UTF-8） */
+export function estimateHistoryEventBytes(ev: HistoryEvent): number {
+  try { return byteLength(JSON.stringify(ev)); } catch { return LIMITS.singleEventBytes + 1; }
+}
+
 function byteLength(s: string): number {
   // UTF-8 字节数（无需 Buffer；浏览器安全）
   let n = 0;
@@ -395,9 +403,12 @@ function fileName(obj: Record<string, unknown>): string | FrameCheck {
 function cursorOf(raw: unknown): { ok: true; value: EventCursor } | { ok: false } {
   if (typeof raw !== "object" || raw === null) return { ok: false };
   const o = raw as Record<string, unknown>;
+  // B01：游标对象必须 exact（多余属性拒绝，不静默丢弃）；seq=下一待读位，合法域 ≥1（0 非法）。
+  const keys = Object.keys(o);
+  if (keys.length !== 2 || !("streamId" in o) || !("seq" in o)) return { ok: false };
   const sid = o["streamId"], seq = o["seq"];
   if (typeof sid !== "string" || sid.length === 0 || sid.length > 64) return { ok: false };
-  if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 0) return { ok: false };
+  if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 1) return { ok: false };
   return { ok: true, value: { streamId: sid, seq } };
 }
 

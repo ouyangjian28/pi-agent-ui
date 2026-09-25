@@ -1,31 +1,37 @@
 // ②WS/UI 值级脱敏产线（契约 v1.2 §5.4；真实现）。
 // 零 node 依赖（浏览器安全）。顺序=NFC→剥控制→形态替换→不安全集合→截断→置位。
 // 保证边界（如实声明）：已知敏感形态的确定删除+不可分类内容不外发；不承诺任意自然语言秘密识别。
+//
+// B05（c4 审定）：形态替换按「完整语义单元先行」排序——先处理作为整体出现的秘密
+// （PEM/env/Bearer/AKIA/ssh-rsa/含 userinfo 的 URL），最后才跑泛路径规则。
+// 理由：env 值（API_KEY=abcd/efgh/ijkl）与 ssh 公钥（base64 含 /）会被先行的
+// 路径规则撕碎中段，留下残缺形态既泄漏又破坏后续识别（GPT 实测探针）。
 import type { SanitizedText } from "./contracts.ts";
 
-// --- 形态替换规则（顺序敏感：先长形态后短形态） ---
+// --- 形态替换规则（顺序敏感：完整语义单元 → 泛形态） ---
 const SECRET_REPLACEMENTS: readonly { readonly re: RegExp; readonly out: string }[] = [
-  // PEM 整块（含多行正文）→ 整块遮蔽
-  { re: /-----BEGIN [A-Z ]+KEY-----[\s\S]*?-----END [A-Z ]+KEY-----/g, out: "[secret]" },
-  // 截断 PEM（有 BEGIN 无 END）→ 遮到末尾，正文不泄漏
-  { re: /-----BEGIN [A-Z ]+KEY-----[\s\S]*$/g, out: "[truncated-secret]" },
-  // URL userinfo（先于路径与 URL 整体：避免 //user:pass@host 被路径形态吞掉）
-  { re: /[a-z][a-z0-9+.-]*:\/\/[^\s/@]+@/gi, out: "[userinfo-removed]" },
-  // URL 整体（scheme://…）：保留 scheme，余下全部遮蔽（host+路径均保守；先于 POSIX 路径防 // 被吞）
+  // ① PEM 整块（任意大写标签：PRIVATE KEY/CERTIFICATE/…；含多行正文）→ 整块遮蔽
+  { re: /-----BEGIN [A-Z0-9 ]+-----[\s\S]*?-----END [A-Z0-9 ]+-----/g, out: "[secret]" },
+  // ② 截断 PEM（有 BEGIN 无 END）→ 遮到末尾，正文不泄漏
+  { re: /-----BEGIN [A-Z0-9 ]+-----[\s\S]*$/g, out: "[truncated-secret]" },
+  // ③ env 赋值（完整键值单元；值可为带 / 的路径形态——先于路径规则防撕碎）
+  { re: /[A-Za-z_]\w*=(?:"[^\n"]{4,}"|[\w./-]{8,})/g, out: "[env]" },
+  // ④ Bearer 凭据（整 token）
+  { re: /Bearer\s+\S+/gi, out: "[token]" },
+  // ⑤ AWS AKIA 形态
+  { re: /AKIA[0-9A-Z]{16}/g, out: "[secret]" },
+  // ⑥ ssh 公钥（base64 可含 / 与 + ——先于路径规则防撕碎）
+  { re: /ssh-rsa AAAA[0-9A-Za-z+/=]{32,}/g, out: "[secret]" },
+  // ⑦ 含 userinfo 的 URL：整条遮蔽（带凭据 URL 比裸 URL 更敏感，不保留 scheme）
+  { re: /[a-z][a-z0-9+.-]*:\/\/\S+@\S+/gi, out: "[url]" },
+  // ⑧ URL 整体（scheme://…）：保留 scheme，余下全部遮蔽（host+路径均保守）
   { re: /([a-z][a-z0-9+.-]*):\/\/\S+/gi, out: "$1:[url]" },
-  // POSIX 绝对路径 ≥2 段（段内容=非空白/非引号/非尖括号/非管道；含中文）。
-  // (?<!:) 排除 URL 的 //host 形态；单段如 /secret = 命名性内容，声明允许透出。
+  // ⑨ POSIX 绝对路径 ≥2 段（段内容=非空白/非引号/非尖括号/非管道；含中文）。
+  //    (?<!:) 排除 URL 的 //host 形态；单段如 /secret = 命名性内容，声明允许透出。
   { re: /(?<!:)(?:\/[^\s"'>|\\]+){2,}\/?/g, out: "[path]" },
-  // Windows 盘符绝对路径 / UNC
+  // ⑩ Windows 盘符绝对路径 / UNC
   { re: /[A-Za-z]:\\[^\s"<>|]+/g, out: "[path]" },
   { re: /\\\\[\w.-]+\\[^\s"]+/g, out: "[path]" },
-  // env 赋值
-  { re: /[A-Za-z_]\w*=(?:"[^\n"]{4,}"|[\w./-]{8,})/g, out: "[env]" },
-  // Bearer 凭据
-  { re: /Bearer\s+\S+/gi, out: "[token]" },
-  // AWS AKIA 形态 / ssh 公钥
-  { re: /AKIA[0-9A-Z]{16}/g, out: "[secret]" },
-  { re: /ssh-rsa AAAA[0-9A-Za-z+/=]{32,}/g, out: "[secret]" },
 ];
 
 // --- 不安全字符集（精确 Unicode 集合；存在→整段替换） ---
@@ -73,12 +79,17 @@ export function machineId(id: string): string {
   return `~id-${fnv1a64Hex(s)}`;
 }
 
-/** FNV-1a 64 位 → 16 位 hex（BigInt；浏览器/Node 均支持） */
+/**
+ * FNV-1a 64 位（UTF-8 全字节；BigInt）。
+ * B05（c4 审定）：charCodeAt & 0xff 丢高 8 位（\u0100/\u0200 同哈希整类碰撞）
+ * → 改对 TextEncoder 编码的全部字节折叠。
+ */
 export function fnv1a64Hex(s: string): string {
+  const bytes = new TextEncoder().encode(s);
   const prime = 0x100000001b3n, mask = 0xffffffffffffffffn;
   let h = 0xcbf29ce484222325n;
-  for (let i = 0; i < s.length; i++) {
-    h ^= BigInt(s.charCodeAt(i) & 0xff);
+  for (const b of bytes) {
+    h ^= BigInt(b);
     h = (h * prime) & mask;
   }
   return h.toString(16).padStart(16, "0");

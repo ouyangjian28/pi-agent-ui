@@ -20,7 +20,8 @@ interface IdVector {
   readonly expect:
     | { readonly id: string }
     | { readonly idPattern: string }
-    | { readonly idStableWith: string };
+    | { readonly idStableWith: string }
+    | { readonly idPattern: string; readonly idDistinctWith: string };
 }
 type Vector = TextVector | IdVector;
 
@@ -41,11 +42,15 @@ describe("脱敏向量（人工 golden）", () => {
     it(`id: ${v.name}`, () => {
       const out = machineId(v.input);
       if ("id" in v.expect) expect(out).toBe(v.expect.id);
+      else if ("idDistinctWith" in v.expect) {
+        expect(out).toMatch(new RegExp(v.expect.idPattern));
+        expect(out).not.toBe(machineId(v.expect.idDistinctWith)); // UTF-8 全字节：高位字符互异
+      }
       else if ("idPattern" in v.expect) expect(out).toMatch(new RegExp(v.expect.idPattern));
       else expect(out).toBe(machineId(v.expect.idStableWith)); // 同输入稳定
     });
   }
-  it("向量规模 ≥36（契约冻结门）", () => {
-    expect(raw.vectors.length).toBeGreaterThanOrEqual(36);
+  it("向量规模 ≥40（契约冻结门）", () => {
+    expect(raw.vectors.length).toBeGreaterThanOrEqual(40);
   });
 });
