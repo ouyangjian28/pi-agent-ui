@@ -88,4 +88,17 @@
 
 ## W/J/R/B/D 行（服务端机制面）
 
-全部 🔴 缺测——RPC adapter/journal 耐久/通知执行链未开工（一审指令 5-7 序；范围=服务端端到端机制验收，与上方 W1/W1a/W1b/opId 等【纯逻辑局部】✅不冲突）；本表不虚报。
+端到端验收面全部 🔴 缺测——RPC adapter 真进程集成/journal 真文件系统耐久/通知执行链未开工（r8c 风险序 2-6）；范围=服务端端到端机制验收，与上方纯逻辑局部 ✅ 及下方 adapter 逻辑面不冲突；本表不虚报。
+
+### adapter 切片 1（r8c 风险序 1：派发屏障与耐久接口；纯逻辑+注入耐久端口）
+
+| 编号 | 断言落点 | 状态 |
+| --- | --- | --- |
+| 屏障硬序（enqueue→sending 两 fsync 完成→才发 send 许可；stdin 首字节不早于 sending fsync） | turn-gate.test@硬序（行序断言+resolve 后才许可） | ✅（逻辑面；受控 FakeDurability 端口） |
+| 屏障占用/释放（in-flight 中 submit=busy；settled 行 fsync 成功才 idle 放下一意图） | turn-gate.test@占用/释放 | ✅（逻辑面） |
+| 耐久 fail-closed（enqueue/sending/settled 任一 fsync 失败→closed 保持；journal 态=崩溃矩阵行；reopen 由宿主裁决） | turn-gate.test@三处 fsync 失败 | ✅（逻辑面；变异：去屏障→3 挂、settled fail-open→1 挂） |
+| success 仅受理（onAccepted 不释放屏障；settled 先于 success 可收口；晚到回执 no-op 不开新轮） | turn-gate.test@仅受理+乱序基础+晚到 | ✅（逻辑面） |
+| 轮超时中断呈现（超窗→closed(turn-timeout) 不自动重发；窗口内不裁决；reopen 解锁） | turn-gate.test@轮超时 | ✅（逻辑面；进程级处置+对账归后续切片） |
+| 通用命令占位先行（placeholder fsync→send→result fsync→settle；占位失败不发送+回滚；send 失败=效果未知留置；结果耐久失败=内存占位态；cached 不重发；同键不同参拒+审计） | command-channel.test@7（含同通道重试重新受理断言） | ✅（逻辑面；变异：占位序倒置→3 挂、去回滚→1 挂） |
+
+端到端面（真 spawn+真文件系统+乱序压力+连续派发）待 adapter 后续切片，仍 🔴。
