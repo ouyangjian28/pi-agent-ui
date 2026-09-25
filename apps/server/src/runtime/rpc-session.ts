@@ -85,7 +85,8 @@ export class RpcSession {
   private readonly settledNotified = new Set<string>(); // intentId → 已发完成通知（恰好一次/轮）
   private cmdSeq = 0;
   private intentSeq = 0;
-  private pollTimer: NodeJS.Timeout | null; // dispose 置 null（幂等）
+  private pollTimer: NodeJS.Timeout | null; // dispose 置 null
+  private disposed = false; // dispose 幂等门（双重 dispose 不二次关耐久）
 
   constructor(private readonly opts: RpcSessionOpts) {
     const now = opts.now ?? (() => new Date().toISOString());
@@ -173,6 +174,8 @@ export class RpcSession {
 
   /** 释放本地资源（Y-C2/s4c：巡检定时器+耐久句柄）；进程退役另走 stop()。幂等。 */
   async dispose(): Promise<void> {
+    if (this.disposed) return;
+    this.disposed = true;
     if (this.pollTimer !== null) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
