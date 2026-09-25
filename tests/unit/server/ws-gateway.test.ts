@@ -619,43 +619,32 @@ describe("ws-gateway w1：D 恢复与列表（W1-06/07/11）", () => {
     }
   });
 
-  it("D22 W1-07 断开取消排队计算：挂起 provider 的连接关闭后，新请求不被死连接占槽", async () => {
+  it("D22 W1-07 断开取消排队计算：死连接的排队任务被取消，槽让给活连接（provider 不被死任务调用）", async () => {
     const sem = new ComputeSemaphore(1, 60_000, { setTimeout: (cb, ms) => setTimeout(cb, ms), clearTimeout: (t) => clearTimeout(t as ReturnType<typeof setTimeout>) });
-    let release1: (() => void) | null = null;
-    const gates: Array<() => void> = [];
+    let calls = 0;
+    const resolvers: Array<(v: null) => void> = [];
     const r = await makeRig({
       semaphore: sem,
-      recoveryEvidence: () => new Promise((_res) => { gates.push(() => {}); release1 = () => {}; }),
+      recoveryEvidence: () => new Promise<null>((res) => { calls++; resolvers.push(res); }),
     });
-    void release1;
     try {
       const cA = await authed(r);
-      cA.say({ t: "get-recovery", requestId: "a1", file: "hold.jsonl" }); // 占住唯一槽（挂起）
-      await tick();
+      void cA.say({ t: "get-recovery", requestId: "a1", file: "hold.jsonl" }); // A 执行（挂起）
+      await until(() => calls === 1, 2000);
       const cB = await authed(r);
-      cB.say({ t: "get-recovery", requestId: "b1", file: "hold.jsonl" }); // 排队
+      void cB.say({ t: "get-recovery", requestId: "b1", file: "hold.jsonl" }); // B 排队
+      await until(() => sem.queued === 1, 2000);
+      cB.closedByTransport(); // B 死→其排队任务必须被取消（排队立即归零——不等槽归还）
       await tick();
-      // A 断开：排队任务…B 在排队；A 在执行。A 的任务还在执行（provider 未结算）——取消只影响排队
-      cA.closedByTransport();
-      await tick();
-      // B 的请求随后仍能拿到槽吗？A 的任务未结束（release 未调）→ B 仍在排队——但 B 未被取消（B 连接活着）
-      // 真正要验的：A 死后 B 的新请求不被 A 排队的【旧】请求挤位。此处验 A 关闭即取消其排队任务：
-      const cA2 = await authed(r);
-      cA2.say({ t: "get-recovery", requestId: "a2", file: "hold.jsonl" }); // A2 排队
-      await tick();
-      cA2.closedByTransport(); // A2 断开→其排队任务被取消
-      await tick();
-      // B 仍是队列首（A2 的取消不吞 B 的位）
-      expect(r.gw.connectionCount).toBe(1); // 只剩 B
-      cB.closedByTransport();
-      await tick();
-      expect(r.gw.connectionCount).toBe(0);
-      void gates;
+      expect(sem.queued).toBe(0); // 若未取消：仍排队 1
+      resolvers[0]!(null); // 释放 A 的 provider→A 结束→槽归还
+      await until(() => sem.inFlight === 0 && sem.queued === 0, 2000);
+      await tick(); await tick();
+      expect(calls).toBe(1); // b1 已取消：不再被调用（若未取消→calls=2）
     } finally {
       await r.dispose();
     }
   });
-
   it("D23 W1-08 审计回调抛错不阻断令牌撤销（safeAudit）", async () => {
     // 可变 token 文件：初始含 tok-a/tok-b；reload 后只剩 tok-b→撤销 tok-a
     let tokens = ["tok-a", "tok-b"];
