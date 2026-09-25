@@ -294,6 +294,88 @@ describe("recover（恢复入口受控面）", () => {
     expect(r3.resumable).toEqual([]);
   });
 
+  it("F1i（H1）：身份形态不可完全解释→保守阻断（不误放 unknownEffect/resumable）", () => {
+    const lines: JournalLine[] = [JSON.parse(enq("i-1")), JSON.parse(enq("i-2"))];
+    // ①第二值截断：已匹配身份唯一≠整条归属唯一（旧版正则只收完整字面量→漏掉第二个截断身份→误放 i-1）
+    const probes = [
+      '{\"t\":\"sending\",\"intentId\":\"i-1\",\"intentId\":\"i-2',
+      "\"intent\\u0049d\":\"i-2\"", // ②键名转义变体=intentId
+      '{\"metadata\":{\"intentId\":\"i-1\"},\"intentId\":\"i-2', // ③嵌套身份被当行身份
+      '{\"t\":\"sending\",\"intentId\":\"i-1\",\"note\":\"ab', // ④截断在无关字符串中间（无法证明非身份候选）
+    ];
+    for (const raw of probes) {
+      const r = buildRecoverReport(lines, "s1", { fragments: [{ raw, error: "撕裂尾", partialTail: true }], blocked: false });
+      expect(r.unknownEffect).toEqual([]); // 不臆造归 i-1（H1 探针：旧版此处=["i-1"]）
+      expect(r.unattributableFragments).toHaveLength(1);
+      expect(r.resumeBlocked).toBe(true);
+      expect(r.resumable).toEqual([]); // 旧版此处放出 ["i-2"]
+    }
+  });
+
+  it("F1i2（H1）：受限结构正常面保持——截断在身份字段边界外（数字段）仍唯一归因", () => {
+    const lines: JournalLine[] = [JSON.parse(enq("i-1")), JSON.parse(enq("i-2"))];
+    const raw = '{\"t\":\"sending\",\"intentId\":\"i-1\",\"generation\":1';
+    const r = buildRecoverReport(lines, "s1", { fragments: [{ raw, error: "撕裂尾", partialTail: true }], blocked: false });
+    expect(r.unknownEffect).toEqual(["i-1"]); // 顶层唯一身份自动关联能力保留
+    expect(r.unattributableFragments).toEqual([]);
+    expect(r.resumeBlocked).toBe(false);
+    expect(r.resumable).toEqual(["i-2"]); // 证据已归因→非 i-1 可重发
+  });
+
+  it("F1j（H2）：同一证据的冲突裁决（同 raw 双目标）→整条保留阻断，结果与顺序无关；同目标重复=幂等合并", () => {
+    const lines: JournalLine[] = [JSON.parse(enq("i-1")), JSON.parse(enq("i-2"))];
+    const raw = '{"t":"send';
+    const frag = (r: string) => ({ raw: r, error: "撕裂尾", partialTail: true }) as const;
+    // ①[a→i-1, b→i-2] 同 raw：旧版首条消耗、次条当幂等 no-op→unknown=[i-1]+resumable=[i-2]（顺序依赖）
+    const r1 = buildRecoverReport(lines, "s1", {
+      fragments: [frag(raw)],
+      blocked: false,
+      attributedFragments: [
+        { raw, intentId: "i-1" },
+        { raw, intentId: "i-2" },
+      ],
+    });
+    expect(r1.unknownEffect).toEqual([]); // 冲突裁决都不采纳
+    expect(r1.unattributableFragments).toHaveLength(1);
+    expect(r1.resumable).toEqual([]);
+    // ②反序 [b,a]：结果恒同（H2 探针：旧版=[unknown i-2, resumable i-1]）
+    const r2 = buildRecoverReport(lines, "s1", {
+      fragments: [frag(raw)],
+      blocked: false,
+      attributedFragments: [
+        { raw, intentId: "i-2" },
+        { raw, intentId: "i-1" },
+      ],
+    });
+    expect(r2.unknownEffect).toEqual([]);
+    expect(r2.resumable).toEqual([]);
+    // ③同目标重复三条（幂等合并）+异目标一条（冲突）→仍阻断
+    const r3 = buildRecoverReport(lines, "s1", {
+      fragments: [frag(raw)],
+      blocked: false,
+      attributedFragments: [
+        { raw, intentId: "i-1" },
+        { raw, intentId: "i-1" },
+        { raw, intentId: "i-1" },
+        { raw, intentId: "i-2" },
+      ],
+    });
+    expect(r3.unknownEffect).toEqual([]);
+    expect(r3.resumable).toEqual([]);
+    // ④单目标重复两次（无冲突）→幂等消耗恰一次，正常解锁
+    const r4 = buildRecoverReport(lines, "s1", {
+      fragments: [frag(raw)],
+      blocked: false,
+      attributedFragments: [
+        { raw, intentId: "i-1" },
+        { raw, intentId: "i-1" },
+      ],
+    });
+    expect(r4.unknownEffect).toEqual(["i-1"]);
+    expect(r4.unattributableFragments).toEqual([]);
+    expect(r4.resumable).toEqual(["i-2"]);
+  });
+
   it("F1b：残片 intentId 为 JSON 转义（\\u0069-1=i-1）→字面量解码后正确关联（裸正则提取会漏）", () => {
     const enqueue: JournalLine = {
       t: "enqueue",

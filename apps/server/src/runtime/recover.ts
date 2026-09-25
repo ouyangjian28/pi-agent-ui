@@ -166,10 +166,83 @@ function isUnknownEffect(rec: IntentRecord): boolean {
   return rec.sending || rec.responseTimeoutRecorded === true;
 }
 
-/** 从坏行提取 sending 证据（R1/F1+s4g G1）：**所有坏行都是未裁决证据，默认阻断**——
- *  可靠解析出**唯一** intentId（含 JSON 转义解码）且该 id 在当前重放范围内→可关联（并入 unknown）；
- *  解析不出/多个不同 id/解码失败/id 超出重放范围→不可关联（恢复范围级阻断，不因盘面修复解锁）。
- *  G1 教训：不能把「未看见足够长的 sending 字样」解释成「可以忽略」——更早字节边界的撕裂（{ / "t":"s）同样进证据集。 */
+/** 残片顶层身份扫描结果：none=无顶层 intentId；conflict=存在不可完全解释的身份形态
+ *  （嵌套/转义键/截断字符串/二次键/非字符串值）——保守阻断；unique=唯一完整可解码且无其它候选。 */
+type TopLevelIdScan = { kind: "none" } | { kind: "conflict" } | { kind: "unique"; id: IntentId };
+
+/** s4h H1：受限结构扫描——手写状态机逐字符跟深度（{[ 层级）与字符串字面量（\\ 转义跨步），
+ *  只接受「顶层（depth===1）恰一个 intentId 键且其值为完整可解码非空字符串，且全 raw 无其它
+ *  任何 intentId 形态」的残片：嵌套 intentId 键（含 metadata 等）、键名转义变体、值截断、
+ *  未闭合字符串（任何位置——无法证明它不是身份候选）、第二次顶层键、非字符串值→conflict。
+ *  生产 journal 行只有顶层 intentId 一个身份字段，其余一切形态=结构不可完全解释→保守阻断交人工。 */
+function scanTopLevelIntentId(raw: string): TopLevelIdScan {
+  let depth = 0;
+  let i = 0;
+  let sawTopKey = false;
+  let topValue: IntentId | null = null;
+  const isWs = (c: string): boolean => c === " " || c === "\t" || c === "\r" || c === "\n";
+  /** 从 i（开引号处）读一个完整字符串字面量；返回 [闭引号后一位置, 字面量] 或 null=未闭合。 */
+  const readLiteral = (start: number): readonly [number, string] | null => {
+    let j = start + 1;
+    while (j < raw.length) {
+      if (raw[j] === "\\") { j += 2; continue; }
+      if (raw[j] === '"') return [j + 1, raw.slice(start, j + 1)];
+      j += 1;
+    }
+    return null; // 截断在字符串内（含转义中间）→未解析候选
+  };
+  while (i < raw.length) {
+    const ch = raw[i] as string;
+    if (ch === '"') {
+      const lit = readLiteral(i);
+      if (lit === null) return { kind: "conflict" }; // 未闭合字符串：无法证明不是身份候选
+      const [afterKey, keyLiteral] = lit;
+      let k = afterKey;
+      while (k < raw.length && isWs(raw[k] as string)) k += 1;
+      if (raw[k] === ":") {
+        let keyName: string;
+        try {
+          keyName = JSON.parse(keyLiteral) as string; // 键名转义变体（"intent\u0049d"）自然归一
+        } catch {
+          return { kind: "conflict" }; // 键转义中断
+        }
+        if (keyName === "intentId") {
+          if (depth !== 1 || sawTopKey) return { kind: "conflict" }; // 嵌套键/第二次键
+          sawTopKey = true;
+          let m = k + 1;
+          while (m < raw.length && isWs(raw[m] as string)) m += 1;
+          if (raw[m] !== '"') return { kind: "conflict" }; // 值非字符串（数字/对象/截断）非生产形态
+          const val = readLiteral(m);
+          if (val === null) return { kind: "conflict" }; // 值截断
+          try {
+            const decoded: unknown = JSON.parse(val[1]);
+            if (typeof decoded !== "string" || decoded.length === 0) return { kind: "conflict" };
+            topValue = decoded;
+            i = val[0];
+            continue;
+          } catch {
+            return { kind: "conflict" }; // 值转义中断
+          }
+        }
+        i = afterKey;
+        continue;
+      }
+      i = afterKey; // 值位置字符串（非身份）：继续
+      continue;
+    }
+    if (ch === "{" || ch === "[") { depth += 1; i += 1; continue; }
+    if (ch === "}" || ch === "]") { depth -= 1; i += 1; continue; }
+    i += 1;
+  }
+  if (!sawTopKey || topValue === null) return sawTopKey ? { kind: "conflict" } : { kind: "none" };
+  return { kind: "unique", id: topValue };
+}
+
+/** 从坏行提取 sending 证据（R1/F1+s4g G1+s4h H1）：**所有坏行都是未裁决证据，默认阻断**——
+ *  受限结构扫描（scanTopLevelIntentId）证得顶层唯一身份且在当前重放范围内→可关联（并入 unknown）；
+ *  无身份/结构冲突（嵌套键/转义键/截断值/二次键）/越出重放范围→不可关联（恢复范围级阻断，不因盘面修复解锁）。
+ *  G1 教训：不能把「未看见足够长的 sending 字样」解释成「可以忽略」；
+ *  H1 教训：已匹配身份唯一不等于整条残片归属唯一——正则只收完整字面量会漏掉截断的第二身份/嵌套身份。 */
 function sendingFragmentAttribution(
   bad: readonly BadJournalEntry[],
   knownIds: ReadonlySet<IntentId>,
@@ -177,25 +250,11 @@ function sendingFragmentAttribution(
   const attributed: Array<{ id: IntentId; entry: BadJournalEntry }> = [];
   const unattributable: BadJournalEntry[] = [];
   for (const b of bad) {
-    // 提取全部完整 intentId 字符串字面量再逐个 JSON 解码（"\u0069-1" 转义是合法 JSON 字符串身份——正则裸提取会漏）
-    const literals = b.raw.match(/"intentId"\s*:\s*("(?:[^"\\]|\\.)*")/g) ?? [];
-    const ids = new Set<IntentId>();
-    let decodeOk = true;
-    for (const lit of literals) {
-      try {
-        const decoded: unknown = JSON.parse(lit.slice(lit.indexOf(":") + 1).trim());
-        if (typeof decoded !== "string" || decoded.length === 0) decodeOk = false;
-        else ids.add(decoded);
-      } catch {
-        decodeOk = false; // 字面量非法（截断在转义中间等）→不可关联
-      }
-    }
-    if (decodeOk && ids.size === 1) {
-      const id = [...ids][0] as IntentId;
-      if (knownIds.has(id)) attributed.push({ id, entry: b }); // 唯一且在重放范围内→可关联
-      else unattributable.push(b); // G1：归属超出重放范围（无法验证）→保守阻断，不静默消失
+    const scan = scanTopLevelIntentId(b.raw);
+    if (scan.kind === "unique" && knownIds.has(scan.id)) {
+      attributed.push({ id: scan.id, entry: b }); // 顶层唯一身份且在重放范围内→可关联
     } else {
-      unattributable.push(b); // 无 id/多 id 歧义（含双 intentId 異值）/解码失败→不可关联
+      unattributable.push(b); // none（无身份）/conflict（结构冲突）/越界→保守阻断
     }
   }
   return { attributed, unattributable };
@@ -225,16 +284,25 @@ export function buildRecoverReport(lines: readonly JournalLine[], sessionId: Ses
   const unknown = new Set(intents.filter(isUnknownEffect).map((r) => r.intentId));
   const { attributed, unattributable } = sendingFragmentAttribution(fragments, new Set(map.keys()));
   for (const { id } of attributed) unknown.add(id); // 唯一且在重放范围内的可靠关联→并入 unknown
-  // G2 裁决：宿主显式归因（raw 精确全等+恰一条匹配+目标在重放范围内）→并入 unknownEffect+从证据集移除；
-  // 否则忽略（阻断保留）；重复裁决幂等（已消耗→无匹配→no-op）；多条同文本残片→歧义拒绝（位置不可分，凭文本归因会误合并）。
+  // G2 裁决（s4h H2 整批冲突校验）：同一 raw 的有效目标集>1=冲突裁决——两条都不是重复，整条证据
+  // 保留阻断（消费前预检，两种顺序结果恒定）；相同目标重复合并（幂等）。裁决有效消耗条件：
+  // ①raw 与恰一条残片全等（多条同文本=歧义拒绝）②目标在重放范围内③该 raw 无冲突裁决集。
+  const verdicts = opts.attributedFragments ?? [];
+  const targetsByRaw = new Map<string, Set<IntentId>>();
+  for (const a of verdicts) {
+    if (!map.has(a.intentId)) continue; // 目标不在重放范围→结构性无效（不参与冲突集）
+    const set = targetsByRaw.get(a.raw) ?? new Set<IntentId>();
+    set.add(a.intentId);
+    targetsByRaw.set(a.raw, set);
+  }
   let unattributed = unattributable;
-  for (const a of opts.attributedFragments ?? []) {
-    const matches = fragments.filter((b) => b.raw === a.raw);
-    if (matches.length !== 1) continue; // 不在场（0）或歧义（>1）→不信任，保留阻断
-    if (!map.has(a.intentId)) continue; // G2a：目标不在重放范围内→结构性无效，不解除证据
+  for (const [raw, targets] of targetsByRaw) {
+    if (targets.size > 1) continue; // H2：冲突裁决集→该证据不消耗，保留阻断（与顺序无关）
+    const matches = fragments.filter((b) => b.raw === raw);
+    if (matches.length !== 1) continue; // 不在场（0）或歧义（>1 同文本残片）→不信任，保留阻断
     const hit = unattributed.find((b) => b === matches[0]);
     if (hit === undefined) continue; // 已被先前裁决消耗→幂等 no-op
-    unknown.add(a.intentId);
+    unknown.add([...targets][0] as IntentId);
     unattributed = unattributed.filter((b) => b !== hit);
   }
   const resumeBlocked = diskBlocked || unattributed.length > 0; // 盘面阻断或仍有未裁决证据→授权阻断（两证分离）
