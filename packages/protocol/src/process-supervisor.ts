@@ -6,16 +6,18 @@
 //    退役代次（retired）或非当前登记项的事件一律丢弃+审计；stopping 期仍路由——
 //    SIGTERM 宽限内晚到的 settled 是旧轮最后事实，归协调器结算，不得静默丢。
 // 2) 首字节身份复核（s2d 风险序3①）：协调器返回 launched 后、写 stdin 前，复核
-//    当前代次仍拥有该轮（登记项仍是 current 且未退役、协调器登记仍在同一 key）。
-//    失效不写并返回 {kind:"invalidated", stage:"first-byte"}。这是防御深度——
-//    公开流由协调器 C3（send 返回后登记前复核）拦在前；本复核守护的是
-//    「协调器承诺与监管器进程事实一致」的不变量，公开路径不可达时仍固化。
-// 3) 串行化交接（TECH §136）：retireCurrent = SIGTERM → 宽限 sleep(graceMs) →
-//    SIGKILL → 退出确认截止（exitDeadlineMs 自 retire 起算，F1 预算口径）。
-//    退出确认 → 退役（协调器清登记 + gate 若在飞则 close("generation-retired")）→
+//    当前代次仍拥有该轮：登记项仍是 current 且未退役、协调器登记仍在同一 key、
+//    Gate 许可仍是本轮 in-flight。失效不写并返回 {kind:"invalidated", stage:"first-byte"}。
+//    Gate 许可项可经排队微任务到达（协调器登记后、本复核前的窗口；s3 审读探针复现）。
+// 3) 串行化交接（TECH §136）：retireCurrent = SIGTERM → 宽限 sleep →
+//    SIGKILL → 退出确认截止（exitDeadlineMs 自 retire 起算的绝对截止，F1 预算口径：
+//    宽限被钳到预算内；每段等待只睡剩余量，先醒/晚醒不重置预算）。
+//    退出确认 → 退役（协调器清登记 + gate 三活相态 dispatching/in-flight/settling 之一则
+//    close("generation-retired")，旧 submit/settled 续体经 epoch 失效：不 send 不登记/held 保留）→
 //    idle → spawnNext 才可用；stopping 期 spawnNext 拒绝。
 //    截止到期 = 本次接管失败：保持 stopping（不裁决进程死活），晚到 exit 自动
 //    收口（同条退役手续）后回 idle，宿主可重试 spawn。
+//    退役幂等：onExit 与 retireCurrent 续体双路径只生效一次，旧续体不得清掉新代次登记。
 // 4) 意外退出：running 中 exit → 代次退役 + gate 关闭 + 回 idle；
 //    屏障解除归宿主（reopen 后新轮可跑），监管器不自动 reopen。
 // 5) 背压窗口：writeStdin 的 await 期间发生换代/退出 → 续体只及旧 handle。
@@ -67,12 +69,15 @@ export interface SupervisorDeps {
   readonly gate: SupervisorGatePort;
   /** 进程事件路由（已按代次过滤）：接线层在此映射 RPC 回执/settled/pi 事件到协调器入口。 */
   onProcessEvent?(ev: unknown, generation: number): void;
-  onStderr?(text: string): void;
+  /** stderr 诊断（已按代次过滤，非当前/退役代次不转发）。 */
+  onStderr?(text: string, generation: number): void;
   now(): string;
   sleep(ms: number): Promise<void>;
-  /** SIGTERM 宽限（默认 2s）。 */
+  /** 单调毫秒时钟（预算口径；缺省 Date.now()）。 */
+  nowMs?(): number;
+  /** SIGTERM 宽限（默认 2s，被总预算钳位）。 */
   readonly graceMs?: number;
-  /** 退出确认总预算（默认 10s，F1 口径，自 retire 起算）。 */
+  /** 退出确认总预算（默认 10s，F1 口径，自 retire 起算的绝对截止）。 */
   readonly exitDeadlineMs?: number;
   audit?(line: string): void;
 }
@@ -81,6 +86,7 @@ export type SupervisorPhase = "idle" | "running" | "stopping";
 
 export type SpawnOutcome =
   | { readonly kind: "spawned"; readonly generation: number }
+  | { readonly kind: "spawn-exited"; readonly generation: number; readonly exit: Readonly<{ code: number | null; signal: string | null }> }
   | { readonly kind: "rejected"; readonly reason: "not-idle" }
   | { readonly kind: "spawn-failed"; readonly error: unknown };
 
@@ -147,7 +153,13 @@ export class ProcessSupervisor {
     try {
       handle = this.opts.host.spawn(args, {
         onEvent: (ev) => this.routeEvent(entry, ev),
-        onStderr: (t) => this.opts.onStderr?.(t),
+        onStderr: (t) => {
+          if (entry.retired || entry !== this.current) {
+            this.audit(`process-stderr-dropped generation=${entry.generation}`);
+            return;
+          }
+          this.opts.onStderr?.(t, entry.generation);
+        },
         onExit: (code, signal) => this.onExit(entry, code, signal),
       });
     } catch (error) {
@@ -158,6 +170,11 @@ export class ProcessSupervisor {
       return { kind: "spawn-failed", error };
     }
     entry.handle = handle;
+    if (entry.exit !== null) {
+      // spawn 内同步退出：onExit 已按意外退出收口（退役+回 idle）；创建事实成立但当前不可用，宿主可重试
+      this.audit(`process-spawn-exited-sync generation=${entry.generation}`);
+      return { kind: "spawn-exited", generation: entry.generation, exit: entry.exit };
+    }
     this.audit(`process-spawned generation=${entry.generation}`);
     return { kind: "spawned", generation: entry.generation };
   }
@@ -174,13 +191,18 @@ export class ProcessSupervisor {
     this.phase = "stopping";
     this.pendingRetire = true;
     const graceMs = this.opts.graceMs ?? 2_000;
+    // 总预算=自 retire 起算的绝对截止：宽限被钳到预算内；每段等待只睡剩余量，
+    // 先醒/晚醒不重置预算（remainMs 已过期只探查 1ms）
     const deadlineMs = Math.max(this.opts.exitDeadlineMs ?? 10_000, 1);
+    const startMs = this.nowMs();
+    const graceEnd = startMs + Math.min(graceMs, deadlineMs); // 宽限被总预算钳位
+    const deadlineEnd = startMs + deadlineMs;
     try {
       this.stopSignal(entry, "SIGTERM");
-      let exit = await this.raceExit(entry, graceMs);
+      let exit = await this.raceExit(entry, this.remainMs(graceEnd));
       if (exit === null) {
         this.stopSignal(entry, "SIGKILL");
-        exit = await this.raceExit(entry, Math.max(deadlineMs - graceMs, 1));
+        exit = await this.raceExit(entry, this.remainMs(deadlineEnd));
         // sleep 先醒不等于进程未死：最后一刻的 exit 仍算确认
         if (exit === null && entry.exit !== null) exit = entry.exit;
       }
@@ -188,8 +210,9 @@ export class ProcessSupervisor {
         this.audit(`process-retire-deadline-exceeded generation=${entry.generation}`);
         return { kind: "deadline-exceeded" };
       }
+      // 退役幂等：onExit 可能已先收口（含已允许新 spawn）——旧续体不覆盖新代次
       this.finalizeRetire(entry, "handover");
-      this.toIdle();
+      this.toIdle(entry);
       return { kind: "confirmed", exit };
     } finally {
       this.pendingRetire = false;
@@ -213,18 +236,22 @@ export class ProcessSupervisor {
       commandId,
     );
     if (launched.kind !== "launched") return launched;
-    // 首字节身份复核：launched→stdin 首字节之间的换代/退出窗口（防御深度）
+    // 首字节身份复核：launched→stdin 首字节之间的窗口。
+    // Gate 许可项=协调器登记后、本复核前可达（排队微任务窗口，审读探针复现）。
     const reg = this.opts.coordinator.getState().command;
+    const gs = this.opts.gate.getState();
     if (
       this.phase !== "running" ||
       this.current !== entry ||
       entry.retired ||
       entry.handle === null ||
       reg === null ||
-      !keyEqual(reg.key, launched.key)
+      !keyEqual(reg.key, launched.key) ||
+      gs.kind !== "in-flight" ||
+      gs.intentId !== launched.key.intentId
     ) {
       this.audit(
-        `stdin-send-invalidated intentId=${launched.key.intentId} commandId=${launched.key.commandId} generation=${launched.key.generation}`,
+        `stdin-send-invalidated intentId=${launched.key.intentId} commandId=${launched.key.commandId} generation=${launched.key.generation} gate=${gs.kind}`,
       );
       return { kind: "invalidated", stage: "first-byte" };
     }
@@ -290,33 +317,53 @@ export class ProcessSupervisor {
       // 交接中退出：按同一退役手续收口（含 deadline-exceeded 后的晚到收口）
       const late = !this.pendingRetire;
       this.finalizeRetire(entry, late ? "handover-late" : "handover");
-      this.toIdle();
+      this.toIdle(entry);
       this.audit(`process-retired${late ? "-late" : ""} generation=${entry.generation}`);
       return;
     }
     // 意外退出：代次退役+屏障关闭；解除归宿主 reopen
     this.finalizeRetire(entry, "unexpected-exit");
-    this.toIdle();
+    this.toIdle(entry);
     this.audit(`process-retired generation=${entry.generation}`);
   }
 
-  private finalizeRetire(entry: GenEntry, reason: string): void {
+  /** 幂等退役：双路径（onExit/retireCurrent 续体）只生效一次；返回是否本次生效。 */
+  private finalizeRetire(entry: GenEntry, reason: string): boolean {
+    if (entry.retired) return false;
     entry.retired = true;
     const cleared = this.opts.coordinator.onGenerationRetired(entry.generation);
     const gs = this.opts.gate.getState();
-    const gateClosed = gs.kind === "in-flight";
+    // 三活相态都关：dispatching（旧 submit 续体→invalidated：不 send 不登记）、
+    // in-flight、settling（旧 settled 续体→invalidated：held 保留不写 idle）
+    const gateClosed = gs.kind === "dispatching" || gs.kind === "in-flight" || gs.kind === "settling";
     if (gateClosed) this.opts.gate.close("generation-retired");
     this.audit(
       `generation-retired reason=${reason} generation=${entry.generation} clearedCommands=${cleared.clearedCommands} clearedEvents=${cleared.clearedEvents} gateClosed=${gateClosed}`,
     );
+    return true;
   }
 
-  private toIdle(): void {
+  /** 条件回 idle：仅当登记项仍是 current（旧续体不得清掉新代次）。 */
+  private toIdle(entry: GenEntry): void {
+    if (this.current !== entry) return;
     this.current = null;
     this.phase = "idle";
   }
 
+  private nowMs(): number {
+    return this.opts.nowMs ? this.opts.nowMs() : Date.now();
+  }
+
+  /** 剩余预算（绝对截止→剩余毫秒）；已过期只探查 1ms，不重置预算。 */
+  private remainMs(endAbsMs: number): number {
+    return Math.max(endAbsMs - this.nowMs(), 1);
+  }
+
   private audit(line: string): void {
-    this.opts.audit?.(`${this.opts.now()} process-supervisor ${line}`);
+    try {
+      this.opts.audit?.(`${this.opts.now()} process-supervisor ${line}`);
+    } catch {
+      // 审计钩子异常不改变机制行为（与 command-channel 同口径）
+    }
   }
 }

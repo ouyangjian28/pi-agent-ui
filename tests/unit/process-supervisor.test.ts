@@ -1,9 +1,12 @@
 // 进程代次监管器测试（切片 3：进程代次与交接隔离；TECH §136/§169④/§4 语义权威）
-// 反例集=s3 设计 12 条：正常序/首字节窗口失效（受控）/背压窗口换代零串扰/旧代次事件丢弃/
-// stopping 期仍路由/串行化交接/宽限升级 SIGKILL/截止失败+晚到收口/意外退出/retire 前置/ spawn 失败回滚/重复 exit 幂等。
-// 纯逻辑注入：FakeProcessHost（受控进程）+FakeSleep（受控宽限）+真协调器/网关+FakeDurability。
+// 反例集=s3 设计 12 条（正常序/首字节窗口失效（受控）/背压窗口换代零串扰/旧代次事件丢弃/
+// stopping 期仍路由/串行化交接/宽限升级 SIGKILL/截止失败+晚到收口/意外退出/retire 前置/
+// spawn 失败回滚/重复 exit 幂等）+s3 审读修复组（S3-01 双收口/S3-02 dispatching/settling 窗口/
+// S3-03 Gate 许可/S3-04 预算截断+晚醒不重置/黄项：stderr 过滤/spawn 同步退出/审计隔离/写拒绝）。
+// 纯逻辑注入：FakeProcessHost（受控进程）+FakeSleep（虚拟时钟：advance 推进+requests 记录预算）
+// +真协调器/网关+FakeDurability。
 import { describe, expect, it } from "vitest";
-import type { JournalLine, ProcessSpawnHandlers, SupervisorCoordinatorPort } from "@pi-agent-ui/protocol";
+import type { JournalLine, LaunchOutcome, ProcessSpawnHandlers, SupervisorCoordinatorPort, TrackedCommand } from "@pi-agent-ui/protocol";
 import { DispatchCoordinator, ProcessSupervisor, TurnGate } from "@pi-agent-ui/protocol";
 import type { TurnIntentInput } from "@pi-agent-ui/protocol";
 
@@ -62,26 +65,29 @@ interface FakeProc {
   readonly handlers: ProcessSpawnHandlers;
   readonly stopSignals: string[];
   readonly writes: string[];
-  readonly writeResolvers: Array<() => void>;
+  readonly writeWaiters: Array<{ resolve: () => void; reject: (e: unknown) => void }>;
 }
 
 class FakeProcessHost {
   readonly procs: FakeProc[] = [];
   spawnFail = false;
   holdWrites = false;
+  spawnSyncExit: { code: number | null; signal: string | null } | null = null;
 
   spawn(args: readonly string[], handlers: ProcessSpawnHandlers): { readonly id: string } {
     if (this.spawnFail) throw new Error("spawn-enofile");
     void args;
     const handle = { id: `p${this.procs.length + 1}` };
-    this.procs.push({ handle, handlers, stopSignals: [], writes: [], writeResolvers: [] });
+    const p: FakeProc = { handle, handlers, stopSignals: [], writes: [], writeWaiters: [] };
+    this.procs.push(p);
+    if (this.spawnSyncExit) handlers.onExit(this.spawnSyncExit.code, this.spawnSyncExit.signal); // spawn 内同步退出
     return handle;
   }
 
   async writeStdin(h: { readonly id: string }, text: string): Promise<void> {
     const p = this.proc(h);
     p.writes.push(text);
-    if (this.holdWrites) await new Promise<void>((r) => p.writeResolvers.push(r));
+    if (this.holdWrites) await new Promise<void>((resolve, reject) => p.writeWaiters.push({ resolve, reject }));
   }
 
   stop(h: { readonly id: string }, signal: "SIGTERM" | "SIGKILL"): void {
@@ -98,30 +104,47 @@ class FakeProcessHost {
     p.handlers.onEvent(ev);
   }
 
+  deliverStderr(p: FakeProc, text: string): void {
+    p.handlers.onStderr(text);
+  }
+
   deliverExit(p: FakeProc, code: number | null, signal: string | null): void {
     p.handlers.onExit(code, signal);
   }
 
   releaseWrites(p: FakeProc): void {
-    for (const r of p.writeResolvers.splice(0)) r();
+    for (const w of p.writeWaiters.splice(0)) w.resolve();
+  }
+
+  rejectWrites(p: FakeProc, err: unknown): void {
+    for (const w of p.writeWaiters.splice(0)) w.reject(err);
   }
 }
 
-/** 受控睡眠：sleep 挂起直到 wake()（一次醒掉当前全部挂起，串行用法够用）。 */
+/** 受控睡眠+虚拟单调时钟：advance(to) 推进时钟并唤醒到期 sleep；requests 记录每次请求量（预算断言用）。 */
 class FakeSleep {
-  private pending: Array<() => void> = [];
+  readonly requests: number[] = [];
+  private pending: Array<{ fireAt: number; resolve: () => void }> = [];
+  private ms = 0;
 
-  sleep(_ms: number): Promise<void> {
-    void _ms;
+  sleep(ms: number): Promise<void> {
+    this.requests.push(ms);
     return new Promise<void>((resolve) => {
-      this.pending.push(resolve);
+      this.pending.push({ fireAt: this.ms + ms, resolve });
     });
   }
 
-  async wake(): Promise<void> {
-    const ps = this.pending.splice(0);
-    for (const p of ps) p();
-    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+  advance(to: number): void {
+    this.ms = Math.max(this.ms, to);
+    const due = this.pending.filter((p) => p.fireAt <= this.ms);
+    for (const p of due) {
+      this.pending.splice(this.pending.indexOf(p), 1);
+      p.resolve();
+    }
+  }
+
+  now(): number {
+    return this.ms;
   }
 }
 
@@ -132,6 +155,15 @@ const intent = (id: string): Omit<TurnIntentInput, "generation"> => ({
   matchKey: { textHash: "ab12cd34", attachmentIdentity: "", ordinal: 0 },
   payload: { kind: "prompt", rawText: "你好", attachments: [], sentAt: T0 },
 });
+
+interface HarnessOpts {
+  graceMs?: number;
+  exitDeadlineMs?: number;
+  onStderr?: (text: string, generation: number) => void;
+  auditThrows?: boolean;
+  /** 包装协调器（制造登记后/首字节前的排队微任务窗口）。 */
+  wrapCoord?: (c: DispatchCoordinator, gate: TurnGate) => SupervisorCoordinatorPort;
+}
 
 interface Harness {
   sup: ProcessSupervisor;
@@ -144,11 +176,15 @@ interface Harness {
   routed: Array<{ ev: unknown; generation: number }>;
 }
 
-function makeHarness(): Harness {
+function makeHarness(opts: HarnessOpts = {}): Harness {
   const dur = new FakeDurability();
   const audits: string[] = [];
   const routed: Array<{ ev: unknown; generation: number }> = [];
   const drained: unknown[][] = [];
+  const auditFn = (l: string): void => {
+    if (opts.auditThrows) throw new Error("audit-down");
+    audits.push(l);
+  };
   const gate = new TurnGate({ durability: dur, now: () => T0, turnTimeoutMs: 30 * 60 * 1000 });
   const coord = new DispatchCoordinator({
     gate,
@@ -156,21 +192,23 @@ function makeHarness(): Harness {
     now: () => T0,
     responseTimeoutMs: 60_000,
     maxBufferedEvents: 4,
-    audit: (l) => audits.push(l),
+    audit: auditFn,
     onBufferDrain: (evs) => drained.push([...evs]),
   });
   const host = new FakeProcessHost();
   const sleep = new FakeSleep();
   const sup = new ProcessSupervisor({
     host,
-    coordinator: coord,
+    coordinator: opts.wrapCoord ? opts.wrapCoord(coord, gate) : coord,
     gate,
     onProcessEvent: (ev, generation) => routed.push({ ev, generation }),
+    ...(opts.onStderr ? { onStderr: opts.onStderr } : {}),
     now: () => T0,
     sleep: (ms) => sleep.sleep(ms),
-    graceMs: 2_000,
-    exitDeadlineMs: 5_000,
-    audit: (l) => audits.push(l),
+    nowMs: () => sleep.now(),
+    graceMs: opts.graceMs ?? 2_000,
+    exitDeadlineMs: opts.exitDeadlineMs ?? 5_000,
+    audit: auditFn,
   });
   return { sup, coord, gate, dur, host, sleep, audits, routed };
 }
@@ -211,18 +249,18 @@ describe("进程代次监管器（ProcessSupervisor，切片3）", () => {
     const gate = new TurnGate({ durability: dur, now: () => T0, turnTimeoutMs: 30 * 60 * 1000 });
     const retiredGens: number[] = [];
     // 受控替身：submitTurn 挂起，等世界变化后再返 launched（制造 launched→首字节窗口）
-    let resolveSubmit: ((r: { kind: "launched"; key: { intentId: string; commandId: number; generation: number } }) => void) | null = null;
+    let resolveSubmit: ((r: LaunchOutcome) => void) | null = null;
     const stub: SupervisorCoordinatorPort = {
       submitTurn: () =>
-        new Promise((resolve) => {
+        new Promise<LaunchOutcome>((resolve) => {
           resolveSubmit = resolve;
-        }) as never,
+        }),
       onGenerationRetired: (g) => {
         retiredGens.push(g);
         return { clearedCommands: 1, clearedEvents: 0 };
       },
       getState: () => ({
-        command: { key: { intentId: "i-1", commandId: 101, generation: 1 } },
+        command: { key: { intentId: "i-1", commandId: 101, generation: 1 } } as TrackedCommand,
       }),
     };
     const sup = new ProcessSupervisor({
@@ -319,7 +357,7 @@ describe("进程代次监管器（ProcessSupervisor，切片3）", () => {
     h.sup.spawnNext([]);
     const pr = h.sup.retireCurrent();
     await until(() => h.host.proc(h.host.procs[0]!.handle).stopSignals.includes("SIGTERM"), "SIGTERM");
-    await h.sleep.wake(); // 宽限过，无 exit
+    h.sleep.advance(2_000); // 宽限到点，无 exit
     await until(() => h.host.proc(h.host.procs[0]!.handle).stopSignals.includes("SIGKILL"), "SIGKILL");
     h.host.deliverExit(h.host.procs[0]!, null, "SIGKILL");
     expect(await pr).toEqual({ kind: "confirmed", exit: { code: null, signal: "SIGKILL" } });
@@ -332,9 +370,9 @@ describe("进程代次监管器（ProcessSupervisor，切片3）", () => {
     await h.sup.submitTurn(intent("i-1"), 101, "a\n");
     const pr = h.sup.retireCurrent();
     await until(() => h.host.proc(h.host.procs[0]!.handle).stopSignals.includes("SIGTERM"), "SIGTERM");
-    await h.sleep.wake(); // 宽限过
+    h.sleep.advance(2_000); // 宽限到点
     await until(() => h.host.proc(h.host.procs[0]!.handle).stopSignals.includes("SIGKILL"), "SIGKILL");
-    await h.sleep.wake(); // 截止过
+    h.sleep.advance(5_000); // 总截止到点
     expect(await pr).toEqual({ kind: "deadline-exceeded" });
     expect(h.sup.getState().phase).toBe("stopping");
     expect(h.sup.spawnNext([])).toEqual({ kind: "rejected", reason: "not-idle" });
@@ -396,5 +434,161 @@ describe("进程代次监管器（ProcessSupervisor，切片3）", () => {
     expect(h.audits.filter((l) => l.includes("process-exit-duplicate generation=1")).length).toBe(1);
     expect(h.audits.filter((l) => l.includes("generation-retired reason=")).length).toBe(1);
     expect(h.dur.calls).toBeGreaterThan(0);
+  });
+
+  it("S3-01 双收口不覆盖新代次：宽限内 onExit 先收口→B 抢先接管→retire 续体幂等不清 B", async () => {
+    const h = makeHarness();
+    h.sup.spawnNext([]);
+    await h.sup.submitTurn(intent("i-1"), 101, "a\n");
+    const pr = h.sup.retireCurrent();
+    await until(() => h.host.proc(h.host.procs[0]!.handle).stopSignals.includes("SIGTERM"), "SIGTERM");
+    h.host.deliverExit(h.host.procs[0]!, 0, null); // 宽限内退出：onExit 立即收口→idle
+    expect(h.sup.getState().phase).toBe("idle");
+    expect(h.sup.spawnNext([])).toEqual({ kind: "spawned", generation: 2 }); // B 抢先接管
+    expect(await pr).toEqual({ kind: "confirmed", exit: { code: 0, signal: null } }); // 旧续体醒
+    expect(h.sup.getState()).toEqual({ phase: "running", generation: 2, retired: false });
+    expect(h.audits.filter((l) => l.includes("generation-retired reason=")).length).toBe(1); // 恰一次退役
+    h.host.deliverEvent(h.host.procs[1]!, { type: "ev-b" });
+    expect(h.routed.at(-1)).toEqual({ ev: { type: "ev-b" }, generation: 2 }); // B 存活且可路由
+  });
+
+  it("S3-02a dispatching 窗口：硬序 fsync 挂起中意外退出→gate 关闭→旧 submit 续体 invalidated 不写；新代次可跑", async () => {
+    const h = makeHarness();
+    h.dur.holdAt = 1; // intent 行 fsync 挂起（gate=dispatching）
+    h.sup.spawnNext([]);
+    const pa = h.sup.submitTurn(intent("i-1"), 101, "a\n");
+    await until(() => h.dur.isHeld(), "enqueue held");
+    expect(h.gate.getState().kind).toBe("dispatching");
+    h.host.deliverExit(h.host.procs[0]!, 1, "SIGKILL");
+    expect(h.gate.getState()).toEqual({ kind: "closed", reason: "generation-retired" }); // 不再漏 dispatching
+    h.dur.releaseHold(0);
+    expect((await pa).kind).toBe("invalidated"); // 旧 submit 续体：不 send 不登记
+    expect(h.host.proc(h.host.procs[0]!.handle).writes).toEqual([]);
+    expect(h.coord.getState().command).toBeNull();
+    h.gate.reopen();
+    expect(h.sup.spawnNext([])).toEqual({ kind: "spawned", generation: 2 });
+    expect((await h.sup.submitTurn(intent("i-2"), 102, "b\n")).kind).toBe("launched");
+    expect(h.host.proc(h.host.procs[1]!.handle).writes).toEqual(["b\n"]);
+  });
+
+  it("S3-02b settling 窗口：终态行 fsync 挂起中意外退出→gate 关闭→旧 settled 续体失效 held；B 登记不受污染", async () => {
+    const h = makeHarness();
+    h.sup.spawnNext([]);
+    expect((await h.sup.submitTurn(intent("i-1"), 101, "a\n")).kind).toBe("launched");
+    await h.coord.onRpcResponse(101, 1, true); // in-flight accepted
+    h.dur.holdAt = 3; // 第 3 次 append=settled 行
+    const pset = h.coord.onSettledEvent({ generation: 1, commandId: 101 });
+    await until(() => h.dur.isHeld(), "settled append held");
+    expect(h.gate.getState().kind).toBe("settling");
+    h.host.deliverExit(h.host.procs[0]!, 0, null);
+    expect(h.gate.getState()).toEqual({ kind: "closed", reason: "generation-retired" }); // 不再漏 settling
+    h.gate.reopen();
+    expect(h.sup.spawnNext([])).toEqual({ kind: "spawned", generation: 2 });
+    expect((await h.sup.submitTurn(intent("i-2"), 102, "b\n")).kind).toBe("launched");
+    h.dur.releaseHold(0); // 旧 settled 续体醒来
+    expect(await pset).toMatchObject({ kind: "invalidated", key: { intentId: "i-1", commandId: 101, generation: 1 } }); // 旧续体失效
+    expect(h.coord.getState().command?.key.intentId).toBe("i-2"); // B 登记未被旧续体污染
+    expect(h.gate.getState()).toMatchObject({ kind: "in-flight", intentId: "i-2" }); // 屏障仍在 B 轮
+  });
+
+  it("S3-03 Gate 许可复核：协调器登记后首字节前 gate 被关（排队微任务窗口）→invalidated 不写", async () => {
+    const h = makeHarness({
+      wrapCoord: (c, g) => ({
+        submitTurn: (i, cid) =>
+          c.submitTurn(i, cid).then((r) => {
+            if (r.kind === "launched") g.close("manual"); // 同一 promise 链上先于监管器续体执行
+            return r;
+          }),
+        onGenerationRetired: (gen) => c.onGenerationRetired(gen),
+        getState: () => c.getState(),
+        abandonHeld: (reason) => c.abandonHeld(reason),
+      }),
+    });
+    h.sup.spawnNext([]);
+    const pa = h.sup.submitTurn(intent("i-1"), 101, "a\n");
+    expect(await pa).toEqual({ kind: "invalidated", stage: "first-byte" });
+    expect(h.host.proc(h.host.procs[0]!.handle).writes).toEqual([]);
+    expect(h.audits.some((l) => l.includes("stdin-send-invalidated") && l.includes("gate=closed"))).toBe(true);
+  });
+
+  it("S3-04a 预算截断：grace>deadline 时宽限被钳到总预算，第二段只探查 1ms（requests=[1000,1]）", async () => {
+    const h = makeHarness({ graceMs: 2_000, exitDeadlineMs: 1_000 });
+    h.sup.spawnNext([]);
+    const pr = h.sup.retireCurrent();
+    await until(() => h.host.proc(h.host.procs[0]!.handle).stopSignals.includes("SIGTERM"), "SIGTERM");
+    h.sleep.advance(1_000); // 截断后的宽限到点（绝对时刻）
+    await until(() => h.host.proc(h.host.procs[0]!.handle).stopSignals.includes("SIGKILL"), "SIGKILL");
+    h.sleep.advance(1_001); // 第二段探查 1ms 到点
+    expect(await pr).toEqual({ kind: "deadline-exceeded" });
+    expect(h.sleep.requests).toEqual([1_000, 1]); // 不睡满 grace，不重置预算
+  });
+
+  it("S3-04b 晚醒不重置预算：宽限期睡过头（超量推进）→第二段只睡剩余量 1ms", async () => {
+    const h = makeHarness(); // grace 2000 / deadline 5000
+    h.sup.spawnNext([]);
+    const pr = h.sup.retireCurrent();
+    await until(() => h.host.proc(h.host.procs[0]!.handle).stopSignals.includes("SIGTERM"), "SIGTERM");
+    h.sleep.advance(5_000); // 计时器晚醒：一次跨过总预算终点（绝对时刻）
+    await until(() => h.host.proc(h.host.procs[0]!.handle).stopSignals.includes("SIGKILL"), "SIGKILL");
+    h.sleep.advance(5_001); // 第二段探查 1ms 到点
+    expect(await pr).toEqual({ kind: "deadline-exceeded" });
+    expect(h.sleep.requests).toEqual([2_000, 1]); // 第二段=max(5000-5000,1)=1，非全新 3000
+  });
+
+  it("stderr 按代次过滤：当前带 generation 转发；退役/非当前丢弃+审计", async () => {
+    const stderr: Array<[string, number]> = [];
+    const h = makeHarness({ onStderr: (t, g) => stderr.push([t, g]) });
+    h.sup.spawnNext([]);
+    h.host.deliverStderr(h.host.procs[0]!, "boom");
+    h.host.deliverExit(h.host.procs[0]!, 0, null);
+    h.gate.reopen();
+    expect(h.sup.spawnNext([])).toEqual({ kind: "spawned", generation: 2 });
+    h.host.deliverStderr(h.host.procs[0]!, "stale"); // 旧代次
+    h.host.deliverStderr(h.host.procs[1]!, "ok");
+    expect(stderr).toEqual([
+      ["boom", 1],
+      ["ok", 2],
+    ]);
+    expect(h.audits.some((l) => l.includes("process-stderr-dropped generation=1"))).toBe(true);
+  });
+
+  it("spawn 同步退出：onExit 在 spawn 内冒出→spawn-exited 结果+已收口 idle+恰一次退役，可重试", () => {
+    const h = makeHarness();
+    h.host.spawnSyncExit = { code: 0, signal: null };
+    expect(h.sup.spawnNext([])).toEqual({ kind: "spawn-exited", generation: 1, exit: { code: 0, signal: null } });
+    expect(h.sup.getState()).toEqual({ phase: "idle", generation: null, retired: false });
+    expect(h.audits.some((l) => l.includes("process-spawn-exited-sync generation=1"))).toBe(true);
+    expect(h.audits.filter((l) => l.includes("generation-retired reason=")).length).toBe(1);
+    h.host.spawnSyncExit = null;
+    expect(h.sup.spawnNext([])).toEqual({ kind: "spawned", generation: 2 });
+  });
+
+  it("审计钩子抛错被隔离：机制不受影响（submit/retire 照常完成）", async () => {
+    const h = makeHarness({ auditThrows: true });
+    h.sup.spawnNext([]);
+    expect((await h.sup.submitTurn(intent("i-1"), 101, "a\n")).kind).toBe("launched"); // 含多条审计
+    const pr = h.sup.retireCurrent();
+    await until(() => h.host.proc(h.host.procs[0]!.handle).stopSignals.includes("SIGTERM"), "SIGTERM");
+    h.host.deliverExit(h.host.procs[0]!, 0, null);
+    expect(await pr).toEqual({ kind: "confirmed", exit: { code: 0, signal: null } });
+    expect(h.sup.getState().phase).toBe("idle");
+  });
+
+  it("写拒绝透传且不毁监管器：EPIPE→submitTurn 拒绝→换代→新轮正常", async () => {
+    const h = makeHarness();
+    h.host.holdWrites = true;
+    h.sup.spawnNext([]);
+    const pa = h.sup.submitTurn(intent("i-1"), 101, "a\n");
+    await until(() => h.host.proc(h.host.procs[0]!.handle).writes.length === 1, "A write started");
+    h.host.rejectWrites(h.host.procs[0]!, new Error("EPIPE"));
+    await expect(pa).rejects.toThrow("EPIPE");
+    const pr = h.sup.retireCurrent();
+    await until(() => h.host.proc(h.host.procs[0]!.handle).stopSignals.includes("SIGTERM"), "SIGTERM");
+    h.host.deliverExit(h.host.procs[0]!, 0, null);
+    expect((await pr).kind).toBe("confirmed");
+    h.gate.reopen();
+    h.host.holdWrites = false;
+    expect(h.sup.spawnNext([])).toEqual({ kind: "spawned", generation: 2 });
+    expect((await h.sup.submitTurn(intent("i-2"), 102, "b\n")).kind).toBe("launched");
   });
 });
