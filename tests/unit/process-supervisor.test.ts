@@ -163,6 +163,10 @@ interface HarnessOpts {
   auditThrows?: boolean;
   /** 包装协调器（制造登记后/首字节前的排队微任务窗口）。 */
   wrapCoord?: (c: DispatchCoordinator, gate: TurnGate) => SupervisorCoordinatorPort;
+  /** 覆盖预算时钟（S3B-01：非单调/NaN 替身）。 */
+  nowMs?: () => number;
+  /** 用默认时钟（不注入 nowMs，S3B-01 默认分支）。 */
+  useDefaultNowMs?: boolean;
 }
 
 interface Harness {
@@ -205,7 +209,7 @@ function makeHarness(opts: HarnessOpts = {}): Harness {
     ...(opts.onStderr ? { onStderr: opts.onStderr } : {}),
     now: () => T0,
     sleep: (ms) => sleep.sleep(ms),
-    nowMs: () => sleep.now(),
+    ...(opts.nowMs ? { nowMs: opts.nowMs } : opts.useDefaultNowMs ? {} : { nowMs: () => sleep.now() }),
     graceMs: opts.graceMs ?? 2_000,
     exitDeadlineMs: opts.exitDeadlineMs ?? 5_000,
     audit: auditFn,
@@ -511,28 +515,102 @@ describe("进程代次监管器（ProcessSupervisor，切片3）", () => {
     expect(h.audits.some((l) => l.includes("stdin-send-invalidated") && l.includes("gate=closed"))).toBe(true);
   });
 
-  it("S3-04a 预算截断：grace>deadline 时宽限被钳到总预算，第二段只探查 1ms（requests=[1000,1]）", async () => {
+  it("S3-04a 预算截断：grace>deadline 时宽限被钳到总预算，第二段只探查 1ms（requests=[1000,1]，先断言再收口）", async () => {
     const h = makeHarness({ graceMs: 2_000, exitDeadlineMs: 1_000 });
     h.sup.spawnNext([]);
     const pr = h.sup.retireCurrent();
     await until(() => h.host.proc(h.host.procs[0]!.handle).stopSignals.includes("SIGTERM"), "SIGTERM");
     h.sleep.advance(1_000); // 截断后的宽限到点（绝对时刻）
-    await until(() => h.host.proc(h.host.procs[0]!.handle).stopSignals.includes("SIGKILL"), "SIGKILL");
+    await until(() => h.sleep.requests.length === 2, "第二段预算已请求");
+    expect(h.sleep.requests).toEqual([1_000, 1]); // 不睡满 grace，不重置预算
     h.sleep.advance(1_001); // 第二段探查 1ms 到点
     expect(await pr).toEqual({ kind: "deadline-exceeded" });
-    expect(h.sleep.requests).toEqual([1_000, 1]); // 不睡满 grace，不重置预算
   });
 
-  it("S3-04b 晚醒不重置预算：宽限期睡过头（超量推进）→第二段只睡剩余量 1ms", async () => {
+  it("S3-04b 晚醒不重置预算：宽限期睡过头（超量推进）→第二段只睡剩余量 1ms（先断言再收口）", async () => {
     const h = makeHarness(); // grace 2000 / deadline 5000
     h.sup.spawnNext([]);
     const pr = h.sup.retireCurrent();
     await until(() => h.host.proc(h.host.procs[0]!.handle).stopSignals.includes("SIGTERM"), "SIGTERM");
     h.sleep.advance(5_000); // 计时器晚醒：一次跨过总预算终点（绝对时刻）
-    await until(() => h.host.proc(h.host.procs[0]!.handle).stopSignals.includes("SIGKILL"), "SIGKILL");
+    await until(() => h.sleep.requests.length === 2, "第二段预算已请求");
+    expect(h.sleep.requests).toEqual([2_000, 1]); // 第二段=max(5000-5000,1)=1，非全新 3000
     h.sleep.advance(5_001); // 第二段探查 1ms 到点
     expect(await pr).toEqual({ kind: "deadline-exceeded" });
-    expect(h.sleep.requests).toEqual([2_000, 1]); // 第二段=max(5000-5000,1)=1，非全新 3000
+  });
+
+  it("S3B-01 默认时钟=单调 performance.now：不注入 nowMs 也能完整走一轮交接", async () => {
+    const h = makeHarness({ useDefaultNowMs: true });
+    h.sup.spawnNext([]);
+    expect((await h.sup.submitTurn(intent("i-1"), 101, "a\n")).kind).toBe("launched");
+    const pr = h.sup.retireCurrent();
+    await until(() => h.host.proc(h.host.procs[0]!.handle).stopSignals.includes("SIGTERM"), "SIGTERM");
+    h.host.deliverExit(h.host.procs[0]!, 0, null); // 宽限内退出，不等时钟
+    expect(await pr).toEqual({ kind: "confirmed", exit: { code: 0, signal: null } });
+    expect(h.sup.getState().phase).toBe("idle");
+  });
+
+  it("S3B-01 时钟回拨不扩大预算：nowMs 从 10000 跳回 -50000，第二段仍按钳位剩余=5000（非 65000）", async () => {
+    const vals = [10_000, -50_000, -50_000];
+    const h = makeHarness({ nowMs: () => vals.shift() ?? -50_000 }); // grace 2000 / deadline 5000
+    h.sup.spawnNext([]);
+    const pr = h.sup.retireCurrent(); // startMs=10000；graceEnd=12000；deadlineEnd=15000
+    await until(() => h.host.proc(h.host.procs[0]!.handle).stopSignals.includes("SIGTERM"), "SIGTERM");
+    h.sleep.advance(2_000); // 宽限到点（虚拟睡眠）
+    await until(() => h.sleep.requests.length === 2, "第二段预算已请求");
+    expect(h.sleep.requests).toEqual([2_000, 5_000]); // 回拨被钳到 startMs：15000-10000=5000
+    h.sleep.advance(7_000); // 第二段自虚拟 2000 起算→7000 到点（总虚拟等待=2000+5000 不放大）
+    expect((await pr).kind).toBe("deadline-exceeded");
+  });
+
+  it("S3B-01 非有限时钟按 0 对待：NaN 时钟不产生 NaN/Infinity 预算", async () => {
+    const h = makeHarness({ nowMs: () => Number.NaN });
+    h.sup.spawnNext([]);
+    const pr = h.sup.retireCurrent();
+    await until(() => h.host.proc(h.host.procs[0]!.handle).stopSignals.includes("SIGTERM"), "SIGTERM");
+    h.sleep.advance(2_000);
+    await until(() => h.sleep.requests.length === 2, "第二段预算已请求");
+    expect(h.sleep.requests).toEqual([2_000, 5_000]); // 非有限→0→正常预算，非 NaN
+    h.sleep.advance(7_000); // 2000+5000 到点
+    expect((await pr).kind).toBe("deadline-exceeded");
+  });
+
+  it("S3B-02 A 宽限内收口后 B 立即退役不被 A 旧续体挡：retireInFlight 按代次隔离", async () => {
+    const h = makeHarness();
+    h.sup.spawnNext([]);
+    const prA = h.sup.retireCurrent();
+    await until(() => h.host.proc(h.host.procs[0]!.handle).stopSignals.includes("SIGTERM"), "A SIGTERM");
+    h.host.deliverExit(h.host.procs[0]!, 0, null); // A 宽限内退出：onExit 收口→idle（A 续体待恢复）
+    h.gate.reopen();
+    expect(h.sup.spawnNext([])).toEqual({ kind: "spawned", generation: 2 }); // B 接管
+    const prB = h.sup.retireCurrent(); // 旧全局布尔会被 A 未跑完的续体挡成 stopping
+    await until(() => h.host.proc(h.host.procs[1]!.handle).stopSignals.includes("SIGTERM"), "B SIGTERM");
+    expect((await prA).kind).toBe("confirmed"); // A 旧续体恢复：只收口自己，不碰 B
+    h.host.deliverExit(h.host.procs[1]!, 0, null);
+    expect((await prB).kind).toBe("confirmed");
+    expect(h.sup.getState().phase).toBe("idle");
+    expect(h.audits.filter((l) => l.includes("process-supervisor generation-retired")).length).toBe(2); // 两代各恰一次
+  });
+
+  it("S3B-02 A 旧 finally 不清 B 槽位：B 挂起期间 A 续体收尾，B/第三代次仍各自独立退役", async () => {
+    const h = makeHarness();
+    h.sup.spawnNext([]);
+    const prA = h.sup.retireCurrent();
+    await until(() => h.host.proc(h.host.procs[0]!.handle).stopSignals.includes("SIGTERM"), "A SIGTERM");
+    h.host.deliverExit(h.host.procs[0]!, 0, null);
+    h.gate.reopen();
+    h.sup.spawnNext([]);
+    const prB = h.sup.retireCurrent();
+    await until(() => h.host.proc(h.host.procs[1]!.handle).stopSignals.includes("SIGTERM"), "B SIGTERM");
+    await prA; // A 旧续体 finally 在 B 挂起期间执行
+    h.host.deliverExit(h.host.procs[1]!, 0, null);
+    expect((await prB).kind).toBe("confirmed");
+    h.gate.reopen();
+    h.sup.spawnNext([]);
+    const prC = h.sup.retireCurrent();
+    await until(() => h.host.proc(h.host.procs[2]!.handle).stopSignals.includes("SIGTERM"), "C SIGTERM");
+    h.host.deliverExit(h.host.procs[2]!, 0, null);
+    expect((await prC).kind).toBe("confirmed"); // 按代次隔离后各代独立，无双写
   });
 
   it("stderr 按代次过滤：当前带 generation 转发；退役/非当前丢弃+审计", async () => {

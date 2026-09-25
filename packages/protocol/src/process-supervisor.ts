@@ -13,7 +13,7 @@
 //    SIGKILL → 退出确认截止（exitDeadlineMs 自 retire 起算的绝对截止，F1 预算口径：
 //    宽限被钳到预算内；每段等待只睡剩余量，先醒/晚醒不重置预算）。
 //    退出确认 → 退役（协调器清登记 + gate 三活相态 dispatching/in-flight/settling 之一则
-//    close("generation-retired")，旧 submit/settled 续体经 epoch 失效：不 send 不登记/held 保留）→
+//    close("generation-retired")，旧 submit/settled 续体经 epoch 失效：不 send 不登记/held 保留（DC 登记面已由 onGenerationRetired 清，held 仅指 gate 内旧轮呈现）→
 //    idle → spawnNext 才可用；stopping 期 spawnNext 拒绝。
 //    截止到期 = 本次接管失败：保持 stopping（不裁决进程死活），晚到 exit 自动
 //    收口（同条退役手续）后回 idle，宿主可重试 spawn。
@@ -21,7 +21,7 @@
 // 4) 意外退出：running 中 exit → 代次退役 + gate 关闭 + 回 idle；
 //    屏障解除归宿主（reopen 后新轮可跑），监管器不自动 reopen。
 // 5) 背压窗口：writeStdin 的 await 期间发生换代/退出 → 续体只及旧 handle。
-//    写旧进程=旧进程将死，无害；新轮写新 handle，零串扰。写完成仅审计不动作。
+//    写旧进程安全依据=handle 不重定向+退出确认前不开新写者（stopping 期旧进程可真实执行副作用，其事件仍按代次路由）；新轮写新 handle。写完成仅审计不动作。
 //
 // 失败语义：所有失败保守呈现（no-process / deadline-exceeded / spawn-failed），
 // 不猜进程状态；退出确认是唯一「进程已死」证据（waitpid 口径，宿主实现保证）。
@@ -73,7 +73,7 @@ export interface SupervisorDeps {
   onStderr?(text: string, generation: number): void;
   now(): string;
   sleep(ms: number): Promise<void>;
-  /** 单调毫秒时钟（预算口径；缺省 Date.now()）。 */
+  /** 单调毫秒时钟（预算口径；缺省 performance.now()——非单调注入时 remainMs 钳位不放大但前跳仍过早耗尽，宿主应注入单调源）。 */
   nowMs?(): number;
   /** SIGTERM 宽限（默认 2s，被总预算钳位）。 */
   readonly graceMs?: number;
@@ -105,6 +105,7 @@ interface GenEntry {
   readonly generation: number;
   handle: ProcessHandle | null; // spawn 返回前为 null（此窗口内不会写 stdin）
   retired: boolean;
+  retireInFlight: boolean; // 本代次 retire 续体在飞（S3B-02：槽位所属代次，旧续体 finally 不清新代次的槽）
   exit: Readonly<{ code: number | null; signal: string | null }> | null;
   exitWaiters: Array<() => void>;
 }
@@ -117,7 +118,6 @@ export class ProcessSupervisor {
   private phase: SupervisorPhase = "idle";
   private current: GenEntry | null = null;
   private nextGeneration = 0;
-  private pendingRetire = false;
 
   constructor(private readonly opts: SupervisorDeps) {}
 
@@ -143,6 +143,7 @@ export class ProcessSupervisor {
       generation: this.nextGeneration,
       handle: null,
       retired: false,
+      retireInFlight: false,
       exit: null,
       exitWaiters: [],
     };
@@ -186,23 +187,24 @@ export class ProcessSupervisor {
    */
   async retireCurrent(): Promise<RetireOutcome> {
     if (this.phase === "idle" || this.current === null) return { kind: "no-process" };
-    if (this.phase === "stopping" || this.pendingRetire) return { kind: "stopping" };
     const entry = this.current;
+    if (this.phase === "stopping" || entry.retireInFlight) return { kind: "stopping" };
     this.phase = "stopping";
-    this.pendingRetire = true;
+    entry.retireInFlight = true;
     const graceMs = this.opts.graceMs ?? 2_000;
     // 总预算=自 retire 起算的绝对截止：宽限被钳到预算内；每段等待只睡剩余量，
     // 先醒/晚醒不重置预算（remainMs 已过期只探查 1ms）
     const deadlineMs = Math.max(this.opts.exitDeadlineMs ?? 10_000, 1);
-    const startMs = this.nowMs();
+    const rawStart = this.nowMs();
+    const startMs = Number.isFinite(rawStart) ? rawStart : 0; // S3B-01：非有限时钟按 0 对待（预算不产生 NaN/Infinity）
     const graceEnd = startMs + Math.min(graceMs, deadlineMs); // 宽限被总预算钳位
     const deadlineEnd = startMs + deadlineMs;
     try {
       this.stopSignal(entry, "SIGTERM");
-      let exit = await this.raceExit(entry, this.remainMs(graceEnd));
+      let exit = await this.raceExit(entry, this.remainMs(graceEnd, startMs));
       if (exit === null) {
         this.stopSignal(entry, "SIGKILL");
-        exit = await this.raceExit(entry, this.remainMs(deadlineEnd));
+        exit = await this.raceExit(entry, this.remainMs(deadlineEnd, startMs));
         // sleep 先醒不等于进程未死：最后一刻的 exit 仍算确认
         if (exit === null && entry.exit !== null) exit = entry.exit;
       }
@@ -215,14 +217,14 @@ export class ProcessSupervisor {
       this.toIdle(entry);
       return { kind: "confirmed", exit };
     } finally {
-      this.pendingRetire = false;
+      entry.retireInFlight = false;
     }
   }
 
   /**
    * 发起一轮用户消息：协调器受理（含耐久化）→ launched 后首字节身份复核 → 写 stdin。
    * 任一环失效不写：no-process（无进程）/协调器结果原样透传/first-byte invalidated。
-   * 写完成后的复核只审计不动作（写旧 handle=旧进程将死，无害）。
+   * 写完成后的复核只审计不动作（安全依据=handle 不重定向+退出确认前不开新写者；旧进程 stopping 期仍可执行副作用）。
    */
   async submitTurn(
     intent: Omit<TurnIntentInput, "generation">,
@@ -315,7 +317,7 @@ export class ProcessSupervisor {
     }
     if (this.phase === "stopping") {
       // 交接中退出：按同一退役手续收口（含 deadline-exceeded 后的晚到收口）
-      const late = !this.pendingRetire;
+      const late = !entry.retireInFlight;
       this.finalizeRetire(entry, late ? "handover-late" : "handover");
       this.toIdle(entry);
       this.audit(`process-retired${late ? "-late" : ""} generation=${entry.generation}`);
@@ -351,12 +353,20 @@ export class ProcessSupervisor {
   }
 
   private nowMs(): number {
-    return this.opts.nowMs ? this.opts.nowMs() : Date.now();
+    // S3B-01：默认单调时钟（performance.now）。墙钟回拨会扩大预算，前跳会过早耗尽；
+    // remainMs 对回拨/非有限值已钳位，但宿主仍应注入单调源。
+    if (this.opts.nowMs) return this.opts.nowMs();
+    return typeof performance !== "undefined" && typeof performance.now === "function"
+      ? performance.now()
+      : Date.now();
   }
 
-  /** 剩余预算（绝对截止→剩余毫秒）；已过期只探查 1ms，不重置预算。 */
-  private remainMs(endAbsMs: number): number {
-    return Math.max(endAbsMs - this.nowMs(), 1);
+  /** 剩余预算（绝对截止→剩余毫秒）；时钟回拨/非有限值被钳到 startMs（不扩大预算），已过期只探查 1ms。 */
+  private remainMs(endAbsMs: number, startMs: number): number {
+    let now = this.nowMs();
+    if (!Number.isFinite(now)) now = startMs;
+    if (now < startMs) now = startMs;
+    return Math.max(endAbsMs - now, 1);
   }
 
   private audit(line: string): void {
