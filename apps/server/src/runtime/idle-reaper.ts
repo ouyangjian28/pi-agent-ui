@@ -124,8 +124,19 @@ export class IdleReaper {
       // S5-R4：audit 是可重入外部回调（登记/完成/发送/dispose 都可能同步发生）——
       // 触发前复核放在 audit 之后：最终复核到 retireCurrentGraceful 同步置 stopping
       // 之间不再有外部回调，竞争闭合的原子边界才成立。
+      // s5c B1：最终复核还须吸收 audit 回调内的短活动（register+complete 同步对）——
+      // 它不改 phase/gate/activeCount，eligible() 看不见；按「最后一次活动距今满期」口径复核。
+      // 取消时起点回退到活动时刻（剩余期限延续，不从 0 重计也不立即再到期）。
+      const n2 = this.deps.now();
+      const actFresh = this.lastActivity !== null && (!Number.isFinite(n2) || n2 - this.lastActivity < this.idleMs);
       if (this.disposed || !this.eligible()) {
         this.reaping = false;
+        return;
+      }
+      if (actFresh) {
+        this.reaping = false;
+        this.idleSince = this.lastActivity; // 活动时刻起算剩余期限
+        this.audit(`idle-timer-reset-by-activity since=${this.lastActivity} at=reap-check`);
         return;
       }
       void this.deps.supervisor

@@ -692,6 +692,21 @@ describe("RpcSession（受控替身）", () => {
     await until(() => audits.some((l) => l.includes("idle-reap-done kind=confirmed")), "回收确认");
   });
 
+  it("s5c B2：dispose 同步急停——调用返回后 tick 通道立即失效（微任务让渡窗口内不再触发回收）", async () => {
+    const { session, host, audits } = await makeSession({ idleMs: 30, eofGraceMs: 400, timeoutPollMs: 10 });
+    const p0 = session.start();
+    await until(() => host.frames.some((f) => f.includes('"type":"get_state"')), "探针写出");
+    host.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true });
+    expect((await p0).kind).toBe("ready");
+    await runTurn(host, session, "前置轮", 1); // gate idle+无登记=闲置条件满足，idleMs=30 极短
+    // dispose 不 await：同步段急停（interval 清+回收器置废）后让渡微任务
+    void session.dispose();
+    await new Promise((r) => setTimeout(r, 200)); // 远超 idleMs+多个 tick 周期
+    expect(audits.some((l) => l.includes("idle-reap-start"))).toBe(false); // 未发起回收
+    expect(host.closedStdinCount).toBe(0); // 未对进程发 EOF/信号（无回收外部作用）
+    await session.dispose(); // 幂等复用
+  });
+
   it("S5-R1：采样间短登记（经包装面 register/complete）→闲置起点后移到活动时刻（不沿用旧起点）", async () => {
     const { session, host, audits } = await makeSession({ idleMs: 120, eofGraceMs: 400 });
     const p0 = session.start();

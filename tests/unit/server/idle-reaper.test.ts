@@ -200,6 +200,52 @@ describe("idle-reaper（闲置回收受控面）", () => {
     expect(retired).toBe(1);
   });
 
+  it("s5c B1：audit 回调内短活动对（register+complete 同步+note）→eligible 看不见但活动复核取消；起点回退活动时刻（剩余期限延续）", () => {
+    const calls: string[] = [];
+    let phase: "running" | "idle" = "running";
+    const registry = new MapRegistry();
+    let nowN = 1_000;
+    let retireStarted = 0;
+    let spiked = false;
+    const r2 = new IdleReaper({
+      supervisor: {
+        getState: () => ({ generation: 7, phase }),
+        retireCurrentGraceful: async () => {
+          retireStarted += 1;
+          phase = "idle";
+          return { kind: "confirmed" };
+        },
+      },
+      isSessionIdle: () => true,
+      registry,
+      now: () => nowN,
+      audit: (l) => {
+        calls.push(l);
+        if (l.includes("idle-reap-start") && !spiked) {
+          spiked = true; // 只注入一次（第二次到期=正常发起，钩子不再扰动）
+          registry.register("short", "短活动"); // audit 回调内同步登记+完成（activeCount 归零）
+          registry.complete("short");
+          r2.noteActivity(); // 宿主包装面的同步活动通知（wrapRegistry 转发后 note 的等价载荷）
+        }
+      },
+      idleMs: 100,
+    });
+    r2.tick(); // 起点=1000
+    nowN = 1_100;
+    r2.tick(); // 到期判定+audit 注入短活动→最终复核吸收（now-lastActivity=0<100）→取消
+    expect(calls).toContain("idle-reap-start generation=7 idleMs=100");
+    expect(calls.some((l) => l.includes("idle-timer-reset-by-activity") && l.includes("at=reap-check"))).toBe(true);
+    expect(retireStarted).toBe(0); // 未发起 retire
+    // 起点回退活动时刻 1100：now=1150（自活动起 50 未满）不触发；now=1200 满→真正发起
+    nowN = 1_150;
+    r2.tick();
+    expect(calls.filter((l) => l.includes("idle-reap-start"))).toHaveLength(1);
+    nowN = 1_200;
+    r2.tick(); // 自活动时刻 1100 起 100 满→发起
+    expect(calls.filter((l) => l.includes("idle-reap-start"))).toHaveLength(2);
+    expect(retireStarted).toBe(1);
+  });
+
   it("S5-R4：audit 回调同步重入（登记/dispose/受理）→触发前最终复核取消，不发起退役", () => {
     // 反例三连：audit 是可重入外部回调——idle-reap-start 后的最终复核必须重查全部条件
     const run = (mutate: (r: IdleReaper, registry: MapRegistry, setIdle: (v: boolean) => void) => void) => {

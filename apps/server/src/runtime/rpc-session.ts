@@ -237,6 +237,16 @@ export class RpcSession {
   /** 释放本地资源（Y-C2/s4c：巡检定时器+耐久句柄）；进程退役另走 stop()。幂等。 */
   async dispose(): Promise<void> {
     if (this.disposeP !== null) return this.disposeP;
+    // s5c B2：同步急停——公开 dispose 调用返回前 tick 通道立即失效（interval 清+回收器置废）。
+    // 此前清停排在未来微任务（F3 先发布后运行），让渡窗口内 interval 回调仍可 fire 一次 tick
+    // 并发起回收（对真进程发 EOF/SIGTERM）——dispose 语义=此后不得再有任何回收外部作用。
+    // 幂等：runDispose 再清一次（pollTimer 已 null / reaper 已 null 均无害）。
+    if (this.pollTimer !== null) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+    this.reaper?.dispose();
+    this.reaper = null;
     // F3：先发布再运行（微任务边界）：外部 durability.close 的同步回调里若重入 dispose()，
     // 此刻 disposeP 已发布（共享同一关闭操作与完成结果，同步重入 dispose 也走同一链）→不会二次 close。
     // 注：close 内不得 await 本 dispose Promise（自等待死锁）——同步契约注释见 DurabilityPort.close。
