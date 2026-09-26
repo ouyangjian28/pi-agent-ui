@@ -342,6 +342,21 @@
 | **R3 披露同步** | ①N4b 测试源码注释勘正（「他方两笔未配对引用」→「超额释放压力例——单次 load 已被 observe 消费后再放两笔；合法路径由 D4 固化」）；②M-C3 三挂归属勘正（见 3b2e 变异行）；③无主槽回收行按 R1/R2 收窄后本节重新核销；④D14 审计断言定位恢复代（auditsBeforeB 锚+切片——全量扫描可被首代 loaded 满足）；⑤sanitizer 顶部注释对齐整体消费语义（去「链式匹配分段遮」旧词） | TEST-MAP+测试源码+sanitizer 注释 | ✅ |
 | **变异两组（基线 0b62eff）** | M-R1 去 Map 身份门→F10 挂（1 failed）；M-R2 去返回后复核块→F4+F5 挂（2 failed）。还原后 48/48（全套 661+7） | 两杀 | ✅ |
 
+## adapter 切片③-3b2b①（session-projection 纯函数：session JSONL→ScanRow[]；基线 c5b65b7）
+
+| 断言面 | 用例 | 状态 |
+| --- | --- | --- |
+| 行分类三分（message/corrupt/unknown）+空行=corrupt+final 基础映射 | session-projection.test.ts 基础/缺 id 角色非法/空文本 | 🟢 |
+| locator=字节偏移（多字节行 UTF-8 推进）+同行多事件有序 | session-projection.test.ts locator | 🟢 |
+| 撕裂尾不发布（末段无 \n）；补全后自然编入 | session-projection.test.ts 撕裂尾 | 🟢 |
+| user 三元组匹配：ordinal 按序消费（第 n 同键↔第 n enqueue）+generation 携带+附件身份不误配 | session-projection.test.ts 三元组/附件 | 🟢 |
+| 区间归因：正确哈希成区（含锚 user 回退）/伪终点不采信/孤儿 toolResult=null | session-projection.test.ts 区间三用例 | 🟢 |
+| toolCall 块分立：块键 entryId:blockIndex 0 基+本体先行 | session-projection.test.ts 块分立 | 🟢 |
+| final 全表（length/aborted→true；无 stopReason assistant→false；toolResult/system 补全角色） | session-projection.test.ts final 全表 | 🟢 |
+| 预览脱敏（[env] 遮蔽）+200 截断 | session-projection.test.ts 预览 | 🟢 |
+
+- 变异七杀（基线 c5b65b7）：M1 撕裂尾边界/M2 ordinal 不递增/M3 孤儿规则删/M4 final 反转/M5 blockIndex 不增/M6 locator 行号化/M7 lengthHash 空——全部 KILLED（python 锚点替换+count 断言+git checkout 还原；还原后 13/13 绿）。
+
 ## adapter 切片③-3b2i 修复轮（GPT 3b2h 复审 95/100：R1/R2 closed，唯一阻断=H-C5-01 N4b 披露小补；基线 847aa84）
 | 面 | 断言落点 | 状态 |
 | --- | --- | --- |
