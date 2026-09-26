@@ -907,3 +907,61 @@ describe("DualHistorySource 3b3-fix6 F6-1：终止通知注册资格门（GPT fi
     expect(c.log.appends).toHaveLength(0);
   });
 });
+
+describe("DualHistorySource 3b3-fix7 F7-2：晚附 observe 窗内收口+session watcher 错误→wrap 门的独占杀伤面（GPT fix6 P7）", () => {
+  // GPT fix6 P7 反例路径（fix6 档「M-F6-WRAP 全域无独占面」归因不成立的反证）：
+  // A 晚附 session-sub observe **未返回**（unS 尚 null、session wrap 已在子源 entry.sinks）时
+  // 同步收 A → session watcher 错误 → 重挂失败 → deliverUnavailable("watch-failed")：
+  // HS 成员资格门全过（has(wrapA)=true、srcDisposed=false），唯一拦截者=wrap ok()（st.closed=true）。
+  // 该窗口无其它探针触达（fix6 三例终态窗均在 observe 返回之后）——窄变异 M-F7-WRAP 的独占杀伤面。
+  it("F7/P-LATE-WATCH-FAIL 晚附窗内收口 A+watcher 重挂失败→活 B 照收不可用、已收口 A 零终止回调", async () => {
+    const reader = new PathReader();
+    const watcher = new PathWatcher();
+    const audits: string[] = [];
+    let src: DualHistorySource | null = null;
+    let inject: (() => void) | null = null;
+    let seenObserved = 0;
+    const made = new DualHistorySource({
+      roots: ["/j"], sessionRoots: ["/s"], sessionFor: (f) => f.replace("/j/", "/s/"),
+      reader, watcher,
+      audit: (l) => {
+        audits.push(l);
+        // 第二次 session-sub observed = A 的晚附审计点（第一次=B，正常附上）
+        if (l.includes("session-sub") && l.includes("observed") && src !== null) {
+          seenObserved += 1;
+          if (seenObserved === 2 && inject !== null) { const fn = inject; inject = null; fn(); }
+        }
+      },
+    });
+    src = made;
+    reader.set("/j/a", jEnqueue("i-1", USER_TEXT, 0) + "\n");
+    await made.load("/j/a"); // journal-only 建代（session 未设）
+    const b = makeSinks(), a = makeSinks();
+    expect(made.observe("/j/a", b.s)).not.toBeNull(); // B 先注册（晚附迭代首——附上活的 session 代）
+    const stopA = made.observe("/j/a", a.s);
+    expect(stopA).not.toBeNull();
+    inject = () => {
+      if (stopA !== null) stopA(); // A：unJ 已收、unS 尚 null（晚附窗内）
+      watcher.failPaths.add("/s/a"); // 下一次 registerWatch 必炸
+      watcher.error("/s/a", new Error("watch boom")); // 活跃期错误→重叠重挂→失败→不可用(watch-failed)
+      watcher.failPaths.delete("/s/a");
+    };
+    reader.set("/s/a", sUser("u1", USER_TEXT) + "\n");
+    const rows = await made.load("/j/a"); // 双源恢复→attachSessionIfObserved：B 正常附，A 晚附窗内注入
+    expect(rows).not.toBeNull();
+    await drain();
+    expect(audits.some((l) => l.includes("session-sub") && l.includes("watch-rearm-failed"))).toBe(true);
+    expect(audits.some((l) => l.includes("session-sub") && l.includes("unavailable") && l.includes("watch-failed"))).toBe(true);
+    expect(a.log.unavailables).toHaveLength(0); // A 已收口：wrap 门拦截（旧代码=去掉 ok()：漏投 watch-failed）
+    expect(a.log.invalidates).toHaveLength(0);
+    expect(b.log.unavailables).toHaveLength(1); // B=活成员照收（终态不因一人收口而误吞）
+    expect(b.log.unavailables[0]).toBe("watch-failed");
+    expect(made["obs"].get("/j/a")?.length).toBe(1); // A 已摘、B 独存
+    // journal 面未楔死：B 的 journal 观察仍收得到追加（session 代终态≠组合层终态）
+    reader.set("/j/a", jEnqueue("i-1", USER_TEXT, 0) + "\n" + jEnqueue("i-2", "more", 1) + "\n");
+    watcher.notice("/j/a");
+    await until(() => b.log.appends.length > 0);
+    expect(a.log.appends).toHaveLength(0);
+    expect(() => { if (stopA !== null) stopA(); }).not.toThrow(); // 迟到 stop 幂等
+  });
+});

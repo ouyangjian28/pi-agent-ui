@@ -140,7 +140,8 @@ export class SubscriptionEngine {
       // 追平补页（C5-05 收紧+C6-05 幂等）：仅 live 态（空页 done，生成入缓存——重试同 statusVersion）；paging 期 H+1 属超前（跳页）
       if (cur.seq === this.barrier + 1) {
         if (this.phase === "live") {
-          const status = this.d.status(); // 首次生成冻结（C6-05）；重试走上方缓存分支
+          const status = freezeStatus(this.d.status()); // 首次生成冻结（C6-05）；重试走上方缓存分支
+          if ((this.phase as string) === "closed") return [err4404(req.requestId)]; // F7-3：H+1 冻结窗同型重入复核（GPT fix6 P10；freeze 窗内宿主可关引擎，类型系统不可见）
           const empty: PageCache = { pageFrom: { streamId: this.streamId, seq: cur.seq }, barrier: this.barrier, events: [], done: true, status };
           const f = this.emitPage(req.requestId, empty.pageFrom, empty.events, true, status);
           if ((this.d.estimateFrame ?? estimateFrameBytes)({ ...(f as { requestId: string }), requestId: MAX_ENVELOPE_REQUEST_ID } as ServerFrame) > LIMITS.pageFrameBudgetBytes) {
@@ -188,6 +189,11 @@ export class SubscriptionEngine {
   private servePageFrom(requestId: string, from: EventCursor): ServerFrame {
     const est = this.d.estimateEvent ?? estimateHistoryEventBytes;
     const status = freezeStatus(this.d.status()); // 冻结先取（C6-01：信封含真实 status，非事后取）；
+    // F7-3（fix7，GPT fix6 P9）：freeze 窗=宿主重入点——stringify 求值 toJSON/getter 期间宿主可
+    // invalidate（引擎 close+phase=closed）。冻结后复核资格：closed→按入口同语义拒（err4404），
+    // 不得用旧坐标出页/复活引擎（旧代码：旧快照排 4409 后+done=true enterLive 把 closed 引擎
+    // 改回 live——「4409→旧快照」倒序与复活两病）。
+    if (this.phase === "closed") return err4404(requestId);
     // F6-3（fix6，GPT fix5 P6）：**资格门前纯数据化**——宿主 status 可能携带 getter/toJSON（
     // 合法 JS 对象，接口未强制纯数据）。JSON 往返一次性求值全部宿主行为，后续任何序列化
     //（页预算实测/入队实测/缓存重发）不再触宿主代码——入队段序列化重入（toJSON 内
@@ -253,6 +259,7 @@ export class SubscriptionEngine {
   }
 
   private enterLive(): void {
+    if (this.phase === "closed") return; // F7-3（fix7，GPT fix6 P9）：终态幂等门——closed 引擎不得复活（防御层：即使未来新增路径到达，也已由 freeze 后复核拦截）
     this.phase = "live";
     for (const item of this.buffered) this.outbox.push(item); // 按编入序整项回放（C5-04：含 status 帧——到达序）
     this.buffered.length = 0;

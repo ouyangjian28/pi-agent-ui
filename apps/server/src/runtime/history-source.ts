@@ -725,20 +725,26 @@ export class FileHistorySource implements HistorySourcePort {
    *  快照循环内：①回调内整体 dispose（srcDisposed）→ 不再开始后继宿主回调（整批停）；
    *  ②回调内退订他人（unbind 在终态窗内仍可摘 Set 成员）→ 跳过该注册，其余照投；
    *  ③正常终止事件（无上述重入）→ 全量投递（不以 entry.disposed 吞掉终止事件——
-   *  closeEntry 先行置 disposed 是正常序，非撤销信号）。分发完毕置空 sinks=迟到成员核对判据。 */
+   *  closeEntry 先行置 disposed 是正常序，非撤销信号）。分发完毕置空 sinks=迟到成员核对判据。
+   *  F7-1（fix7，GPT fix6 P6）：置空收尾挪进 finally——源级提前 return / 回调异常等**所有出口**
+   *  都释放旧注册成员面（否则宿主长持 stop 闭包会经 entry→Set 间接保留整套旧 sinks 链：
+   *  dispose 只遍历当前 slot.entry/pendingEntry，找不到已摘下的旧 entry，无人替它清）。 */
   private deliverTerminal(entry: GenEntry, sinks: readonly HistorySinks[], kind: "invalidate" | "unavailable", reason: string): void {
-    for (const sk of sinks) {
-      if (this.srcDisposed) return; // 源级终态：dispose 之后不再开始后继宿主回调
-      const cur = entry.sinks;
-      if (cur === null || !cur.has(sk)) continue; // 注册已被回调内撤销：跳过该注册
-      try {
-        if (kind === "invalidate") sk.onInvalidate?.(reason as HistoryInvalidateReason);
-        else sk.onUnavailable?.(reason as HistoryUnavailableReason);
-      } catch (e) {
-        this.audit(`${kind}-cb-error file=${entry.file} kind=${errKind(e)}`);
+    try {
+      for (const sk of sinks) {
+        if (this.srcDisposed) return; // 源级终态：dispose 之后不再开始后继宿主回调
+        const cur = entry.sinks;
+        if (cur === null || !cur.has(sk)) continue; // 注册已被回调内撤销：跳过该注册
+        try {
+          if (kind === "invalidate") sk.onInvalidate?.(reason as HistoryInvalidateReason);
+          else sk.onUnavailable?.(reason as HistoryUnavailableReason);
+        } catch (e) {
+          this.audit(`${kind}-cb-error file=${entry.file} kind=${errKind(e)}`);
+        }
       }
+    } finally {
+      entry.sinks = null; // 终止分发收尾（全出口）：清注册面（迟到核对以 null 判定）
     }
-    entry.sinks = null; // 终止分发完毕：清注册面（迟到核对以 null 判定）
   }
 
   /** 逻辑失效先行（摘登记+disposed/state），再关 OS watcher。F6-1：**不在此清 sinks**——

@@ -58,7 +58,16 @@
 | 变异 | 目标面 | 杀手 | 退出码 | 还原后 |
 |---|---|---|---|---|
 | M-F6-TERM | F6-1 HS 终止通知成员资格门 | F6/P-TERM-UNBIND | 1 KILLED | 过（sha256 同值） |
-| M-F6-WRAP | F6-1 DUAL wrap 转发门 | ——（纵深防御层，子源门全量覆盖可达路径） | 0 SURVIVED（合法） | 基线 |
+| M-F6-WRAP | F6-1 DUAL wrap 转发门 | ~~无独占面~~（**fix7 勘正：见下**） | 0 SURVIVED（当时） | 基线 |
 | M-F6-FREEZE | F6-3 status 纯数据化 | F6/P-SERIAL-REENTRY | 1 KILLED | 过（sha256 同值） |
+
+### fix7 勘正（GPT fix6 P7）
+
+「M-F6-WRAP 全域无独占杀伤面」归因**不成立**——漏了一个窗口：晚附 session-sub observe **未返回**时
+（unS 尚 null、session wrap 已在子源 entry.sinks），同步收口该注册后紧接 session watcher 错误
+→ 重挂失败 → deliverUnavailable("watch-failed")：HS 成员资格门全过（has(wrap)=true、srcDisposed=false），
+**唯一拦截者=wrap ok()（st.closed）**。该窗口无 fix6 三例触达（均在 observe 返回之后）。
+专杀探针=F7/P-LATE-WATCH-FAIL（tests/unit/server/dual-history-source.test.ts）；窄变异 M-F7-WRAP
+（同型去 ok()）在该探针上 KILLED——见 tests/fixtures/mutation-records/3b3-fix7.md。
 
 还原校验：三个 .bak 均以 sha256 同值回基线；全套终态见 TEST-MAP 3b3-fix6 节。

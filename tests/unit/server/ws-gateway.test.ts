@@ -2840,3 +2840,111 @@ describe("ws-gateway 3b3-fix5：F5-1 门后重入提交资格复核（GPT fix4 P
     }
   });
 });
+
+describe("ws-gateway 3b3-fix7 F7-3：续页/H+1 冻结窗重入资格复核（GPT fix6 P9/P10）", () => {
+  const frozenBase = (): SessionStatus => ({
+    session: { file: "f.jsonl", sessionId: null }, process: { phase: "idle" }, turn: { phase: "idle" },
+    backgroundTasks: { availability: "unknown", activeCount: null },
+    reap: { eligible: false, idleElapsedMs: null, idleRemainingMs: null, idleMs: 0 },
+    recovery: { availability: "unavailable", resumeBlocked: null, diskBlocked: null, unknownEffectCount: null, unattributableFragments: null, intentsCount: null, settledCount: null, evidenceHash: null },
+    statusVersion: 7, serverTimeMs: 0,
+  } as unknown as SessionStatus);
+
+  it("F7/P-PAGE-REENTRY 续页冻结窗内宿主 invalidate→closed 引擎按入口同语义拒（4404），不出旧快照/不复活", async () => {
+    const frozen = frozenBase();
+    let freezes = 0;
+    let rig: Rig | null = null;
+    const host = {
+      ...frozen,
+      toJSON() {
+        freezes += 1;
+        if (freezes === 2 && rig !== null) {
+          // 第 2 次冻结=续页（第 1 页 200 行已发）——stringify 求值窗内同步失效流（rewrite）
+          rig.history.invalidate("f.jsonl", "rewrite");
+        }
+        return frozen;
+      },
+    };
+    const r = await makeRig({ statusFor: () => host });
+    rig = r;
+    try {
+      r.history.put("f.jsonl", makeRows(201)); // 第 1 页 200 行 + 续页 1 行
+      const c = await authed(r);
+      await c.say({ t: "subscribe", requestId: "s-1", file: "f.jsonl" });
+      const first = await until(() => (c.frames().filter((f) => f.t === "snapshot").pop() as { hasMore?: boolean; snapshotId?: string; historyNext?: { streamId: string; seq: number } } | undefined)?.hasMore === true);
+      void first;
+      const snap = c.frames().filter((f) => f.t === "snapshot").pop() as { snapshotId: string; historyNext: { streamId: string; seq: number } };
+      await c.say({ t: "subscribe", requestId: "pg-1", file: "f.jsonl", snapshotId: snap.snapshotId, historyNext: snap.historyNext });
+      await until(() => c.frames().some((f) => f.t === "error" && (f as { code?: number }).code === 4409));
+      // 顺序与资格：4409（流退役）之后 4404（按入口同语义拒），不再出旧坐标第 2 页快照
+      expect(c.frames().filter((f) => f.t === "snapshot").length).toBe(1);
+      const e4404 = c.frames().filter((f) => f.t === "error" && (f as { code?: number }).code === 4404);
+      expect(e4404).toHaveLength(1);
+      expect((e4404[0] as { requestId?: string }).requestId).toBe("pg-1");
+      // 引擎未复活：新订阅走新流（旧流坐标彻底退役）
+      await c.say({ t: "subscribe", requestId: "s-2", file: "f.jsonl" });
+      const s2 = await until(() => (c.frames().filter((f) => f.t === "snapshot").pop() as { streamId?: string } | undefined)?.streamId !== undefined);
+      const newSnap = c.frames().filter((f) => f.t === "snapshot").pop() as { streamId: string };
+      void s2;
+      expect(newSnap.streamId).not.toBe(snap.historyNext.streamId);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("F7/P-H1-FREEZE live 态 H+1 补页冻结窗内宿主 invalidate→同型拒（4404），空页快照不复活 closed 引擎", async () => {
+    const frozen = frozenBase();
+    let freezes = 0;
+    let rig: Rig | null = null;
+    const host = {
+      ...frozen,
+      toJSON() {
+        freezes += 1;
+        if (freezes === 2 && rig !== null) {
+          rig.history.invalidate("f.jsonl", "rewrite"); // H+1 首次生成=第 2 次冻结
+        }
+        return frozen;
+      },
+    };
+    const r = await makeRig({ statusFor: () => host });
+    rig = r;
+    try {
+      r.history.put("f.jsonl", makeRows(3)); // 单页 done→live
+      const c = await authed(r);
+      await c.say({ t: "subscribe", requestId: "s-1", file: "f.jsonl" });
+      const snap = await until(() => (c.frames().filter((f) => f.t === "snapshot").pop() as { hasMore?: boolean; snapshotId?: string; streamId?: string } | undefined)?.hasMore === false);
+      void snap;
+      const first = c.frames().filter((f) => f.t === "snapshot").pop() as { snapshotId: string; streamId: string };
+      await c.say({ t: "subscribe", requestId: "h1-1", file: "f.jsonl", snapshotId: first.snapshotId, historyNext: { streamId: first.streamId, seq: 4 } }); // barrier=3→H+1
+      await until(() => c.frames().some((f) => f.t === "error" && (f as { code?: number }).code === 4409));
+      expect(c.frames().filter((f) => f.t === "snapshot").length).toBe(1); // 无 H+1 空页快照（旧代码：done 空页+enterLive 复活）
+      const e4404 = c.frames().filter((f) => f.t === "error" && (f as { code?: number }).code === 4404);
+      expect(e4404).toHaveLength(1);
+      expect((e4404[0] as { requestId?: string }).requestId).toBe("h1-1");
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("F7/P-SERIAL-GETTER getter-only status（无 toJSON）→冻结窗恰一次求值，帧内纯数据", async () => {
+    let calls = 0;
+    const frozen = frozenBase();
+    const host = { ...frozen, get statusVersion() { calls += 1; return 7; } };
+    const r = await makeRig({ statusFor: () => host });
+    try {
+      r.history.put("f.jsonl", makeRows(3));
+      const c = await authed(r);
+      await c.say({ t: "subscribe", requestId: "s-1", file: "f.jsonl" });
+      await until(() => c.frames().some((f) => f.t === "snapshot"));
+      expect(calls).toBe(1); // getter 在冻结 stringify 中恰一次
+      const before = calls;
+      JSON.stringify(c.frames().find((f) => f.t === "snapshot"));
+      JSON.stringify(c.frames().find((f) => f.t === "snapshot"));
+      expect(calls).toBe(before); // 帧内已是纯数据
+      const snap = c.frames().find((f) => f.t === "snapshot") as { status?: { statusVersion?: number } };
+      expect(snap.status?.statusVersion).toBe(7);
+    } finally {
+      await r.dispose();
+    }
+  });
+});

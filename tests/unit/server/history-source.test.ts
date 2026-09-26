@@ -1599,6 +1599,31 @@ describe("FileHistorySource 3b3-fix6 F6-1：终止通知成员资格可撤销（
     expect(await h.src.load("f.jsonl")).toBeNull(); // 源级终态
   });
 
+  it("F7/P-TERM-RETAIN 终止分发源级提前 return 也释放旧注册成员面（dispose 后槽已摘，无人再清——旧代码 Set 滞留）", async () => {
+    const { r, h } = rig3();
+    r.reads.push({ text: `${jline(1)}\n`, identity: "1:1" }, { text: `${jline(9)}\n`, identity: "2:2" });
+    await h.src.load("f.jsonl");
+    // 捕获代实体引用（dispose 会清 slots；长持 entry 的宿主视角=旧注册成员面是否释放）
+    const entry = (h.src["slots"] as Map<string, { entry: { sinks: unknown } | null } | undefined>).get("f.jsonl")!.entry!;
+    const b = makeSinks(), a = makeSinks(), c = makeSinks();
+    let armed = true;
+    const aSinks: HistorySinks = {
+      onAppend: (row) => { a.log.appends.push(row); },
+      onInvalidate: (reason) => { a.log.invalidates.push(reason); if (armed) { armed = false; h.src.dispose(); } },
+      onUnavailable: (reason) => { a.log.unavailables.push(reason); },
+      onLive: (ev) => { a.log.lives.push(ev); }, onStatus: (st) => { a.log.statuses.push(st); },
+    };
+    expect(h.src.observe("f.jsonl", b.s)).not.toBeNull();
+    expect(h.src.observe("f.jsonl", aSinks)).not.toBeNull();
+    expect(h.src.observe("f.jsonl", c.s)).not.toBeNull();
+    activeHandles(h.watcher)[0]?.triggerNotice();
+    await drain();
+    expect(b.log.invalidates).toHaveLength(1);
+    expect(a.log.invalidates).toHaveLength(1);
+    expect(c.log.invalidates).toHaveLength(0); // 源级提前 return：C 不再开始
+    expect(entry.sinks).toBeNull(); // F7-1 核心断言：提前 return 出口也置空（旧代码：{b,a,c} 三成员 Set 滞留）
+  });
+
   it("F6/P-TERM-UNBIND 终止回调内退订他人→该注册零回调，其余照投（invalidate 面）", async () => {
     const { r, h } = rig3();
     r.reads.push({ text: `${jline(1)}\n`, identity: "1:1" }, { text: `${jline(9)}\n`, identity: "2:2" });
@@ -1624,7 +1649,7 @@ describe("FileHistorySource 3b3-fix6 F6-1：终止通知成员资格可撤销（
     expect(c.log.appends).toHaveLength(0);
   });
 
-  it("F6/P-TERM-DISPOSE-UNAVAIL 读失败→unavailable 面同型：终止回调内 dispose→后继注册零回调", async () => {
+  it("F6/P-TERM-DISPOSE-UNAVAIL **读失败**（非 watch 失败——watch-failed 面由 fix7 F7/P-LATE-WATCH-FAIL 覆盖）→unavailable 面同型：终止回调内 dispose→后继注册零回调", async () => {
     const { r, h } = rig3();
     r.reads.push({ text: `${jline(1)}\n`, identity: "1:1" }, new Error("boom"));
     await h.src.load("f.jsonl");
