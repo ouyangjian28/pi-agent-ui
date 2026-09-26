@@ -665,6 +665,7 @@ export class WsGateway {
     this.registry.replace(file);
     index = this.registry.get(file);
     for (const row of rows) index.append(row.source, row.locator, row.raw, row.event);
+    this.recordFingerprints(file, index); // Y-04：重建路同样落指纹（三路统一）
     if (index.overBudget) { this.closeSubscriptionsFor(file, "index-over-budget"); return WsGateway.INDEX_BUDGET; }
     const retired = this.retireEnginesForFile(file, index.streamId, "disk-rewrite");
     if (retired > 0) this.audit(`stream-replaced-disk file=${file} retired=${retired} newStream=${index.streamId}`);
@@ -726,6 +727,7 @@ export class WsGateway {
             throw err;
           }
           const seq = index.append(row.source, row.locator, row.raw, row.event);
+          this.recordFingerprints(file, index); // Y-04：live 追加后指纹跟进（信息性元数据与盘面一致）
           // B2：分发用索引规范化后的统一坐标（丢弃外部 seq，引擎/索引恒一致）
           const indexed = index.read(seq, 1)[0];
           if (indexed === undefined) { this.audit(`history-append-lost file=${file} seq=${seq}`); return; }

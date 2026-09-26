@@ -178,34 +178,32 @@ describe("3b-3④ 预算容量（真盘体量；组合层无合计门——单�
       }
       const c = await r.authed();
       const ids = new Map<string, string>();
-      for (let k = 0; k < files.length; k++) {
-        const f = files[k]!;
+      const subOnce = async (f: string, rid: string): Promise<string> => {
         const before = c.frames().length;
-        await c.say({ t: "subscribe", requestId: `s-${k}`, file: f });
+        await c.say({ t: "subscribe", requestId: rid, file: f });
         await until(() => c.frames().slice(before).some((x) => x.t === "snapshot"), 8000);
         const snap = c.frames().slice(before).find((x) => x.t === "snapshot") as { streamId?: string; subscriptionId?: string };
-        ids.set(f, snap.streamId ?? "");
-        await c.say({ t: "unsubscribe", requestId: `u-${k}`, subscriptionId: snap.subscriptionId ?? "" });
+        await c.say({ t: "unsubscribe", requestId: `u-${rid}`, subscriptionId: snap.subscriptionId ?? "" });
         await settle(20);
-      }
+        return snap.streamId ?? "";
+      };
+      // Y-03：LRU 优于 FIFO 的触达重排证据——f1..f32 装满池后「触达 f1」（重订一次），
+      // 再装 f33：被挤出的必须是 LRU=f2（触达位次=装载序），而非 FIFO 口径的 f1。
+      for (let k = 1; k <= 32; k++) ids.set(`f${k}.jsonl`, await subOnce(`f${k}.jsonl`, `s-${k}`));
+      const touch1 = await subOnce("f1.jsonl", "touch-f1"); // 触达：f1→MRU
+      expect(touch1).toBe(ids.get("f1.jsonl")); // 池内命中=同 streamId
+      ids.set("f33.jsonl", await subOnce("f33.jsonl", "s-33")); // 满池+1→挤出 LRU=f2
       expect(r.gw["registry"].size).toBeLessThanOrEqual(32); // 流池不超 32
-      // f1（最旧）已被挤出：重订得到新 streamId；f33（最新）保留原 streamId
-      const before1 = c.frames().length;
-      await c.say({ t: "subscribe", requestId: "re-f1", file: "f1.jsonl" });
-      await until(() => c.frames().slice(before1).some((x) => x.t === "snapshot"), 8000);
-      const again1 = c.frames().slice(before1).find((x) => x.t === "snapshot") as { streamId?: string };
-      expect(again1.streamId).not.toBe(ids.get("f1.jsonl")); // 换流=旧身份丢失
-      const before33 = c.frames().length;
-      await c.say({ t: "subscribe", requestId: "re-f33", file: "f33.jsonl" });
-      await until(() => c.frames().slice(before33).some((x) => x.t === "snapshot"), 8000);
-      const again33 = c.frames().slice(before33).find((x) => x.t === "snapshot") as { streamId?: string };
-      expect(again33.streamId).toBe(ids.get("f33.jsonl")); // 在池内的流身份稳定
+      // f1 被触达保留；f2（未触达最旧）被挤出；f33（最新）在池
+      expect(await subOnce("f1.jsonl", "re-f1")).toBe(ids.get("f1.jsonl")); // 保留=同身份
+      expect(await subOnce("f2.jsonl", "re-f2")).not.toBe(ids.get("f2.jsonl")); // 换流=旧身份丢失
+      expect(await subOnce("f33.jsonl", "re-f33")).toBe(ids.get("f33.jsonl")); // 在池内的流身份稳定
     } finally {
       await r.dispose();
     }
   }, 60_000);
 
-  it("BG5 内存峰值披露（非生产 RSS 断言）：20k 流+32 流池满载下 heapUsed<384MiB 快照记录", async () => {
+  it("BG5 内存峰值披露（口径=单 20k 事件流满载；非生产 RSS 断言）：heapUsed<384MiB 快照记录", async () => {
     const r = await makeRig();
     try {
       let js = "";

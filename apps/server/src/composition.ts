@@ -146,21 +146,26 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
   const onSighup = (): void => { void server.reloadTokens(); };
   if (config.registerSighup === true) process.on("SIGHUP", onSighup);
 
-  let disposed = false;
+  // Y-01（GPT 3b-3）：并发 dispose 共享同一收尾 Promise——布尔早退会让第二个调用方在首个
+  // dispose 尚未完成时提前 resolve（观察到「半关」状态）；共享 Promise 保证所有等待方都在
+  // 完整收尾（gateway 告别+adapter 断链+tokens 释放）之后才继续，且收尾体恰执行一次。
+  let disposeP: Promise<void> | null = null;
   const server: PiAgentUiServer = {
     port,
     host,
     reloadTokens: async () => { await gateway.applyTokenReload(); },
-    dispose: async () => {
-      if (disposed) return;
-      disposed = true;
-      offConn(); // 停新连接接入
-      if (pollTimer !== null) { clearInterval(pollTimer); pollTimer = null; }
-      if (config.registerSighup === true) process.off("SIGHUP", onSighup);
-      gateway.dispose(); // 应用层告别（1000 server-shutdown）+观察器全解绑（DH 句柄归零）
-      await adapter.dispose(); // 传输层兜底（1001+关自建 server）
-      tokens.dispose();
-      audit("composition disposed");
+    dispose: () => {
+      if (disposeP !== null) return disposeP;
+      disposeP = (async () => {
+        offConn(); // 停新连接接入
+        if (pollTimer !== null) { clearInterval(pollTimer); pollTimer = null; }
+        if (config.registerSighup === true) process.off("SIGHUP", onSighup);
+        gateway.dispose(); // 应用层告别（1000 server-shutdown）+观察器全解绑（DH 句柄归零）
+        await adapter.dispose(); // 传输层兜底（1001+关自建 server）
+        tokens.dispose();
+        audit("composition disposed");
+      })();
+      return disposeP;
     },
   };
   audit(`composition listening host=${host} port=${port} origins=${config.allowedOrigins.length} roots=${config.roots.length}`);

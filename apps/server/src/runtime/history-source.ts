@@ -16,7 +16,10 @@
 //  ③ 事件三分：追加→onAppend；盘面失效→onInvalidate(rewrite|truncate|replace)；不可用→
 //    onUnavailable(deleted|unreadable|watch-failed|scan-over-budget)。
 //  ④ 去重=行定位+原文摘要 diff；同位置同原文=无变化；撕裂尾不发布，补全后自然编入。
-//  ⑤ 安全=每次重读安全打开+同 fd 身份+读中硬限；dev:ino 变化=invalidate("replace")。
+//  ⑤ 安全=每次重读安全打开+同 fd 身份+读中硬限；R-02 起换 inode 不单独换流：同字节=指纹短路
+//     （fingerprint-skip-identity-change+强制核对读）；纯追加+换 inode=同流交接（inode-handoff-append）
+//     前缀补发；仅前缀破（改写/截短）且 inode 变=invalidate("replace")。契约 §1.3 无同字节例外——
+//     此为 3b-3⑤/3b3 修复轮的实现面语义（观察一致面不换流），已在 TEST-MAP 披露。
 //  v1 披露：本实现覆盖 journal 面双源之一——session 文件投影与双源归并=3b-2b（journalFor 钩子已预留）。
 import { watch as fsWatch } from "node:fs";
 import { openSafeFile, readBounded, resolveWithinRoots, SafeOpenError } from "../ws/safe-open.ts";
@@ -551,6 +554,10 @@ export class FileHistorySource implements HistorySourcePort {
     // 连接队列的 setImmediate 排水在同步循环内饥饿：队列自溢出→正常读取的快客户端被 4431 误杀。
     // 让出窗口复核纪律（与 await 后复核同型）：失效/换代→丢弃；并发重扫已推进 baseline→跳到
     // 新水位续推（余下行的所有权归推进者，本循环不重复分发）。
+    // 3b-3⑤/Y-04：指纹在分发循环**前**落地（read 快照固定）——循环内 onAppend 链
+    // （ws-gateway recordFingerprints）读 currentFingerprint 即得追加后指纹；若留在循环后，
+    // 中段 yield 窗口并发重扫推进时回写旧读指纹会回退（并发者自会写更新值，此处不二写）。
+    entry.fingerprint = read.fingerprint;
     const sinksSnapshot = [...(entry.sinks ?? [])];
     // R-01：小批量（≤256 行）保持同步语义；大批量每 16 条让出（下游连接队列 setImmediate 排水
     // 不再饥饿——正常读取的快客户端不会被队列自溢出误杀）。
@@ -574,7 +581,6 @@ export class FileHistorySource implements HistorySourcePort {
       entry.baselineRows.push(row);
       entry.baseline.push(digests[i] as { locator: string; digest: string });
     }
-    entry.fingerprint = read.fingerprint; // 3b-3⑤：重扫成功落地后指纹跟进（下一轮同内容 notice 可短路）
     this.audit(`rescan file=${entry.file} why=${why} rows=${rows.length} appended=${appended}`);
     // 重挂观察（fs.watch 对 rename 类事件可能失效——重叠换新关旧；失败→unavailable，R6 fail-closed）
     this.rearmWatcher(slot, entry);

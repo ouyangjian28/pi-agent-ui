@@ -207,6 +207,45 @@ describe("3b-3① composition", () => {
     await rm(cfgB.dir, { recursive: true, force: true });
   });
 
+  it("Y-05 tokenPollMs 轮询真实生效：无手动 reload，写新 token 文件后旧 token 自动失效", async () => {
+    // GPT 3b-3 Y-05：注释曾称 mtime+size 增量检测（不存在）——实际口径=每次轮询全量读文件并整表
+    // 应用。本用例固化「轮询自动重读」：不调 reloadTokens，仅靠 tokenPollMs 周期任务完成轮换。
+    const { dir, cfg, audits } = await mkCfg({ tokenPollMs: 20 });
+    const s = await start(cfg);
+    await writeFile(cfg.tokenFile, JSON.stringify({ version: 1, tokens: ["tok-poll-2"] }), "utf8");
+    const t0 = Date.now();
+    // 等轮询任务把新表装上（每 20ms 一拍；上限 2s）
+    while (Date.now() - t0 < 2000 && !audits.some((l) => l.includes("token-reloaded"))) await new Promise((r) => setTimeout(r, 20));
+    expect(audits.some((l) => l.includes("token-reloaded"))).toBe(true);
+    const ws1 = new WebSocket(`ws://127.0.0.1:${s.port}`, { origin: ORIGIN });
+    await new Promise<void>((res, rej) => { ws1.on("open", res); ws1.on("error", (e) => rej(e as Error)); });
+    const got: unknown[] = [];
+    ws1.on("message", (d) => got.push(JSON.parse(String(d))));
+    ws1.send(JSON.stringify({ t: "hello", protocolVersion: 1, token: TOKEN })); // 旧 token——轮询后应拒
+    await new Promise<void>((res) => setTimeout(res, 300));
+    expect(got.some((f) => (f as { t?: string; code?: number }).t === "error" && (f as { code?: number }).code === 4401)).toBe(true);
+    ws1.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("Y-01 并发 dispose：两方同时收尾→都在完整关停后 resolve，收尾体恰执行一次", async () => {
+    // GPT 3b-3 Y-01：布尔早退版第二个 dispose 在首个未完成时提前 resolve——「半关」窗口。
+    const { cfg, audits } = await mkCfg();
+    const s = await start(cfg);
+    const ws = new WebSocket(`ws://127.0.0.1:${s.port}`, { origin: ORIGIN, headers: { authorization: `Bearer ${TOKEN}` } });
+    const closed = new Promise<number>((res) => { ws.on("close", (c) => res(c)); });
+    await new Promise<void>((res, rej) => { ws.once("open", res); ws.once("error", rej); });
+    const d1 = s.dispose();
+    const d2 = s.dispose(); // 并发第二方：不等 d1 落定才调
+    await Promise.all([d1, d2]);
+    // 两方都已 resolve 且完整关停证据齐：告别帧（1000 server-shutdown）+ 收尾审计恰一次
+    expect(await closed).toBe(1000);
+    expect(audits.filter((l) => l === "composition disposed")).toHaveLength(1);
+    const d3 = s.dispose(); // 收尾后再调：同 Promise 立即返回，无二次执行
+    await d3;
+    expect(audits.filter((l) => l === "composition disposed")).toHaveLength(1);
+  });
+
   it("reloadTokens：写新 token 文件→轮换生效（旧 token 拒新 hello）", async () => {
     const { dir, cfg } = await mkCfg();
     const s = await start(cfg);

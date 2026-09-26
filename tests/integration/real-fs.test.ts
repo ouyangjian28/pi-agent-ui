@@ -6,6 +6,8 @@
 // delete（4402 真路径）/recreate/缺源恢复晚附/旧 cursor 分页 H 后增长/句柄票据收口（全退后观察代理静默）/4404 真路径。
 import { describe, expect, it } from "vitest";
 import { appendFile, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { sha256HexBytes } from "@pi-agent-ui/protocol";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WsGateway, type ConnMeta, type GatewayConnHooks } from "../../apps/server/src/ws/ws-gateway.ts";
@@ -288,7 +290,7 @@ describe("3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真
       await until(() => c2.frames().some((f) => f.t === "snapshot"));
       const snap2 = c2.frames().find((f) => f.t === "snapshot") as { page?: Array<Record<string, unknown>>; historyNext?: { seq: number } };
       const paged = snap2.page ?? [];
-      // 契约 §212：cursor{streamId,455}→补 455..H'（含起始 seq 的重发语义——幂等续读）
+      // 契约 §3.7 第4项：cursor{streamId,455}→补 455..H'（含起始 seq 的重发语义——幂等续读）
       expect(paged.map((e) => e.seq).sort((x, y) => Number(x) - Number(y))).toEqual([h, h + 1, h + 2]); // 增长 2 行恰入（含游标重发）
       await appendFile(r.sp, sU("u3", TEXT_C) + "\n"); // 续投 live
       // 快照后追加的行经 events 帧续投（origin=history|live 取决于引擎相位——恰一次为断言面）
@@ -321,12 +323,50 @@ describe("3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真
       await settle(400);
       expect(a.c.sent.length).toBe(framesA); // 静默：无任何新帧（事件/错误/状态）
       expect(b.c.sent.length).toBe(framesB);
+      // Y-03：零泄漏正面证据——最后一订阅退订后观察器确已关闭（closeEntry→unobserved 审计），
+      // 不靠「静默」反面推断
+      expect(r.audits.some((l) => l.includes("unobserved file=j.jsonl"))).toBe(true);
       const c3 = await r.authed(); // 再订：按需装载恢复
       await c3.say({ t: "subscribe", requestId: "s-c", file: "j.jsonl" });
       await until(() => c3.frames().some((f) => f.t === "snapshot"));
       const snap = c3.frames().find((f) => f.t === "snapshot") as { barrier?: number };
       expect(snap.barrier).toBe(4); // J1,S1,S5(u5),J5(i-5) 增长期全部编入
       expect(errFrames(c3).length).toBe(0);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("RF12 指纹字段与源字节对拍（Y-04）：装载/追加/换流三态下索引指纹=源文件 SHA-256 全 64hex", async () => {
+    const r = await makeRig();
+    try {
+      await writeFile(r.jp, jEn("i-1", TEXT_A, 0) + "\n");
+      await writeFile(r.sp, sU("u1", TEXT_A) + "\n");
+      const { c: cfp, sub: subFp } = await subAndWait(r, "s-fp");
+      await settle(WARM);
+      const idx1 = r.gw["registry"].peek("j.jsonl") as { journalFingerprint: string; sessionFingerprint: string };
+      const fp1 = idx1.journalFingerprint; // 立即拷贝——peek 返回活对象，后断言读的是快照值
+      const sfp1 = idx1.sessionFingerprint;
+      expect(fp1).toBe(sha256HexBytes(readFileSync(r.jp))); // 64hex 与源字节精确相等
+      expect(sfp1).toBe(sha256HexBytes(readFileSync(r.sp)));
+      expect(fp1).toMatch(/^[0-9a-f]{64}$/);
+      // live 追加后指纹跟进（onAppend 路 recordFingerprints——Y-04）
+      await appendFile(r.jp, jEn("i-2", TEXT_B, 1) + "\n");
+      await until(() => cfp.events(subFp).length >= 1, 4000);
+      await settle(WARM);
+      const idx2 = r.gw["registry"].peek("j.jsonl") as { journalFingerprint: string };
+      expect(idx2.journalFingerprint).toBe(sha256HexBytes(readFileSync(r.jp)));
+      expect(idx2.journalFingerprint).not.toBe(fp1); // 确已变化（非陈旧值）
+      // 换流重建路（非前缀改写）：4409 后旧索引退役（peek=undefined），重订触发重建→新指纹与新源相等
+      await writeFile(r.jp, jEn("i-9", TEXT_C, 0) + "\n", "utf8");
+      await until(() => errFrames(cfp).some((f) => (f as { code?: number }).code === 4409), 4000);
+      await settle(WARM);
+      expect(r.gw["registry"].peek("j.jsonl")).toBeUndefined(); // 旧索引已随换流退役
+      const { c: cNew } = await subAndWait(r, "s-fp2");
+      await settle(WARM);
+      const idx3 = r.gw["registry"].peek("j.jsonl") as { journalFingerprint: string };
+      expect(idx3.journalFingerprint).toBe(sha256HexBytes(readFileSync(r.jp)));
+      expect(errFrames(cNew).length).toBe(0);
     } finally {
       await r.dispose();
     }
@@ -352,6 +392,14 @@ describe("3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真
       await until(() => a.events(aSub).length >= 1100, 8000);
       await settle(300);
       expect(a.events(aSub).length).toBe(1100);
+      // Y-03：逐 seq 对拍——1100 行恰一次无缺无重（session 行编入 seq=2..1101，首 seq 是 journal 种子行）
+      const seqs11 = a.events(aSub).map((ev) => (ev as { seq?: number }).seq).filter((n): n is number => typeof n === "number");
+      const uniq11 = new Set(seqs11);
+      expect(uniq11.size).toBe(1100);
+      const min11 = Math.min(...seqs11), max11 = Math.max(...seqs11);
+      expect(min11).toBe(2);
+      expect(max11).toBe(1101);
+      for (let q = min11; q <= max11; q++) expect(uniq11.has(q)).toBe(true);
       expect(errFrames(a).length).toBe(0); // 无 4431/4404/4409——快客户端零误伤
       expect(a.sent.length).toBeGreaterThan(0); // 连接仍在收帧（FakeConn 无 alive——以持续收帧为准）
     } finally {

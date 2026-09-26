@@ -155,7 +155,8 @@ describe("3b-3③ real-ws：真实传输+慢客户端矩阵", () => {
         await settle(250);
         expect(fast.events(fastSub).length).toBe(1100); // 恰全量
         expect(fast.errs().length).toBe(0);
-        // 慢客户端恢复：cursor 续读（含起始 seq 重发；翻页到追平——契约 §212）
+        // 慢客户端恢复：cursor 续读（含起始 seq 重发；翻页到追平——契约 §3.7 第4项）
+        const recMark = slow.frames.length; // Y-03：只统计恢复订阅的页（排除首轮快照页 1..200）
         await slow.say({ t: "subscribe", requestId: "sb2", file: "j.jsonl", cursor: { streamId: slowSnap.streamId as string, seq: 200 } });
         await until(() => slow.frames.some((f) => f.t === "snapshot" && f.subscriptionId !== slowSub));
         for (let guard = 0; guard < 12; guard++) {
@@ -167,6 +168,16 @@ describe("3b-3③ real-ws：真实传输+慢客户端矩阵", () => {
         const snap2 = slow.frames.filter((f) => f.t === "snapshot").pop() as { page?: Array<{ seq?: number }>; hasMore?: boolean };
         expect(Number(snap2.page?.slice(-1)[0]?.seq)).toBe(1350); // 翻页补齐到末位
         expect(snap2.hasMore).toBe(false);
+        // Y-03：续读全序列对拍——收集恢复订阅全部快照页 seq，恰=200..1350 无缺无重（含起始重发）
+        const recSeqs: number[] = [];
+        for (const f of slow.frames.slice(recMark)) {
+          if (f.t !== "snapshot") continue;
+          for (const ev of (f as { page?: Array<{ seq?: number }[]> }).page ?? []) if (typeof ev.seq === "number") recSeqs.push(ev.seq);
+        }
+        expect(recSeqs.length).toBe(1151); // 200..1350 含两端
+        const recUniq = new Set(recSeqs);
+        expect(recUniq.size).toBe(1151);
+        for (let q = 200; q <= 1350; q++) expect(recUniq.has(q)).toBe(true);
       } finally {
         fast.dispose(); slow.dispose();
       }
