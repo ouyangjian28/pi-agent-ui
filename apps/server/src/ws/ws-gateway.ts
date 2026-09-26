@@ -34,6 +34,8 @@ import type { ScannedSession } from "./session-scan.ts";
 import { resolveWithinRoots } from "./safe-open.ts";
 import { recoverFromSnapshot, snapshotEvidenceHash } from "../runtime/recover.ts";
 import type { RecoveryEvidenceSnapshot } from "../runtime/recover.ts";
+import { isRecoverySnapshot } from "../runtime/recovery-evidence-source.ts";
+import type { RecoveryEvidenceResult } from "../runtime/recovery-evidence-source.ts";
 
 export interface GatewayConnHooks {
   /** 传输层收到应用消息（已是文本；isBinary=true 时 gateway 直接按协议违规处理）。 */
@@ -93,7 +95,7 @@ export interface WsGatewayOpts {
   /** 全服务计算闸（跨连接共享；list/recovery）。 */
   readonly semaphore?: ComputeSemaphore;
   /** 恢复证据快照提供者（file→快照|null；null→unavailable(no-evidence-snapshot)——B03：禁裸读盘面）。 */
-  readonly recoveryEvidence?: (file: string) => RecoveryEvidenceSnapshot | null | Promise<RecoveryEvidenceSnapshot | null>;
+  readonly recoveryEvidence?: (file: string, signal: AbortSignal) => RecoveryEvidenceResult | null | Promise<RecoveryEvidenceResult | null>;
   /** 订阅数据入口（W1-04；缺省=订阅一律 4402 fail-closed，接线归宿主/3b）。 */
   readonly historySource?: HistorySourcePort;
   /** 每会话状态源（订阅帧冻结用；缺省=unknown 状态）。 */
@@ -133,6 +135,8 @@ interface ConnState {
   readonly id: string;
   readonly queue: ConnectionQueue;
   readonly meta: ConnMeta;
+  /** 3b-4：连接级取消信号——关闭（应用/传输两路）即 abort，供 get-recovery provider 停读。 */
+  readonly abortCtl: AbortController;
   tokenDigest: string | null;
   authed: boolean;
   preAuthFrames: number;
@@ -281,6 +285,7 @@ export class WsGateway {
       lastFrameAt: this.now(), connectedAt: this.now(),
       subs: new Map(), inflight: new Set(), tasks: new Map(),
       recoveryPages: new Map(),
+      abortCtl: new AbortController(),
     };
     // W1-02：握手滑窗（单调时钟；先记后判——被拒的接入也计入滑窗）
     // B6（w1b）：有界记账——饱和期拒接不再存时间戳（窗内已有 ≥limit 个样本即足以判拒；
@@ -1106,10 +1111,21 @@ export class WsGateway {
       if (st.closed) { r.release(); return; }
       try {
         const provider = this.opts.recoveryEvidence;
-        const snap = provider === undefined ? null : await provider(file);
+        const snap = provider === undefined ? null : await provider(file, st.abortCtl.signal);
         if (st.closed) return;
         if (snap === null) {
           this.enqueueIfOpen(st, { t: "recovery", requestId, file, availability: "unavailable", reason: "no-evidence-snapshot" });
+          return;
+        }
+        if (!isRecoverySnapshot(snap)) {
+          // 3b-4 typed 结果映射：unavailable 携冻结 reason；file-unreadable 归 read-failed（typed 区分进审计）
+          if (snap.kind === "unavailable") {
+            this.audit(`recovery-unavailable file=${file} reason=${snap.reason}`);
+            this.enqueueIfOpen(st, { t: "recovery", requestId, file, availability: "unavailable", reason: snap.reason });
+            return;
+          }
+          this.audit(`recovery-unreadable file=${file} path=${snap.path} detail=${snap.detail ?? ""}`);
+          this.enqueueIfOpen(st, { t: "recovery", requestId, file, availability: "unavailable", reason: "read-failed" });
           return;
         }
         const hash = snapshotEvidenceHash(snap);
@@ -1229,6 +1245,7 @@ export class WsGateway {
     }
     st.tasks.clear();
     st.recoveryPages.clear(); // B8：恢复页缓存随连接终结
+    st.abortCtl.abort(); // 3b-4：连接级取消（幂等）——provider 停读；已断连接不再消费结果
     for (const [file] of st.subs) {
       const sub = st.subs.get(file);
       sub?.engine.close(4431, "", false);
@@ -1256,6 +1273,7 @@ export class WsGateway {
     }
     st.tasks.clear();
     st.recoveryPages.clear(); // B8：恢复页缓存随连接终结
+    st.abortCtl.abort(); // 3b-4：连接级取消（幂等）——provider 停读；已断连接不再消费结果
     for (const [file] of st.subs) {
       const sub = st.subs.get(file);
       sub?.engine.close(4431, "", false);

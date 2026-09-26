@@ -233,10 +233,11 @@ export class SubscriptionEngine {
       const f = this.emitPage(requestId, page, events, done, status);
       // R1：终判按最坏重试信封（64B requestId）测——缓存重发不因合法 requestId 变长击穿页预算
       const worst = { ...(f as { requestId: string }), requestId: MAX_ENVELOPE_REQUEST_ID } as ServerFrame; // 快照帧必有 requestId；上界克隆仅供测量
-      const over = measure(worst) > LIMITS.pageFrameBudgetBytes;
+      const measured = measure(worst);
       // F9-1（fix9，GPT fix8 P10a）：终判回调内宿主可关引擎——预算结果解读前先验 closed
+      // F10（fix10，GPT fix9 Y10-3）：成功谓词沿用旧形 measured<=B（NaN 不受控注入时退空→4431，与 fix8 语义一致；不用 over=measured>B 反转型）
       if ((this.phase as string) === "closed") return err4404(requestId);
-      if (!over) { frame = f; break; }
+      if (measured <= LIMITS.pageFrameBudgetBytes) { frame = f; break; }
       if (events.length === 0) {
         // 首条即超整帧预算：无截断/占位规则→显式失败（4431 关订阅；retryable=false=订阅已亡，恢复=重新订阅）
         this.close(4431, "事件超预算", false);

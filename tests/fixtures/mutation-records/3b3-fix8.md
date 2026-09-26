@@ -13,10 +13,10 @@
   +    const pageAt = this.d.now(); // MUTATION M-F8-COMMIT: 终检删除
   ```
 - 命令（独立跑，单变异）：
-  - `npx vitest run tests/unit/subscription-engine.test.ts -t "F8/P-PAGE-EST-EVENT"` → exit 1，AssertionError: `expected { t: 'snapshot', …(10) } to match object { t: 'error', code: 4404, …(1) }`（时钟窗关引擎后退役页照发）。
+  - `npx vitest run tests/unit/subscription-engine.test.ts -t "F8/P-PAGE-EST-EVENT"` → exit 1，AssertionError: `expected { t: 'snapshot', …(10) } to match object { t: 'error', code: 4404, …(1) }`（估算窗关引擎后退役页照发；fix10 勘正：此处是 estimateEvent 填装窗，非时钟窗）。
   - `-t "F8/P-PAGE-NONFINAL"` → exit 1，同型断言（done-else 分支复活 closed 引擎）。
   - `-t "F8/P-PAGE-NOW-ENGINE"` → exit 1，同型断言（GPT fix7 P10 引擎序列：装页/终判毕→lastPageAt=now() 窗失效）。
-  - `-t "F8/P-PAGE-NOW"`（ws-gateway 整合例）→ **exit 0 合法存活**：该例 arm 在网关帧分发层 now()（ws-gateway.ts:408）早触发→invalidate 先删 sub→续页请求落到「请求与订阅状态不符」网关级 4404——真实系统防线，但**非引擎提交点杀伤**；引擎提交点杀伤由 P-PAGE-NOW-ENGINE 承担。测试注释已如实标注。
+  - `-t "F8/P-PAGE-NOW"`（ws-gateway 整合例）→ **exit 0 合法存活**：该例 arm 在网关入站帧时钟（st.lastFrameAt，ws-gateway.ts:321；fix10 勘正：原记 :408 有误，:408=认证失败记账）早触发→invalidate 先删 sub→续页请求落到「请求与订阅状态不符」网关级 4404——真实系统防线，但**非引擎提交点杀伤**；引擎提交点杀伤由 P-PAGE-NOW-ENGINE 承担，真提交点整合例=fix9 F9/P-PAGE-NOW-COMMIT。
 - 还原：`cp /tmp/f8-base-se.ts` → sha256 回 c25d0815…（同值）。
 
 ## M-F8-H1 + M-F8-CACHED + M-F8-GRACE 三口联合删除（F8-1 / GPT fix7 P8/P11/P10）

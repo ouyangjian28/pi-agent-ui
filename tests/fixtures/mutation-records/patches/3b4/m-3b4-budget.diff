@@ -1,0 +1,14 @@
+--- a/apps/server/src/runtime/recovery-evidence-source.ts
++++ b/apps/server/src/runtime/recovery-evidence-source.ts
+@@ -121,10 +121,7 @@
+       }
+     }
+     if (signal?.aborted) return { kind: "unavailable", reason: "read-failed" };
+-    if (jSize + sSize > maxBytes) {
+-      audit(`recovery-oversized file=${file} journal=${jSize} session=${sSize} budget=${maxBytes}`);
+-      return { kind: "unavailable", reason: "oversized" };
+-    }
++
+     // 有界读（allowed=预算−session 占用；读 allowed+1 字节探增长）
+     let raw: string | null;
+     try {

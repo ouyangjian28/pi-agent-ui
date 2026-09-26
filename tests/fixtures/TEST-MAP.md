@@ -559,10 +559,20 @@
 - 变异（3b3-fix8.md）：M-F8-COMMIT 三杀（P-PAGE-NOW 网关例合法存活=分发层防线，如实标注）；M-F8-H1/CACHED/GRACE 联合跑各杀各口；跨轮重演 M-F7-1/M-F7-WRAP KILLED、**M-F7-PAGE 窄变异 fix8 基线合法 SURVIVED（F8-1 纵深覆盖，杀伤归因移交 M-F8-COMMIT/H1；复合四口同删 KILLED 双探针）**。
 - 终态：44 files **826 passed+7 skipped**+tsc0（根）+lint0（较 fix7 +8=上列探针）。
 
-## 3b3-fix9 修复轮（GPT fix8 复审 84→修复；2026-10-03）
+## 3b3-fix9 修复轮（GPT fix8 复审 84→修复；2026-10-03）（GPT fix8 复审 84→修复；2026-10-03）
 
 - **F9-1 预算失败出口先验 closed（GPT fix8 B9-1 P8/P9/P10）**：subscription-engine.ts 四口——①缓存重发估帧；②H+1 估帧；③servePageFrom 终判循环（measure 返回后）；④退空判定口——全部改为「宿主回调求值与预算结果解读分离：先验 closed→err4404，再消费超限判定（真超限仍 4431）」。旧病：回调内宿主关引擎后返回超限→旧序立即 close+4431 抢盖既成关闭事实、绕过 F8-1 终检。对照（未关闭真超限→4431）=既有⑲+F9/P-BUDGET-NOCLOSE。
 - **F9-2 真网关提交点整合例+注释勘正（GPT fix8 Y9-1/Y9-2）**：新增 F9/P-PAGE-NOW-COMMIT（freeze 内 arm、pageAt=now() 触发 invalidate→4409 先于 4404、快照恒 1、观察收口、新订阅新流；双条件等待使变异首败落在快照计数断言非 until 超时）；P-PAGE-NOW 注释勘正（arm 实际=入站帧时钟 ws-gateway.ts:321，非 :408；该例=网关级防线例，engine.handle 未及调用）；P-H1-EST 加缓存长度直证（recentPages.length===0，重发 4404 属入口拒不能独立证缓存空）；P-GRACE-NOW 旧注勘正（删门后落状态门 4409，非「退役首页」）。
 - **F9-3 变异实物入仓+归因勘正（GPT fix8 D9-1/P16/P17）**：新增 tests/fixtures/mutation-records/patches/{fix8,fix9}/ 共 9 个入仓 unified diff（含重建带文件头的 m-f8-commit.diff）；fix8 档 P16 归因勘正（复合杀伤首败断言=**快照计数** expected 2 to be 1 @ws-gateway.test.ts:2880/:2920，非 4404 计数；六口复合重验实证）；fix7 档全称勘正（M-F7-WRAP 门属 fix6 已有，非 fix7 新增）。
 - 变异（3b3-fix9.md）：M-F9-BUDGET 四口先验删除→4 定向探针 KILLED（断言=4431≠4404）；NOCLOSE 对照存活（4431 语义保留）；M-F8-COMMIT 重演双杀（引擎序列+新真提交点网关例，后者=expected [snapshot…] to have length 1 but got 2）；**复合四口在 fix9 基线 SURVIVED（F9-1 先验与 F7-3 冻结复核同窗纵深叠加，如实记录）→六口同删才 KILLED（快照计数首败）**。
 - 终态：44 files **832 passed+7 skipped**（JSON=tests/fixtures/run-records/3b3-fix9-vitest.json）+tsc0（根）+lint0；运行清单（前后哈希+命令+退出码+事故节）=tests/fixtures/run-records/3b3-fix9-run-manifest.md（fix9 增量 +6=引擎 5+网关 1）。
+
+- fix10（Y10 窄清，随 3b-4 开工清偿）：NaN 谓词回旧形 measured<=B（F10/P-BUDGET-NAN 探针+M-F10-NAN 杀，patches/fix10/）；fix8/fix9 档文案勘正（:321/估算窗/六口标题/SHRINK-EMPTY 注释）；manifest 命令补全+诚实边界。终态 833+7。
+
+## 3b-4 恢复证据面（typed 真读源；2026-10-03）
+- **真源 provider**：apps/server/src/runtime/recovery-evidence-source.ts——createRecoveryEvidenceProvider({roots,sessionRoots?,sessionFor?,maxCombinedBytes?=8MiB,sessionIdFor?=去.jsonl,statLike?,readLike?})→(file,signal?)=>RecoveryEvidenceResult：snapshot|unavailable{read-failed|concurrent-modification|oversized|no-evidence-snapshot}|file-unreadable{path,detail?}。合计预算=journal stat+session stat（session ENOENT 降级=0，其余 stat 错=file-unreadable）→超=oversized 早拒（不读才拒，审计带三元组）→有界读（maxBytes−sSize，+1 探增长）→**读后取消检查+字节纵深复核（raw 非 null 也验长：注入/演进防护）**→parseJournalText→快照。resolveWithin（无分隔符+resolve 幂等）。R1-R10 单测：预算边界−1/=/+1、合计口径、UTF-8 字节、检查后增长、ENOENT/权限、读前/读中取消、撕裂尾入 bad、真 8MiB 档。
+- **网关 typed 映射+连接级取消**：ws-gateway opts.recoveryEvidence 放宽为 (file,signal)=>Result|null|Promise；unavailable→帧 reason 原样+审计 recovery-unavailable；file-unreadable→帧 read-failed（契约冻结集归并）+审计 recovery-unreadable(path,detail)；ConnState.abortCtl：两路 close（closeConn/传输关）均 abort→provider 停读。T1-T4 探针（typed 映射×2+挂起传输关 abort+应用关 abort；closeConn 私有→测试经 cast）。
+- **组合根接线**：composition.ts 建 provider（roots/sessionRoots/sessionFor/maxRecoveryCombinedBytes 配置门 1..1GiB）传 WsGateway；「不在本层」注释移除。
+- **真集成**（tests/integration/recovery-real.test.ts，真 startServer+真 ws+真文件）：I1 501 意图多页完整 ID 集无重不含缓存后追加+同 hash 续页冻结+无 hash 新快照 total 502；I2 真路径注入预算合计超→oversized 帧+审计；I3 journal 缺失→read-failed；I4 撕裂尾真源→blockedReasons 含 torn-tail+resumable 空。坑：replayIntents 按 sessionId 过滤（journal.ts:68）——sessionIdFor 默认=文件名 stem（生产不变量：journal 文件名=会话 id，异映射宿主注入）。
+- 变异（3b4.md+patches/3b4/）：M-3B4-BUDGET（stat 层删→R2 审计断言杀；结果断言不杀=读窗纵深兜底，独占面=早拒审计行）/M-3B4-GREW（复核删→R4 注入杀）/M-3B4-ABORT（读后取消删→R10 读中取消杀；R6 读前取消只命中入口检查，初跑 SURVIVED→补 R10 转杀）。全部真实 diff+退出码+首败断言+还原哈希同值。
+- 终态：46 files **851 passed+7 skipped**（JSON=tests/fixtures/run-records/3b4-vitest.json）+tsc0（根）+lint0。

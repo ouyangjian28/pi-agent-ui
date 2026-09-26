@@ -1,0 +1,10 @@
+--- a/apps/server/src/runtime/recovery-evidence-source.ts
++++ b/apps/server/src/runtime/recovery-evidence-source.ts
+@@ -132,7 +132,6 @@
+     } catch (e) {
+       return { kind: "file-unreadable", path: jAbs, detail: errName(e) };
+     }
+-    if (signal?.aborted) return { kind: "unavailable", reason: "read-failed" };
+     if (raw === null || Buffer.byteLength(raw) > maxBytes - sSize) {
+       // 纵深复核：seam 契约约定超限返 null，但对返回体再验字节长（注入/演进防护——超限串不得漏进结论）
+       audit(`recovery-oversized-grew file=${file} journal=${jSize} session=${sSize} budget=${maxBytes}`);

@@ -10,12 +10,13 @@
 // - dispose 顺序（冻结）：摘 onConnection → 停轮询/SIGHUP → gateway.dispose()（存量连接 1000
 //   "server-shutdown" 优雅关+文件观察器全解绑→DH 双源句柄归零）→ adapter.dispose()（传输层
 //   兜底 1001+关自建 server）→ tokens.dispose()。gateway 先于 adapter：应用层告别帧先于传输层断链。
-// - 不在本层：RpcSession 写侧接线（后续 UI 阶段）、recoveryEvidence（3b-4）、statusFor（缺省=unknown）。
+// - 不在本层：RpcSession 写侧接线（后续 UI 阶段）、statusFor（缺省=unknown）。recoveryEvidence 已于 3b-4 接入。
 import { WsServerAdapter, gatewayMetaFrom } from "./ws/ws-transport.ts";
 import { TokenAuthority } from "./ws/token-auth.ts";
 import { WsGateway } from "./ws/ws-gateway.ts";
 import { ComputeSemaphore } from "./ws/compute-semaphore.ts";
 import { DualHistorySource } from "./runtime/dual-history-source.ts";
+import { createRecoveryEvidenceProvider } from "./runtime/recovery-evidence-source.ts";
 import { isAbsolute } from "node:path";
 
 export interface ServerConfig {
@@ -40,6 +41,8 @@ export interface ServerConfig {
   readonly requireTlsOffLoopback?: boolean;
   /** 单文件扫描预算（默认 8MiB，DEFAULT_MAX_SCAN_BYTES）。 */
   readonly maxScanBytes?: number;
+  /** 恢复投影合计入口预算 journal+session（默认 8MiB，DEFAULT_RECOVERY_COMBINED_BYTES）。 */
+  readonly maxRecoveryCombinedBytes?: number;
   /** token 轮询间隔 ms（默认 5000；0=关闭轮询）。 */
   readonly tokenPollMs?: number;
   /** 注册 SIGHUP 热轮换钩子（默认 false=库模式不碰进程信号；生产入口置 true）。 */
@@ -94,6 +97,9 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
   if (config.tokenPollMs !== undefined && config.tokenPollMs !== 0) {
     // 0=禁用轮询；正值须为安全整数且 ≤ Node 定时器上限（2^31-1）
     requireFinitePosInt("tokenPollMs", config.tokenPollMs, 2_147_483_647);
+    if (config.maxRecoveryCombinedBytes !== undefined) {
+      requireFinitePosInt("maxRecoveryCombinedBytes", config.maxRecoveryCombinedBytes, 1024 * 1024 * 1024);
+    }
   }
   const audit = (line: string): void => { try { config.audit?.(line); } catch { /* 审计异常不阻断 */ } };
 
@@ -109,6 +115,14 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
   });
 
   const semaphore = new ComputeSemaphore();
+  // 3b-4：真读源 recoveryEvidence provider（typed 结果+合计 8MiB 入口预算+session 同源降级）。
+  const recoveryEvidence = createRecoveryEvidenceProvider({
+    roots: config.roots,
+    ...(config.sessionRoots !== undefined ? { sessionRoots: config.sessionRoots } : {}),
+    ...(config.sessionFor !== undefined ? { sessionFor: config.sessionFor } : {}),
+    ...(config.maxRecoveryCombinedBytes !== undefined ? { maxCombinedBytes: config.maxRecoveryCombinedBytes } : {}),
+    audit,
+  });
   const gateway = new WsGateway({
     tokens,
     roots: config.roots,
@@ -117,6 +131,7 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     ...(config.requireTlsOffLoopback !== undefined ? { requireTlsOffLoopback: config.requireTlsOffLoopback } : {}),
     semaphore,
     historySource: history,
+    recoveryEvidence,
     audit,
   });
 

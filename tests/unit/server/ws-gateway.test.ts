@@ -3066,3 +3066,69 @@ describe("ws-gateway 3b3-fix8 F8-1：宿主时钟窗整合（GPT fix7 P10——�
   });
 });
 
+
+describe("ws-gateway 3b-4：typed recovery 结果映射+连接级取消", () => {
+  it("T1 typed unavailable（oversized）→recovery 帧 availability=unavailable reason=oversized（冻结枚举直传）", async () => {
+    const r = await makeRig({ recoveryEvidence: async () => ({ kind: "unavailable", reason: "oversized" }) });
+    try {
+      const c = await authed(r);
+      await c.say({ t: "get-recovery", requestId: "o1", file: "f.jsonl", offset: 0 });
+      const f = c.frames().find((x) => x.t === "recovery") as Record<string, unknown>;
+      expect(f).toMatchObject({ availability: "unavailable", reason: "oversized" });
+      expect(r.audits.some((l) => l.includes("recovery-unavailable") && l.includes("oversized"))).toBe(true);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("T2 typed file-unreadable→帧 reason=read-failed（契约冻结集归并；typed 区分入审计 path/detail）", async () => {
+    const r = await makeRig({ recoveryEvidence: async () => ({ kind: "file-unreadable", path: "/j/f.jsonl", detail: "ENOENT" }) });
+    try {
+      const c = await authed(r);
+      await c.say({ t: "get-recovery", requestId: "u1", file: "f.jsonl", offset: 0 });
+      const f = c.frames().find((x) => x.t === "recovery") as Record<string, unknown>;
+      expect(f).toMatchObject({ availability: "unavailable", reason: "read-failed" });
+      expect(r.audits.some((l) => l.includes("recovery-unreadable") && l.includes("/j/f.jsonl"))).toBe(true);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("T3 取消语义：provider 挂起中传输关闭→AbortSignal 触发（provider 可停读）；无帧泄漏+连接清户", async () => {
+    let seen: AbortSignal | null = null;
+    const r = await makeRig({
+      recoveryEvidence: (_file, signal) => { seen = signal ?? null; return new Promise<never>(() => {}); }, // 挂起读（真源大文件窗）
+    });
+    try {
+      const c = await authed(r);
+      void c.say({ t: "get-recovery", requestId: "h1", file: "f.jsonl", offset: 0 });
+      await tick();
+      expect(seen).not.toBeNull();
+      expect((seen as AbortSignal | null)?.aborted).toBe(false);
+      c.closedByTransport();
+      await tick();
+      expect((seen as AbortSignal | null)?.aborted).toBe(true); // provider 收到停读信号
+      expect(c.frames().some((f) => f.t === "recovery" || f.t === "error")).toBe(false); // 无帧泄漏（本例无任何响应帧）
+      expect(r.gw.connectionCount).toBe(0);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("T4 应用关闭同路取消：closeConn（服务端主动）也触发 abort（幂等）", async () => {
+    let seen: AbortSignal | null = null;
+    const r = await makeRig({ recoveryEvidence: (_f, signal) => { seen = signal ?? null; return new Promise<never>(() => {}); } });
+    try {
+      const c = await authed(r);
+      void c.say({ t: "get-recovery", requestId: "h2", file: "f.jsonl", offset: 0 });
+      await tick();
+      const conns = (r.gw as unknown as { conns: Map<string, unknown> }).conns;
+      const stObj = [...conns.values()][0];
+      (r.gw as unknown as { closeConn: (st: unknown, code: number, reason: string) => void }).closeConn(stObj, 1000, "test");
+      await tick();
+      expect((seen as AbortSignal | null)?.aborted).toBe(true);
+    } finally {
+      await r.dispose();
+    }
+  });
+});

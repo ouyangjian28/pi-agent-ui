@@ -46,8 +46,8 @@ type UnknownRecord = Record<string, unknown>;
 // 行 schema 校验唯一权威已抽出至 protocol（journal-schema.ts，s4e R2+s4f F2→3b2a-R5）：JSON 可解析≠有效 JournalLine；
 // 缺字段/错类型/未知行型/嵌套结构非法一律拒收进 bad——恢复侧与读侧投影共用同一判定。
 
-export async function readJournalFile(path: string): Promise<JournalReadResult> {
-  const raw = await readFile(path, "utf8");
+/** 文本→行拆分+逐行 schema 判定（3b-4 抽取：有界读入口与路径读共用同一判定；行为与旧 readJournalFile 逐字节等价）。 */
+export function parseJournalText(raw: string): JournalReadResult {
   const lines: JournalLine[] = [];
   const bad: BadJournalEntry[] = [];
   const segments = raw.split("\n");
@@ -75,6 +75,11 @@ export async function readJournalFile(path: string): Promise<JournalReadResult> 
     }
   });
   return { lines, bad };
+}
+
+/** 路径读（旧语义：无界 readFile；预算控制入口用 recovery-evidence-source 的有界读，不走本函数）。 */
+export async function readJournalFile(path: string): Promise<JournalReadResult> {
+  return parseJournalText(await readFile(path, "utf8"));
 }
 
 /** 重放呈现报告（按 enqueue 顺序）。 */

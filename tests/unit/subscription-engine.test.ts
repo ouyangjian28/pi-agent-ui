@@ -658,7 +658,7 @@ describe("3b3-fix8 F8-1：页提交资格统一终检（GPT fix7 P8/P9/P10/P11�
     let armed = false;
     const { eng } = mkEng(201, { estimateFrame: () => { if (armed) { if (!eng.state || (eng.state.phase as string) !== "closed") eng.close(4431, "宿主重入", false); return B + 1; } return 64; } });
     const f1 = S(eng.startSnapshot("r-1")[0]);
-    armed = true; // 第 2 页 1 条：终判首轮关+超限→退条→次轮仍超限→events 空→旧代码 4431
+    armed = true; // 第 2 页 1 条：基线=终判首轮（关引擎）即被 F9-1 先验拒 4404；删门旧态=退条→次轮仍超限→events 退空→4431（fix10 注释勘正：区分基线首轮拒绝与旧态退空）
     const res = errOf(eng.handle({ kind: "page", requestId: "r-2", snapshotId: f1.snapshotId, historyNext: f1.historyNext! }));
     expect(res).toHaveLength(1);
     expect(res[0]).toMatchObject({ t: "error", code: 4404, requestId: "r-2" });
@@ -669,10 +669,21 @@ describe("3b3-fix8 F8-1：页提交资格统一终检（GPT fix7 P8/P9/P10/P11�
     let step = 0; // 0=基线64；1=关+超限（仅一次）；2=通过64；3=超限（持续）
     const { eng } = mkEng(201, { estimateFrame: () => { if (step === 1) { step = 2; eng.close(4431, "宿主重入", false); return B + 1; } return step === 3 ? B + 1 : 64; } });
     const f1 = S(eng.startSnapshot("r-1")[0]); // 调用=64（step0）
-    step = 1; // 第 2 页终判首轮：关引擎+超限→退条；次轮 step2=64 通过（events 已空）→退空判定口
+    step = 1; // 第 2 页终判首轮：基线=F9-1 先验首轮即拒 4404；删门旧态=退条后次轮 64 通过（events 已空）→落退空判定口 4431
     const res = errOf(eng.handle({ kind: "page", requestId: "r-2", snapshotId: f1.snapshotId, historyNext: f1.historyNext! }));
     expect(res).toHaveLength(1);
     expect(res[0]).toMatchObject({ t: "error", code: 4404, requestId: "r-2" }); // 旧代码：4431（退空口）
+    expect(eng.state.phase).toBe("closed");
+  });
+
+  it("F10/P-BUDGET-NAN 对照：估算器返回 NaN（未关闭）→退空→4431（旧成功谓词语义保留，GPT fix9 Y10-3）", () => {
+    let armed = false;
+    const { eng } = mkEng(201, { estimateFrame: () => (armed ? Number.NaN : 64) }); // NaN=不受控注入端口行为（默认估算器不产生）
+    const f1 = S(eng.startSnapshot("r-1")[0]);
+    armed = true; // 第 2 页终判 NaN：NaN<=B 不成立→退条→退空→4431（fix8 语义；fix9 首版 over=NaN>B=false 会误受帧，fix10 勘正）
+    const res = errOf(eng.handle({ kind: "page", requestId: "r-2", snapshotId: f1.snapshotId, historyNext: f1.historyNext! }));
+    expect(res).toHaveLength(1);
+    expect(res[0]).toMatchObject({ t: "error", code: 4431, retryable: false, requestId: "r-2" });
     expect(eng.state.phase).toBe("closed");
   });
 
