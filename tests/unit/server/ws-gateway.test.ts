@@ -15,7 +15,7 @@ import { DualHistorySource } from "../../../apps/server/src/runtime/dual-history
 import { ComputeSemaphore } from "../../../apps/server/src/ws/compute-semaphore.ts";
 import type { RecoveryEvidenceSnapshot, BadJournalEntry } from "../../../apps/server/src/runtime/recover.ts";
 import type { ScanRow } from "@pi-agent-ui/protocol";
-import { matchKeyOf, validateClientFrame } from "@pi-agent-ui/protocol";
+import { fnv1a64Hex, matchKeyOf, validateClientFrame } from "@pi-agent-ui/protocol";
 
 const tick = (): Promise<void> => new Promise((res) => setImmediate(() => res()));
 async function until(cond: () => boolean, ms = 2000): Promise<void> {
@@ -1767,11 +1767,11 @@ describe("ws-gateway 3b-2b③：DualHistorySource 接线验证", () => {
   class PathReader implements HistoryReaderPort {
     readonly files = new Map<string, { text: string; identity: string }>();
     readonly failPaths = new Set<string>();
-    read(absPath: string): Promise<{ text: string; identity: string }> {
+    read(absPath: string): Promise<{ text: string; identity: string; fingerprint: string }> {
       if (this.failPaths.has(absPath)) return Promise.reject(new Error("EACCES " + absPath));
       const f = this.files.get(absPath);
       if (!f) return Promise.reject(new Error("ENOENT " + absPath));
-      return Promise.resolve({ text: f.text, identity: f.identity });
+      return Promise.resolve({ text: f.text, identity: f.identity, fingerprint: fnv1a64Hex(f.text) });
     }
     set(path: string, text: string, identity?: string): void { this.files.set(path, { text, identity: identity ?? `dev-ino-${path}` }); }
   }
@@ -1804,7 +1804,7 @@ describe("ws-gateway 3b-2b③：DualHistorySource 接线验证", () => {
       watcher,
       audit: (l) => { audits.push(l); },
     });
-    const r = await makeRig({ historySource: dual, roots: [jr], scanDir: jr });
+    const r = await makeRig({ historySource: dual, roots: [jr], scanDir: jr, audit: (l) => { audits.push(l); } });
     return { r, reader, watcher, jp: join(jr, "j.jsonl"), sp: join(sr, "sess.jsonl"), audits, dispose: async () => { await r.dispose(); await rm(jr, { recursive: true, force: true }); await rm(sr, { recursive: true, force: true }); } };
   }
   type Ev = { kind: string; intentId: string | null; seq: number; role?: string };
@@ -2190,5 +2190,28 @@ describe("ws-gateway 3b-2b③：DualHistorySource 接线验证", () => {
     } finally {
       await d.dispose();
     }
+  });
+  it("3b-3⑤：装载后审计 index-fingerprint（journal/session 各 12hex；journal-only 面 session=-）", async () => {
+    const d = await dualRig();
+    try {
+      d.reader.set(d.jp, jEn("i-1", TEXT_A, 0) + "\n");
+      d.reader.set(d.sp, sU("u1", TEXT_A) + "\n");
+      const c = await authed(d.r);
+      await c.say({ t: "subscribe", requestId: "sub-1", file: "j.jsonl" });
+      const snap = c.frames().find((f) => f.t === "snapshot");
+      expect(snap).toBeDefined();
+      const line = d.audits.find((l) => l.includes("index-fingerprint"));
+      expect(line).toBeDefined();
+      expect(line).toContain("journal=");
+      expect(line).toContain("session=");
+      // journal-only：删 session+通知（代退役→无活跃指纹）→新订阅装载→session=- 审计行
+      d.reader.files.delete(d.sp);
+      d.watcher.notice(d.sp);
+      await new Promise((r2) => setTimeout(r2, 10)); // 代退役结算
+      const c2 = await authed(d.r);
+      await c2.say({ t: "subscribe", requestId: "sub-2", file: "j.jsonl" });
+      const lines = d.audits.filter((l) => l.includes("index-fingerprint"));
+      expect(lines.some((l) => l.includes("session=-"))).toBe(true);
+    } finally { await d.dispose(); }
   });
 });

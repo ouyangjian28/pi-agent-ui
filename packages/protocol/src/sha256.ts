@@ -20,16 +20,16 @@ const K = new Uint32Array([
 /** SHA-256（FIPS 180-4），输入=字符串的 UTF-8 字节，输出=小写 64 位 hex。
  *  输入上界（3b2c-Y3）：字节长度 < 2^28（256MiB）——位长低 32 位经 int32 移位（len<<3），
  *  超出即静默截断；当前读预算 8MiB 远低于此，未来放大须改用双字位长计算。 */
-export function sha256Hex(input: string): string {
-  const bytes = new TextEncoder().encode(input);
-  const len = bytes.length;
+/** SHA-256（FIPS 180-4）纯 TS 实现：字节入口。指纹=整文件字节（含撕裂尾）的变更检测触发器（契约 §1.3）。 */
+export function sha256HexBytes(buf: Uint8Array): string {
+  const len = buf.length;
   const bitLenHi = Math.floor(len / 0x20000000); // len*8 高 32 位（len ≤ 2^53）
   const bitLenLo = (len << 3) >>> 0; // 低 32 位（截断即 mod 2^32）
 
   // 填充：0x80 + 0* + 8 字节位长（总长 ≡ 0 mod 64）
   const paddedLen = (((len + 8) >>> 6) + 1) << 6;
   const m = new Uint8Array(paddedLen);
-  m.set(bytes);
+  m.set(buf);
   m[len] = 0x80;
   const dv = new DataView(m.buffer);
   dv.setUint32(paddedLen - 8, bitLenHi >>> 0);
@@ -64,6 +64,10 @@ export function sha256Hex(input: string): string {
 
   const out = [h0, h1, h2, h3, h4, h5, h6, h7].map((x) => x.toString(16).padStart(8, "0")).join("");
   return out;
+}
+
+export function sha256Hex(input: string): string {
+  return sha256HexBytes(new TextEncoder().encode(input));
 }
 
 /** 附件身份 canon（identity.ts 三审冻结口径的派生入口）：sha256 前 12 hex。 */

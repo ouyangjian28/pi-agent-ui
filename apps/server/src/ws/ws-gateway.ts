@@ -61,6 +61,8 @@ export interface HistorySourcePort {
   observe?(file: string, sinks: HistorySinks, opts?: { consumeLoadRef?: boolean }): (() => void) | null;
   /** 释放一次 load 引用（load 解析后不 observe 的出口：失败口/重复订阅丢弃）。 */
   release?(file: string): void;
+  /** 3b-3⑤：两源整文件指纹（信息性元数据；缺省=源未接线，网关不记指纹）。 */
+  fingerprints?(file: string): { journal: string; session: string } | null;
 }
 /** 3b-2（GPT 3b-0 §IV.E 冻结）：盘面失效分类——后两者不得伪装成行追加/onStatus。 */
 export type HistoryInvalidateReason = "rewrite" | "truncate" | "replace";
@@ -602,6 +604,15 @@ export class WsGateway {
   /** W1-04：索引装载与增量同步（前缀→追加；非前缀=盘面改写→换流重建+退役旧引擎）。
    * R2（w1c）：换流必须协调所有仍持旧索引身份的活动订阅（4409 退旧+撤帧+清理），
    * 不得让旧引擎接收新流坐标的事件；R3：所有装载/增量出口统一容量门。 */
+  /** 3b-3⑤：装载/续编时把两源整文件指纹落到索引（信息性元数据+审计行——变更检测触发器，非身份判据）。 */
+  private recordFingerprints(file: string, index: ReadIndex): void {
+    const fp = this.opts.historySource?.fingerprints?.(file);
+    if (fp === null || fp === undefined) return;
+    index.journalFingerprint = fp.journal;
+    index.sessionFingerprint = fp.session;
+    this.audit(`index-fingerprint file=${file} journal=${fp.journal.slice(0, 12)} session=${fp.session === "" ? "-" : fp.session.slice(0, 12)}`);
+  }
+
   private syncIndex(file: string, rows: readonly ScanRow[]): ReadIndex | typeof WsGateway.INDEX_BUDGET {
     let index: ReadIndex;
     try {
@@ -612,6 +623,7 @@ export class WsGateway {
     }
     if (index.waterMark === 0) {
       for (const row of rows) index.append(row.source, row.locator, row.raw, row.event);
+      this.recordFingerprints(file, index);
       if (index.overBudget) { this.closeSubscriptionsFor(file, "index-over-budget"); return WsGateway.INDEX_BUDGET; }
       // D1（w1d）身份防线：空索引装载（新流/挤出重建/宽容换流）不得喂仍持旧身份的引擎
       // （正常路径已由 onStreamDropped 钩子退役；此处兜底协调漏网，幂等 no-op）
@@ -635,6 +647,7 @@ export class WsGateway {
       // live——每订阅恰一次（已在索引内的行不会经此重复：onAppend 路径入索引后即非余量）。
       const before = index.waterMark;
       const appended = index.continueFrom(rows);
+      this.recordFingerprints(file, index);
       if (appended > 0) {
         const fresh = index.read(before + 1, appended);
         for (const fe of fresh) this.forEachEngine(file, (e) => e.onHistoryAppend(fe.event));

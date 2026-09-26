@@ -250,4 +250,15 @@ export class DualHistorySource implements HistorySourcePort {
       this.sessionSrc.release?.(file);
     }
   }
+
+  /** 3b-3⑤：两源整文件指纹（信息性元数据——契约 §1.3 变更检测触发器，供网关审计/诊断）。
+   *  journal 无活跃代→null；journal-only（session 未装载/无映射）→session=""。 */
+  fingerprints(file: string): { journal: string; session: string } | null {
+    const jfp = this.journalSrc.currentFingerprint(file);
+    if (jfp === null) return null;
+    if (this.sessionSrc === null || this.opts.sessionFor === undefined) return { journal: jfp, session: "" };
+    // session 子源槽以**逻辑 file** 键控（journalFor=路径映射器，非槽键——3b-2b② 冻结）
+    const sfp = this.sessionSrc.currentFingerprint(file);
+    return { journal: jfp, session: sfp ?? "" };
+  }
 }

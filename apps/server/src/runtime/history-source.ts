@@ -28,11 +28,13 @@ import type {
 } from "../ws/ws-gateway.ts";
 import { journalToScanRows } from "@pi-agent-ui/protocol";
 import type { ScanRow } from "@pi-agent-ui/protocol";
-import { scanDigest } from "@pi-agent-ui/protocol";
+import { scanDigest, sha256HexBytes } from "@pi-agent-ui/protocol";
 
-/** 读取端口：一次调用=一次全新安全打开+有界读+身份（测试可注入；默认真盘）。 */
+/** 读取端口：一次调用=一次全新安全打开+有界读+身份+指纹（测试可注入；默认真盘）。
+ *  3b-3⑤（契约 §1.3）：fingerprint=整文件字节 SHA-256（**含撕裂尾**）——变更检测触发器，
+ *  非身份判据（身份判据=前缀投影 locator+digest 比对）。同指纹=内容未变可短路；异指纹=重扫。 */
 export interface HistoryReaderPort {
-  read(absPath: string): Promise<{ text: string; identity: string }>;
+  read(absPath: string): Promise<{ text: string; identity: string; fingerprint: string }>;
 }
 
 /**
@@ -62,7 +64,7 @@ export const DEFAULT_MAX_SCAN_BYTES = 8 * 1024 * 1024;
 /** 真盘读取：安全打开→有界读→同 fd 身份。任何失败抛 SafeOpenError（含 kind 分类）。 */
 export class RealReader implements HistoryReaderPort {
   constructor(private readonly maxBytes: number) {}
-  async read(absPath: string): Promise<{ text: string; identity: string }> {
+  async read(absPath: string): Promise<{ text: string; identity: string; fingerprint: string }> {
     const { fh } = await openSafeFile(absPath);
     try {
       const [buf, st] = await Promise.all([readBounded(fh, this.maxBytes, absPath), fh.stat()]);
@@ -84,7 +86,8 @@ export class RealReader implements HistoryReaderPort {
         throw new SafeOpenError("read-failed", absPath, "invalid-utf8-complete-line");
       }
       if (tail.length > 0) text += new TextDecoder("utf-8", { ignoreBOM: true }).decode(tail);
-      return { text, identity: `${st.dev}:${st.ino}` };
+      // 3b-3⑤：指纹=整文件字节（含撕裂尾）——撕裂尾增长也改变指纹（触发重扫→前缀比对裁决追加）
+      return { text, identity: `${st.dev}:${st.ino}`, fingerprint: sha256HexBytes(buf) };
     } finally {
       await fh.close().catch(() => {});
     }
@@ -112,6 +115,8 @@ interface GenEntry {
   disposed: boolean;
   state: "active" | "closed";
   identity: string;
+  /** 3b-3⑤：整文件字节 SHA-256（含撕裂尾）——变更检测触发器（同指纹=内容未变可短路；非身份判据）。 */
+  fingerprint: string;
   /** 注册序（3b2e-C2）：每次 watcher 注册独立递增。 */
   regCounter: number;
   /** 当前有效注册（3b2e-C2）：rearm 重挂后旧句柄回调凭 reg 失效（同代亦然，GPT 3b2d D3/D15）。 */
@@ -286,6 +291,7 @@ export class FileHistorySource implements HistorySourcePort {
     const entry: GenEntry = {
       file, abs, disposed: false, state: "active",
       identity: "",
+      fingerprint: "",
       baseline: [],
       baselineRows: [],
       watchers: [],
@@ -308,7 +314,7 @@ export class FileHistorySource implements HistorySourcePort {
       this.audit(`watch-setup-failed file=${file} kind=${errKind(e)}`);
       return false;
     }
-    let read: { text: string; identity: string };
+    let read: { text: string; identity: string; fingerprint: string };
     try {
       read = await this.reader().read(abs);
     } catch (e) {
@@ -329,6 +335,7 @@ export class FileHistorySource implements HistorySourcePort {
       return false; // project-failed 已审计
     }
     entry.identity = read.identity;
+    entry.fingerprint = read.fingerprint; // 3b-3⑤
     entry.baseline = rows.map((r) => ({ locator: r.locator, digest: scanDigest(r) }));
     entry.baselineRows = [...rows];
     slot.pendingEntry = null;
@@ -372,6 +379,14 @@ export class FileHistorySource implements HistorySourcePort {
 
   /** 3b2b-R1：当前活跃代基线行副本（无引用副作用）——DualHistorySource 装载等待窗后的复核面。
    *  无活跃代（槽未建/已失效/已淘汰）=null；副本语义=调用方持快照，后续追加不影响已取值。 */
+  /** 3b-3⑤：当前活跃代的整文件指纹（无活跃代=null；供组合层/网关元数据用）。 */
+  currentFingerprint(file: string): string | null {
+    const slot = this.slots.get(file);
+    const entry = slot?.entry ?? null;
+    if (slot === undefined || entry === null || entry.disposed || entry.state !== "active") return null;
+    return entry.fingerprint;
+  }
+
   currentRows(file: string): readonly ScanRow[] | null {
     const slot = this.slots.get(file);
     const entry = slot?.entry ?? null;
@@ -484,7 +499,7 @@ export class FileHistorySource implements HistorySourcePort {
   }
 
   private async rescanOnce(slot: FileSlot, entry: GenEntry, why: string): Promise<void> {
-    let read: { text: string; identity: string };
+    let read: { text: string; identity: string; fingerprint: string };
     try {
       read = await this.reader().read(entry.abs);
     } catch (e) {
@@ -492,6 +507,17 @@ export class FileHistorySource implements HistorySourcePort {
       return;
     }
     if (entry.disposed || entry.state !== "active" || slot.entry !== entry) return; // 读期间失效/换代：丢弃（await 后复核）
+    // 3b-3⑤ 指纹短路（契约 §1.3）：同指纹=整文件字节未变——无论 inode 是否更换（同字节换 inode=短路，观察一致面不换流）
+    if (read.fingerprint === entry.fingerprint) {
+      if (read.identity !== entry.identity) {
+        entry.identity = read.identity; // 后续追加/换代判据跟到新 inode
+        this.audit(`fingerprint-skip-identity-change file=${entry.file} why=${why}`);
+      } else {
+        this.audit(`fingerprint-skip file=${entry.file} why=${why}`);
+      }
+      this.rearmWatcher(slot, entry);
+      return;
+    }
     if (read.identity !== entry.identity) {
       this.deliverInvalidate(slot, entry, "replace");
       return;
@@ -525,6 +551,7 @@ export class FileHistorySource implements HistorySourcePort {
       entry.baselineRows.push(row);
       entry.baseline.push(digests[i] as { locator: string; digest: string });
     }
+    entry.fingerprint = read.fingerprint; // 3b-3⑤：重扫成功落地后指纹跟进（下一轮同内容 notice 可短路）
     this.audit(`rescan file=${entry.file} why=${why} rows=${rows.length} appended=${appended}`);
     // 重挂观察（fs.watch 对 rename 类事件可能失效——重叠换新关旧；失败→unavailable，R6 fail-closed）
     this.rearmWatcher(slot, entry);

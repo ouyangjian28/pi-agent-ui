@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileHistorySource, RealReader, type HistoryReaderPort, type HistoryWatcherPort } from "../../../apps/server/src/runtime/history-source.ts";
 import type { HistoryInvalidateReason, HistorySinks, HistoryUnavailableReason } from "../../../apps/server/src/ws/ws-gateway.ts";
-import { sessionToScanRows, type ScanRow } from "@pi-agent-ui/protocol";
+import { fnv1a64Hex, sessionToScanRows, type ScanRow } from "@pi-agent-ui/protocol";
 
 const CLEANUP: string[] = [];
 afterAll(async () => { for (const d of CLEANUP) await rm(d, { recursive: true, force: true }); });
@@ -21,17 +21,23 @@ function jline(n: number, text = `m${n}`): string {
   return JSON.stringify({ t: "enqueue", intentId: `i-${n}`, sessionId: "s", generation: 1, leafId: `L${n}`, matchKey: { textHash: `h${n}`, attachmentIdentity: "", ordinal: n }, payload: { kind: "prompt", rawText: text, attachments: [], sentAt: "1" } });
 }
 
-type ReadResult = { text: string; identity: string };
+type ReadResult = { text: string; identity: string; fingerprint?: string };
 /** 挂起读占位：手动 resolve/reject（多槽——R2 单飞/P3 竞态证据）。 */
 class HeldRead {
   settled = false;
-  private res?: (v: ReadResult) => void;
+  private res?: (v: { text: string; identity: string; fingerprint: string }) => void;
   private rej?: (e: unknown) => void;
-  readonly promise: Promise<ReadResult>;
+  readonly promise: Promise<{ text: string; identity: string; fingerprint: string }>;
   constructor() {
     this.promise = new Promise((res, rej) => { this.res = res; this.rej = rej; });
   }
-  resolve(v: ReadResult): void { if (!this.settled) { this.settled = true; (this.res as (x: ReadResult) => void)(v); } }
+  resolve(v: ReadResult): void {
+    if (this.settled) return;
+    this.settled = true;
+    const full: { text: string; identity: string; fingerprint: string } =
+      v.fingerprint !== undefined ? { text: v.text, identity: v.identity, fingerprint: v.fingerprint } : { text: v.text, identity: v.identity, fingerprint: fnv1a64Hex(v.text) };
+    (this.res as (x: { text: string; identity: string; fingerprint: string }) => void)(full);
+  }
   reject(e: unknown): void { if (!this.settled) { this.settled = true; (this.rej as (x: unknown) => void)(e); } }
 }
 
@@ -39,13 +45,13 @@ class HeldRead {
 class FakeReader implements HistoryReaderPort {
   reads: Array<ReadResult | Error | HeldRead> = [];
   calls = 0;
-  read(_abs: string): Promise<ReadResult> {
+  read(_abs: string): Promise<{ text: string; identity: string; fingerprint: string }> {
     this.calls += 1;
     const next = this.reads[this.calls - 1];
     const r = next === undefined ? { text: "", identity: "0:0" } : next;
     if (r instanceof Error) return Promise.reject(r);
     if (r instanceof HeldRead) return r.promise;
-    return Promise.resolve(r);
+    return Promise.resolve(r.fingerprint !== undefined ? { text: r.text, identity: r.identity, fingerprint: r.fingerprint } : { text: r.text, identity: r.identity, fingerprint: fnv1a64Hex(r.text) });
   }
 }
 
@@ -520,9 +526,9 @@ describe("FileHistorySource——盘面分型（§V②）", () => {
     expect(log.invalidates[0]).toBe("truncate");
   });
 
-  it("replace（身份变化）→invalidate", async () => {
+  it("replace（身份变化）→invalidate（3b-3⑤ 起：identity 变+内容变才 replace——同字节换 inode 走指纹短路，见 ⑤ 组）", async () => {
     const { h, log } = await setup(`${jline(1)}\n`);
-    h.reader.reads.push({ text: `${jline(1)}\n`, identity: "9:9" }); // dev:ino 变
+    h.reader.reads.push({ text: `${jline(2)}\n`, identity: "9:9" }); // dev:ino 变+内容变
     h.watcher.handles[0]?.triggerNotice();
     await until(() => log.invalidates.length === 1);
     expect(log.invalidates[0]).toBe("replace");
@@ -706,7 +712,8 @@ describe("FileHistorySource 真盘（3b-2a+R7 证据分级）", () => {
         read: async (abs: string) => {
           if (first) { first = false; while (!gateOpen) await new Promise((res) => setTimeout(res, 2)); }
           const st = await stat(abs);
-          return { text: await readFile(abs, "utf8"), identity: `${st.dev}:${st.ino}` };
+          const buf = await readFile(abs);
+          return { text: buf.toString("utf8"), identity: `${st.dev}:${st.ino}`, fingerprint: fnv1a64Hex(buf.toString("utf8")) };
         },
       },
     });
@@ -1261,5 +1268,88 @@ describe("RealReader 3b2b-R5（GPT 65→修复）：非法 UTF-8 fail-closed", (
     const r = await new RealReader(MAX).read(p);
     expect(r.text).toContain(`{"t":"x"}`);
     expect(r.text).toContain("\uFFFD"); // 撕裂尾的有损解码仍在（不发布即无害）
+  });
+});
+
+describe("FileHistorySource 3b-3⑤：整文件指纹短路（契约 §1.3——变更检测触发器）", () => {
+  it("同内容同身份 notice→fingerprint-skip：无 append 无 invalidate（幂等重扫静默）", async () => {
+    const r = new FakeReader();
+    r.reads.push({ text: `${jline(1)}\n`, identity: "1:1" });
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");
+    const { s: sk, log } = makeSinks();
+    h.src.observe("a.jsonl", sk);
+    r.reads.push({ text: `${jline(1)}\n`, identity: "1:1" }); // 字节未变
+    h.watcher.handles[0]?.triggerNotice();
+    await drain(20);
+    expect(log.appends).toEqual([]);
+    expect(log.invalidates).toEqual([]);
+    expect(h.audits.some((l) => l.includes("fingerprint-skip file=a.jsonl"))).toBe(true);
+    expect(h.audits.some((l) => l.includes("identity-change"))).toBe(false);
+  });
+
+  it("同字节换 inode→fingerprint-skip-identity-change（不失效）；后续新 inode 上真追加仍达", async () => {
+    const t1 = `${jline(1)}\n`;
+    const r = new FakeReader();
+    r.reads.push({ text: t1, identity: "1:1" });
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");
+    const { s: sk, log } = makeSinks();
+    h.src.observe("a.jsonl", sk);
+    // rename-over 同字节：inode 变、内容不变→短路（观察一致面不换流）
+    r.reads.push({ text: t1, identity: "9:9" });
+    h.watcher.handles[0]?.triggerNotice();
+    await until(() => h.audits.some((l) => l.includes("fingerprint-skip-identity-change")));
+    expect(log.invalidates).toEqual([]);
+    expect(log.appends).toEqual([]);
+    // 新 inode 上继续追加（身份已跟进 9:9）→正常 onAppend 不失效
+    r.reads.push({ text: `${t1}${jline(2)}\n`, identity: "9:9" });
+    const live2 = h.watcher.handles.filter((x) => !x.closed).pop(); // rearm 后最新句柄
+    live2?.triggerNotice();
+    await until(() => log.appends.length === 1);
+    expect(log.invalidates).toEqual([]);
+  });
+
+  it("内容增长→正常 append+指纹跟进；随后同内容 notice→fingerprint-skip", async () => {
+    const t1 = `${jline(1)}\n`;
+    const r = new FakeReader();
+    r.reads.push({ text: t1, identity: "1:1" });
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");
+    const { s: sk, log } = makeSinks();
+    h.src.observe("a.jsonl", sk);
+    r.reads.push({ text: `${t1}${jline(2)}\n`, identity: "1:1" });
+    h.watcher.handles[0]?.triggerNotice();
+    await until(() => log.appends.length === 1);
+    expect(h.audits.some((l) => l.includes("fingerprint-skip"))).toBe(false); // 真增长不走短路
+    r.reads.push({ text: `${t1}${jline(2)}\n`, identity: "1:1" }); // 指纹已更新→再触=skip
+    const live3 = h.watcher.handles.filter((x) => !x.closed).pop(); // rearm 后最新句柄
+    live3?.triggerNotice();
+    await until(() => h.audits.some((l) => l.includes("fingerprint-skip")));
+    expect(log.appends.length).toBe(1); // 无新 append
+  });
+
+  it("真盘 rename 覆盖同字节（真新 inode）→无 invalidate；随后真追加正常（RealReader+RealWatcher 冒烟）", async () => {
+    const d = await mkdtemp(join(tmpdir(), "fp-real-"));
+    CLEANUP.push(d);
+    const p = join(d, "j.jsonl");
+    const t1 = `${jline(1)}\n`;
+    await writeFile(p, t1);
+    const audits: string[] = [];
+    const src = new FileHistorySource({ roots: [d], audit: (l) => { audits.push(l); } }); // 默认真 reader+真 watcher
+    const rows = await src.load(p);
+    expect(rows).not.toBeNull();
+    const { s: sk, log } = makeSinks();
+    const un = src.observe(p, sk);
+    expect(un).not.toBeNull();
+    const tmp = join(d, "tmp.jsonl");
+    await writeFile(tmp, t1); // 同字节
+    await rename(tmp, p); // rename-over=真换 inode
+    await until(() => audits.some((l) => l.includes("fingerprint-skip-identity-change")));
+    expect(log.invalidates).toEqual([]); // 同字节换 inode=短路不换流（契约 §1.3）
+    await appendFile(p, `${jline(2)}\n`); // 真追加
+    await until(() => log.appends.length === 1);
+    expect(log.invalidates).toEqual([]);
+    (un as () => void)();
   });
 });

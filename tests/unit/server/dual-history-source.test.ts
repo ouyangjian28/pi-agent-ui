@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { DualHistorySource } from "../../../apps/server/src/runtime/dual-history-source.ts";
 import type { HistoryReaderPort, HistoryWatcherPort } from "../../../apps/server/src/runtime/history-source.ts";
 import type { HistoryInvalidateReason, HistorySinks, HistoryUnavailableReason } from "../../../apps/server/src/ws/ws-gateway.ts";
-import { matchKeyOf } from "@pi-agent-ui/protocol";
+import { fnv1a64Hex, matchKeyOf } from "@pi-agent-ui/protocol";
 import type { ScanRow } from "@pi-agent-ui/protocol";
 
 const CLEANUP: string[] = [];
@@ -28,7 +28,7 @@ class PathReader implements HistoryReaderPort {
   readonly holdPaths = new Set<string>();
   readCalls: string[] = [];
   private readonly heldFns: (() => void)[] = [];
-  read(absPath: string): Promise<{ text: string; identity: string }> {
+  read(absPath: string): Promise<{ text: string; identity: string; fingerprint: string }> {
     this.readCalls.push(absPath);
     if (this.failPaths.has(absPath)) return Promise.reject(new Error(`read boom ${absPath}`));
     if (this.holdPaths.has(absPath)) {
@@ -36,13 +36,13 @@ class PathReader implements HistoryReaderPort {
         this.heldFns.push(() => {
           const f = this.files.get(absPath);
           if (f === undefined) rej(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
-          else res({ text: f.text, identity: f.identity });
+          else res({ text: f.text, identity: f.identity, fingerprint: fnv1a64Hex(f.text) });
         });
       });
     }
     const f = this.files.get(absPath);
     if (f === undefined) return Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
-    return Promise.resolve({ text: f.text, identity: f.identity });
+    return Promise.resolve({ text: f.text, identity: f.identity, fingerprint: fnv1a64Hex(f.text) });
   }
   set(path: string, text: string, identity?: string): void { this.files.set(path, { text, identity: identity ?? `dev-ino-${path}` }); } // 同路径恒同身份（改写≠换身份；显式传 identity=换代）
   releaseHold(): void { this.holdPaths.clear(); const fns = this.heldFns.splice(0); for (const fn of fns) fn(); } // 一次性放行：后续读不再挂起（重装重读不挂）
@@ -196,8 +196,9 @@ describe("DualHistorySource 3b-2b②——合成与归因", () => {
     h.reader.set("/s/a", sUser("u1", USER_TEXT) + "\n" + sUser("u2", "second") + "\n");
     h.watcher.notice("/s/a");
     await until(() => log.appends.some((r) => r.source === "session"));
-    // 任一源盘面换代（identity 变）→invalidate 转发（watch 瞬错=重挂自愈，不产失效——设计面）
-    h.reader.set("/s/a", sUser("u1", USER_TEXT) + "\n" + sUser("u2", "second") + "\n", `dev-ino-${Date.now()}`);
+    // 任一源盘面换代（identity 变+内容变——3b-3⑤ 起同字节换 inode 走指纹短路不失效）
+    // →invalidate 转发（watch 瞬错=重挂自愈，不产失效——设计面）
+    h.reader.set("/s/a", sUser("u1", USER_TEXT) + "\n" + sUser("u2", "second") + "\n" + sUser("u3", "third") + "\n", `dev-ino-${Date.now()}`);
     h.watcher.notice("/s/a");
     await until(() => log.invalidates.length > 0);
     expect(log.invalidates).toContain("replace");
@@ -538,7 +539,7 @@ describe("DualHistorySource 3b2c-fix1——五阻断闭合（GPT 72→修复）"
     const h = harness({ sessionFor: (f) => f.replace("/j/", "/s/") });
     // session 读改为可控 deferred（arm 后生效——首次装载与 journal-only observe 不挂起）
     let arm = false;
-    const held: Array<(v: { text: string; identity: string } | Error) => void> = [];
+    const held: Array<(v: { text: string; identity: string; fingerprint: string } | Error) => void> = [];
     const baseRead = h.reader.read.bind(h.reader);
     h.reader.read = (p: string) => {
       if (p === SP && arm) {
@@ -562,7 +563,7 @@ describe("DualHistorySource 3b2c-fix1——五阻断闭合（GPT 72→修复）"
       h.watcher.notice(JP);
       await until(() => log.invalidates.includes("replace"));
       const settle = held.shift();
-      settle?.({ text: sUser("u1", USER_TEXT) + "\n", identity: `id-s${round}` });
+      settle?.({ text: sUser("u1", USER_TEXT) + "\n", identity: `id-s${round}`, fingerprint: fnv1a64Hex(sUser("u1", USER_TEXT) + "\n") });
       await drain(8); // 当前轮结算（复核 stale→release→下一轮）
     }
     expect(await ld).toBeNull();
@@ -684,5 +685,22 @@ describe("DualHistorySource 3b2c-fix1——五阻断闭合（GPT 72→修复）"
       unD?.();
       await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
     });
+  });
+});
+
+describe("DualHistorySource 3b-3⑤：fingerprints() 元数据面", () => {
+  const FP_J1 = () => fnv1a64Hex(jEnqueue("i-1", USER_TEXT, 0) + "\n");
+  const FP_S1 = () => fnv1a64Hex(sUser("u1", USER_TEXT) + "\n");
+  it("未装载→null；双源活跃→两指纹；journal-only→session=\"\"（契约 §1.3 信息性元数据）", async () => {
+    const h = harness({ sessionFor: (f) => f.replace("/j/", "/s/") });
+    expect(h.src.fingerprints("/j/a")).toBeNull(); // 无活跃代
+    h.reader.set("/j/a", jEnqueue("i-1", USER_TEXT, 0) + "\n");
+    h.reader.set("/s/a", sUser("u1", USER_TEXT) + "\n");
+    await h.src.load("/j/a");
+    expect(h.src.fingerprints("/j/a")).toEqual({ journal: FP_J1(), session: FP_S1() });
+    const h2 = harness({ sessionFor: (f) => f.replace("/j/", "/s/") });
+    h2.reader.set("/j/a", jEnqueue("i-1", USER_TEXT, 0) + "\n"); // session 缺失
+    await h2.src.load("/j/a");
+    expect(h2.src.fingerprints("/j/a")).toEqual({ journal: FP_J1(), session: "" }); // journal-only 降级面
   });
 });
