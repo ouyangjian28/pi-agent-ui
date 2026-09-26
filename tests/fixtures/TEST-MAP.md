@@ -469,3 +469,17 @@
 - 语义变更披露：**同字节换 inode 从「invalidate(replace)」改为「短路不换流」**（契约 §1.3 指纹=变更检测触发器；观察一致面）。两处旧测试随之更新：hs「replace（身份变化）」改 identity 变+内容变；dual「observe 双子源」换代步加 u3 行。
 - 变异四杀：M-FP-1 短路门 if(false)→4 挂；M-FP-2 跳过不跟进 identity→2 挂（短路自陷：后续新 inode 追加误判 replace）；M-FP-3 追加后指纹不更新→1 挂；M-FP-4 网关不记指纹→1 挂。全部 KILLED（tests/fixtures/mutation-records/3b3-fingerprint.md，真实 diff+失败用例名+还原后 747+7 复验）。
 - 踩坑：①tests 直接跑 tsc 严格面下 ReadResult 可选 fingerprint 的收窄要显式展开（in 收窄不动）②python 追加测试后搬移进 describe 时吞了前一 it 的闭合括号（suite-in-test+EOF 缺括号——vitest 部分收集假象 673/680，tsc 才是真相）③网关审计与双源审计是两条线（dualRig 的 audits 原只接双源——makeRig 透传 audit 并入）④session 子源槽键=逻辑 file 非 session 路径（journalFor 是映射器）。
+
+## 3b-3② real-fs E2E（2026-09-29；repo ed7e22b）
+- 场景=真实 OS 时序（mkdtemp 真目录+真 fs.watch+RealReader），网关面走 FakeConn 内存传输（无网络无 LLM）。rig=dual 默认装配（roots=[jr], sessionRoots=[sr], sessionFor）+WsGateway{roots,scanDir}；WARM=150ms 稳态+until(3000ms)。
+- 断言面：RF1 同 tick 双源追加各恰一次+归因直达；RF2 撕裂尾跨写补全（半行不发布→补全后发布）；RF3 rename-over 同字节→fingerprint-skip-identity-change 短路+新 inode 追加仍达；RF4 rename-over 改写→4409+重订新 streamId；RF5 delete→4402 retryable=true；RF6 recreate 成流；RF7 缺源恢复晚附（journal-only 订阅→session 落盘→B 装载→A 恰一次+直达）；RF8 旧 cursor 续读（契约 §212 含起始 seq 重发）；RF9 全退静默+再订恢复；RF10 从未装载 cursor→4404。
+- **RF8 契约三步勘正**：快照单页完读 historyNext=null（非 {seq}）；cursor.seq 首事件=1（seq:0 是非法 cursor）；补齐=含起始 seq 重发（期望 [h..h+2] 非 [h+1..h+2]）。
+- 变异二杀（tests/fixtures/mutation-records/3b3b-real-fs.md）：M-RF-a syncIndex 前缀分发 if(appended>0)→if(false)（RF7 挂）；M-RF-b RealReader fingerprint 恒空（6 挂）。还原 756+7。
+
+## 3b-3③ real-ws E2E+同步排水修复（3b3c；2026-09-29；repo 7bfcde2）
+- 场景=组合根 startServer 真监听 127.0.0.1:0+真 ws 客户端（WsClient：waitOpen 必备——readyState 0 时 send 静默丢）。
+- **同步排水缺陷（RW1 实测真 bug，单测不可见）**：1100 行同 tick 追加→onAppend 同步分发循环内 schedulePump 是 tmr(0) 定时器永不到期→live 引擎 outbox 堆过 1024 积压门→快客户端被慢客户端门误杀。修复三件套：①schedulePump 抽 pumpFile(file)（逐连接 drain+emit+仍积压续泵）②pumpIfBacklogged（判据=**engine.outboxDepth**（新增只读口，仅可排水面）≥maxEventsPerLiveFrame=7——首版用 state.buffered（含 paging 滞留）致每事件排水→1025 单事件帧→连接队列超限二次误杀）③dispatchHistoryBatch（syncIndex 首装/续编两路共用，每 16 条分块排水）。
+- **两级 4431 语义收窄（设计变更）**：订阅级 4431「订阅积压超限（慢客户端）」retryable=false=paging 滞留（RW1 慢端）；连接级 4431「连接发送队列超限（queue-overflow）」retryable=true=live 传输堆积（RW2 停读端）——同步排水后 live outbox 有界，传输堆积转移到连接队列，两级各管一面。
+- 断言面：RW1 快/慢并存（250>200 分页+1100 突发：slow 订阅级 4431 只关订阅+连接不断+cursor seq=200 分页循环续读到 1350；fast 恰 1100 零错）；RW2 pauseSocket+7000 突发→连接级 4431 retryable=true+无订阅级误杀；RW3 262,145B→4404 不断链+>1MiB 单帧→close 1009；RW4 Origin 外→HTTP 403+坏 token→4401/1008；RW5 A 硬断→B 共享观察 30 事件全量（审计名=conn-transport-closed）；RF11 恢复期 1100 行批量续编→A 恰 1100 零错（M-P2 杀）。
+- 变异三杀（tests/fixtures/mutation-records/3b3c-sync-pump.md，真实 diff+失败名）：M-P1 onAppend 去同步排水→2 挂；M-P2 dispatchHistoryBatch 去分块→1 挂；M-P3 判据退混合 buffered→1 挂。还原 762+7。
+- 踩坑：vitest 看 console 须 --disable-console-intercept；RW1 尾放宽 20s；慢端续读须快照翻页循环（hasMore→续送 snapshotId+historyNext，单订一次只到 399）。
