@@ -483,3 +483,9 @@
 - 断言面：RW1 快/慢并存（250>200 分页+1100 突发：slow 订阅级 4431 只关订阅+连接不断+cursor seq=200 分页循环续读到 1350；fast 恰 1100 零错）；RW2 pauseSocket+7000 突发→连接级 4431 retryable=true+无订阅级误杀；RW3 262,145B→4404 不断链+>1MiB 单帧→close 1009；RW4 Origin 外→HTTP 403+坏 token→4401/1008；RW5 A 硬断→B 共享观察 30 事件全量（审计名=conn-transport-closed）；RF11 恢复期 1100 行批量续编→A 恰 1100 零错（M-P2 杀）。
 - 变异三杀（tests/fixtures/mutation-records/3b3c-sync-pump.md，真实 diff+失败名）：M-P1 onAppend 去同步排水→2 挂；M-P2 dispatchHistoryBatch 去分块→1 挂；M-P3 判据退混合 buffered→1 挂。还原 762+7。
 - 踩坑：vitest 看 console 须 --disable-console-intercept；RW1 尾放宽 20s；慢端续读须快照翻页循环（hasMore→续送 snapshotId+historyNext，单订一次只到 399）。
+
+## 3b-3④ 预算容量+内存峰值（2026-09-29；repo 40aee70）
+- 断言面：BG1 双源同池 20k 触顶状态机（19,998+3=20,001 越界→订阅 4402 retryable=true+不发快照；宽容换流后再触顶仍 4402；额度用尽第三订→registry 拒建，审计 index-over-budget-get——**该审计为本轮补齐**：syncIndex 的 FileOverBudgetError 原为静默 4402，与 onAppend 路径观察面不一致）；BG2 恰 20,000 恰在池内放行（barrier=20,000 零错）；BG3 每文件 8MiB 扫描预算（9MiB journal→4402 会话不可读 retryable=true+源侧审计 load-read-failed kind=too-large——网关订阅口 load=null 统一通用文案，reason 只落审计线）；BG4 流池 LRU 32（33 文件顺序订/退→registry.size≤32+f1 重订=新 streamId 换流+f33 在池身份稳定）；BG5 内存峰值披露（20k 满载下 vitest 进程 heapUsed 快照+384MiB 宽松护栏；口径=含测试运行时本体，非生产 RSS——披露非承诺）。
+- 组合层无合计门（冻结裁决）：合计口径归 3b-4 恢复面。
+- 变异三杀（tests/fixtures/mutation-records/3b3d-budget.md）：M-B1 触顶边界 > → >=（BG2 恰 20k 误判）；M-B2 LRU while(false)（BG4 无界）；M-B3 readBounded 上限 MAX_SAFE_INTEGER（BG3 绕过）。全部 KILLED；还原 767+7。
+- 踩坑：requestId 模式 \w- 不含句点（s-f1.jsonl→4404 requestId 非法）；订阅口 load=null 的 reason 只在源侧审计（history-source load-read-failed kind=…），网关层无 reason 审计——断言走源侧线。
