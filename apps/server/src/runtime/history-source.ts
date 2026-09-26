@@ -248,7 +248,7 @@ export class FileHistorySource implements HistorySourcePort {
     );
     if (
       reg !== entry.activeReg || // 嵌套注册已取代本注册（新句柄才是最新）
-      (slot.entry !== entry && slot.pendingEntry !== entry) || // 代已提交/在飞均不属于本注册（初扫期身份锄=pendingEntry）
+      (slot.entry !== entry && slot.pendingEntry !== entry) || // 代已提交/在飞均不属于本注册（初扫期身份锚=pendingEntry）
       entry.disposed || entry.state !== "active" // 代已死
     ) {
       try { handle.close(); } catch { /* 已关 */ }
