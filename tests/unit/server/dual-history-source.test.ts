@@ -408,7 +408,7 @@ describe("DualHistorySource 3b2c-fix1——五阻断闭合（GPT 72→修复）"
     await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
   });
 
-  it("F1-02：late-attach 引用 credit——B 的 release 不双扣；C 订阅后 session 事件仍直达（无静默断流）", async () => {
+  it("F1-02：late-attach 引用 credit——B 的 release 不双扣；A 先退出后 C 重开可续流（无静默断流）", async () => {
     const h = harness({ sessionFor: (f) => f.replace("/j/", "/s/") });
     h.reader.set(JP, jEnqueue("i-1", USER_TEXT, 0) + "\n");
     await h.src.load(JP); // A 装载
@@ -422,7 +422,10 @@ describe("DualHistorySource 3b2c-fix1——五阻断闭合（GPT 72→修复）"
     h.src.release(JP);
     expect(h.audits.some((l) => l.includes("release-session-credit") && l.includes("credits=0"))).toBe(true);
     expect(h.watcher.active(SP).length).toBe(1); // session 句柄仍活（A 的联合观察持有）
-    // C 装载+观察：session 观察正常（若无 credit，B 双扣→carry→C 装载时 released-unobserved-carry 关掉新 session watcher）
+    // A 先退出（旧 session 槽真正回收后的重开场景）：双源句柄全关
+    unA?.();
+    await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
+    // C 装载+观察（load→observe 二选一配对，不再额外 release）：session 事件直达 C
     const rowsC = await h.src.load(JP);
     expect((rowsC ?? []).filter((r) => r.source === "session")).toHaveLength(1);
     const c = makeSinks();
@@ -430,42 +433,96 @@ describe("DualHistorySource 3b2c-fix1——五阻断闭合（GPT 72→修复）"
     expect(unC).not.toBeNull();
     h.reader.set(SP, sUser("u1", USER_TEXT) + "\n" + sUser("u2", "second") + "\n");
     h.watcher.notice(SP);
-    await until(() => a.log.appends.some((r) => r.source === "session"));
     await until(() => c.log.appends.some((r) => r.source === "session"));
-    // 收尾：A/C 解绑+release → 双源句柄全关（引用账守恒，无孤儿）
-    h.src.release(JP);
-    unA?.();
+    // 收尾：C 解绑即配对完成（observe 已消耗装载引用，无需 release）→双源句柄全关（无孤儿无 carry）
     unC?.();
     await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
     expect(h.audits.some((l) => l.includes("released-unobserved-carry"))).toBe(false);
   });
 
-  it("F1-04：同一 sinks 对象重绑——包装身份隔离；旧 stop 迟到只关旧状态（不作用新绑定）", async () => {
+  it("F2-01：observe 出口也消费 credit——B 走 observe 配对不遗留；后继 C load/release 零孤儿", async () => {
+    const h = harness({ sessionFor: (f) => f.replace("/j/", "/s/") });
+    h.reader.set(JP, jEnqueue("i-1", USER_TEXT, 0) + "\n");
+    await h.src.load(JP); // A 装载
+    const a = makeSinks();
+    const unA = h.src.observe(JP, a.s); // A 观察（journal-only；session 缺）
+    // session 出现→B 装载→晚附绑 A（消耗 B 的 session 引用，credit=1）
+    h.reader.set(SP, sUser("u1", USER_TEXT) + "\n");
+    await h.src.load(JP);
+    expect(h.audits.some((l) => l.includes("session-attached-late") && l.includes("credits=1"))).toBe(true);
+    // B 走 **observe** 出口（端口契约：load→observe|release 二选一）——旧代码只在 release 消费
+    // credit→observe 路径把 credit 带到下一周期→后继 caller 的 release 误跳→session watcher 孤儿。
+    const b = makeSinks();
+    const unB = h.src.observe(JP, b.s);
+    expect(unB).not.toBeNull();
+    expect(h.audits.some((l) => l.includes("observe-session-credit") && l.includes("credits=0"))).toBe(true);
+    // A/B 全退：双源句柄归零（B 的 session 绑定零额外消耗，stop 即结算）
+    unA?.();
+    unB?.();
+    await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
+    // C load→release（合法配对）：credit 已空→session 侧正常释放，无残留免扣额度→零孤儿
+    await h.src.load(JP);
+    h.src.release(JP);
+    await until(() => h.watcher.active(SP).length === 0);
+    expect(h.audits.filter((l) => l.includes("release-session-credit"))).toHaveLength(0);
+    expect(h.audits.some((l) => l.includes("released-unobserved-carry"))).toBe(false);
+  });
+
+  it("F2-02：多注册登记——新注册先停、旧注册仍活→恢复晚附补接旧注册（不丢 session 事件）", async () => {
+    const h = harness({ sessionFor: (f) => f.replace("/j/", "/s/") });
+    h.reader.set(JP, jEnqueue("i-1", USER_TEXT, 0) + "\n");
+    await h.src.load(JP);
+    const a = makeSinks();
+    const unA = h.src.observe(JP, a.s); // 旧注册 st-A（journal-only；session 缺）
+    await h.src.load(JP);
+    const b = makeSinks();
+    const unB = h.src.observe(JP, b.s); // 新注册 st-B（仍 journal-only）——旧单条 Map 会覆盖 st-A
+    // 新注册先停：登记列表回到 [st-A]（旧代码 Map 只存最后一条→st-A 丢恢复入口）
+    unB?.();
+    // session 出现→C 装载→晚附应补接 st-A（regs=1）
+    h.reader.set(SP, sUser("u1", USER_TEXT) + "\n");
+    await h.src.load(JP);
+    expect(h.audits.some((l) => l.includes("session-attached-late") && l.includes("regs=1"))).toBe(true);
+    h.src.release(JP); // C 配对 release：credit 消费，跳过 session 侧
+    expect(h.watcher.active(SP).length).toBe(1); // st-A 的晚附仍持有
+    // session 追加→**旧注册 A** 收到（旧代码：晚附找不到入口→A 永远收不到）
+    h.reader.set(SP, sUser("u1", USER_TEXT) + "\n" + sUser("u2", "recovered") + "\n");
+    h.watcher.notice(SP);
+    await until(() => a.log.appends.some((r) => r.source === "session" && r.event.kind === "message"));
+    expect(a.log.appends.filter((r) => r.source === "session").some((r) => r.event.kind === "message")).toBe(true);
+    // 收尾：A 解绑→双源句柄全关
+    unA?.();
+    await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
+  });
+
+  it("F1-04/F2-02：同 sinks 合法重绑（各自有 load 配对）——包装身份隔离；旧 stop 迟到只关旧注册", async () => {
     const h = harness({ sessionFor: (f) => f.replace("/j/", "/s/") });
     h.reader.set(JP, jEnqueue("i-1", USER_TEXT, 0) + "\n", "id-j1");
     h.reader.set(SP, sUser("u1", USER_TEXT) + "\n");
-    await h.src.load(JP);
+    await h.src.load(JP); // A 装载（配对将走 observe）
     const { s, log } = makeSinks();
-    const un1 = h.src.observe(JP, s);
-    expect(un1).not.toBeNull();
-    // 同一 sinks 对象再次绑定（网关侧重挂场景）——旧代码直传 sinks：FH Set 按对象身份，
-    // 新绑定 add(S) 不增、旧 stop 删 S→关掉新绑定→un2 成功但实际已失效。
-    const un2 = h.src.observe(JP, s);
-    expect(un2).not.toBeNull();
-    // FileHistorySource 同文件共享 watcher（引用计数）：句柄数=1，两条观察各自持 ref。
-    // 隔离面在 sinks 集：旧代码直传 sinks→同一对象→新绑定 add(S) 不增、旧 stop 删 S→
-    // 引用还在但 sinks 已空→句柄关→un2 成功但实际已断流。
+    const un1 = h.src.observe(JP, s); // 注册 st-1
+    await h.src.load(JP); // B 装载（合法配对：每次成功 load 配对 observe 或 release 二选一）
+    const un2 = h.src.observe(JP, s); // 同 sinks 对象再注册 st-2——旧代码直传 sinks：FH Set 按
+    expect(un2).not.toBeNull(); // 对象身份，旧 stop 删 S→关掉新绑定→un2 成功但实际已失效。
+    // FileHistorySource 同文件共享 watcher（引用计数）：句柄数=1，两条注册各自持 ref。
     expect(h.watcher.active(JP).length).toBe(1);
     expect(h.watcher.active(SP).length).toBe(1);
-    // 旧 stop 迟到：只收口 st1（sinks 集只删 wrap1），st2 的绑定不受影响（句柄仍活）
+    // 并行注册语义：重叠期追加→两注册各交付一次（同一 sinks 收两次——网关从不重用 sinks，
+    // 此处为端口级语义断言：两条独立注册=两个交付流）
+    h.reader.set(JP, jEnqueue("i-1", USER_TEXT, 0) + "\n" + jEnqueue("i-2", "overlap", 0) + "\n", "id-j1");
+    h.watcher.notice(JP);
+    await until(() => log.appends.filter((r) => (r.event as { intentId?: string }).intentId === "i-2").length === 2);
+    // 旧 stop 迟到：只收口 st-1（sinks 集只删 wrap1），st-2 的绑定不受影响（句柄仍活）
     un1?.();
     expect(h.watcher.active(JP).length).toBe(1);
     expect(h.watcher.active(SP).length).toBe(1);
-    // 新绑定仍活：追加直达 st2 的 sinks
-    h.reader.set(JP, jEnqueue("i-1", USER_TEXT, 0) + "\n" + jEnqueue("i-3", "third", 0) + "\n", "id-j1");
+    // st-2 仍活：后续追加恰交付一次（不双送不断流）
+    h.reader.set(JP, jEnqueue("i-1", USER_TEXT, 0) + "\n" + jEnqueue("i-2", "overlap", 0) + "\n" + jEnqueue("i-3", "third", 0) + "\n", "id-j1");
     h.watcher.notice(JP);
-    await until(() => log.appends.some((r) => r.event.kind === "turn-enqueued" && (r.event as { intentId?: string }).intentId === "i-3"));
-    // 收口 st2 + Y1：obs Map 状态壳不滞留（需先留一枚装载引用才能再绑——引用纪律）
+    await until(() => log.appends.some((r) => (r.event as { intentId?: string }).intentId === "i-3"));
+    expect(log.appends.filter((r) => (r.event as { intentId?: string }).intentId === "i-3")).toHaveLength(1);
+    // 收口 st-2 + Y1：注册列表空→键删除（状态壳不滞留）；再开需新装载引用（引用纪律）
     un2?.();
     expect(h.watcher.active(JP).length).toBe(0);
     expect(h.watcher.active(SP).length).toBe(0);

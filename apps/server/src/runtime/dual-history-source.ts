@@ -59,11 +59,27 @@ interface ObsState {
   closed: boolean;
 }
 
+/** 3b2c-F2-02：注册级转发包装（observe 与晚附共用同构）——每次绑定独立对象身份，
+ *  子源 Set 按身份增删；exactOptionalPropertyTypes 下可选方法条件展开。 */
+function wrapSinks(sinks: HistorySinks): HistorySinks {
+  return {
+    onAppend: (row) => sinks.onAppend(row),
+    ...(sinks.onInvalidate !== undefined ? { onInvalidate: (r) => sinks.onInvalidate?.(r) } : {}),
+    ...(sinks.onUnavailable !== undefined ? { onUnavailable: (r) => sinks.onUnavailable?.(r) } : {}),
+    onLive: (ev) => sinks.onLive(ev),
+    onStatus: (s) => sinks.onStatus(s),
+  };
+}
+
 /** 双源组合器：对外=单一 HistorySourcePort（网关不变）；对内=两个 FileHistorySource 子源。 */
 export class DualHistorySource implements HistorySourcePort {
   private readonly journalSrc: FileHistorySource;
   private readonly sessionSrc: FileHistorySource | null;
-  private readonly obs = new Map<string, ObsState>();
+  /** 3b2c-F2-02：观察登记=多注册模型（file→活跃注册列表）。每个成功 observe()=一条独立注册
+   *  （独立 wrap+独立 stop），并行注册=并行交付；旧 stop 迟到只关自己的注册（closed 幂等+身份门
+   *  splice）。旧单条 Map 会「后注册覆盖前注册」→最新 stop 后旧注册失活但仍占观察→恢复晚附找不到
+   *  入口（丢 session 事件）。 */
+  private readonly obs = new Map<string, ObsState[]>();
 
   constructor(private readonly opts: DualHistorySourceOpts) {
     this.journalSrc = new FileHistorySource({
@@ -171,41 +187,59 @@ export class DualHistorySource implements HistorySourcePort {
    *  released-unobserved-carry 误关新 session watcher（静默断流）。 */
   private readonly sessionReleaseCredits = new Map<string, number>();
 
-  /** 3b2b-R2：journal-only 降级后恢复双源——若观察仍在且 session 未绑定，补接（同一 sinks）。 */
+  /** 3b2c-F2-02：晚附给**全部**活跃且未绑 session 的注册各配独立 wrap（与 observe 同构，不再传
+   *  原 sinks）；首个成功绑定消耗装载方 session 引用（credit+1），后续绑定零额外消耗。 */
   private attachSessionIfObserved(file: string): void {
-    const st = this.obs.get(file);
-    if (st === undefined || st.closed || st.sinks === null || st.unS !== null) return;
     if (this.sessionSrc === null || this.opts.sessionFor === undefined) return;
-    const unS = this.sessionSrc.observe?.(file, st.sinks) ?? null;
-    if (unS !== null) {
-      st.unS = unS;
+    const regs = this.obs.get(file);
+    if (regs === undefined) return;
+    let attached = 0;
+    for (const st of regs) {
+      if (st.closed || st.sinks === null || st.unS !== null) continue;
+      const wrap = wrapSinks(st.sinks);
+      const unS = this.sessionSrc.observe?.(file, wrap) ?? null;
+      if (unS !== null) {
+        st.unS = unS;
+        attached++;
+      }
+    }
+    if (attached > 0) {
       this.sessionReleaseCredits.set(file, (this.sessionReleaseCredits.get(file) ?? 0) + 1);
-      this.audit(`session-attached-late file=${file} credits=${this.sessionReleaseCredits.get(file)}`);
+      this.audit(`session-attached-late file=${file} regs=${attached} credits=${this.sessionReleaseCredits.get(file)}`);
     }
   }
 
   observe(file: string, sinks: HistorySinks): (() => void) | null {
-    // 3b2c-F1-04：每次绑定用独立转发包装（对象身份隔离）——子源 Set 按对象身份增删：
+    // 3b2c-F1-04/F2-02：每次绑定用独立转发包装（对象身份隔离）——子源 Set 按对象身份增删：
     // 同一 sinks 对象重绑时旧解绑删旧包装、新解绑删新包装，互不误删（旧代码直接传 sinks，
     // 同对象重绑=旧 stop 删掉新绑定，返回已失效的成功 stop）。
-    const wrap: HistorySinks = {
-      onAppend: (row) => sinks.onAppend(row),
-      ...(sinks.onInvalidate !== undefined ? { onInvalidate: (r) => sinks.onInvalidate?.(r) } : {}),
-      ...(sinks.onUnavailable !== undefined ? { onUnavailable: (r) => sinks.onUnavailable?.(r) } : {}),
-      onLive: (ev) => sinks.onLive(ev),
-      onStatus: (s) => sinks.onStatus(s),
-    };
+    const wrap = wrapSinks(sinks);
     const unJ = this.journalSrc.observe?.(file, wrap) ?? null;
     if (unJ === null) return null; // 3b2b-R1b：journal=事实源——绑定失败=整组失败（不透 session-only 观察）
-    if (this.sessionSrc === null || this.opts.sessionFor === undefined) return unJ;
-    const unS = this.sessionSrc.observe?.(file, wrap) ?? null; // session 尽力（缺文件→null，恢复时补接）
+    let unS: (() => void) | null = null;
+    if (this.sessionSrc !== null && this.opts.sessionFor !== undefined) {
+      unS = this.sessionSrc.observe?.(file, wrap) ?? null; // session 尽力（缺文件→null，恢复时补接）
+    }
     const st: ObsState = { file, sinks, unJ, unS, closed: false };
-    this.obs.set(file, st);
+    const regs = this.obs.get(file) ?? [];
+    regs.push(st);
+    this.obs.set(file, regs);
+    // 3b2c-F2-01：credit 对称结算——端口契约「每次成功 load 配对 observe **或** release 二选一」。
+    // 晚附已代本次装载方消耗 session 引用（credit），则装载方走 observe 出口时也必须消费 credit
+    // （旧代码只在 release 消费→observe 路径把 credit 带到下一周期→后继 load/release 误跳释放→
+    // session watcher 孤儿）。
+    const credit = this.sessionReleaseCredits.get(file) ?? 0;
+    if (credit > 0) {
+      const left = credit - 1;
+      if (left === 0) this.sessionReleaseCredits.delete(file);
+      else this.sessionReleaseCredits.set(file, left);
+      this.audit(`observe-session-credit file=${file} credits=${left}`);
+    }
     return () => this.closeObsState(st);
   }
 
-  /** 幂等收口一次联合观察（3b2c-F1-04/Y1）：身份门——旧 stop 迟到只关自己的状态（closed 幂等），
-   *  不作用新状态；按 Map 身份从 obs 摘除（状态壳不永久滞留 Map——每个历史 file 的壳会累积）。 */
+  /** 幂等收口一次联合观察（3b2c-F1-04/Y1/F2-02）：身份门——旧 stop 迟到只关自己的注册（closed
+   *  幂等），不作用其他注册；按身份从注册列表 splice（列表空则删键，状态壳不永久滞留）。 */
   private closeObsState(st: ObsState): void {
     if (st.closed) return;
     st.closed = true;
@@ -214,7 +248,13 @@ export class DualHistorySource implements HistorySourcePort {
     try { st.unS?.(); } catch { /* 解绑不抛 */ }
     st.unJ = null;
     st.unS = null;
-    if (this.obs.get(st.file) === st) this.obs.delete(st.file);
+    const regs = this.obs.get(st.file);
+    if (regs === undefined) return;
+    const i = regs.indexOf(st);
+    if (i !== -1) {
+      regs.splice(i, 1);
+      if (regs.length === 0) this.obs.delete(st.file);
+    }
   }
 
   release(file: string): void {
@@ -224,8 +264,10 @@ export class DualHistorySource implements HistorySourcePort {
       // 本次 release 跳过 session 侧一次（精确笔数配对，不误扣并发 caller 的引用）。
       const credit = this.sessionReleaseCredits.get(file) ?? 0;
       if (credit > 0) {
-        this.sessionReleaseCredits.set(file, credit - 1);
-        this.audit(`release-session-credit file=${file} credits=${credit - 1}`);
+        const left = credit - 1;
+        if (left === 0) this.sessionReleaseCredits.delete(file); // 3b2c-F2-02 黄项：归零删键（不积累壳）
+        else this.sessionReleaseCredits.set(file, left);
+        this.audit(`release-session-credit file=${file} credits=${left}`);
         return;
       }
       this.sessionSrc.release?.(file);

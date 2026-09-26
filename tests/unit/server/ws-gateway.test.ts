@@ -1975,7 +1975,7 @@ describe("ws-gateway 3b-2b③：DualHistorySource 接线验证", () => {
     }
   });
 
-  it("D9 3b2c-§8：恢复后新追加+全退再开+重复装载——恰一次纪律持续成立，无错流无重复", async () => {
+  it("D9 3b2c-§8：恢复后新追加+B 退订再开+重复装载——恰一次纪律持续成立，无错流无重复（真全退见 D10）", async () => {
     const d = await dualRig();
     try {
       d.reader.set(d.jp, jEn("i-1", TEXT_A, 0) + "\n");
@@ -2057,6 +2057,115 @@ describe("ws-gateway 3b-2b③：DualHistorySource 接线验证", () => {
       expect(sessEvents(c.frames()).length).toBe(2);
       expect(sessEvents(c2.frames()).length).toBe(0);
       expect(errFrames(c).filter((f) => f.code === 4404 || f.code === 4409).length).toBe(0);
+    } finally {
+      await d.dispose();
+    }
+  });
+
+  it("D10 3b2c-fix2 §7.5：真全退（A+B 退订）→双源句柄归零→盘面增长→C 再开快照含全部→新行 live 直达", async () => {
+    const d = await dualRig();
+    try {
+      d.reader.set(d.jp, jEn("i-1", TEXT_A, 0) + "\n");
+      d.reader.set(d.sp, sU("u1", TEXT_A) + "\n");
+      const unsub = async (c: { frames(): unknown[]; say(m: unknown): Promise<void> }, tag: string) => {
+        const snap = c.frames().find((f) => f.t === "snapshot") as { subscriptionId?: string };
+        await c.say({ t: "unsubscribe", requestId: `un-${tag}`, subscriptionId: snap?.subscriptionId ?? "" });
+      };
+      const cA = await authed(d.r);
+      await cA.say({ t: "subscribe", requestId: "sub-a", file: "j.jsonl" });
+      const cB = await authed(d.r);
+      await cB.say({ t: "subscribe", requestId: "sub-b", file: "j.jsonl" });
+      await until(() => (cA.frames().find((f) => f.t === "snapshot") as { barrier?: number } | undefined) !== undefined
+        && (cB.frames().find((f) => f.t === "snapshot") as { barrier?: number } | undefined) !== undefined);
+      // 真全退：A+B 都退订
+      await unsub(cA, "a");
+      await unsub(cB, "b");
+      await until(() => d.watcher.handles.filter((h) => h.abs === d.jp && !h.closed).length === 0
+        && d.watcher.handles.filter((h) => h.abs === d.sp && !h.closed).length === 0);
+      // 无人观察期盘面增长（watcher 已关→无通知；新行只能靠下次装载快照编入）
+      d.reader.set(d.jp, jEn("i-1", TEXT_A, 0) + "\n" + jEn("i-2", TEXT_B, 0) + "\n");
+      d.reader.set(d.sp, sU("u1", TEXT_A) + "\n" + sU("u4", "grown while away") + "\n");
+      // C 再开：快照含全部 4 行（journal 2+session 2），无错流
+      const cC = await authed(d.r);
+      await cC.say({ t: "subscribe", requestId: "sub-c", file: "j.jsonl" });
+      const snapC = cC.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      expect(snapC.barrier).toBe(4);
+      const liveOf = (frames: unknown[]): number => {
+        let n = 0;
+        for (const f of frames) {
+          const ev = f as { t?: string; origin?: string; events?: unknown[] };
+          if (ev.t === "events") n += (ev.events ?? []).length;
+        }
+        return n;
+      };
+      expect(liveOf(cC.frames())).toBe(0); // 全走快照
+      // 新行 live 直达：u5 追加+通知→C 恰收 1 条（seq=5）
+      d.reader.set(d.sp, sU("u1", TEXT_A) + "\n" + sU("u4", "grown while away") + "\n" + sU("u5", TEXT_C) + "\n");
+      d.watcher.notice(d.sp);
+      await until(() => {
+        const evs: Array<{ kind: string; seq: number }> = [];
+        for (const f of cC.frames()) {
+          const ev = f as { t?: string; events?: Array<{ kind: string; seq: number }> };
+          if (ev.t === "events") evs.push(...(ev.events ?? []));
+        }
+        return evs.filter((e) => e.kind === "message").length === 1;
+      });
+      const cEv: Array<{ kind: string; seq: number }> = [];
+      for (const f of cC.frames()) {
+        const ev = f as { t?: string; events?: Array<{ kind: string; seq: number }> };
+        if (ev.t === "events") cEv.push(...(ev.events ?? []));
+      }
+      expect(cEv.filter((e) => e.kind === "message").map((e) => e.seq)).toEqual([5]);
+      expect(errFrames(cC).filter((f) => f.code === 4404 || f.code === 4409).length).toBe(0);
+    } finally {
+      await d.dispose();
+    }
+  });
+
+  it("D11 3b2c-fix2 §7.5：A/B 在线恢复——逐条核对 streamId/seq/entryId 双引擎一致", async () => {
+    const d = await dualRig();
+    try {
+      d.reader.set(d.jp, jEn("i-1", TEXT_A, 0) + "\n");
+      const cA = await authed(d.r); // A：journal-only（barrier=1）
+      await cA.say({ t: "subscribe", requestId: "sub-a", file: "j.jsonl" });
+      const cB = await authed(d.r); // B：同流共享观察
+      await cB.say({ t: "subscribe", requestId: "sub-b", file: "j.jsonl" });
+      const snapA = cA.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      const snapB = cB.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      expect(snapA.barrier).toBe(1);
+      expect(snapB.barrier).toBe(1);
+      expect(snapA.streamId).toBe(snapB.streamId); // 同一流
+      type M = { seq: number; entryId?: string; intentId: string | null };
+      const msgOf = (frames: unknown[]): M[] => {
+        const out: M[] = [];
+        for (const f of frames) {
+          const ev = f as { t?: string; events?: Array<{ kind: string; seq: number; entryId?: string; intentId: string | null }> };
+          if (ev.t === "events") out.push(...(ev.events ?? []).filter((e) => e.kind === "message"));
+        }
+        return out;
+      };
+      // session 出现（u1 归因 i-1；u2 null）→C 装载触发续编分发→A/B 双引擎各恰收 2 条
+      d.reader.set(d.sp, sU("u1", TEXT_A) + "\n" + sU("u2", TEXT_B) + "\n");
+      const cC = await authed(d.r);
+      await cC.say({ t: "subscribe", requestId: "sub-c", file: "j.jsonl" });
+      await until(() => msgOf(cA.frames()).length === 2 && msgOf(cB.frames()).length === 2);
+      // 后续通知新追加 u3 → A/B 各恰收 1 条（总数 3）
+      d.reader.set(d.sp, sU("u1", TEXT_A) + "\n" + sU("u2", TEXT_B) + "\n" + sU("u3", TEXT_C) + "\n");
+      d.watcher.notice(d.sp);
+      await until(() => msgOf(cA.frames()).length === 3 && msgOf(cB.frames()).length === 3);
+      // 逐条核对：双引擎 seq 序列一致且严格递增；entryId 对应 u1/u2/u3；归因一致
+      const a = msgOf(cA.frames());
+      const b = msgOf(cB.frames());
+      expect(a.map((e) => e.seq)).toEqual([2, 3, 4]);
+      expect(b.map((e) => e.seq)).toEqual(a.map((e) => e.seq));
+      expect(a.map((e) => e.entryId)).toEqual(["u1", "u2", "u3"]);
+      expect(b.map((e) => e.entryId)).toEqual(a.map((e) => e.entryId));
+      expect(a.map((e) => e.intentId)).toEqual(["i-1", null, null]);
+      expect(b.map((e) => e.intentId)).toEqual(a.map((e) => e.intentId));
+      const snapC = cC.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      expect(snapC.streamId).toBe(snapA.streamId); // 同流不换
+      expect(errFrames(cA).filter((f) => f.code === 4404 || f.code === 4409).length).toBe(0);
+      expect(errFrames(cB).filter((f) => f.code === 4404 || f.code === 4409).length).toBe(0);
     } finally {
       await d.dispose();
     }

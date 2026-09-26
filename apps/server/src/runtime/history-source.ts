@@ -66,21 +66,24 @@ export class RealReader implements HistoryReaderPort {
     const { fh } = await openSafeFile(absPath);
     try {
       const [buf, st] = await Promise.all([readBounded(fh, this.maxBytes, absPath), fh.stat()]);
-      // 3b2c-F1-05：合法性判据=字节级（非字符值）——完整前缀（末 \n 前）用 fatal UTF-8 解码：
-      // 非法编码（0xff/0xfe/断裂多字节）拒；合法字符值（含真实用户输入的 U+FFFD=EF BF BD）放行
-      // （旧判据「完整行含 U+FFFD 即拒」会误杀含该合法字符的整文件）。撕裂尾（末段无 \n）
-      // lenient 解码容忍（本就不发布；补全后重读定位自然正确）。完整前缀字节↔字符串一一对应，
-      // scanDigest 字符串比对保有字节级判等力（有损解码等价类仍封死）。
+      // 3b2c-F1-05/F2-03：合法性判据=字节级（非字符值）——完整前缀（末 \n 前）用 fatal UTF-8
+      // 解码：非法编码（0xff/0xfe/断裂多字节）拒；合法字符值（含真实用户输入的 U+FFFD=EF BF BD）
+      // 放行（旧判据「完整行含 U+FFFD 即拒」会误杀含该合法字符的整文件）。撕裂尾（末段无 \n）
+      // lenient 解码容忍（本就不发布；补全后重读定位自然正确）。两段解码均保留 BOM 字节：
+      // fatal+ignoreBOM 下「完整前缀字节序列→字符串」为单射（非法序列拒、BOM/U+FFFD 保序保留），
+      // 故 scanDigest 字符串比对保有字节级判等力；撕裂尾不承诺（见上）。
       const lastNl = buf.lastIndexOf(0x0a);
       const prefix = buf.subarray(0, lastNl + 1);
       const tail = buf.subarray(lastNl + 1);
       let text: string;
       try {
-        text = new TextDecoder("utf-8", { fatal: true }).decode(prefix);
+        // 3b2c-F2-03：ignoreBOM:true=**保留** U+FEFF 字节（默认会剥除开头 BOM→三字节坐标漂移+
+        // 有/无 BOM 两输入折叠同文本）；fatal 只拒非法编码序列，合法字符值（含真实 U+FFFD）放行。
+        text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(prefix);
       } catch {
         throw new SafeOpenError("read-failed", absPath, "invalid-utf8-complete-line");
       }
-      if (tail.length > 0) text += new TextDecoder("utf-8").decode(tail);
+      if (tail.length > 0) text += new TextDecoder("utf-8", { ignoreBOM: true }).decode(tail);
       return { text, identity: `${st.dev}:${st.ino}` };
     } finally {
       await fh.close().catch(() => {});

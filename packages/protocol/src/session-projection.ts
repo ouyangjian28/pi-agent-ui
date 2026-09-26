@@ -4,7 +4,8 @@
 // 行分类三分：`type:"message"` 且形状合法→消息事件（可多事件：toolCall 块分立）；JSON 不可解析/
 // 非对象/缺 id/角色非法→corrupt-entry 占位（entryId=`corrupt-<byteOffset>`，不丢不静默）；
 // 可解析但非 message 行（session header/model_change/thinking_level_change/custom…）→unknown-line。
-// 坐标纪律（read-index B02）：locator=行首字节偏移（十进制字符串，稳定身份——插入行不漂移后续锚）；
+// 坐标纪律（read-index B02）：locator=行首字节偏移（十进制字符串；append-only 产物下稳定，
+// 同位改写/中插会移动后续偏移→前缀校验检出→换流，不宣称「插入不漂移」）；
 // digest 由 scanDigest 对 raw 原文计算（投影不得抹平改写差异）。同一行可产多事件（消息本体+toolCall
 // 块）——同 locator 多行确定性有序（本体先、块按序），重扫可精确复现。
 // 归因两面：user=三元组匹配 journal enqueue（matchKeyOf 同构：textHash(normalizeText)+

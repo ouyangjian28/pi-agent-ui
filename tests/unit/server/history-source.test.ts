@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileHistorySource, RealReader, type HistoryReaderPort, type HistoryWatcherPort } from "../../../apps/server/src/runtime/history-source.ts";
 import type { HistoryInvalidateReason, HistorySinks, HistoryUnavailableReason } from "../../../apps/server/src/ws/ws-gateway.ts";
-import type { ScanRow } from "@pi-agent-ui/protocol";
+import { sessionToScanRows, type ScanRow } from "@pi-agent-ui/protocol";
 
 const CLEANUP: string[] = [];
 afterAll(async () => { for (const d of CLEANUP) await rm(d, { recursive: true, force: true }); });
@@ -1116,6 +1116,71 @@ describe("FileHistorySource 3b2g-R1/R2——回收身份门与注册提交重入
     expect(sk.log.unavailables).toEqual([]); // 干净退出不推 watch-failed
     expect(h.audits.some((l) => l.includes("watch-rearm-superseded"))).toBe(true);
     await until(() => h.audits.some((l) => l.includes("slot-reaped"))); // 槽终了回收（D2 终了收尾面）
+  });
+});
+
+describe("FileHistorySource 3b2c-F2（GPT fix2 §7.5）：currentRows 无副作用固化", () => {
+  it("load→currentRows×3→observe→stop：读纯只读（不触发重扫/不扰动引用账）→零句柄收尾", async () => {
+    const t12 = `${jline(1)}\n${jline(2)}\n`;
+    const r = new FakeReader();
+    r.reads.push({ text: t12, identity: "1:1" });
+    const h = harness({ reader: r });
+    const loaded = await h.src.load("a.jsonl");
+    expect(loaded).not.toBeNull();
+    // 三连读：结果恒等快照副本；不触发重扫（reader.calls 仍=1）；未装载文件→null
+    const c1 = h.src.currentRows("a.jsonl");
+    const c2 = h.src.currentRows("a.jsonl");
+    const c3 = h.src.currentRows("a.jsonl");
+    expect(c1).toEqual(loaded);
+    expect(c2).toEqual(loaded);
+    expect(c3).toEqual(loaded);
+    expect(r.calls).toBe(1);
+    expect(h.src.currentRows("never-loaded.jsonl")).toBeNull();
+    // 引用账未被扰动：observe 正常消耗装载引用→stop 后零句柄（无 carry 兜底）
+    const sk = makeSinks();
+    const stop = h.src.observe("a.jsonl", sk.s);
+    expect(stop).not.toBeNull();
+    stop!();
+    expect(activeHandles(h.watcher)).toHaveLength(0);
+    expect(h.audits.some((l) => l.includes("released-unobserved-carry"))).toBe(false);
+  });
+});
+
+describe("RealReader 3b2c-F2-03（GPT fix2）：BOM 保留与字节坐标", () => {
+  const MAX = 8 * 1024 * 1024;
+  const line1 = JSON.stringify({ type: "message", id: "u1", timestamp: 1, message: { role: "user", content: "first" } });
+  const line2 = JSON.stringify({ type: "message", id: "u2", timestamp: 2, message: { role: "user", content: "second" } });
+  it("开头 BOM（EF BB BF）保留不剥→第二行 locator=真字节偏移（旧默认解码剥 BOM→坐标漂移 -3）", async () => {
+    const d = await mkdtemp(join(tmpdir(), "rr-bom-"));
+    CLEANUP.push(d);
+    const p = join(d, "bom.jsonl");
+    await writeFile(p, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(`${line1}\n${line2}\n`, "utf8")]));
+    const r = await new RealReader(MAX).read(p);
+    expect(r.text.charCodeAt(0)).toBe(0xfeff); // BOM 字符保留（默认 decoder 会剥→首字节丢失）
+    const rows = sessionToScanRows({ sessionText: r.text, enqueues: [], consumed: [] });
+    const second = rows.find((x) => (x.event as { entryId?: string }).entryId === "u2");
+    expect(second?.locator).toBe(String(3 + Buffer.byteLength(line1, "utf8") + 1)); // BOM 3B+行1+\n
+  });
+  it("有/无 BOM 两输入文本不同（不再折叠同一 text→digest 判等力保留）", async () => {
+    const d = await mkdtemp(join(tmpdir(), "rr-bom2-"));
+    CLEANUP.push(d);
+    const a = join(d, "a.jsonl");
+    const b = join(d, "b.jsonl");
+    await writeFile(a, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(`${line1}\n`, "utf8")]));
+    await writeFile(b, Buffer.from(`${line1}\n`, "utf8"));
+    const ra = await new RealReader(MAX).read(a);
+    const rb = await new RealReader(MAX).read(b);
+    expect(ra.text).not.toBe(rb.text); // 旧默认解码：两份折叠同 text（BOM 被剥）
+    expect(ra.text.length - rb.text.length).toBe(1);
+  });
+  it("撕裂尾=未完成多字节序列（无 \\n）→容忍可读，完整前缀不受影响", async () => {
+    const d = await mkdtemp(join(tmpdir(), "rr-torn2-"));
+    CLEANUP.push(d);
+    const p = join(d, "torn.jsonl");
+    // 「中」=E4 B8 AD；只写前两字节（无换行）→尾段非法但属撕裂尾（不发布）
+    await writeFile(p, Buffer.concat([Buffer.from(`${line1}\n`, "utf8"), Buffer.from([0xe4, 0xb8])]));
+    const r = await new RealReader(MAX).read(p);
+    expect(r.text.startsWith(line1)).toBe(true);
   });
 });
 
