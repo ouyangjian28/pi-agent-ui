@@ -383,6 +383,26 @@
 | 网关接线 D5：journal 读失败→4402 retryable（session 在也不能洗白——事实源 fail-closed） | ws-gateway 3b-2b③ D5 | 🟢 |
 | 网关接线 D6：交错 live 追加后退订→二次装载余量（两源各+1）→分流前缀成立不换流+continueFrom 余量无重无漏（位置续编会把 s2 重复编入+漏 j3→seqs/dup 断言挂） | ws-gateway 3b-2b③ D6 | 🟢 |
 
+### 3b-2b 修复轮（GPT 65/100→；repo 1684b89+70e5b7c）
+
+| 断言面 | 用例 | 状态 |
+| --- | --- | --- |
+| R1a 装载等待窗 journal 追加→吸收增长返 [J1,J2,S1]（无 load-revalidate 审计；去复核门则返旧快照漏 J2 挂） | dual 3b2b-R1/R2 R1a | 🟢 |
+| R1b 等待窗 journal 换代（identity 变）→重试环重装新代内容+审计 journal-generation-lost | dual 3b2b-R1/R2 R1b | 🟢 |
+| R1c sessionFor 同步抛错→journal 引用精确回滚（watcher 句柄 0，无孤儿）+审计 session-load-threw | dual 3b2b-R1/R2 R1c | 🟢 |
+| R1b 观察面：journal 活跃代已失效→新 observe=null（session 绑定成功不得掩盖事实源失效；旧代码联合 stop 非 null） | dual 3b2b-R1/R2 R1b-观察面 | 🟢 |
+| R2 journal-only 降级→双源恢复：load 后补接 session 观察（同 sinks，session-attached-late 审计）+后续 notice 直达 | dual 3b2b-R1/R2 R2 | 🟢 |
+| R2 网关协同：journal-only 订阅期 session 恢复+二次装载——续编行恰一次达活跃订阅 A（load 分发）；B 走快照不重发；后续 watcher 通知不重复 | ws-gateway D7 | 🟢 |
+| R3 journalAttributionOf：坏 enqueue/consumed 行（缺字段/非法 generation/坏嵌套）不采信+rejected 计数；非 JSON/其他行型不计；撕裂尾不参与 | session-projection R3 | 🟢 |
+| R3 dual 面：journal 坏行→attribution-schema-rejected 审计+session 投影 intentId=null（不拿 BAD 归因） | dual R3 | 🟢 |
+| R4 真实图片块（data 字段）身份=sha256 前 12hex：同图同 id 按序消费；异图不误配（旧代码无 id/url 全塌缩同 id） | session-projection R4 | 🟢 |
+| R4 多重集换序等价（AB=BA 同组按序）；未知块 u: 前缀不可匹配写侧 12hex 面；键序规范化确定性 | session-projection R4 | 🟢 |
+| R6 stopReason=length→textPreview.truncated=true（短正文也置位）；非 length 对照 false；空正文占位 {text:"",truncated:true} | session-projection R6 | 🟢 |
+| R5 完整行含非法 UTF-8（字节 0xff）→read-failed fail-closed（有损解码等价类假前缀封死）；撕裂尾非法容忍可读 | history-source RealReader R5 ×2 | 🟢 |
+
+- 变异七杀（基线 70e5b7c；/tmp/mut-3b2b-fix.py python 锚点+count 断言+git checkout 还原）：M-R1 去装载复核→1 挂；M-R2a 去续编分发→1 挂（D7）；M-R2b attachSessionIfObserved 去 session 绑定→1 挂；M-R3 归因去 schema 门→2 挂；M-R4 附件去 data 分支→2 挂；M-R5 去 U+FFFD fail-closed→1 挂；M-R6 去 length 合并→1 挂。还原后 709+7 全绿。
+- 设计披露：R5 修复选「fail-closed」而非整文件双指纹接线（journalFingerprint/sessionFingerprint 字段仍预留未接线）——接受面上行字符串与字节序列一一对应，digest 字符串比对获得字节级判等力；双指纹身份面延后 3b-3 生产组装再定（已在 PROJECT 登记）。
+
 - 变异九杀（基线 1855268/7c5d1ba；python 锚点替换+count 断言+git checkout 还原）：
   - ②：M1 分流前缀（M1 首版「journal 侧换键」变异体语义等价 SURVIVED——sourceIsPrefixOf 内部本就按源过滤，已披露；重设计 M1b=退回旧逐位比对）→2 挂 KILLED；M2 去 digest→2 挂；M3 续编序反→1 挂；M4 撕裂尾参与归因→1 挂；M5 合并序反→1 挂；M6 journal 不 fail-closed→1 挂；M7 归因键路径错（session 子源 journalFor 误用 opts.journalFor）→5 挂；M8 归因 reader 无注入返回空（丢归因）→1 挂。
   - ③：M-G1 syncIndex 前缀分支退回位置续编→D6 挂 KILLED。还原后 696+7 全绿。
