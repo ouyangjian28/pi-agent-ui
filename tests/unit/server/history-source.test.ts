@@ -56,6 +56,8 @@ class FakeWatcher implements HistoryWatcherPort {
   /** 3b2g-R2 探针（GPT 3b2f F4/F5）：第 N 次注册在句柄建立后、返回前同步回调 onError（嵌套 rearm 窗口） */
   errorOnRegBeforeReturn: number | null = null;
   failNestedSetup = false;
+  /** 3b2i-H5（GPT 3b2h H5）：第 N 次注册在句柄建立并留档后、返回前同步执行 fn——无嵌套注册的生命周期换代窗口（如最后订阅 stop）。 */
+  callOnRegBeforeReturn: { atReg: number; fn: () => void } | null = null;
   regCount = 0;
   watch(_abs: string, onNotice: () => void, onError: (e: unknown) => void): { close(): void } {
     if (this.failNextSetup) { this.failNextSetup = false; throw new Error("watch setup boom"); }
@@ -65,6 +67,11 @@ class FakeWatcher implements HistoryWatcherPort {
     if (this.errorOnRegBeforeReturn === this.regCount) {
       if (this.failNestedSetup) this.failNextSetup = true; // F4 排程：嵌套注册（N+1）建立失败
       onError(new Error("registered watcher error before return")); // 同步嵌套：驱动 rearmWatcher 后才返回
+    }
+    if (this.callOnRegBeforeReturn !== null && this.callOnRegBeforeReturn.atReg === this.regCount) {
+      const fn = this.callOnRegBeforeReturn.fn;
+      this.callOnRegBeforeReturn = null; // 一次性（fn 内可再排程）
+      fn();
     }
     return h;
   }
@@ -802,8 +809,7 @@ describe("FileHistorySource 3b2c-B1/B2——槽位代次隔离+原始回调身�
     expect(await h.src.load("a.jsonl")).not.toBeNull(); // 代 A（读1）
     const stopA = h.src.observe("a.jsonl", makeSinks().s);
     h.src.release("a.jsonl");
-    h.src.release("a.jsonl");
-    h.src.release("a.jsonl"); // 3b2f-R3 勘正：超额释放压力例——单次 load 已被 observe 消费后再放两笔（非合法两他方 load）；合法路径同槽换代由 D4 固化
+    h.src.release("a.jsonl"); // 超额释放压力例×2——单次 load 已被 observe 消费后再放两笔（非合法两他方 load）：carry=2，B 的成功 load 只吸收一（剩 1 保槽）；合法路径同槽换代由 D4 固化（3b2h H-C5-01：恰两笔，carry 计数证据见测试尾）
     h.watcher.handles[0]?.triggerNotice();
     await until(() => r.calls === 2); // 重扫 9:9 → replace 关代 A（读2；槽因 carry 存活）
     stopA?.();
@@ -819,6 +825,12 @@ describe("FileHistorySource 3b2c-B1/B2——槽位代次隔离+原始回调身�
     expect(b.log.invalidates).toHaveLength(0);
     expect(b.log.unavailables).toHaveLength(0);
     stopB?.();
+    // 3b2i（GPT 3b2h H-C5-01）carry 计数证据：两笔超额后 carry=2 → B 成功 load 吸收一（2→1）→ 本探针笔 1→2。
+    // 审计序列恰 [carry=1, carry=2, carry=2]——若只改注释不改计数（如三笔超额版）会现 carry=3 即挂。
+    h.src.release("a.jsonl");
+    expect(h.audits.filter((l) => l.endsWith("release-carry file=a.jsonl carry=1"))).toHaveLength(1); // 审计行带时间戳前缀——endsWith 匹配
+    expect(h.audits.filter((l) => l.endsWith("release-carry file=a.jsonl carry=2"))).toHaveLength(2); // 首两笔后一笔+B 吸收后探针一笔
+    expect(h.audits.some((l) => l.endsWith("release-carry file=a.jsonl carry=3"))).toBe(false);
   });
 
   it("N6：旧代未配对引用的 release 扣旧账，不取消新代在飞装载", async () => {
@@ -1083,5 +1095,26 @@ describe("FileHistorySource 3b2g-R1/R2——回收身份门与注册提交重入
     await until(() => r.calls === 3);                 // 跟进重扫交付追加（#3 通知折叠的恰一次跟进）
     expect(sk.log.appends.map((x) => x.event.kind)).toContain("turn-enqueued"); // 追加行经活观察送达 sinks
     stop?.();
+  });
+
+  it("R2/H5：注册返回前最后订阅退出（生命周期换代、reg 不变）→返回句柄即关，无孤儿", async () => {
+    const text = `${jline(1)}\n`;
+    const r = new FakeReader();
+    r.reads.push({ text, identity: "1:1" }, { text, identity: "1:1" }); // 读#2=#1 错误的跟进重扫（同 identity 收敛→rearm）
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");
+    const sk = makeSinks();
+    const stop = h.src.observe("a.jsonl", sk.s);
+    // 注册#2 建立并留档后、返回前：最后订阅 stop（entry 关闭）——无嵌套注册，reg===activeReg 恒成立，
+    // 唯一防线=复核块的生命周期半边（3b2h H-C2-02：M-life-only 窄变异的原网漏网例）
+    h.watcher.callOnRegBeforeReturn = { atReg: 2, fn: () => { stop?.(); } };
+    h.watcher.handles[0]!.triggerError(new Error("watch error 1")); // 驱动重扫→rearm（注册#2）
+    await until(() => h.watcher.handles.length >= 2);
+    await drain(8);
+    expect(h.watcher.regCount).toBe(2); // 无嵌套注册（区别于 F4/F5）——本例专测生命周期半边
+    expect(activeHandles(h.watcher)).toHaveLength(0); // 返回句柄即关；仅留 reg 门的窄变异下：#2 被追加进已关代=孤儿 1
+    expect(sk.log.unavailables).toEqual([]); // 干净退出不推 watch-failed
+    expect(h.audits.some((l) => l.includes("watch-rearm-superseded"))).toBe(true);
+    await until(() => h.audits.some((l) => l.includes("slot-reaped"))); // 槽终了回收（D2 终了收尾面）
   });
 });
