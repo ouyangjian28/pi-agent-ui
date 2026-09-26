@@ -104,7 +104,7 @@ async function makeRig(): Promise<Rig> {
     return c;
   };
   return {
-    gw, conn, authed, audits, jp, sp,
+    gw, conn, authed, audits, jp, sp, dual,
     dispose: async () => {
       gw.dispose();
       await rm(jr, { recursive: true, force: true });
@@ -324,8 +324,9 @@ describe("3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真
       expect(a.c.sent.length).toBe(framesA); // 静默：无任何新帧（事件/错误/状态）
       expect(b.c.sent.length).toBe(framesB);
       // Y-03：零泄漏正面证据——最后一订阅退订后观察器确已关闭（closeEntry→unobserved 审计），
-      // 不靠「静默」反面推断
-      expect(r.audits.some((l) => l.includes("unobserved file=j.jsonl"))).toBe(true);
+      // 不靠「静默」反面推断；Y-04（3b3-fix2）：journal/session 两源分开——session 槽同以逻辑 file 键控，
+      // 故断言【两条】unobserved（journal 槽+session 槽各一）
+      expect(r.audits.filter((l) => l.includes("unobserved file=j.jsonl")).length).toBe(2);
       const c3 = await r.authed(); // 再订：按需装载恢复
       await c3.say({ t: "subscribe", requestId: "s-c", file: "j.jsonl" });
       await until(() => c3.frames().some((f) => f.t === "snapshot"));
@@ -367,6 +368,58 @@ describe("3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真
       const idx3 = r.gw["registry"].peek("j.jsonl") as { journalFingerprint: string };
       expect(idx3.journalFingerprint).toBe(sha256HexBytes(readFileSync(r.jp)));
       expect(errFrames(cNew).length).toBe(0);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("RF13 撕裂尾指纹语义（Y-04 钉死）：未成完整行不编入→索引指纹停旧值；补全后跟进到全量 SHA-256", async () => {
+    const r = await makeRig();
+    try {
+      await writeFile(r.jp, jEn("i-1", TEXT_A, 0) + "\n");
+      const { c, sub } = await subAndWait(r, "s-torn");
+      await settle(WARM);
+      const before = (r.gw["registry"].peek("j.jsonl") as { journalFingerprint: string }).journalFingerprint;
+      expect(before).toBe(sha256HexBytes(readFileSync(r.jp))); // 基线：与源字节相等
+      // 撕裂尾：半行 JSON（无换行）——不构成完整事件，不编入
+      await appendFile(r.jp, jEn("i-2", TEXT_B, 0).slice(0, -8)); // 掐掉尾部 8 字符（含换行）
+      await settle(400);
+      const idx = r.gw["registry"].peek("j.jsonl") as { journalFingerprint: string };
+      expect(idx.journalFingerprint).toBe(before); // 停在旧值（最后编入时点）
+      expect(idx.journalFingerprint).not.toBe(sha256HexBytes(readFileSync(r.jp))); // ≠当前盘字节（含撕裂尾）
+      expect(c.events(sub).length).toBe(0); // 无事件编入（无 onAppend 发布）
+      // 补全成完整行（前置撕裂片段+余下字节+换行）→事件编入→指纹跟进到全量
+      await appendFile(r.jp, jEn("i-2", TEXT_B, 0).slice(-8) + "\n");
+      await until(() => c.events(sub).length === 1, 4000);
+      await settle(WARM);
+      const idx2 = r.gw["registry"].peek("j.jsonl") as { journalFingerprint: string };
+      expect(idx2.journalFingerprint).toBe(sha256HexBytes(readFileSync(r.jp))); // 全量字节（含新行）
+      expect(idx2.journalFingerprint).not.toBe(before);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("RF14 非前缀重建路指纹字段（Y-04）：直驱 syncIndex 非前缀分支→重建后指纹=新源字节 SHA-256（真指纹三路统一之重建路）", async () => {
+    const r = await makeRig();
+    try {
+      await writeFile(r.jp, jEn("i-1", TEXT_A, 0) + "\n");
+      const a = await subAndWait(r, "s-a");
+      await settle(WARM);
+      const oldIdx = r.gw["registry"].peek("j.jsonl") as { streamId: string; journalFingerprint: string };
+      const oldStream = oldIdx.streamId;
+      await a.c.say({ t: "unsubscribe", requestId: "u-a", subscriptionId: a.sub });
+      await settle(WARM); // 释放观察→后续改盘不被源主动发现（无观察者无重扫）
+      await writeFile(r.jp, jEn("i-9", TEXT_C, 0) + "\n"); // 改写：非前缀（行内容变）
+      const rows = await r.dual.load("j.jsonl"); // 全真源读新内容
+      await r.gw["syncIndex"]("j.jsonl", rows); // 直驱非前缀分支（waterMark>0 且非前缀）
+      const newIdx = r.gw["registry"].peek("j.jsonl") as { streamId: string; journalFingerprint: string; sessionFingerprint: string };
+      expect(newIdx.streamId).not.toBe(oldStream); // 换流重建（registry.replace 新 streamId；此分支特有——无观察者在场，排除 onInvalidate 路）
+      expect(newIdx.journalFingerprint).toBe(sha256HexBytes(readFileSync(r.jp))); // 重建路指纹=新源字节
+      expect(newIdx.journalFingerprint).not.toBe(oldIdx.journalFingerprint);
+      // 注：stream-replaced-disk 审计仅 retired>0 时发——本用例已退订（无引擎），断言流身份变化即可
+      const fp = r.dual.fingerprints?.("j.jsonl");
+      expect(newIdx.sessionFingerprint).toBe(fp?.session ?? ""); // 与源指纹函数一致（字段非自造）
     } finally {
       await r.dispose();
     }

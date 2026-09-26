@@ -169,7 +169,7 @@ describe("3b-3① composition", () => {
   it("R-03 生产流身份随机：两实例首流不同 id；跨实例 cursor → 4404 拒绝", async () => {
     const cfgA = await mkCfg();
     const dir = cfgA.dir; // 公共 journal 根=A 的 dir；B 显式指到同一根
-    const cfgB = await mkCfg({ roots: [dir], sessionRoots: undefined, scanDir: dir });
+    const cfgB = await mkCfg({ roots: [dir], scanDir: dir }); // sessionRoots 省略=沿用默认（exactOptionalPropertyTypes 下不得显式 undefined）
     // 公共 journal 根=dir（两实例同授权面）
     await writeFile(join(dir, "r3.jsonl"), `${JSON.stringify({ t: "session-init", sessionId: "sid-r3", leafId: "l0", ts: 1, cwd: dir })}\n${JSON.stringify({ t: "enqueue", intentId: "i-1", sessionId: "sid-r3", leafId: "l0", generation: 1, matchKey: { textHash: "th-r3-1", attachmentIdentity: "", ordinal: 0 }, payload: { kind: "prompt", rawText: "hello r3", attachments: [], sentAt: "2026-09-26T00:00:00Z" } })}\n`, "utf8");
     const a = await start(cfgA.cfg);

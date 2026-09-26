@@ -479,13 +479,13 @@
 ## 3b-3③ real-ws E2E+同步排水修复（3b3c；2026-09-29；repo 7bfcde2）
 - 场景=组合根 startServer 真监听 127.0.0.1:0+真 ws 客户端（WsClient：waitOpen 必备——readyState 0 时 send 静默丢）。
 - **同步排水缺陷（RW1 实测真 bug，单测不可见）**：1100 行同 tick 追加→onAppend 同步分发循环内 schedulePump 是 tmr(0) 定时器永不到期→live 引擎 outbox 堆过 1024 积压门→快客户端被慢客户端门误杀。修复三件套：①schedulePump 抽 pumpFile(file)（逐连接 drain+emit+仍积压续泵）②pumpIfBacklogged（判据=**engine.outboxDepth**（新增只读口，仅可排水面）≥maxEventsPerLiveFrame=7——首版用 state.buffered（含 paging 滞留）致每事件排水→1025 单事件帧→连接队列超限二次误杀）③dispatchHistoryBatch（syncIndex 首装/续编两路共用，每 16 条分块排水）。
-- **两级 4431 语义（Y-02 勘正版）**：订阅级 4431 触发面=①paging 滞留破 subscriptionBacklogMax（「订阅积压超限（慢客户端）」retryable=true，RW1 慢端）②单帧组装超 frameMaxBytes（「帧超预算」retryable=false，subscription-engine.ts:296）——「订阅级仅=paging」不是全域真命题；连接级 4431「连接发送队列超限（queue-overflow）」retryable=true=connQueueFrames/Bytes 破限或 bufferedAmount≥4MiB 背压门（ws-support.test.ts:263 单元面）——同步排水+有界让出后 live outbox 有界，持续传输堆积走连接队列，两级各管一面。RW2 修复后语义=同负载对照（pause+7000 突发→零 4431 误杀+resume 全量恰一次）；conn 级正例由单元面覆盖（真回环内核缓冲吸收 MB 级，集成面正例不稳定不设门）。
+- **两级 4431 语义（Y-02 勘正版；3b3-fix2 再勘正 retryable 口径）**：订阅级 4431 触发面=①paging 滞留破 subscriptionBacklogMax（「订阅积压超限（慢客户端）」）②单帧组装超 frameMaxBytes（「帧超预算」，subscription-engine.ts:296）——**两者帧内 retryable 恒 false**（引擎 close 第三参=是否发错帧，帧语义固定；契约 §5.3；RW1 断 false）——「订阅级仅=paging」不是全域真命题；连接级 4431「连接发送队列超限（queue-overflow）」retryable=true=connQueueFrames/Bytes 破限或 bufferedAmount≥4MiB 背压门（**正例由单元面覆盖**=ws-support.test.ts:263；真回环内核缓冲吸收 MB 级，集成面正例不稳定不设门）——同步排水+有界让出后 live outbox 有界，持续传输堆积走连接队列，两级各管一面。RW2 的验收目标=同负载零 4431 误杀（pause+7000 突发→零 4431+resume 全量恰一次），**不是**断言连接级 4431 正例。
 - 断言面：RW1 快/慢并存（250>200 分页+1100 突发：slow 订阅级 4431 只关订阅+连接不断+cursor seq=200 分页循环续读到 1350；fast 恰 1100 零错）；RW2 pauseSocket+7000 突发→连接级 4431 retryable=true+无订阅级误杀；RW3 262,145B→4404 不断链+>1MiB 单帧→close 1009；RW4 Origin 外→HTTP 403+坏 token→4401/1008；RW5 A 硬断→B 共享观察 30 事件全量（审计名=conn-transport-closed）；RF11 恢复期 1100 行批量续编→A 恰 1100 零错（M-P2 杀）。
 - 变异三杀（tests/fixtures/mutation-records/3b3c-sync-pump.md，真实 diff+失败名）：M-P1 onAppend 去同步排水→2 挂；M-P2 dispatchHistoryBatch 去分块→1 挂；M-P3 判据退混合 buffered→1 挂。还原 762+7。
 - 踩坑：vitest 看 console 须 --disable-console-intercept；RW1 尾放宽 20s；慢端续读须快照翻页循环（hasMore→续送 snapshotId+historyNext，单订一次只到 399）。
 
 ## 3b-3④ 预算容量+内存峰值（2026-09-29；repo 40aee70）
-- 断言面：BG1 双源同池 20k 触顶状态机（19,998+3=20,001 越界→订阅 4402 retryable=true+不发快照；宽容换流后再触顶仍 4402；额度用尽第三订→registry 拒建，审计 index-over-budget-get——**该审计为本轮补齐**：syncIndex 的 FileOverBudgetError 原为静默 4402，与 onAppend 路径观察面不一致）；BG2 恰 20,000 恰在池内放行（barrier=20,000 零错）；BG3 每文件 8MiB 扫描预算（9MiB journal→4402 会话不可读 retryable=true+源侧审计 load-read-failed kind=too-large——网关订阅口 load=null 统一通用文案，reason 只落审计线）；BG4 流池 LRU 32（33 文件顺序订/退→registry.size≤32+f1 重订=新 streamId 换流+f33 在池身份稳定）；BG5 内存峰值披露（20k 满载下 vitest 进程 heapUsed 快照+384MiB 宽松护栏；口径=含测试运行时本体，非生产 RSS——披露非承诺）。
+- 断言面：BG1 双源同池 20k 触顶状态机（19,998+3=20,001 越界→订阅 4402 retryable=true+不发快照；宽容换流后再触顶仍 4402；额度用尽第三订→registry 拒建，审计 index-over-budget-get——**该审计为本轮补齐**：syncIndex 的 FileOverBudgetError 原为静默 4402，与 onAppend 路径观察面不一致）；BG2 恰 20,000 恰在池内放行（barrier=20,000 零错）；BG3 每文件 8MiB 扫描预算（9MiB journal→4402 会话不可读 retryable=true+源侧审计 load-read-failed kind=too-large——网关订阅口 load=null 统一通用文案，reason 只落审计线）；BG4 流池 LRU 32（33 文件顺序订/退→registry.size≤32；**3b3 修复轮 Y-03 后断言触达重排**：f1 触达保留/f2 挤出，非首轮简单淘汰）；BG5 内存披露（20k 满载下 vitest 进程 heapUsed **单次瞬时采样**快照+384MiB 宽松护栏；口径=含测试运行时本体，非生产 RSS，非持续峰值监控——披露非承诺）。
 - 组合层无合计门（冻结裁决）：合计口径归 3b-4 恢复面。
 - 变异三杀（tests/fixtures/mutation-records/3b3d-budget.md）：M-B1 触顶边界 > → >=（BG2 恰 20k 误判）；M-B2 LRU while(false)（BG4 无界）；M-B3 readBounded 上限 MAX_SAFE_INTEGER（BG3 绕过）。全部 KILLED；还原 767+7。
 - 踩坑：requestId 模式 \w- 不含句点（s-f1.jsonl→4404 requestId 非法）；订阅口 load=null 的 reason 只在源侧审计（history-source load-read-failed kind=…），网关层无 reason 审计——断言走源侧线。
@@ -493,10 +493,20 @@
 ## 3b3 修复轮（GPT 3b-3 首审 69→修复；2026-09-29；repo 63bce74+519d620）
 - R-01 同步排水只转移饥饿点（P-FAST：正常读+6750 单突发→events=0+连接级 4431，connQueue drain=setImmediate 在同步循环内饥饿）：①dispatchHistoryBatch（syncIndex 首装/续编两路）+rescanOnce 追加分发均改「>256 行批次每 16 条 setImmediate 让出」（≤256 保持同步语义，既有单测时序不变）；②让出窗口复核（失效/换代丢弃；并发重扫推进水位跳过不重发）；③RW2 重写=同负载对照（pause+1.2MB 突发→零 4431 误杀+resume 全量恰一次）；RW6=P-FAST 复现锁死；RW7=syncIndex 批量续编路（8000 行真传输，M-R1a 杀手）。
 - R-02 同字节换 inode 漏读窗口（读后重挂前新 inode 追加无人观察）：①skip-identity-change 后强制核对读（identity-handoff-verify；无追加=纯 skip 收敛无环）；②identity 变不再单独 replace——前缀判据先行：纯追加+换 inode=同流交接（inode-handoff-append 身份跟进+前缀补发）；前缀破才 replace（改写）。
-- R-03 生产流 ID：GW 默认改 defaultStreamId（crypto 16B base64url，read-index.ts 导出）；composition 两实例首流互异+跨实例 cursor 4404。
+- R-03 生产流 ID：GW 默认改 defaultStreamId（crypto 16B→32 位十六进制 `s-`+hex，read-index.ts 导出；3b3-fix2 勘正：原记 base64url 有误）；composition 两实例首流互异+跨实例 cursor 4404。
 - R-04 配置门：requireFinitePosInt（maxScanBytes 1..1GiB/tokenPollMs）+requireAbsPaths（roots/sessionRoots/scanDir）+Origin 正则；NaN/Infinity 绕过 readBounded 封死。
 - R-05 RW4 403 拒握手 CONNECTING 态 terminate→unhandled：error 过滤+close 收敛；三 unused import 清。
 - Y-01 并发 dispose 共享收尾 Promise（d2Early 窗口断言）；Y-02 两级 4431 语义勘正（订阅级=paging 滞留**或**帧超预算）+§3.7 第4项锚点+inode 例外原位；Y-03 RW1 续读全序列 200..1350 对拍+RF11 逐 seq（2..1101）+RF9 unobserved 正面证据+BG4 LRU 触达重排（f1 触达保留/f2 挤出）+BG5 口径改「单 20k 流满载」；Y-04 指纹三路统一（首装/续编/重建+onAppend）+rescanOnce 指纹移分发循环前（循环内链路即时可得+并发窗口不回退）+RF12 三态对拍源 SHA-256 全 64hex；Y-05 tokenPollMs 轮询真实生效（token-reloaded+旧 token 4401）+头注释口径勘正。
 - 断言面：R-02/W1-W3+收敛性（history-source 66 it）；真盘全分型补 rename 纯追加=交接+改写 rename=replace；RF12（real-fs 11 it）；RW7（real-ws 7 it）；composition 13 it（R-04 门×4+R-03+Y-01+Y-05）。
 - 变异六杀（tests/fixtures/mutation-records/3b3-fix1.md）：M-R1a/M-R1b/M-R2a/M-R2b/M-Y1/M-Y4 全 KILLED；两首轮 SURVIVED 均为杀手集缺口（补 RW7/d2Early 后杀）——已披露。
 - 终态：781+7+tsc0+lint0，npm test exit0 无 unhandled。
+
+## 3b3-fix2 修复轮（GPT 复审 74→修复；2026-09-29）
+- F1 分发乱序（publishStates 单飞发布循环）：syncIndex 三路（首装/续编/非前缀重建）+onAppend 统一 claimPublish→publishLoop 按 nextSeq 账本逐条有序投递（读批 16、backlog>256 让出、让出后索引身份复核）；引擎增 historyBarrier（快照/页已含 seq 跳过，恰一次）；publishLoop 异常退位 stopped 标志不补启（防同步重入环——实测栈爆反例自捕自修）；删 dispatchHistoryBatch。
+- F2 await 后不复检（结构性闭合）：syncIndex 全同步无 await（P-CLOSE/P-REPLACE 窗口从根消失）；发布让出窗口的关流/换流由循环身份复核+retire 兜底。测试：F2/P-CLOSE（发布中段双闭→stopped+release 恰一次+关后零帧）、F2/P-REPLACE（中段 invalidate→双 4409+旧流发布中止+新订阅新流快照）。
+- F3 inode 前缀追加交接漏读：rescanOnce inodeChanged→handoffVerify 标志→重挂后 queueRescan('inode-handoff-verify')；followUpReason 字段穿透在飞折叠（审计可辨）；W5 杀手（读后重挂前追加+读前追加→appends 恰 2）。
+- F4 根 typecheck：composition.test.ts:172 显式 undefined 违 exactOptionalPropertyTypes→省略键。
+- Y-04 残余：指纹语义钉死（read-index 字段+recordFingerprints 注释：最后事件编入/装载时点摘要，非实时版本，恢复面禁用）；RF13 撕裂尾（不编入→指纹停旧值≠盘字节；补全→跟进全量 SHA-256）；RF14 直驱 syncIndex 非前缀分支→重建路指纹=新源字节（三路统一之重建路真指纹）；RF9 unobserved 两源分开（journal+session 槽各一条）。
+- 文档勘误：TEST-MAP 两级 4431 retryable 口径（订阅级两触发面帧内恒 false；RW2=零误杀目标非连接级正例）+R-03 base64url→hex+BG4 触达重排+BG5 单次瞬时采样；契约换流全集 inode 例外原位；composition.ts reload 假描述（changed:true 无条件）；read-index 注释 hex。
+- 变异两杀（新标准档 tests/fixtures/mutation-records/3b3-fix2.md）：M-F1 屏障判定移除→P-ORDER 翻页不收敛 exit1；M-F3 核对读移除→W5 until 超时 exit1。fix1 档补勘误头（旧标准说明+GPT 独立复演依据）。
+- 终态：44 files 787+7+tsc0（根）+lint0，无 RangeError/unhandled。披露：全套首跑曾 1 例失败（tail 截断未捕获用例名，其后 5 连跑全绿不可复现——按抖动记录，不掩饰）。

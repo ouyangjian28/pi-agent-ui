@@ -160,6 +160,8 @@ interface FileSlot {
   pendingEntry: GenEntry | null;
   scanInFlight: Promise<boolean> | Promise<void> | null;
   dirtyPending: boolean;
+  /** F3（3b3-fix2）：在飞期排队的核对读原因——跟进重扫携带（否则被 follow-up 泛化标签吞掉，审计不可辨）。 */
+  followUpReason: string | null;
   rescanQueued: boolean;
   earlyWatchErrors: number;
   awaitingBind: number;
@@ -192,7 +194,7 @@ export class FileHistorySource implements HistorySourcePort {
     }
     let slot = this.slots.get(file);
     if (slot === undefined) {
-      slot = { file, abs, entry: null, pendingEntry: null, scanInFlight: null, dirtyPending: false, rescanQueued: false, earlyWatchErrors: 0, awaitingBind: 0, pendingTickets: new Set(), releaseCarry: 0 };
+      slot = { file, abs, entry: null, pendingEntry: null, scanInFlight: null, dirtyPending: false, followUpReason: null, rescanQueued: false, earlyWatchErrors: 0, awaitingBind: 0, pendingTickets: new Set(), releaseCarry: 0 };
       this.slots.set(file, slot);
     }
     slot.abs = abs;
@@ -495,7 +497,9 @@ export class FileHistorySource implements HistorySourcePort {
       if (slot.scanInFlight === run) slot.scanInFlight = null;
       if (slot.dirtyPending && slot.entry !== null && !slot.entry.disposed && slot.entry.sinks !== null) {
         slot.dirtyPending = false;
-        this.queueRescan(slot, "follow-up"); // 在飞期折叠的恰一次跟进
+        const why2 = slot.followUpReason ?? "follow-up"; // F3：核对读原因穿透（identity/inode 交接可辨）
+        slot.followUpReason = null;
+        this.queueRescan(slot, why2); // 在飞期折叠的恰一次跟进
       }
       this.maybeReapSlot(slot); // C1/D2（3b2e）：在飞重扫曾挡住 unbind/release 侧回收——重扫终了的身份安全收尾点补收（静止槽不滞留 Map）
     }
@@ -519,6 +523,7 @@ export class FileHistorySource implements HistorySourcePort {
         // 绑旧 inode 收不到新 inode 事件）。重挂后强制一次核对读：有追加→正常前缀路径补发；
         // 无追加→同指纹+同 identity=纯 skip（不再排，无自触发环）。
         this.rearmWatcher(slot, entry);
+        slot.followUpReason = "identity-handoff-verify"; // F3：核对读原因穿透（审计可辨）
         this.queueRescan(slot, "identity-handoff-verify");
         return;
       }
@@ -549,6 +554,11 @@ export class FileHistorySource implements HistorySourcePort {
       entry.identity = read.identity; // 纯追加下的 inode 交接：身份跟进（同指纹分支同型）
       this.audit(`inode-handoff-append file=${entry.file} why=${why}`);
     }
+    // F3（3b3-fix2）：凡跨 inode 且保流（纯追加/含零追加）都需重挂后核对读——与同指纹分支
+    // identity-handoff-verify 同型收敛：读到重挂窗口内新 inode 的追加无人观察（旧 watch 绑旧
+    // inode），漏读行会永久缺失（旧实现只在同指纹分支核对，append 分支漏）。核对读收敛性：
+    // 无追加→同指纹+同 identity→纯 skip 停（无自触发环）；有追加→正常前缀路径补发。
+    const handoffVerify = inodeChanged;
     const appended = rows.length - entry.baseline.length;
     // R-01：大批量新编入行分发按有界批次让出事件循环（每 16 条 setImmediate）——否则下游
     // 连接队列的 setImmediate 排水在同步循环内饥饿：队列自溢出→正常读取的快客户端被 4431 误杀。
@@ -584,6 +594,10 @@ export class FileHistorySource implements HistorySourcePort {
     this.audit(`rescan file=${entry.file} why=${why} rows=${rows.length} appended=${appended}`);
     // 重挂观察（fs.watch 对 rename 类事件可能失效——重叠换新关旧；失败→unavailable，R6 fail-closed）
     this.rearmWatcher(slot, entry);
+    if (handoffVerify) {
+      slot.followUpReason = "inode-handoff-verify"; // F3：核对读原因穿透（审计可辨）
+      this.queueRescan(slot, "inode-handoff-verify"); // 交接核对读（重挂后）
+    }
   }
 
   /** 重叠换新观察：先建新再关旧（无窗口）；建立失败=不可用（不降级、不空转，R6）。 */

@@ -5,7 +5,8 @@
 //   （resolveWithinRoots 同一口径——网关授权什么，源就最多能读什么，不允许源比网关授权面更宽）。
 // - token fail-closed：tokenFile 缺失/非法/空集合→startServer 抛错拒绝启动（TokenAuthority.fromFile 语义）。
 // - 热轮换：默认间隔轮询（周期全量读 tokenFile 并重新校验——无 mtime/size 指纹短路；TokenAuthority.reload
-//   对相同集合返回 changed:false（内容比对），对变更集合撤销 revoked→网关撤销既有连接 4401+1008）。
+//   成功读入即 install 并返回 changed:true（**无内容比对短路**，集合未变也是 true——3b3-fix2 勘正原假描述）；只有
+//   读失败/乱序完成才 changed:false；对变更集合撤销 revoked→网关撤销既有连接 4401+1008）。
 // - dispose 顺序（冻结）：摘 onConnection → 停轮询/SIGHUP → gateway.dispose()（存量连接 1000
 //   "server-shutdown" 优雅关+文件观察器全解绑→DH 双源句柄归零）→ adapter.dispose()（传输层
 //   兜底 1001+关自建 server）→ tokens.dispose()。gateway 先于 adapter：应用层告别帧先于传输层断链。

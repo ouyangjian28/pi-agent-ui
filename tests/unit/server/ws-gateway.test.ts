@@ -2215,3 +2215,117 @@ describe("ws-gateway 3b-2b③：DualHistorySource 接线验证", () => {
     } finally { await d.dispose(); }
   });
 });
+
+// ---- 3b3-fix2（GPT 3b3-fix1 复审反例面）：F1 统一发布循环序 / F2 发布让出窗口复核 ----
+describe("ws-gateway 3b3-fix2：F1/F2 发布循环", () => {
+  /** 拼接连接全部 history 追加事件 seq（帧序×帧内序；非 Set——顺序即断言对象）。 */
+  const historySeqs = (c: FakeConn): number[] => {
+    const out: number[] = [];
+    for (const f of c.frames()) {
+      if (f.t === "events" && f.origin === "history") {
+        for (const e of (f as { events: Array<{ seq: number }> }).events) out.push(e.seq);
+      }
+    }
+    return out;
+  };
+
+  /** 快照/续页翻完（engine→live；buffered 才能落 outbox 交付）。 */
+  async function pageThrough(c: FakeConn, file: string): Promise<void> {
+    for (let i = 0; i < 64; i++) {
+      const snap = c.frames().filter((f) => f.t === "snapshot").pop() as Record<string, unknown> | undefined;
+      if (snap === undefined) throw new Error("pageThrough：无快照帧");
+      if (snap.hasMore !== true) return;
+      await c.say({ t: "subscribe", requestId: `pg-${i}`, file, snapshotId: snap.snapshotId, historyNext: snap.historyNext });
+    }
+    throw new Error("pageThrough：翻页不收敛");
+  }
+
+  it("F1/P-ORDER 大批量续编让出窗口内 onAppend 越序杀手→严格升序完整数组（21..1221 各恰一次）", async () => {
+    const r = await makeRig();
+    try {
+      const file = "f1-order.jsonl";
+      r.history.put(file, makeRows(20));
+      const a = await authed(r);
+      await a.say({ t: "subscribe", requestId: "a1", file });
+      await until(() => a.frames().some((f) => f.t === "snapshot")); // A live（barrier=20）
+      const s1 = (a.frames().find((f) => f.t === "snapshot") as Record<string, unknown>).streamId;
+      // 盘面 1220；B 新订阅触发 load→continueFrom（大批量发布循环，让出窗口多段）
+      r.history.put(file, makeRows(1220));
+      const b = await authed(r);
+      await b.say({ t: "subscribe", requestId: "b1", file });
+      await until(() => historySeqs(a).length >= 100, 4000); // 发布推进到中段（处在让出节奏中）
+      r.history.append(file, rowAt(1221)); // 窗口内射入 onAppend——旧实现在此越序（302 插队）
+      await until(() => historySeqs(a).length === 1201, 8000);
+      // 完整有序数组断言（非 Set）：[21..1221] 严格升序各恰一次
+      expect(historySeqs(a)).toEqual(Array.from({ length: 1201 }, (_, i) => 21 + i));
+      expect(r.audits.some((l) => l.includes("publish-seq-mismatch") || l.includes("publish-read-empty"))).toBe(false);
+      expect(errFrames(a).some((f) => f.code === 4431)).toBe(false);
+      // B（续编请求方，屏障=1220）：不重收 21..1220，只收 1221（恰一次账本）
+      await pageThrough(b, file);
+      await until(() => historySeqs(b).some((s) => s === 1221), 4000);
+      expect(historySeqs(b)).toEqual([1221]);
+      expect(s1).toBeDefined();
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("F2/P-CLOSE 发布让出窗口内连接关闭→观察收口不被在飞发布阻塞（stopped+release 落地，无泄漏绑定）", async () => {
+    const r = await makeRig();
+    try {
+      const file = "f2-close.jsonl";
+      r.history.put(file, makeRows(20));
+      const a = await authed(r);
+      await a.say({ t: "subscribe", requestId: "a1", file });
+      await until(() => a.frames().some((f) => f.t === "snapshot"));
+      r.history.put(file, makeRows(1220));
+      const b = await authed(r);
+      await b.say({ t: "subscribe", requestId: "b1", file });
+      await until(() => historySeqs(a).length >= 100, 4000); // 发布窗中段
+      a.closedByTransport(); // 窗口内关连接（GPT P-CLOSE 的发布期等价面）
+      b.closedByTransport();
+      await until(() => r.history.stopped.includes(file), 3000); // 全关→unobserve（收口未被在飞循环阻塞）
+      expect(r.history.releaseCalls).toContain(file); // load 引用恰一次结算
+      expect(r.audits.some((l) => l.includes("publish-seq-mismatch"))).toBe(false);
+      const n = a.frames().length;
+      await new Promise((res) => setTimeout(res, 30));
+      expect(a.frames().length).toBe(n); // 关后无任何新帧（不建引擎/不发死快照）
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("F2/P-REPLACE 发布让出窗口内 onInvalidate(replace)→发布按流作废中止；新订阅新流不发旧坐标帧", async () => {
+    const r = await makeRig();
+    try {
+      const file = "f2-replace.jsonl";
+      r.history.put(file, makeRows(20));
+      const a = await authed(r);
+      await a.say({ t: "subscribe", requestId: "a1", file });
+      const snap1 = a.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      await until(() => snap1 !== undefined && a.frames().some((f) => f.t === "snapshot"));
+      r.history.put(file, makeRows(1220));
+      const b = await authed(r);
+      await b.say({ t: "subscribe", requestId: "b1", file });
+      await until(() => historySeqs(a).length >= 100, 4000); // 发布窗中段
+      r.history.invalidate(file, "replace"); // 窗口内换流（GPT P-REPLACE 的发布期等价面）
+      await until(() => errFrames(a).some((f) => f.code === 4409) && errFrames(b).some((f) => f.code === 4409), 3000);
+      const n = historySeqs(a).length;
+      await new Promise((res) => setTimeout(res, 40));
+      expect(historySeqs(a).length).toBe(n); // 旧流发布中止：不再有旧坐标追加帧
+      expect(r.audits.some((l) => l.includes("publish-seq-mismatch"))).toBe(false);
+      // 新订阅→新流：快照页自服务（页内含全部 1220 行），仅新追加走 events 帧
+      const c = await authed(r);
+      await c.say({ t: "subscribe", requestId: "c1", file });
+      const snap2 = c.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      expect(snap2).toBeDefined();
+      expect(snap2.streamId).not.toBe(snap1.streamId); // 新流身份（跨流不续坐标）
+      await pageThrough(c, file);
+      r.history.append(file, rowAt(1221));
+      await until(() => historySeqs(c).some((s) => s === 1221), 4000);
+      expect(historySeqs(c)).toEqual([1221]); // 只收新追加（旧坐标全走快照页，无越页直投）
+    } finally {
+      await r.dispose();
+    }
+  });
+});

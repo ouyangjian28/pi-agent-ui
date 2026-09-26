@@ -1383,12 +1383,15 @@ describe("FileHistorySource 3b-3⑤：整文件指纹短路（契约 §1.3——
     await h.src.load("a.jsonl");
     const { s: sk, log } = makeSinks();
     h.src.observe("a.jsonl", sk);
-    // rename 后、重扫读发生前已有追加：重扫读直接见新行（指纹已变）→正常 append
-    r.reads.push({ text: `${t1}${jline(2)}\n`, identity: "9:9" });
+    // rename 后、重扫读发生前已有追加：重扫读直接见新行（指纹已变）→正常 append；
+    // F3（3b3-fix2）：append 分支的 inode 交接也重挂后核对读（读3=同态→纯 skip 收敛，不重发）。
+    r.reads.push({ text: `${t1}${jline(2)}\n`, identity: "9:9" }, { text: `${t1}${jline(2)}\n`, identity: "9:9" });
     h.watcher.handles[0]?.triggerNotice();
     await until(() => log.appends.length === 1);
     expect(log.invalidates).toEqual([]);
     expect(h.audits.some((l) => l.includes("fingerprint-skip-identity-change"))).toBe(false); // 未走 skip
+    await until(() => h.audits.some((l) => l.includes("fingerprint-skip") && l.includes("inode-handoff-verify"))); // 核对读收敛
+    expect(log.appends).toHaveLength(1); // 核对无追加→不重发（恰一次）
   });
 
   it("R-02/W2 读后重挂前追加（读快照不含）→核对读补发恰一次", async () => {
@@ -1428,6 +1431,30 @@ describe("FileHistorySource 3b-3⑤：整文件指纹短路（契约 §1.3——
     live?.triggerNotice();
     await until(() => log.appends.length === 1);
     expect(log.invalidates).toEqual([]);
+  });
+
+  // F3（GPT 3b3-fix1 复审 P-INODE-APPEND 杀手）：rename 换 inode+读前追加 1 条+读后重挂前再追加
+  // 1 条（旧通知已消费，新 inode 无 watch）——旧实现 append 分支只 rearm 无核对读，第 3 行永久漏读。
+  // 机制=append 分支交接也重挂后核对读（inode-handoff-verify）：核对读见新行→前缀补发；收敛无环。
+  it("F3/W5 读前+读后各追加一次（无后续通知）→两行都到；核对读收敛无环", async () => {
+    const t1 = `${jline(1)}\n`;
+    const r = new FakeReader();
+    r.reads.push({ text: t1, identity: "1:1" });
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");
+    const { s: sk, log } = makeSinks();
+    h.src.observe("a.jsonl", sk);
+    // 读2（重扫快照）只含 jline(2)；jline(3) 在读后、重挂前落盘（旧 watch 绑旧 inode 收不到）
+    r.reads.push({ text: `${t1}${jline(2)}\n`, identity: "9:9" }, { text: `${t1}${jline(2)}\n${jline(3)}\n`, identity: "9:9" });
+    h.watcher.handles[0]?.triggerNotice();
+    await until(() => log.appends.length === 2, 3000); // 两行都到（第 3 行靠核对读补）
+    expect(log.invalidates).toEqual([]);
+    expect(h.audits.some((l) => l.includes("inode-handoff-append"))).toBe(true);
+    expect(h.audits.some((l) => l.includes("why=inode-handoff-verify"))).toBe(true); // 核对读可辨
+    const calls = r.calls;
+    await new Promise((res) => setTimeout(res, 80)); // 静止观察窗
+    expect(r.calls).toBe(calls); // 无环：identity/指纹稳定后不再自触发
+    expect(log.appends).toHaveLength(2); // 恰各一次，不重发
   });
 
   it("R-02/收敛性：连续同字节 rename（identity 链变）核对读有限收敛，无自触发环", async () => {

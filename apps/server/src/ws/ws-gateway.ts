@@ -21,7 +21,7 @@ import { createHash } from "node:crypto";
 import type {
   ClientFrame, LiveEvent, RecoveryBlockReason, SanitizedText, ServerFrame, SessionStatus,
 } from "@pi-agent-ui/protocol";
-import { LIMITS, SubscriptionEngine, validateClientFrame, type HistoryEvent , defaultStreamId } from "@pi-agent-ui/protocol";
+import { LIMITS, SubscriptionEngine, validateClientFrame, defaultStreamId } from "@pi-agent-ui/protocol";
 import type { ScanRow } from "@pi-agent-ui/protocol";
 import { ReadIndexRegistry, FileOverBudgetError } from "@pi-agent-ui/protocol";
 import type { ReadIndex } from "@pi-agent-ui/protocol";
@@ -158,6 +158,16 @@ export interface ConnHandle {
 const HANDSHAKE_WINDOW_MS = 60_000;
 const RECOVERY_PAGE_CACHE_MAX = 8; // B8：每连接恢复页缓存上界（LRU 驱逐；连接关闭全清）
 
+/** F1（3b3-fix2）：历史发布游标（每文件）——发布循环的恰一次/顺序账本。 */
+interface PublishState {
+  /** 发布循环在飞标记（单飞：在飞循环按游标自会带走新编入，后到 claim 不另起循环）。 */
+  publishing: boolean;
+  /** 本游标所属流（registry.replace 换流后旧游标作废，下次 claim 按新流重立）。 */
+  streamId: string;
+  /** 下一待发 seq（只前进不回退；=已发序+1）。 */
+  nextSeq: number;
+}
+
 export class WsGateway {
   private readonly conns = new Map<string, ConnState>();
   private readonly registry: ReadIndexRegistry;
@@ -176,6 +186,13 @@ export class WsGateway {
   private readonly connTimers = new Map<string, { auth: unknown; tick: unknown }>();
   /** 文件级共享观察器（多连接同文件共享一份 observe+一个泵；W1-04） */
   private readonly watchers = new Map<string, { refs: Set<ConnState>; unobserve: (() => void) | null }>();
+
+  /** F1（3b3-fix2）：每文件历史发布游标——同流内 seq 严格升序发布，恰一次（已发序不重发）。
+   *  旧 dispatchHistoryBatch「冻结引擎集+直投」在大批量让出窗口会被 onAppend/并发续编越过
+   *  （[2..17,302,18..301] 乱序——契约 §1.3 编入序违反）；改为按游标从索引拉取的单飞循环后，
+   *  让出窗口的新编入只能排在游标之后（同循环按序带走），且交付资格改为引擎屏障判定
+   *  （barrier<seq 才投，快照已含的不重投），与引擎集合冻结解耦。 */
+  private readonly publishStates = new Map<string, PublishState>();
   private readonly pendingPumps = new Set<string>();
   private readonly handshakeTimes: number[] = []; // 单调时钟滑窗（W1-02）
   /** R6（3b-1）：per-IP 认证失败限速+退避（滑窗计数+指数退避封顶；hello 成功即清户）。 */
@@ -606,7 +623,9 @@ export class WsGateway {
   /** W1-04：索引装载与增量同步（前缀→追加；非前缀=盘面改写→换流重建+退役旧引擎）。
    * R2（w1c）：换流必须协调所有仍持旧索引身份的活动订阅（4409 退旧+撤帧+清理），
    * 不得让旧引擎接收新流坐标的事件；R3：所有装载/增量出口统一容量门。 */
-  /** 3b-3⑤：装载/续编时把两源整文件指纹落到索引（信息性元数据+审计行——变更检测触发器，非身份判据）。 */
+  /** 3b-3⑤：装载/续编时把两源整文件指纹落到索引。语义钉死（Y-04/3b3-fix2）：
+   * 值=【最后事件编入/装载时点】的文件摘要——撕裂尾（未成完整行/无后续行）不编入→停在旧值；
+   * 变更检测触发器+信息性元数据，非实时完整版本——【恢复面禁用】（恢复版本以 recoveryEvidence 为准，3b-4）。 */
   private recordFingerprints(file: string, index: ReadIndex): void {
     const fp = this.opts.historySource?.fingerprints?.(file);
     if (fp === null || fp === undefined) return;
@@ -636,10 +655,10 @@ export class WsGateway {
       const stale = this.retireEnginesForFile(file, index.streamId, "identity-change");
       if (stale > 0) this.audit(`stream-identity-guard file=${file} newStream=${index.streamId} retired=${stale}`);
       // 3b2c-F1-03：空索引≠无订阅——H=0 流上的既有活跃订阅必须收到首批行（请求方引擎尚未
-      // 建立，其快照含之；同 continueFrom 分发纪律；先退异身份引擎再分发，不给旧流喂新坐标）。
+      // 建立，其快照含之；先退异身份引擎再分发，不给旧流喂新坐标）。F1：统一发布循环按游标分发。
       if (rows.length > 0) {
-        const fresh = index.read(1, rows.length);
-        await this.dispatchHistoryBatch(file, fresh);
+        this.claimPublish(file, index, 1);
+        this.publishLoop(file);
       }
       return index;
     }
@@ -654,8 +673,8 @@ export class WsGateway {
       const appended = index.continueFrom(rows);
       this.recordFingerprints(file, index);
       if (appended > 0) {
-        const fresh = index.read(before + 1, appended);
-        await this.dispatchHistoryBatch(file, fresh);
+        this.claimPublish(file, index, before + 1);
+        this.publishLoop(file);
       }
       if (index.overBudget) { this.closeSubscriptionsFor(file, "index-over-budget"); return WsGateway.INDEX_BUDGET; }
       return index;
@@ -669,6 +688,10 @@ export class WsGateway {
     if (index.overBudget) { this.closeSubscriptionsFor(file, "index-over-budget"); return WsGateway.INDEX_BUDGET; }
     const retired = this.retireEnginesForFile(file, index.streamId, "disk-rewrite");
     if (retired > 0) this.audit(`stream-replaced-disk file=${file} retired=${retired} newStream=${index.streamId}`);
+    // F1：新流发布游标重立（现无引擎可投；H=0 旧订阅者不可能在新流上存在——重建分支仅 waterMark>0 可达）；
+    // 游标就位后，后续 onAppend/续编的新编入按新流坐标有序发布。
+    this.claimPublish(file, index, 1);
+    this.publishLoop(file);
     return index;
   }
 
@@ -728,13 +751,10 @@ export class WsGateway {
           }
           const seq = index.append(row.source, row.locator, row.raw, row.event);
           this.recordFingerprints(file, index); // Y-04：live 追加后指纹跟进（信息性元数据与盘面一致）
-          // B2：分发用索引规范化后的统一坐标（丢弃外部 seq，引擎/索引恒一致）
-          const indexed = index.read(seq, 1)[0];
-          if (indexed === undefined) { this.audit(`history-append-lost file=${file} seq=${seq}`); return; }
-          // D1（w1d）身份防线：分发前退役仍持异身份的引擎（纵深兜底；正常路径钩子已协调，幂等 no-op）
-          const stale = this.retireEnginesForFile(file, index.streamId, "identity-change");
-          if (stale > 0) this.audit(`onappend-identity-guard file=${file} streamId=${index.streamId} retired=${stale}`);
-          this.forEachEngine(file, (e) => e.onHistoryAppend(indexed.event));
+          // F1（3b3-fix2）：改统一发布循环——旧直投会在历史批量让出窗口越过未发布 seq（乱序）。
+          //  claim 扩游标（同流只前不后），循环按序带走；恰一次由屏障判定保证。
+          this.claimPublish(file, index, seq);
+          this.publishLoop(file);
           // B4（w1b）：observe 通路容量出口——触顶即关流（4402 通知+清理），不靠慢客户端门掩盖索引无限增长
           if (index.overBudget) {
             this.audit(`index-over-budget file=${file} waterMark=${index.waterMark}`);
@@ -859,32 +879,83 @@ export class WsGateway {
     }
   }
 
-  /** 3b3c：批量编入分发（syncIndex 首装/续编两路共用）——每 16 条检欠量同步排水，
-   * 防同 tick 大批量续编（如恢复期 session 首装 1100 行）把 live 引擎 outbox 堆爆积压门。 */
   /** R-01：让出事件循环（setImmediate）——同步分发大批量新编入行会让连接队列的 setImmediate
-   * 排水饥饿：队列自溢出→正常读取的快客户端被 4431 误杀（P-FAST 反例）。每 16 条让一次，
-   * 生产/排水交替推进（排水每轮 16 帧同量级）。 */
+   *  排水饥饿：队列自溢出→正常读取的快客户端被 4431 误杀（P-FAST 反例）。每 16 条让一次，
+   *  生产/排水交替推进（排水每轮 16 帧同量级）。 */
   private yieldToLoop(): Promise<void> {
     return new Promise<void>((r) => setImmediate(() => r()));
   }
 
-  private async dispatchHistoryBatch(file: string, fresh: readonly { event: HistoryEvent }[]): Promise<void> {
-    // 引擎集合在分发起点冻结：中途新建的引擎（本次请求方的引擎在 syncIndex 后建立）其快照
-    // 屏障已含全部新编入行，不得再经 onHistoryAppend 收一遍（恰一次纪律）；已闭引擎天然忽略。
-    const engines: SubscriptionEngine[] = [];
-    this.forEachEngine(file, (e) => engines.push(e));
-    // R-01：小批量（≤256 行/连接，远离 1024 帧队列上限）保持同步语义（既有行为/时序不变）；
-    // 大批量每 16 条让出事件循环，防连接队列排水饥饿（P-FAST 反例：6750 行单突发→队列自溢出）。
-    const yieldBatch = fresh.length > 256;
-    for (let i = 0; i < fresh.length; i++) {
-      const fe = fresh[i]!;
-      for (const e of engines) e.onHistoryAppend(fe.event);
-      if ((i & 15) === 15) {
-        this.pumpIfBacklogged(file);
-        if (yieldBatch && i + 1 < fresh.length) await this.yieldToLoop(); // 大批量中段让出（尾批由末尾 schedulePump 收）
-      }
+  /** F1（3b3-fix2）：登记/推进历史发布游标（syncIndex 三路装载与 onAppend 共用）。
+   *  首建=按 firstNewSeq 立账；换流=旧游标作废重立（nextSeq 重置）；同流=只前不后（min 防回退重发）。 */
+  private claimPublish(file: string, index: ReadIndex, firstNewSeq: number): void {
+    const ps = this.publishStates.get(file);
+    if (ps === undefined || ps.streamId !== index.streamId) {
+      this.publishStates.set(file, { publishing: false, streamId: index.streamId, nextSeq: firstNewSeq });
+      return;
     }
-    this.schedulePump(file);
+    if (firstNewSeq < ps.nextSeq) ps.nextSeq = firstNewSeq;
+  }
+
+  /** F1（3b3-fix2）：发布循环（每文件单飞；3b3c 排水纪律继承）——按游标从索引按序拉取分发，
+   *  每 16 条同步排水防同 tick 大批量续编堆爆 live 引擎 outbox，大批量让出防 P-FAST 排水饥饿（R-01）。
+   *  恰一次与顺序：交付资格=引擎 historyBarrier（seq>barrier 才投）——与引擎集合何时建/退解耦，
+   *  快照/resync 已含的 seq 不重投；中途新建引擎屏障=创建时 waterMark，天然排除未发 seq。
+   *  游标越界（换流/重建/LRU 挤出）即作废返回；finally 末检恰一次补启防丢尾。
+   *  小积压（≤256 不让出）在函数首段同步执行，保留旧时序。 */
+  private publishLoop(file: string): void {
+    if (this.disposed) return;
+    const ps = this.publishStates.get(file);
+    if (ps === undefined || ps.publishing) return;
+    ps.publishing = true;
+    void (async () => {
+      let stopped = false; // 异常退位（换流/重建/超预算/账本异常）：不补启（防同步重入环）
+      try {
+        const index = this.registry.peek(file);
+        if (index === undefined || index.streamId !== ps.streamId) { stopped = true; return; } // 无索引/换流：旧游标作废
+        // D1（w1d）身份防线：发布前退役仍持异身份引擎（纵深兜底；正常路径钩子已协调，幂等 no-op）
+        const stale = this.retireEnginesForFile(file, index.streamId, "identity-change");
+        if (stale > 0) this.audit(`publish-identity-guard file=${file} streamId=${index.streamId} retired=${stale}`);
+        let sincePump = 0;
+        while (ps.nextSeq <= index.waterMark) {
+          if (index.overBudget) { stopped = true; this.closeSubscriptionsFor(file, "index-over-budget"); return; } // 引擎已关，游标无意义
+          const n = Math.min(16, index.waterMark - ps.nextSeq + 1);
+          const chunk = index.read(ps.nextSeq, n);
+          if (chunk.length === 0) { stopped = true; this.audit(`publish-read-empty file=${file} from=${ps.nextSeq}`); return; }
+          for (const ie of chunk) {
+            const seq = ps.nextSeq++;
+            if (ie.seq !== seq) { stopped = true; this.audit(`publish-seq-mismatch file=${file} want=${seq} got=${ie.seq}`); return; }
+            this.forEachEngine(file, (e) => {
+              const floor = e.historyBarrier;
+              if (floor === null || floor >= seq) return; // init/快照已含：跳过（恰一次）
+              e.onHistoryAppend(ie.event);
+            });
+          }
+          sincePump += chunk.length;
+          if (sincePump >= 16) {
+            sincePump = 0;
+            this.pumpIfBacklogged(file);
+            const backlog = index.waterMark - ps.nextSeq + 1;
+            if (backlog > 256) { // R-01：大批量中段让出——连接队列排水不饥饿
+              await this.yieldToLoop();
+              const cur = this.registry.peek(file);
+              if (this.disposed || cur !== index) { stopped = true; return; } // 让出窗口换流/重建：旧坐标作废（新流 claim 重立）
+            }
+          }
+        }
+        this.schedulePump(file); // 尾批收尾（buffered→outbox 后排空）
+      } finally {
+        ps.publishing = false;
+        // 末检（仅正常退位）：让出/排水窗口内又有新编入（claim 只扩水位不动游标）→ 恰一次补启防丢尾；
+        // 异常退位（stopped）不补启：条件未变（如超预算未清）会同步重入自身→栈溢（GPT 复审后实测反例）。
+        if (!stopped) {
+          const idx = this.registry.peek(file);
+          if (!this.disposed && idx !== undefined && idx.streamId === ps.streamId && ps.nextSeq <= idx.waterMark) {
+            this.publishLoop(file);
+          }
+        }
+      }
+    })();
   }
 
   /** 3b-2：文件级观察收口（无引擎可退时的兑底）——退全部引用+unobserve。 */
@@ -1160,6 +1231,7 @@ export class WsGateway {
 
   dispose(): void {
     this.disposed = true;
+    this.publishStates.clear(); // F1：发布游标全作废（在飞循环 disposed 早退）
     for (const c of [...this.conns.values()]) this.closeConn(c, 1000, "server-shutdown");
     for (const [file, w] of [...this.watchers.entries()]) {
       try { w.unobserve?.(); } catch { /* 同上 */ }

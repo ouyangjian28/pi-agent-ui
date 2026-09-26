@@ -53,7 +53,8 @@ export class ReadIndex {
   readonly streamId: StreamId;
   readonly file: string;
   private readonly events: IndexedEvent[] = [];
-  /** 源文件指纹（整文件 SHA-256；空=未记录） */
+  /** 源文件指纹（整文件 SHA-256；空=未记录）。语义（Y-04 钉死）：值=最后事件编入/装载时点摘要，
+   * 非实时版本（撕裂尾不推进）；信息性+变更检测触发器，恢复面禁用。 */
   journalFingerprint = "";
   sessionFingerprint = "";
 
@@ -203,7 +204,7 @@ export class ReadIndexRegistry {
   }
 }
 
-/** boot 内随机流 ID（16B base64url）；无 crypto 时退化为进程内计数（boot 隔离靠进程边界） */
+/** boot 内随机流 ID（16B → 32 位十六进制，`s-`+hex；无 crypto 时退化为进程内计数，boot 隔离靠进程边界） */
 export function defaultStreamId(): StreamId {
   const g = globalThis as { crypto?: { getRandomValues?: (a: Uint8Array) => Uint8Array } };
   if (typeof g.crypto?.getRandomValues === "function") {

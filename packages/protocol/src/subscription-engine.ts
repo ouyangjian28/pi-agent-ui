@@ -101,6 +101,12 @@ export class SubscriptionEngine {
     return this.outbox.length;
   }
 
+  /** F1（3b3-fix2）：历史发布屏障——seq ≤ barrier 已含于本引擎快照/页，发布循环跳过（恰一次）；
+   *  init（尚未冻结快照）=null 同样跳过（宿主建引擎后同步 start*，发布循环异步后才见）。 */
+  get historyBarrier(): number | null {
+    return this.phase === "init" ? null : this.barrier;
+  }
+
   // ---- 客户端请求 ----
   /** 处理续页请求（本引擎已存在；init/resync 由宿主建新引擎后调 startSnapshot/startResync）。 */
   handle(req: SubscribeRequest): ServerFrame[] {
