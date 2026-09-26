@@ -781,6 +781,33 @@ describe("FileHistorySource 3b2c-B1/B2——槽位代次隔离+原始回调身�
     stopB?.();
   });
 
+  it("N4b：同槽换代（carry 存活槽位）下旧代原始 notice 不驱动新代重读", async () => {
+    // N4 的 stopA 后槽被回收（slot-reaped），旧闭包指向死槽=双重保护；本例用 carry=2 锚让 A→B 同槽
+    // 且 B 的成功 load 只吸收一个（剩 carry=1 保槽），旧闭包 genNotice(slot, entryA) 落在活槽上——身份门是唯一防线。
+    const r = new FakeReader();
+    r.reads.push({ text, identity: "1:1" }, { text, identity: "9:9" }, { text, identity: "1:1" }, { text, identity: "1:1" });
+    const h = harness({ reader: r });
+    expect(await h.src.load("a.jsonl")).not.toBeNull(); // 代 A（读1）
+    const stopA = h.src.observe("a.jsonl", makeSinks().s);
+    h.src.release("a.jsonl");
+    h.src.release("a.jsonl"); // 他方两笔未配对引用 → carry=2（槽存活锚；B 吸收一剩一）
+    h.watcher.handles[0]?.triggerNotice();
+    await until(() => r.calls === 2); // 重扫 9:9 → replace 关代 A（读2；槽因 carry 存活）
+    stopA?.();
+    // 代 B：同槽新初扫（读3）+绑定
+    const b = makeSinks();
+    expect(await h.src.load("a.jsonl")).not.toBeNull();
+    const stopB = h.src.observe("a.jsonl", b.s);
+    await drain();
+    const callsBefore = r.calls; // =3
+    (h.watcher.handles[0] as FakeWatchHandle).rawNotice(); // 旧代原始通知（同槽活体）
+    await drain(8);
+    expect(r.calls).toBe(callsBefore); // 旧通知被身份门丢弃：不触发新代重扫
+    expect(b.log.invalidates).toHaveLength(0);
+    expect(b.log.unavailables).toHaveLength(0);
+    stopB?.();
+  });
+
   it("N6：旧代未配对引用的 release 扣旧账，不取消新代在飞装载", async () => {
     const r = new FakeReader();
     const heldB = new HeldRead();
