@@ -1511,3 +1511,57 @@ describe("FileHistorySource 3b3-fix4 F4-2：dispose 终止语义（GPT fix3 F3R-
     expect(h.src["slots"].size).toBe(0);
   });
 });
+
+describe("FileHistorySource 3b3-fix5 F5-2：分发循环逐行/逐 sink 生命周期与成员资格（GPT fix4 P10 同批残余通知）", () => {
+  it("F5/P-BATCH-DISPOSE 同批分发回调内 dispose→残余行不投递：双 sink 均只收首行/句柄全关/终态拒绝", async () => {
+    const base = `${jline(1)}\n`;
+    const grown = `${base}${jline(2)}\n${jline(3)}\n`; // 两行追加（≤256=同步小批量，无 yield）
+    const r = new FakeReader(); r.reads.push({ text: base, identity: "1:1" }, { text: grown, identity: "1:1" });
+    const h = harness({ reader: r });
+    await h.src.load("f.jsonl");
+    const a = makeSinks();
+    const b = makeSinks();
+    expect(h.src.observe("f.jsonl", b.s)).not.toBeNull(); // B 先注册（同行先行投递）
+    let armed = true;
+    const sinksDispose: HistorySinks = {
+      onAppend: (row) => {
+        a.log.appends.push(row);
+        if (armed) { armed = false; h.src.dispose(); } // 首行分发内同步终态（宿主回调重入）
+      },
+      onLive: () => {}, onStatus: () => {},
+    };
+    expect(h.src.observe("f.jsonl", sinksDispose)).not.toBeNull(); // A 后注册（首行末尾 dispose）
+    activeHandles(h.watcher)[0]?.triggerNotice(); // 重扫→2 行追加同步分发
+    await drain();
+    expect(a.log.appends).toHaveLength(1); // 只收首行（旧代码：残余行照投）
+    expect(b.log.appends).toHaveLength(1); // B 同样不收死代残余
+    expect(h.watcher.handles.every((x) => x.closed)).toBe(true); // 终态全关
+    expect(await h.src.load("f.jsonl")).toBeNull(); // 终态拒绝
+  });
+
+  it("F5/P-BATCH-UNBIND 同批分发回调内退订单 sink→后续行跳过已退订者：A 只收首行/B 双行照收", async () => {
+    const base = `${jline(1)}\n`;
+    const grown = `${base}${jline(2)}\n${jline(3)}\n`;
+    const r = new FakeReader(); r.reads.push({ text: base, identity: "1:1" }, { text: grown, identity: "1:1" });
+    const h = harness({ reader: r });
+    await h.src.load("f.jsonl");
+    const b = makeSinks();
+    let stopA: (() => void) | null = null;
+    let armed = true;
+    const a = makeSinks();
+    const sinksUnbind: HistorySinks = {
+      onAppend: (row) => {
+        a.log.appends.push(row);
+        if (armed) { armed = false; if (stopA !== null) stopA(); } // 首行分发内退订自己（成员资格摘除）
+      },
+      onLive: () => {}, onStatus: () => {},
+    };
+    stopA = h.src.observe("f.jsonl", sinksUnbind) ?? null;
+    expect(stopA).not.toBeNull();
+    expect(h.src.observe("f.jsonl", b.s)).not.toBeNull();
+    activeHandles(h.watcher)[0]?.triggerNotice();
+    await drain();
+    expect(a.log.appends).toHaveLength(1); // A 只收首行（旧代码：快照残留照投残余行）
+    expect(b.log.appends).toHaveLength(2); // B 不受影响（成员资格粒度，非整批误杀）
+  });
+});

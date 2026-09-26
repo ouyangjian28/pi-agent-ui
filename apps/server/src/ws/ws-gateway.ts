@@ -581,10 +581,22 @@ export class WsGateway {
         current.engine.close(4431, "stream-replaced", false);
         st.queue.cancelBySubscription(oldId);
         st.subs.delete(file);
+        // F5-1（fix5，GPT fix4 P3/P4）：退旧入队/撤帧是同步宿主回调点——队列溢出拒绝会同步
+        // closeConn（st.closed=true+subs 清空+conns 删除），撤帧审计可被宿主回调重入关连接；
+        // 此时不得再装新订阅/绑观察（死连接复活绑定：conns 已无此连接但 watchers/E1 复活）。
+        // 复核失败：关临时引擎（未承诺任何帧）+恰一次 release+不绑观察（与 F4-1 门同构）。
+        if (st.closed || this.registry.peek(file) !== index) {
+          const why = st.closed ? "closed" : "identity";
+          engine.close(4431, `commit-race2:${why}`, false);
+          this.audit(`subscribe-commit-recheck2-fail conn=${st.id} file=${file} why=${why}`);
+          this.opts.historySource?.release?.(file);
+          return;
+        }
       }
       st.subs.set(file, { engine });
       const consumedRef = this.watchFile(st, file); // B3：本流 observe 是否消费了本次 load 引用
-      if (!st.subs.has(file)) { // B4（3b2c）：observe 右侧同步终止（onUnavailable/onInvalidate）已退役
+      const committed = st.subs.get(file); // B4（3b2c→fix5 按引擎身份复核）：observe 右侧同步终止（onUnavailable/onInvalidate）已退役
+      if (committed === undefined || committed.engine !== engine) {
         // 本订阅（4402 已发、帧已撤）——不得再发死快照/排泵；仅结算引用。
         this.settleLoadRef(st, file, consumedRef);
         return;

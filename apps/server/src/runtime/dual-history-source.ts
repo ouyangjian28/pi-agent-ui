@@ -151,6 +151,9 @@ export class DualHistorySource implements HistorySourcePort {
     if (this.sessionSrc === null || this.opts.sessionFor === undefined) {
       const jrows = await this.journalSrc.load(file);
       if (jrows === null) return null;
+      // F5-2（fix5，GPT fix4 P7 语义钉死）：await 续体前 dispose→jrows 可能已是完成子源快照。
+      // 语义=已交付快照如实返回（dispose 已收全部子源/观察，本次返回不再开任何句柄）
+      //——区分「已完成子源快照」与「未完成组合请求」，不冒称一律 fail-closed。
       this.audit(`journal-only file=${file} reason=no-session-mapping`);
       return jrows;
     }
@@ -196,10 +199,17 @@ export class DualHistorySource implements HistorySourcePort {
     const regs = this.obs.get(file);
     if (regs === undefined) return;
     let attached = 0;
-    for (const st of regs) {
+    for (const st of [...regs]) { // F5-2：快照迭代——补接审计回调可重入收口当前注册（splice 活注册表）
       if (st.closed || st.sinks === null || st.unS !== null) continue;
       const wrap = wrapSinks(st.sinks);
       const unS = this.sessionSrc.observe?.(file, wrap, { consumeLoadRef: false }) ?? null;
+      // F5-2（fix5，GPT fix4 P11 同型）：补接 observe 也是宿主回调面——期间 dispose/本注册收口
+      // 的迟到绑定就地回收，不挂到已死状态上（孤儿 stop 无人兑付）。
+      if (unS !== null && (this.disposed || st.closed)) {
+        try { unS(); } catch { /* 已关 */ }
+        if (this.disposed) return; // 组合层终态：后续注册由 dispose 逐个收口，不再补接
+        continue;
+      }
       if (unS !== null) {
         st.unS = unS;
         attached++;
@@ -221,6 +231,15 @@ export class DualHistorySource implements HistorySourcePort {
     let unS: (() => void) | null = null;
     if (this.sessionSrc !== null && this.opts.sessionFor !== undefined) {
       unS = this.sessionSrc.observe?.(file, wrap) ?? null; // session 尽力（缺文件→null，恢复时补接）
+    }
+    // F5-2（fix5，GPT fix4 P11）：子源 observe 是同步宿主回调面（内部审计/绑定回调可重入 dispose）
+    // ——若期间已终态，本次注册迟到：不落 ObsState（不复活观察账），迟到 stop 就地回收
+    //（恰一次撤销，不泄漏绑定；旧代码无返回后二验→disposed 但 obs.size=1，重复 dispose 入口直返永不收）。
+    if (this.disposed) {
+      try { unJ(); } catch { /* 子源已关 */ }
+      try { unS?.(); } catch { /* 子源已关 */ }
+      this.audit(`observe-aborted-disposed file=${file}`);
+      return null;
     }
     const st: ObsState = { file, sinks, unJ, unS, closed: false };
     const regs = this.obs.get(file) ?? [];

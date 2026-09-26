@@ -748,3 +748,99 @@ describe("DualHistorySource 3b3-fix4 F4-2：dispose 终止语义（GPT fix3 F3R-
     if (stop !== null) expect(() => stop()).not.toThrow(); // 迟到 stop 幂等无害
   });
 });
+
+describe("DualHistorySource 3b3-fix5 F5-2：dispose 通知/注册窗口（GPT fix4 P10/P11/P7）", () => {
+  it("F5/P-OBSERVE-AUDIT-REENTRY 子源 observe 审计回调重入 dispose→迟到注册不落账：obs 零残留/迟到 stop 回收/幂等", async () => {
+    const reader = new PathReader();
+    const watcher = new PathWatcher();
+    const audits: string[] = [];
+    let src: DualHistorySource | null = null;
+    const made = new DualHistorySource({
+      roots: ["/j"], sessionRoots: ["/s"], sessionFor: (f) => f.replace("/j/", "/s/"),
+      reader, watcher,
+      audit: (l) => {
+        audits.push(l);
+        // 重入点=journal 子源 observe 的同步审计（绑定已建、ObsState 未建）：宿主在此同步 dispose（GPT P11）
+        if (l.includes("journal-sub") && l.includes("observed") && src !== null) src.dispose();
+      },
+    });
+    src = made;
+    reader.set("/j/a", jEnqueue("i-1", USER_TEXT, 0) + "\n");
+    reader.set("/s/a", sUser("u1", USER_TEXT) + "\n");
+    await made.load("/j/a"); // 建代
+    const { s } = makeSinks();
+    const stop = made.observe("/j/a", s);
+    expect(stop).toBeNull(); // 迟到注册被拒（旧代码：返成功 stop 且 obs.size=1 永不收）
+    expect(made["obs"].size).toBe(0); // 无僵尸观察账
+    expect(audits.some((l) => l.includes("observe-aborted-disposed"))).toBe(true); // 迟到 stop 已回收
+    await drain();
+    expect(watcher.handles.every((x) => x.closed)).toBe(true); // 子源全停（含重入前已建的绑定）
+    expect(() => made.dispose()).not.toThrow(); // 重复 dispose 幂等
+    expect(made.observe("/j/a", s)).toBeNull(); // 终态后拒绝
+  });
+
+  it("F5/P-JOURNAL-RESOLVED journal-only 已履约子源快照：dispose 后如实返回（语义钉死，不冒称一律 fail-closed）+零新句柄", async () => {
+    const reader = new PathReader();
+    const watcher = new PathWatcher();
+    let src: DualHistorySource | null = null;
+    const made = new DualHistorySource({
+      roots: ["/j"], reader, watcher, // 无 sessionFor=journal-only
+      audit: (l) => {
+        // 重入点=journal-only 审计（jrows 已到手、Dual 续体内）：同步 dispose（GPT P7 注记窗口）
+        if (l.includes("journal-only") && src !== null) src.dispose();
+      },
+    });
+    src = made;
+    reader.set("/j/a", jEnqueue("i-1", USER_TEXT, 0) + "\n");
+    const rows = await made.load("/j/a");
+    expect(rows).not.toBeNull(); // 已交付子源快照如实返回（无新观察/句柄；dispose 已收全部子源）
+    expect(rows!.length).toBeGreaterThan(0);
+    await drain();
+    expect(watcher.handles.every((x) => x.closed)).toBe(true); // 零存活句柄
+    expect(await made.load("/j/a")).toBeNull(); // 后续请求一律拒绝（未完成组合请求才 fail-closed）
+  });
+
+  it("F5/P-LATE-ATTACH-REENTRY 晚附补接期间宿主收掉单个注册→迟到绑定回收：孤儿 stop 不挂已死状态/其余注册照附", async () => {
+    const reader = new PathReader();
+    const watcher = new PathWatcher();
+    const audits: string[] = [];
+    let src: DualHistorySource | null = null;
+    let closeNextReg: (() => void) | null = null;
+    const made = new DualHistorySource({
+      roots: ["/j"], sessionRoots: ["/s"], sessionFor: (f) => f.replace("/j/", "/s/"),
+      reader, watcher,
+      audit: (l) => {
+        audits.push(l);
+        // 重入点=session 子源晚附 observe 的同步审计：宿主收掉当前注册（GPT P11 同型——单注册级）
+        if (l.includes("session-sub") && l.includes("observed") && closeNextReg !== null && src !== null) {
+          const fn = closeNextReg; closeNextReg = null; fn();
+        }
+      },
+    });
+    src = made;
+    reader.set("/j/a", jEnqueue("i-1", USER_TEXT, 0) + "\n");
+    await made.load("/j/a"); // journal-only 建代（session 未设）
+    const a = makeSinks();
+    const b = makeSinks();
+    const stopA = made.observe("/j/a", a.s);
+    expect(stopA).not.toBeNull();
+    const stopB = made.observe("/j/a", b.s);
+    expect(stopB).not.toBeNull();
+    closeNextReg = () => { if (stopA !== null) stopA(); }; // 首个晚附（A）的 session 审计点收 A
+    reader.set("/s/a", sUser("u1", USER_TEXT) + "\n"); // session 盘面到位
+    const rows = await made.load("/j/a"); // 恢复双源→attachSessionIfObserved：A 补接中审计重入收 A
+    expect(rows).not.toBeNull();
+    await drain();
+    expect(audits.some((l) => l.includes("session-attached-late"))).toBe(true);
+    // A 已收口：unS 未挂（迟到绑定已回收）；B 照附且收得到 session 面追加
+    expect(made["obs"].get("/j/a")?.length).toBe(1); // 只剩 B
+    const sText = sUser("u2", "more") + "\n";
+    reader.set("/s/a", sUser("u1", USER_TEXT) + "\n" + sText);
+    watcher.notice("/s/a");
+    await until(() => b.log.appends.length > 0);
+    expect(a.log.appends.length).toBe(0); // A 不再收（已收口）
+    expect(b.log.appends.length).toBe(1); // B 收到 session 投影追加（晚附成功）
+    if (stopB !== null) expect(() => stopB()).not.toThrow();
+    if (stopA !== null) expect(() => stopA()).not.toThrow(); // 迟到 stop 幂等
+  });
+});

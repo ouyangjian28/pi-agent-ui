@@ -617,8 +617,14 @@ export class FileHistorySource implements HistorySourcePort {
       done++;
       const row = rows[i];
       if (row === undefined) continue;
+      // F5-2（fix5，GPT fix4 P10）：同批残余通知——分发回调内 dispose/退订会让本代失活
+      //（entry.disposed / sinks 清空）或摘成员资格（unbind 删 Set）；快照循环不得继续向死代/
+      // 已退订者投递。逐 sink 复核代生命周期（首个 sink 前即查——覆盖行首死代）+成员资格
+      //（让出窗口三查之外补同步回调窗口；dispose 可发生在本行任一 sink 回调内）。
       try {
         for (const sk of sinksSnapshot) {
+          if (entry.disposed || entry.sinks === null) return; // 代已死：整批停（后续行归重扫/新代）
+          if (!entry.sinks.has(sk)) continue; // 成员已摘（本批回调内退订）：跳过该 sink，其余照投
           try { sk.onAppend(row); } catch (e) { this.audit(`append-cb-error file=${entry.file} kind=${errKind(e)}`); }
         }
       } catch (e) {

@@ -17,8 +17,8 @@ GPT fix3 §7 要求：窄 M-F2 变异（恢复 async+await 必须被杀）——
   +        index = await this.syncIndex(file, rows);
   ```
 - 命令：`npx vitest run tests/unit/server/ws-gateway.test.ts -t "P-CLOSE-MICRO|P-REPLACE-MICRO"`
-- 结果：exit 1，KILLED。失败用例=`F2/P-REPLACE-MICRO 提交窗双微任务 onInvalidate(replace)→旧流即退（4409），任何时序都不复活退役流坐标`（await 让出窗口内 invalidate 换流→无门则旧坐标照承诺→4409 后帧序断言崩）。
-- 合法存活者：`F2/P-CLOSE-MICRO`（closed 路径**双守卫**——load 后置 `st.closed` 检查（B3 前置段）与 F4-1 同步复核门任一拦截均满足断言：release 恰一次+零残留；identity 路径唯一守卫=F4-1 门，故承担杀伤）。存活≠假绿：该探针断言的是「任一门拦截都收口正确」，非「仅同步门存在」。
+- 结果：exit 1，KILLED。失败用例=`F2/P-REPLACE-MICRO 提交窗双微任务 onInvalidate(replace)→旧流即退（4409），任何时序都不复活退役流坐标`。（**fix5 勘正归因**：当时杀伤机制=旧测试 until 仅等 4409||快照，而 b 在 F4-1 门在场下被身份门静默拒绝（零帧）→until 3s 超时抛错 exit 1；非「无门则旧坐标照承诺→4409 后帧序断言崩」。窄变异下 identity 路唯一守卫=F4-1 门；fix5 双出口语义下复跑=合法 SURVIVED——出口一断言通过；回归杀伤由复合变异 M-F2c（去门+恢复 async）承担，见 3b3-fix5.md。）
+- 合法存活者：`F2/P-CLOSE-MICRO`（closed 路径**双守卫**——load 后置 `st.closed` 检查（B3 前置段）与 F4-1 同步复核门任一拦截均满足断言：release 恰一次+零残留；fix5 勘正：窄 M-F2 下 M2 落在 load 后初门之后，真正拦截者是 F4-1 门；单微任务变体才由 load 后 st.closed 门拦）。存活≠假绿：该探针断言的是「任一门拦截都收口正确」，非「仅同步门存在」。
 - 还原：`git checkout -- apps/server/src/ws/ws-gateway.ts` 还原变异（副作用：连带回退了当时未提交的 F4-1 门——当场用同一锚点 edit 重打，重打后该文件 83/83 全绿；本档如实记录，还原校验以重打后绿跑为准）。
 
 ## M-F4-RECYCLE syncIndex 换流路回收移除（F4-4 第四出口）
@@ -32,7 +32,8 @@ GPT fix3 §7 要求：窄 M-F2 变异（恢复 async+await 必须被杀）——
   ```
 - 命令：`npx vitest run tests/unit/server/ws-gateway.test.ts -t "F4/P-PS-"`
 - 结果：exit 1，KILLED。失败用例=`F4/P-PS-OVERBUDGET-CHURN 超容量失败分支（非前缀+索引超预算）不滞留旧流账本`（该路 overBudget 早退在 claimPublish 前、无引擎/onAppend 后续——同步回收是唯一防线，去之即滞留）。
-- 合法存活者：`F4/P-PS-REWRITE-RECYCLE`（其盘面 put 触发 FakeHistory 的 onAppend 通知→旧索引 append 非前缀失败→invalidate 路走 fix3 的 onInvalidate 钩子回收——双防线覆盖，断言性质「旧流不滞留」仍成立；非假绿，如实入档）。
+- 合法存活者：`F4/P-PS-REWRITE-RECYCLE`（**fix5 勘正归因**：旧档称「put 触发 onAppend→onInvalidate 钩子双防线」有误——FakeHistory.put 只 files.set 不触发 onAppend；真因=正常重建路 claimPublish(file,I1,1) 检测流身份不同直接用新流 ps 覆盖旧 Map 项，末态断言分辨不了「先删后建」与「直接覆盖」；该变异对本探针=不可分辨，非双防线；OVERBUDGET 分支才是真最小分支杀手）。
+- 命名标注（fix5）：`F4/P-PS-OVERBUDGET-CHURN` 实测场景=单文件一次非前缀重写+超预算拒绝（registryMaxStreams 未触顶），非多文件 LRU 增长 churn——名不副实，fix5 档如实标注不改名。
 - 还原：`cp /tmp/mut-f4-orig.ts apps/server/src/ws/ws-gateway.ts`；还原校验=还原前后 sha256 同值 dd35317b2112b82316812739db89416b49826b86c6cc868dcb968601dc6316c2，复跑 F4/P-PS- 两例 2/2 过。
 
 ## 汇总

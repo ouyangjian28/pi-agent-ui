@@ -2382,6 +2382,7 @@ describe("ws-gateway 3b3-fix3：F2 提交窗口同步化（GPT 双微任务探�
         await until(() => r.history.stopped.includes(file), 3000);
         expect(r.history.sinks.has(file)).toBe(false); // 最终零残留
         expect(r.history.releaseCalls.filter((x) => x === file)).toHaveLength(0); // 引用已消费：结算面=stop
+        expect(r.history.stopped.filter((x) => x === file)).toHaveLength(1); // F5-3：精确计数——恰一次 stop，无双重收口
       } else {
         expect(r.history.stopped).toEqual([]);
         expect(r.history.releaseCalls.filter((x) => x === file)).toHaveLength(1); // 每引用恰一次结算
@@ -2427,9 +2428,27 @@ describe("ws-gateway 3b3-fix3：F2 提交窗口同步化（GPT 双微任务探�
       await b.say({ t: "subscribe", requestId: "b1", file });
       // 旧流必退（无论 M2 落在 b 提交前/后）：a 恒收 4409
       await until(() => errFrames(a).some((f) => f.code === 4409), 3000);
-      // b：要么被拦/要么提交于 invalidate 之前（快照引用提交时点当前流=old，随后同样被退）
-      await until(() => errFrames(b).some((f) => f.code === 4409) || b.frames().some((f) => f.t === "snapshot"), 3000);
-      // 收敛：再订阅者必得新流，且永不等于退役流
+      // F5-3（GPT fix4 F4R-TEST P12 勘正）：b 三个收敛信号——4409/快照=已提交；身份门拒绝审计=合法拒绝。
+      //（拒绝口不发帧——静默 close：b 零帧非超时信号，until 必须容纳，否则窄变异 M-F2 被 until 抛错错杀。）
+      const bRefused = (): boolean =>
+        r.audits.some((l) => (l.includes("subscribe-commit-recheck-fail") || l.includes("subscribe-commit-recheck2-fail")) && l.includes("why=identity"));
+      await until(() => errFrames(b).some((f) => f.code === 4409) || b.frames().some((f) => f.t === "snapshot") || bRefused(), 3000);
+      // 出口判据：4409（含广播退订帧）或快照任一在=已提交；两者皆无=身份门合法拒绝。
+      //（快照可能在 setImmediate flush 前被退役撤帧——已提交者也可只剩 4409。）
+      const bSnap = b.frames().find((f) => f.t === "snapshot") as Record<string, unknown> | undefined;
+      const bGot4409 = (): boolean => errFrames(b).some((f) => f.code === 4409);
+      if (bGot4409() || bSnap !== undefined) {
+        // 出口二：提交早于 invalidate——快照若在必引用 old 流；4409 退役必达（绝不静默持有退役坐标）。
+        // 复合变异 M-F2c（去身份门+恢复 async 窗）下 b 在退役后提交旧坐标：快照在/4409 永缺→末断言超时被杀。
+        if (bSnap !== undefined) expect(bSnap.streamId).toBe(oldStream);
+        await until(bGot4409, 3000);
+        expect(bGot4409()).toBe(true);
+      } else {
+        // 出口一：身份门合法拒绝——拒绝原因审计可见，引用恰一次结算，零新绑定
+        expect(bRefused()).toBe(true);
+        expect(r.history.releaseCalls.filter((x) => x === file)).toHaveLength(1); // a 的 load 已消费（结算面=stop）；b 的 load=release 恰一次
+        expect(r.history.observeCalls.filter((x) => x === file)).toHaveLength(1); // 仅 a 绑定
+      }      // 收敛：再订阅者必得新流，且永不等于退役流
       const c = await authed(r);
       await c.say({ t: "subscribe", requestId: "c1", file });
       await until(() => c.frames().some((f) => f.t === "snapshot"), 3000);
@@ -2446,6 +2465,9 @@ describe("ws-gateway 3b3-fix3：F2 提交窗口同步化（GPT 双微任务探�
   });
 
   it("F2/P-REPLACE-NEWGEN 换流窗内另一请求已建新代→旧盘面 load 返回者再 replace，绝不复活退役流/最终归属唯一", async () => {
+    // F5-3 勘正（GPT fix4）：本探针的 b 挂起用 p.then 自管闸门+人为改写旧盘面（staleRows）
+    //——是「闸门覆盖」非真嵌套助手（nestAcrossCommit）；杀的是同窗双请求并发提交，
+    // 不承担 async 提交窗杀伤面（该面由 P-REPLACE-MICRO 双出口+复合变异 M-F2c 负责）。
     const r = await makeRig();
     try {
       const file = "f3-newgen.jsonl";
@@ -2716,6 +2738,71 @@ describe("ws-gateway 3b3-fix4：F4-4 发布账本第四出口（GPT fix3 F3R-LED
       await until(() => errFrames(b).some((f) => f.code === 4402), 3000); // 超预算拒绝
       const after = ledger().get(file);
       expect(after === undefined || after.streamId !== s0).toBe(true); // 旧流账本项已回收（GPT 复现：早退路漏收）
+    } finally {
+      await r.dispose();
+    }
+  });
+});
+
+describe("ws-gateway 3b3-fix5：F5-1 门后重入提交资格复核（GPT fix4 P3/P4 探针固化）", () => {
+  /** 同 tick 直投：绕过 say 双跳——微任务续体先于 drain 的 setImmediate 运行（P3/P4 竞态窗口） */
+  const raw = (c: FakeConn, obj: unknown): void => {
+    (c as unknown as { msgCb: (d: string, b: boolean) => void }).msgCb(JSON.stringify(obj), false);
+  };
+
+  it("F5/P-RETIRE-OVERFLOW 退旧 4409 入队触发队列溢出同步 closeConn→门后复核拦截：无复活绑定/引用恰一次/零死帧", async () => {
+    const r = await makeRig();
+    try {
+      r.history.put("f.jsonl", makeRows(5));
+      const c = await authed(r);
+      await c.say({ t: "subscribe", requestId: "s-1", file: "f.jsonl" });
+      await until(() => c.frames().some((f) => f.t === "snapshot"));
+      await tick();
+      // FakeConn 不兑现 send 回调→已发帧永滞在途计数；同步突发把 q+inflight 恰填满 1024（不溢出；drain 未跑）
+      const before = c.sent.length;
+      for (let i = 0; i < 1024 - before; i++) raw(c, { t: "ping", nonce: `b${i}` });
+      // 同 tick 第二订阅：微任务续体先于 drain——退旧 4409 入队=第 1025 帧→rejected-overflow→同步 closeConn
+      raw(c, { t: "subscribe", requestId: "s-2", file: "f.jsonl" });
+      await tick(); await tick(); await tick();
+      expect(r.audits.some((l) => l.includes("conn-queue-overflow"))).toBe(true); // 探针确实打进溢出路径
+      expect(r.audits.some((l) => l.includes("subscribe-commit-recheck2-fail") && l.includes("why=closed"))).toBe(true);
+      // 无复活：observe 恰一次（E0）、第二订阅未绑观察；引用恰一次 release；E0 观察随 closeConn 恰一次 stop
+      expect(r.history.observeCalls.filter((f) => f === "f.jsonl").length).toBe(1);
+      expect(r.history.releaseCalls.filter((f) => f === "f.jsonl").length).toBe(1);
+      expect(r.history.stopped.filter((f) => f === "f.jsonl").length).toBe(1);
+      expect(r.gw["watchers"].has("f.jsonl")).toBe(false);
+      expect(c.frames().some((f) => f.requestId === "s-2")).toBe(false); // 死连接零死帧（s-2 无任何承诺）
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("F5/P-RETIRE-AUDIT-REENTRY 撤帧审计宿主回调重入关连接→门后复核拦截：无复活绑定/引用恰一次/无复活快照", async () => {
+    let victim: FakeConn | null = null;
+    const audits: string[] = [];
+    const r = await makeRig({
+      audit: (l) => {
+        audits.push(l);
+        if (l.includes("conn-queue-cancel-by-sub") && victim !== null) victim.closedByTransport(); // 宿主审计重入：同步关连接
+      },
+    });
+    try {
+      r.history.put("f.jsonl", makeRows(5));
+      const c = await authed(r);
+      victim = c;
+      // 同 tick 两订阅：s-1 续体先提交（快照帧在 q 内，drain 未跑）→s-2 续体退旧 4409 入队成功→
+      // cancelBySubscription 撤 s-1 快照帧（removed>0）→审计回调重入关连接→无修复时 s-2 照样装新订阅（P4 反例）
+      raw(c, { t: "subscribe", requestId: "s-1", file: "f.jsonl" });
+      raw(c, { t: "subscribe", requestId: "s-2", file: "f.jsonl" });
+      await tick(); await tick(); await tick();
+      expect(audits.some((l) => l.includes("conn-queue-cancel-by-sub"))).toBe(true); // 探针确实打进撤帧审计回调
+      expect(audits.some((l) => l.includes("subscribe-commit-recheck2-fail") && l.includes("why=closed"))).toBe(true);
+      // 无复活：observe 恰一次（s-1 的 E0；s-2 未绑）、引用恰一次 release（s-2 未消费）、E0 观察随传输关恰一次 stop
+      expect(r.history.observeCalls.filter((f) => f === "f.jsonl").length).toBe(1);
+      expect(r.history.releaseCalls.filter((f) => f === "f.jsonl").length).toBe(1);
+      expect(r.history.stopped.filter((f) => f === "f.jsonl").length).toBe(1);
+      expect(r.gw["watchers"].has("f.jsonl")).toBe(false);
+      expect(c.frames().some((f) => f.requestId === "s-2")).toBe(false); // s-2 零承诺
     } finally {
       await r.dispose();
     }
