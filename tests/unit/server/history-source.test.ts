@@ -53,10 +53,19 @@ class FakeReader implements HistoryReaderPort {
 class FakeWatcher implements HistoryWatcherPort {
   handles: FakeWatchHandle[] = [];
   failNextSetup = false;
+  /** 3b2g-R2 探针（GPT 3b2f F4/F5）：第 N 次注册在句柄建立后、返回前同步回调 onError（嵌套 rearm 窗口） */
+  errorOnRegBeforeReturn: number | null = null;
+  failNestedSetup = false;
+  regCount = 0;
   watch(_abs: string, onNotice: () => void, onError: (e: unknown) => void): { close(): void } {
     if (this.failNextSetup) { this.failNextSetup = false; throw new Error("watch setup boom"); }
     const h = new FakeWatchHandle(_abs, onNotice, onError);
-    this.handles.push(h);
+    this.handles.push(h); // 句柄已建立并留档——注册合法成立后才注入运行错误
+    this.regCount += 1;
+    if (this.errorOnRegBeforeReturn === this.regCount) {
+      if (this.failNestedSetup) this.failNextSetup = true; // F4 排程：嵌套注册（N+1）建立失败
+      onError(new Error("registered watcher error before return")); // 同步嵌套：驱动 rearmWatcher 后才返回
+    }
     return h;
   }
 }
@@ -93,14 +102,17 @@ function makeSinks(): { s: HistorySinks; log: SinkLog } {
   };
 }
 
-function harness(over: { reader?: FakeReader; watcher?: FakeWatcher; roots?: string[]; maxScanBytes?: number } = {}) {
+function harness(over: { reader?: FakeReader; watcher?: FakeWatcher; roots?: string[]; maxScanBytes?: number; onAuditLine?: (l: string, audits: string[]) => void } = {}) {
   const reader = over.reader ?? new FakeReader();
   const watcher = over.watcher ?? new FakeWatcher();
   const audits: string[] = [];
   const src = new FileHistorySource({
     roots: over.roots ?? ["/safe"], reader, watcher,
     ...(over.maxScanBytes === undefined ? {} : { maxScanBytes: over.maxScanBytes }),
-    audit: (l) => { audits.push(l); },
+    audit: (l) => {
+      audits.push(l);
+      over.onAuditLine?.(l, audits); // 3b2g-R1 探针（F10）：审计回调重入口（公开面——同步再入 load）
+    },
   });
   return { src, reader, watcher, audits };
 }
@@ -790,7 +802,8 @@ describe("FileHistorySource 3b2c-B1/B2——槽位代次隔离+原始回调身�
     expect(await h.src.load("a.jsonl")).not.toBeNull(); // 代 A（读1）
     const stopA = h.src.observe("a.jsonl", makeSinks().s);
     h.src.release("a.jsonl");
-    h.src.release("a.jsonl"); // 他方两笔未配对引用 → carry=2（槽存活锚；B 吸收一剩一）
+    h.src.release("a.jsonl");
+    h.src.release("a.jsonl"); // 3b2f-R3 勘正：超额释放压力例——单次 load 已被 observe 消费后再放两笔（非合法两他方 load）；合法路径同槽换代由 D4 固化
     h.watcher.handles[0]?.triggerNotice();
     await until(() => r.calls === 2); // 重扫 9:9 → replace 关代 A（读2；槽因 carry 存活）
     stopA?.();
@@ -887,6 +900,7 @@ describe("FileHistorySource 3b2e-C1/C2——生命周期收口+watcher 注册身
     await until(() => skA.log.unavailables.length === 1);
     stopA?.();                                   // no-op（代已关）
     expect(h.audits.some((l) => l.includes("slot-reaped"))).toBe(false); // C 引用在——同槽再起可达
+    const auditsBeforeB = h.audits.length;         // D14 断言锚：只看 B 代之后日志
     const pB = h.src.load("a.jsonl");            // B 初扫（读#3 挂起）
     await until(() => h.watcher.handles.length === 2);
     h.watcher.handles[1]!.rawError(new Error("early boom 2")); // 本代早期错误（earlyWatchErrors=1+dirty 留痕）
@@ -895,7 +909,9 @@ describe("FileHistorySource 3b2e-C1/C2——生命周期收口+watcher 注册身
     expect(h.audits.some((l) => l.includes("slot-reaped"))).toBe(false); // 槽仍存活（C 在）
     const rowsD = await h.src.load("a.jsonl");   // 读#4——同槽新初扫：靠 earlyWatchErrors 清零存活（D1）
     expect(rowsD).not.toBeNull();
-    expect(h.audits.some((l) => l.includes("loaded file=a.jsonl") && l.includes("dirty=false"))).toBe(true); // D14：旧 dirty 不继承
+    // D14：定位恢复代日志段（3b2f 勘正——全量扫描可被首代 A 的 loaded 行满足）
+    const auditsSinceB = h.audits.slice(auditsBeforeB);
+    expect(auditsSinceB.some((l) => l.includes("loaded file=a.jsonl") && l.includes("dirty=false"))).toBe(true); // 旧 dirty 不继承
     const skD = makeSinks();
     const stopD = h.src.observe("a.jsonl", skD.s);
     await drain(8);
@@ -984,5 +1000,88 @@ describe("FileHistorySource 3b2e-C1/C2——生命周期收口+watcher 注册身
     expect(skB.log.invalidates).toEqual([]);     // 新代不被杀伤
     expect(skB.log.unavailables).toEqual([]);
     stopB?.();
+  });
+});
+
+// ── 3b2g-R1/R2（GPT 3b2f F4/F5/F10）：槽回收 Map 身份门 + 注册返回后重入保护 ──
+describe("FileHistorySource 3b2g-R1/R2——回收身份门与注册提交重入", () => {
+  it("R1/F10：slot-reaped 审计回调重入 load——旧回收第二次调用不得删新槽（幂等）", async () => {
+    const text = `${jline(1)}\n`;
+    const r = new FakeReader();
+    r.reads.push({ text, identity: "1:1" }, { text, identity: "1:1" });
+    const watcher = new FakeWatcher();
+    let reentered = false;
+    let nextLoad: Promise<readonly ScanRow[] | null> | null = null;
+    // F10 排程：首次 slot-reaped 审计回调内同步重入 load——新槽 B 建立并登记初扫（公开审计面重入）
+    const h = harness({
+      reader: r, watcher,
+      onAuditLine: (l) => {
+        if (l.includes("slot-reaped") && !reentered) {
+          reentered = true;
+          nextLoad = h.src.load("a.jsonl");
+        }
+      },
+    });
+    const { src, audits } = h;
+    await src.load("a.jsonl");        // 代 A（读#1；未 observe）
+    src.release("a.jsonl");           // 关 A → 首次回收删 A → 审计重入建 B → 旧 release 的第二次回收不删 B
+    expect(reentered).toBe(true);
+    const rows = await nextLoad!;      // B 初扫正常完成（读#2）
+    expect(rows).not.toBeNull();       // 旧代码：B 槽被第二次回收按文件名盲删
+    const sk = makeSinks();
+    const stop = src.observe("a.jsonl", sk.s); // B 仍登记——observe 必须绑定成功
+    expect(stop).not.toBeNull();       // 旧代码：null（新 load 失去登记无法配对）
+    stop?.();
+    src.release("a.jsonl");            // B 引用结算
+    await until(() => audits.filter((l) => l.includes("slot-reaped")).length >= 2);
+    expect(watcher.handles.every((h) => h.closed)).toBe(true); // 全部句柄归零（无孤儿）
+  });
+
+  it("R2/F4：注册返回前嵌套错误+嵌套建立失败→watch-failed 且无孤儿句柄", async () => {
+    const text = `${jline(1)}\n`;
+    const r = new FakeReader();
+    r.reads.push({ text, identity: "1:1" }, { text, identity: "1:1" });
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");
+    const sk = makeSinks();
+    const stop = h.src.observe("a.jsonl", sk.s);
+    h.watcher.errorOnRegBeforeReturn = 2; // 注册#2 建立后同步 onError → 嵌套 rearm（注册#3）
+    h.watcher.failNestedSetup = true;      // 探针现场置位：嵌套注册#3 建立失败 → watch-failed → 代关闭
+    h.watcher.handles[0]!.triggerError(new Error("watch error 1")); // 驱动 rearm（注册#2）
+    await until(() => sk.log.unavailables.length === 1);
+    expect(sk.log.unavailables[0]).toBe("watch-failed");
+    await drain(8);
+    expect(activeHandles(h.watcher)).toHaveLength(0); // 旧代码：#2 返回后推入已关代=孤儿 1
+    expect(h.audits.some((l) => l.includes("watch-rearm-superseded"))).toBe(true);
+    stop?.();
+  });
+
+  it("R2/F5：注册返回前嵌套错误+嵌套建立成功→新注册存活、外层返回句柄即关", async () => {
+    const text = `${jline(1)}\n`;
+    const r = new FakeReader();
+    const held = new HeldRead();
+    r.reads.push({ text, identity: "1:1" }, held, { text: `${jline(1)}\n${jline(2)}\n`, identity: "1:1" }); // 读#3=#3 通知折叠后的跟进重扫（同 identity+行数增长=前缀追加——append 交付路径）
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");
+    const sk = makeSinks();
+    const stop = h.src.observe("a.jsonl", sk.s);
+    h.watcher.errorOnRegBeforeReturn = 2; // 注册#2 建立后同步 onError → 嵌套 rearm 成功（注册#3=最新）
+    h.watcher.handles[0]!.triggerError(new Error("watch error 1"));
+    await until(() => h.watcher.handles.length >= 3);
+    expect(h.watcher.handles.map((x) => x.closed)).toEqual([true, true, false]); // #1 旧关/#2 外层即关（R2）/#3 最新存活
+    expect(sk.log.unavailables).toEqual([]);       // 无杀观察
+    expect(h.audits.some((l) => l.includes("watch-rearm-superseded"))).toBe(true);
+    await until(() => r.calls === 2);              // 外层 watch-error 的跟进重扫（挂起中）
+    h.watcher.handles[1]!.rawNotice();             // #2 闭包直调——reg 门拒（stale）
+    await drain(8);
+    expect(r.calls).toBe(2);                        // 不再新增读调用
+    // 最新注册 #3 仍有效：通知→在飞折叠 dirty；释放挂起读后收敛并重挂（新注册 #4=存活证明）
+    h.watcher.handles[2]!.triggerNotice();
+    await drain(8);
+    held.resolve({ text, identity: "1:1" }); // 同基线：外层重扫收敛不换代（换代会 invalidate——replace 语义非本测目标）
+    await until(() => h.watcher.handles.length >= 4); // 收敛即重挂=新注册链仍活
+    await until(() => r.calls === 3);                 // 跟进重扫交付追加（#3 通知折叠的恰一次跟进）
+    expect(sk.log.appends.map((x) => x.event.kind)).toContain("turn-enqueued"); // 追加行经活观察送达 sinks
+    stop?.();
   });
 });

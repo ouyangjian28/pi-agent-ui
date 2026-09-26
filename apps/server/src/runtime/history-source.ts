@@ -234,15 +234,27 @@ export class FileHistorySource implements HistorySourcePort {
   }
 
   /** 建立一次观察注册（3b2e-C2）：每次注册独立 reg 身份，activeReg 先于 watch() 生效——
-   *  rearm/重挂后旧句柄闭包（旧 reg）在 genNotice/genError 被 reg 门拒绝（同代亦然）。 */
-  private registerWatch(abs: string, slot: FileSlot, entry: GenEntry): { close(): void } {
+   *  rearm/重挂后旧句柄闭包（旧 reg）在 genNotice/genError 被 reg 门拒绝（同代亦然）。
+   *  3b2g-R2（GPT 3b2f F4/F5）：watch() 返回后复核注册身份——watch 建立期间可同步
+   *  回调 onError 驱动嵌套 rearm（新注册取代本注册或已关代）：旧返回句柄立即关闭、返 null，
+   *  调用方不得推送为最新/关真正的断注册（旧代码：嵌套失败→孤儿句柄推入已关代；嵌套成功→外层 splice 关掉新句柄）。 */
+  private registerWatch(abs: string, slot: FileSlot, entry: GenEntry): { close(): void } | null {
     const reg = ++entry.regCounter;
     entry.activeReg = reg;
-    return this.watcherFactory().watch(
+    const handle = this.watcherFactory().watch(
       abs,
       () => this.genNotice(slot, entry, reg),
       (e) => this.genError(slot, entry, e, reg),
     );
+    if (
+      reg !== entry.activeReg || // 嵌套注册已取代本注册（新句柄才是最新）
+      (slot.entry !== entry && slot.pendingEntry !== entry) || // 代已提交/在飞均不属于本注册（初扫期身份锄=pendingEntry）
+      entry.disposed || entry.state !== "active" // 代已死
+    ) {
+      try { handle.close(); } catch { /* 已关 */ }
+      return null;
+    }
+    return handle;
   }
 
   /** 初扫（在 scanInFlight 内运行）：先建 watcher→读→投影防御→提交。任何失败→false（load=null）。 */
@@ -262,9 +274,14 @@ export class FileHistorySource implements HistorySourcePort {
       activeReg: 0,
     };
     slot.pendingEntry = entry;
-    let handle: { close(): void };
+    let handle: { close(): void } | null;
     try {
       handle = this.registerWatch(abs, slot, entry);
+      if (handle === null) { // R2：注册期间被取代/已关（防御——初扫期无嵌套 rearm，恒不达）
+        slot.pendingEntry = null;
+        this.audit(`watch-setup-superseded file=${file}`);
+        return false;
+      }
       entry.watchers.push(handle);
     } catch (e) {
       slot.pendingEntry = null;
@@ -360,12 +377,16 @@ export class FileHistorySource implements HistorySourcePort {
   }
 
   /** 槽静默回收（3b2c-B1）：完全静止（无代/无在飞/无票/无结转）时移除槽——
-   *  退役槽不留 Map（有界回收；下次 load 全新建槽=零状态继承）。 */
+   *  退役槽不留 Map（有界回收；下次 load 全新建槽=零状态继承）。
+   *  3b2g-R1（GPT 3b2f F10）：删除前验证 Map 中槽对象身份——审计回调可在两次回收间
+   *  重入 load 建新槽，按文件名盲删会删掉后继槽（新 load 失去登记无法 observe/释放）；
+   *  身份不匹配=本槽已被回收过或已被新槽取代，幂等 no-op 不审计不宣称删除。 */
   private maybeReapSlot(slot: FileSlot): void {
     if (
       slot.entry !== null || slot.pendingEntry !== null || slot.scanInFlight !== null ||
       slot.pendingTickets.size > 0 || slot.releaseCarry > 0 || slot.awaitingBind > 0
     ) return;
+    if (this.slots.get(slot.file) !== slot) return; // R1：Map 身份门——只删自己的槽
     this.slots.delete(slot.file);
     this.audit(`slot-reaped file=${slot.file}`);
   }
@@ -479,12 +500,16 @@ export class FileHistorySource implements HistorySourcePort {
   /** 重叠换新观察：先建新再关旧（无窗口）；建立失败=不可用（不降级、不空转，R6）。 */
   private rearmWatcher(slot: FileSlot, entry: GenEntry): void {
     if (slot.entry !== entry || entry.disposed || entry.state !== "active") return;
-    let fresh: { close(): void };
+    let fresh: { close(): void } | null;
     try {
       fresh = this.registerWatch(entry.abs, slot, entry);
     } catch (e) {
       this.audit(`watch-rearm-failed file=${entry.file} kind=${errKind(e)}`);
       this.deliverUnavailable(slot, entry, "watch-failed");
+      return;
+    }
+    if (fresh === null) { // R2：嵌套注册已接管（或代已关）——新句柄归嵌套所有，不推送不 splice
+      this.audit(`watch-rearm-superseded file=${entry.file}`);
       return;
     }
     entry.watchers.push(fresh);
