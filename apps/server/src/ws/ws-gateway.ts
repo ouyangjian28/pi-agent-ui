@@ -618,7 +618,11 @@ export class WsGateway {
     try {
       index = this.registry.get(file);
     } catch (err) {
-      if (err instanceof FileOverBudgetError) return WsGateway.INDEX_BUDGET; // 额度已用又触顶：registry 拒建
+      // 额度已用又触顶：registry 拒建（与首触顶的 index-over-budget 审计区分——观察面一致性）
+      if (err instanceof FileOverBudgetError) {
+        this.audit(`index-over-budget-get file=${file}`);
+        return WsGateway.INDEX_BUDGET;
+      }
       throw err;
     }
     if (index.waterMark === 0) {
