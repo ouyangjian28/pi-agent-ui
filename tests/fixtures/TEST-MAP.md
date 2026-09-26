@@ -489,3 +489,14 @@
 - 组合层无合计门（冻结裁决）：合计口径归 3b-4 恢复面。
 - 变异三杀（tests/fixtures/mutation-records/3b3d-budget.md）：M-B1 触顶边界 > → >=（BG2 恰 20k 误判）；M-B2 LRU while(false)（BG4 无界）；M-B3 readBounded 上限 MAX_SAFE_INTEGER（BG3 绕过）。全部 KILLED；还原 767+7。
 - 踩坑：requestId 模式 \w- 不含句点（s-f1.jsonl→4404 requestId 非法）；订阅口 load=null 的 reason 只在源侧审计（history-source load-read-failed kind=…），网关层无 reason 审计——断言走源侧线。
+
+## 3b3 修复轮（GPT 3b-3 首审 69→修复；2026-09-29；repo 63bce74+519d620）
+- R-01 同步排水只转移饥饿点（P-FAST：正常读+6750 单突发→events=0+连接级 4431，connQueue drain=setImmediate 在同步循环内饥饿）：①dispatchHistoryBatch（syncIndex 首装/续编两路）+rescanOnce 追加分发均改「>256 行批次每 16 条 setImmediate 让出」（≤256 保持同步语义，既有单测时序不变）；②让出窗口复核（失效/换代丢弃；并发重扫推进水位跳过不重发）；③RW2 重写=同负载对照（pause+1.2MB 突发→零 4431 误杀+resume 全量恰一次）；RW6=P-FAST 复现锁死；RW7=syncIndex 批量续编路（8000 行真传输，M-R1a 杀手）。
+- R-02 同字节换 inode 漏读窗口（读后重挂前新 inode 追加无人观察）：①skip-identity-change 后强制核对读（identity-handoff-verify；无追加=纯 skip 收敛无环）；②identity 变不再单独 replace——前缀判据先行：纯追加+换 inode=同流交接（inode-handoff-append 身份跟进+前缀补发）；前缀破才 replace（改写）。
+- R-03 生产流 ID：GW 默认改 defaultStreamId（crypto 16B base64url，read-index.ts 导出）；composition 两实例首流互异+跨实例 cursor 4404。
+- R-04 配置门：requireFinitePosInt（maxScanBytes 1..1GiB/tokenPollMs）+requireAbsPaths（roots/sessionRoots/scanDir）+Origin 正则；NaN/Infinity 绕过 readBounded 封死。
+- R-05 RW4 403 拒握手 CONNECTING 态 terminate→unhandled：error 过滤+close 收敛；三 unused import 清。
+- Y-01 并发 dispose 共享收尾 Promise（d2Early 窗口断言）；Y-02 两级 4431 语义勘正（订阅级=paging 滞留**或**帧超预算）+§3.7 第4项锚点+inode 例外原位；Y-03 RW1 续读全序列 200..1350 对拍+RF11 逐 seq（2..1101）+RF9 unobserved 正面证据+BG4 LRU 触达重排（f1 触达保留/f2 挤出）+BG5 口径改「单 20k 流满载」；Y-04 指纹三路统一（首装/续编/重建+onAppend）+rescanOnce 指纹移分发循环前（循环内链路即时可得+并发窗口不回退）+RF12 三态对拍源 SHA-256 全 64hex；Y-05 tokenPollMs 轮询真实生效（token-reloaded+旧 token 4401）+头注释口径勘正。
+- 断言面：R-02/W1-W3+收敛性（history-source 66 it）；真盘全分型补 rename 纯追加=交接+改写 rename=replace；RF12（real-fs 11 it）；RW7（real-ws 7 it）；composition 13 it（R-04 门×4+R-03+Y-01+Y-05）。
+- 变异六杀（tests/fixtures/mutation-records/3b3-fix1.md）：M-R1a/M-R1b/M-R2a/M-R2b/M-Y1/M-Y4 全 KILLED；两首轮 SURVIVED 均为杀手集缺口（补 RW7/d2Early 后杀）——已披露。
+- 终态：781+7+tsc0+lint0，npm test exit0 无 unhandled。

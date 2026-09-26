@@ -95,7 +95,7 @@ async function makeRig(): Promise<Rig> {
   const url = `ws://127.0.0.1:${srv.port}`;
   const clients: WsClient[] = [];
   return {
-    srv, url, jp, audits,
+    srv, url, jp, sp, audits,
     dispose: async () => {
       for (const c of clients) c.dispose();
       await srv.dispose();
@@ -273,6 +273,49 @@ describe("3b-3③ real-ws：真实传输+慢客户端矩阵", () => {
       await r.dispose();
     }
   }, 20000);
+
+  it("RW7 恢复期大批量续编（真传输）：journal-only 订阅期 session 落盘 8000 行→B 订阅触发批量续编→A 全量恰一次（R-01 syncIndex 路）", async () => {
+    // R-01 的 syncIndex/dispatchHistoryBatch 面：rescan 路由 RW6 锁死，此用例锁 syncIndex 批量续编
+    // 的有界让出——8000 行≈1143 帧>1024 连接队列上限，无让出则队列自溢出误杀 A。
+    const r = await makeRig();
+    try {
+      await seedJournal(r.jp, 1); // journal-only（1 行种子）
+      const a = openClient(r.url);
+      try {
+        await a.hello();
+        await a.say({ t: "subscribe", requestId: "s1", file: "j.jsonl" });
+        await until(() => a.frames.some((f) => f.t === "snapshot"));
+        await settle(WARM); // A 建立观察（journal-only）
+        const big = Array.from({ length: 8000 }, (_, k) => JSON.stringify({ type: "message", id: `u${k + 1}`, parentId: "seed", timestamp: 1, message: { role: "user", content: `line ${k + 1}` } })).join("\n") + "\n";
+        await appendFile(r.sp, big); // session 落盘 8000 行
+        const b = openClient(r.url);
+        try {
+          await b.hello();
+          await b.say({ t: "subscribe", requestId: "sb", file: "j.jsonl" });
+          await until(() => b.frames.some((f) => f.t === "snapshot"), 8000);
+          await until(() => {
+            const evs = a.frames.filter((f) => f.t === "events");
+            return evs.reduce((n, f) => n + ((f as { events?: unknown[] }).events?.length ?? 0), 0) >= 8000;
+          }, 20_000);
+          await settle(500);
+          const seqs: number[] = [];
+          for (const f of a.frames) {
+            if (f.t !== "events") continue;
+            for (const ev of (f as { events?: { seq?: number }[] }).events ?? []) if (typeof ev.seq === "number") seqs.push(ev.seq);
+          }
+          expect(a.errs(4431).length).toBe(0); // 无两级 4431 误杀
+          expect(a.closed).toBeNull();
+          expect(seqs.length).toBe(8000);
+          const uniq = new Set(seqs);
+          expect(uniq.size).toBe(8000);
+          const mn = Math.min(...seqs), mx = Math.max(...seqs);
+          expect(mx - mn + 1).toBe(8000); // 连续无缺
+        } finally { b.dispose(); }
+      } finally { a.dispose(); }
+    } finally {
+      await r.dispose();
+    }
+  }, 60_000);
 
   it("RW3 字节门两级：262,145B 应用帧→4404（帧超字节上限）；>1MiB 传输帧→close 1009", async () => {
     const r = await makeRig();

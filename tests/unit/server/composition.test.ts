@@ -236,8 +236,10 @@ describe("3b-3① composition", () => {
     const closed = new Promise<number>((res) => { ws.on("close", (c) => res(c)); });
     await new Promise<void>((res, rej) => { ws.once("open", res); ws.once("error", rej); });
     const d1 = s.dispose();
-    const d2 = s.dispose(); // 并发第二方：不等 d1 落定才调
+    let d2Early = false; // 第二调用方若在完整收尾（审计落盘）前 resolve=布尔早退窗口
+    const d2 = s.dispose().then(() => { if (!audits.includes("composition disposed")) d2Early = true; });
     await Promise.all([d1, d2]);
+    expect(d2Early).toBe(false); // 共享 Promise：第二方只在完整收尾后 resolve
     // 两方都已 resolve 且完整关停证据齐：告别帧（1000 server-shutdown）+ 收尾审计恰一次
     expect(await closed).toBe(1000);
     expect(audits.filter((l) => l === "composition disposed")).toHaveLength(1);
