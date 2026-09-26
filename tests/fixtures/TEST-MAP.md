@@ -365,3 +365,25 @@
 | **变异复杀（基线 847aa84，独立 git archive 副本）** | M-life-only（3b2h H-C2-02 原网存活者）：复核块仅留 reg 门、去生命周期半边（entry 归属+disposed/state）→文件域 1 failed（H5）+全仓 661 passed+1 failed（H5）——原网三杀一存活→补杀闭环；与 M-reg-only（GPT 3b2h：仅留 reg 门对侧，F5 杀）合成「两半边各有独立入仓证据」 | 一杀（存活者补杀） | ✅ |
 | **锚点清理** | TEST-MAP 3b2e 变异行「:740」陈旧裸行号→符号锚「ws-gateway watchFile 的 observe 分支统一返回值（return stop !== null）」 | TEST-MAP | ✅ |
 
+
+## adapter 切片③-3b2b②+③（read-index 分流前缀/continueFrom+DualHistorySource 组合器+网关接线；基线 1855268+7c5d1ba）
+
+| 断言面 | 用例 | 状态 |
+| --- | --- | --- |
+| 分流前缀：交错编入（journal/session 到达序交错）后固定源序重扫=前缀成立（旧逐位比对误判换流）；同源改写→非前缀（两源各杀）；单源截断→非前缀 | read-index-dual.test.ts ×3 | 🟢 |
+| continueFrom：journal 余量先 session 余量后确定性续编；续编后与全量重扫互为前缀（幂等）；违约调用（未过前缀）不抛不崩 | read-index-dual.test.ts ×2 | 🟢 |
+| DualHistorySource：load 合并序 journal 先 session 后+归因端到端（session user 事件带 intentId/generation）；撕裂尾 enqueue 不参与匹配 | dual-history-source.test.ts 合并/撕裂尾 | 🟢 |
+| journal 子源失败→整体 null fail-closed；session 缺失→journal-only 降级（审计 session-missing）；无 sessionFor→journal-only（no-session-mapping）；session 越界→降级 | dual-history-source.test.ts ×4 | 🟢 |
+| 归因读通道：reader 注入失败→缺证+attribution-unreadable 审计；无注入→真盘 RealReader 兜底（冒烟） | dual-history-source.test.ts ×2 | 🟢 |
+| observe 双子源：journal 追加→onAppend(journal 行)；session 追加→onAppend(session 行)；盘面换代（identity 变）→invalidate("replace") 转发（watch 瞬错=重挂自愈不产失效——设计面）；release→双源 watcher 全关 | dual-history-source.test.ts ×3 | 🟢 |
+| 网关接线 D1：双源快照 barrier=两源合计+journal 前 session 后+归因 intentId 直达客户端 | ws-gateway 3b-2b③ D1 | 🟢 |
+| 网关接线 D2：live 追加双源各自到货→history 帧续投+不换流（无 4404/4409） | ws-gateway 3b-2b③ D2 | 🟢 |
+| 网关接线 D3：session 盘面换代→4409 退役旧订阅+新订阅新 streamId（换流） | ws-gateway 3b-2b③ D3 | 🟢 |
+| 网关接线 D4：session 缺失→journal-only 快照（非 4402，审计 session-missing） | ws-gateway 3b-2b③ D4 | 🟢 |
+| 网关接线 D5：journal 读失败→4402 retryable（session 在也不能洗白——事实源 fail-closed） | ws-gateway 3b-2b③ D5 | 🟢 |
+| 网关接线 D6：交错 live 追加后退订→二次装载余量（两源各+1）→分流前缀成立不换流+continueFrom 余量无重无漏（位置续编会把 s2 重复编入+漏 j3→seqs/dup 断言挂） | ws-gateway 3b-2b③ D6 | 🟢 |
+
+- 变异九杀（基线 1855268/7c5d1ba；python 锚点替换+count 断言+git checkout 还原）：
+  - ②：M1 分流前缀（M1 首版「journal 侧换键」变异体语义等价 SURVIVED——sourceIsPrefixOf 内部本就按源过滤，已披露；重设计 M1b=退回旧逐位比对）→2 挂 KILLED；M2 去 digest→2 挂；M3 续编序反→1 挂；M4 撕裂尾参与归因→1 挂；M5 合并序反→1 挂；M6 journal 不 fail-closed→1 挂；M7 归因键路径错（session 子源 journalFor 误用 opts.journalFor）→5 挂；M8 归因 reader 无注入返回空（丢归因）→1 挂。
+  - ③：M-G1 syncIndex 前缀分支退回位置续编→D6 挂 KILLED。还原后 696+7 全绿。
+  - 踩坑（流程）：syncIndex continueFrom 编辑未随 1855268 提交（提交在前编辑在后）→变异后 git checkout 还原到无修复 HEAD→D6 在旧代码上跑「假挂/假绿」——修复重应用+先提交基线再变异（M-240 同型：变异前必须有干净基线 commit）。
