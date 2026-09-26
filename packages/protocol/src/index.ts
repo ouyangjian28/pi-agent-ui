@@ -15,5 +15,6 @@ export * from "./history-projection.ts";
 export * from "./read-index.ts";
 export * from "./subscription-engine.ts";
 export * from "./session-attribution.ts";
+export * from "./session-projection.ts";
 export * from "./projection-frames.ts";
 export * from "./journal-schema.ts";
