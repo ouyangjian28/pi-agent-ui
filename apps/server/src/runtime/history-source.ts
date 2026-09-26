@@ -53,12 +53,14 @@ export interface FileHistorySourceOpts {
   /** 扫描预算（读中硬限；默认 8MiB）。 */
   readonly maxScanBytes?: number;
   readonly audit?: (line: string) => void;
+  /** 文本→扫描行投影器（3b-2b②：session 子源注入 sessionToScanRows+归因；默认=journal 投影）。 */
+  readonly projector?: (text: string, file: string) => Promise<readonly ScanRow[]> | readonly ScanRow[];
 }
 
-const DEFAULT_MAX_SCAN_BYTES = 8 * 1024 * 1024;
+export const DEFAULT_MAX_SCAN_BYTES = 8 * 1024 * 1024;
 
 /** 真盘读取：安全打开→有界读→同 fd 身份。任何失败抛 SafeOpenError（含 kind 分类）。 */
-class RealReader implements HistoryReaderPort {
+export class RealReader implements HistoryReaderPort {
   constructor(private readonly maxBytes: number) {}
   async read(absPath: string): Promise<{ text: string; identity: string }> {
     const { fh } = await openSafeFile(absPath);
@@ -302,7 +304,7 @@ export class FileHistorySource implements HistorySourcePort {
       this.audit(`initial-scan-superseded file=${file}`);
       return false;
     }
-    const rows = this.projectSafely(read.text);
+    const rows = await this.projectSafely(read.text, slot.file);
     if (rows === null) {
       slot.pendingEntry = null;
       try { handle.close(); } catch { /* 已关 */ }
@@ -463,7 +465,7 @@ export class FileHistorySource implements HistorySourcePort {
       this.deliverInvalidate(slot, entry, "replace");
       return;
     }
-    const rows = this.projectSafely(read.text);
+    const rows = await this.projectSafely(read.text, slot.file);
     if (rows === null) { this.deliverUnavailable(slot, entry, "unreadable"); return; }
     const digests = rows.map((r) => ({ locator: r.locator, digest: scanDigest(r) }));
     // 前缀判定：已观测位置任一（定位+原文摘要）变化→失效；纯变短→截短
@@ -547,9 +549,10 @@ export class FileHistorySource implements HistorySourcePort {
   }
 
   /** 投影防御出口（R5）：投影器 bug/盘面异常不得逃逸成进程错误——防御失败=不可用（unreadable）。 */
-  private projectSafely(text: string): ScanRow[] | null {
+  private async projectSafely(text: string, file: string): Promise<ScanRow[] | null> {
     try {
-      return journalToScanRows(text);
+      const rows = await (this.opts.projector ? this.opts.projector(text, file) : journalToScanRows(text));
+      return [...rows];
     } catch (e) {
       this.audit(`project-failed kind=${errKind(e)}`);
       return null;

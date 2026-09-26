@@ -157,6 +157,42 @@ function matchUserIntents(
   return out;
 }
 
+/** journal 文本 → 归因输入（3b-2b②）：从完整 journal 行提取 enqueue 三元组与 consumed 区间，
+ *  供 session 投影归因（DualHistorySource 在 session 扫描时从 journal 盘面现读派生——
+ *  完整行前缀即耐久事实，撕裂尾不参与，与两源各自行边界纪律一致）。不可解析/非法行忽略
+ *  （归因缺证→session 条目 intentId=null，不猜测）。 */
+export function journalAttributionOf(text: string): { enqueues: readonly SessionEnqueueRef[]; consumed: readonly ConsumedInterval[] } {
+  const enqueues: SessionEnqueueRef[] = [];
+  const consumed: ConsumedInterval[] = [];
+  const segments = text.split("\n");
+  const complete = text.length === 0 ? 0 : segments.length - 1; // 完整行界：末段无 \n=撕裂尾不参与（同 sessionToScanRows 口径）
+  for (let i = 0; i < complete; i++) {
+    const raw = segments[i] ?? "";
+    if (raw === "") continue;
+    let parsed: unknown;
+    try { parsed = JSON.parse(raw); } catch { continue; }
+    if (typeof parsed !== "object" || parsed === null) continue;
+    const r = parsed as Record<string, unknown>;
+    if (r["t"] === "enqueue") {
+      const intentId = r["intentId"], gen = r["generation"], mk = r["matchKey"];
+      if (typeof intentId !== "string" || (gen !== null && typeof gen !== "number")) continue;
+      if (typeof mk !== "object" || mk === null) continue;
+      const m = mk as Record<string, unknown>;
+      const th = m["textHash"], ai = m["attachmentIdentity"], ord = m["ordinal"];
+      if (typeof th !== "string" || typeof ai !== "string" || typeof ord !== "number") continue;
+      enqueues.push({ intentId, generation: gen, matchKey: { textHash: th, attachmentIdentity: ai, ordinal: ord } });
+    } else if (r["t"] === "consumed") {
+      const intentId = r["intentId"], anchor = r["anchorEntryId"], end = r["intervalEnd"];
+      if (typeof intentId !== "string" || typeof anchor !== "string") continue;
+      if (typeof end !== "object" || end === null) continue;
+      const e = end as Record<string, unknown>;
+      if (typeof e["entryId"] !== "string" || typeof e["lengthHash"] !== "string") continue;
+      consumed.push({ intentId, anchorEntryId: anchor, intervalEnd: { entryId: e["entryId"], lengthHash: e["lengthHash"] } });
+    }
+  }
+  return { enqueues, consumed };
+}
+
 /** session 文本 → 扫描行。只发布完整行；撕裂尾不发布（与 journalToScanRows 同口径）。 */
 export function sessionToScanRows(input: SessionProjectionInput): ScanRow[] {
   const text = input.sessionText;

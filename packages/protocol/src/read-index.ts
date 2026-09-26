@@ -85,16 +85,39 @@ export class ReadIndex {
     return out;
   }
 
-  /** 前缀投影比对（换流判定）：位置+locator+内容摘要 全等才可续读（B02：内容改写亦换流）。 */
+  /** 前缀投影比对（换流判定）：位置+locator+内容摘要 全等才可续读（B02：内容改写亦换流）。
+   *  3b-2b② 按源分流：journal/session 各自子序列独立逐位比对。动机：双源 live 追加按到达序
+   *  编入（交错），而全量重扫固定源序合流（journal 全部在前）——逐位比对会把合法交错误判为
+   *  换流；分流后每源各自验前缀，交错无害。 */
   isPrefixOf(currentScan: readonly ScanRow[]): boolean {
-    if (this.events.length > currentScan.length) return false;
-    for (let i = 0; i < this.events.length; i++) {
-      const a = this.events[i], b = currentScan[i];
+    return this.sourceIsPrefixOf("journal", currentScan) && this.sourceIsPrefixOf("session", currentScan);
+  }
+
+  private sourceIsPrefixOf(source: EventSource, currentScan: readonly ScanRow[]): boolean {
+    const rows = currentScan.filter((r) => r.source === source);
+    const indexed = this.events.filter((e) => e.source === source);
+    if (indexed.length > rows.length) return false; // 重扫后源内行数反而变少=截断/改写→换流
+    for (let i = 0; i < indexed.length; i++) {
+      const a = indexed[i], b = rows[i];
       if (a === undefined || b === undefined) return false;
-      if (a.source !== b.source || a.locator !== b.locator) return false;
+      if (a.locator !== b.locator) return false;
       if (a.digest !== scanDigest(b)) return false; // 同位同 locator 但原文改写（含投影抹平型）→ 换流
     }
     return true;
+  }
+
+  /** 增量续编（3b-2b②）：重扫行中未编入部分按「journal 余量先、session 余量后」确定性追加。
+   *  前置=调用方已验 isPrefixOf（否则宿主走 registry.replace 换流）；返回续编条数。
+   *  续编序与全量重扫固定源序一致——此后重扫在两源各自前缀不变时仍可增量。 */
+  continueFrom(currentScan: readonly ScanRow[]): number {
+    const jRows = currentScan.filter((r) => r.source === "journal");
+    const sRows = currentScan.filter((r) => r.source === "session");
+    const jIndexed = this.events.filter((e) => e.source === "journal").length;
+    const sIndexed = this.events.filter((e) => e.source === "session").length;
+    let appended = 0;
+    for (const r of jRows.slice(jIndexed)) { this.append(r.source, r.locator, r.raw, r.event); appended += 1; }
+    for (const r of sRows.slice(sIndexed)) { this.append(r.source, r.locator, r.raw, r.event); appended += 1; }
+    return appended;
   }
 
   /** 预算内事件上限（超限=该流废弃，下次 get 重扫换流；出口有限，无内部循环）。 */
