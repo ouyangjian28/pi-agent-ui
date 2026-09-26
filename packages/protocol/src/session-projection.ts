@@ -22,7 +22,7 @@ import { fnv1a64Hex, sanitizeText } from "./sanitizer.ts";
 import { attributeSessionEntries, type ConsumedInterval } from "./session-attribution.ts";
 import type { ScanRow } from "./read-index.ts";
 import type { HistoryEvent, SanitizedText } from "./contracts.ts";
-import { attachmentIdentity, normalizeText, textHash, type AttachmentMultiset, type IntentMatchKey } from "./identity.ts";
+import { attachmentIdentity, intentEntersReconciliation, normalizeText, textHash, type AttachmentMultiset, type IntentMatchKey, type IntentKind } from "./identity.ts";
 import { journalLineSchemaError, type UnknownRecord } from "./journal-schema.ts";
 import { sha256Hex12 } from "./sha256.ts";
 
@@ -202,6 +202,10 @@ export function journalAttributionOf(text: string): { enqueues: readonly Session
     if (r["t"] !== "enqueue" && r["t"] !== "consumed") continue;
     if (journalLineSchemaError(r) !== null) { rejected += 1; continue; } // 坏行不采信（同正式投影判坏口径）
     if (r["t"] === "enqueue") {
+      // 3b2c-Y2（GPT fix1 建议）：归因匹配域=进入和解的意图（payload.kind∈prompt/steer/followUp）——
+      // abort/takeover 等 schema 合法但不入和解的 enqueue 不消费 user 序号（同键 abort
+      // 不得挤占真意图的 ordinal 匹配位）。kind 在 payload（schema 已验）。
+      if (!intentEntersReconciliation(((r["payload"] as UnknownRecord)["kind"] as IntentKind))) continue;
       const mk = r["matchKey"] as UnknownRecord;
       enqueues.push({
         intentId: r["intentId"] as string,

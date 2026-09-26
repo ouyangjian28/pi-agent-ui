@@ -275,7 +275,10 @@ describe("connection-queue（B7-B10）", () => {
     for (let i = 0; i < 7; i++) q.enqueue({ t: "error", code: 4404, message: `m${i}`, retryable: false, requestId: "" });
     await new Promise((r) => setImmediate(r)); // 第一轮 drain
     expect(p.sent.length).toBe(3); // 第一批 3
-    await new Promise((r) => setTimeout(r, 5));
+    // 3b2c-Y5：后续批次经 setImmediate 链调度——固定 5ms 不保证全部批次已执行（GPT fix1 首跑
+    // 即遇 6/7）；改条件等待（有截止）：直到 7 帧全部送出或 200ms 超时。
+    const deadline = Date.now() + 200;
+    while (p.sent.length < 7 && Date.now() < deadline) await new Promise((r) => setImmediate(r));
     expect(p.sent.length).toBe(7);
     q.dispose();
   });

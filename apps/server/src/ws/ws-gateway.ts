@@ -616,6 +616,13 @@ export class WsGateway {
       // （正常路径已由 onStreamDropped 钩子退役；此处兜底协调漏网，幂等 no-op）
       const stale = this.retireEnginesForFile(file, index.streamId, "identity-change");
       if (stale > 0) this.audit(`stream-identity-guard file=${file} newStream=${index.streamId} retired=${stale}`);
+      // 3b2c-F1-03：空索引≠无订阅——H=0 流上的既有活跃订阅必须收到首批行（请求方引擎尚未
+      // 建立，其快照含之；同 continueFrom 分发纪律；先退异身份引擎再分发，不给旧流喂新坐标）。
+      if (rows.length > 0) {
+        const fresh = index.read(1, rows.length);
+        for (const fe of fresh) this.forEachEngine(file, (e) => e.onHistoryAppend(fe.event));
+        this.schedulePump(file);
+      }
       return index;
     }
     if (index.isPrefixOf(rows)) {

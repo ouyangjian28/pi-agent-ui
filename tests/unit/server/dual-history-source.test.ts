@@ -372,3 +372,146 @@ describe("DualHistorySource 3b2b-R1/R2——跨 await 复核与降级恢复（GP
     await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
   });
 });
+
+describe("DualHistorySource 3b2c-fix1——五阻断闭合（GPT 72→修复）", () => {
+  const JP = "/j/a";
+  const SP = "/s/a";
+
+  it("F1-01：session 缺失等待窗内 journal 合法追加→降级出口也复核，返回吸收增长的 cur（不透旧快照）", async () => {
+    const h = harness({ sessionFor: (f) => f.replace("/j/", "/s/") });
+    h.reader.set(JP, jEnqueue("i-1", USER_TEXT, 0) + "\n");
+    await h.src.load(JP); // journal 槽活跃 [J1]
+    const { s, log } = makeSinks();
+    const un = h.src.observe(JP, s);
+    // B 装载：session 读挂起（F1-01 窗口：session 有文件但读挂起，窗口内撤文件→null 降级）
+    h.reader.set(SP, sUser("u1", USER_TEXT) + "\n");
+    h.reader.holdPaths.add(SP);
+    const ld = h.src.load(JP);
+    await until(() => h.reader.heldCount() >= 1);
+    // 等待窗内 journal 追加 J2
+    h.reader.set(JP, jEnqueue("i-1", USER_TEXT, 0) + "\n" + jEnqueue("i-2", "second", 0) + "\n");
+    h.watcher.notice(JP);
+    await until(() => log.appends.some((r) => r.event.kind === "turn-enqueued" && r.event.intentId === "i-2"));
+    // 窗口内撤走 session 文件→releaseHold 结算为 ENOENT→session=null 降级路径
+    h.reader.files.delete(SP);
+    h.reader.releaseHold();
+    const rows = await ld;
+    // 降级出口复核：返回 cur=[J1,J2]（旧代码返回旧快照 [J1]→网关误判改写 4409+J2 丢）
+    expect(rows).not.toBeNull();
+    const j = (rows ?? []).filter((r) => r.source === "journal");
+    expect(j).toHaveLength(2);
+    expect(j.map((r) => (r.event as { intentId?: string }).intentId)).toEqual(["i-1", "i-2"]);
+    expect(h.audits.some((l) => l.includes("session-missing"))).toBe(true);
+    expect(h.audits.some((l) => l.includes("load-revalidate"))).toBe(false); // 合法增长≠换流
+    h.src.release(JP);
+    un?.();
+    await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
+  });
+
+  it("F1-02：late-attach 引用 credit——B 的 release 不双扣；C 订阅后 session 事件仍直达（无静默断流）", async () => {
+    const h = harness({ sessionFor: (f) => f.replace("/j/", "/s/") });
+    h.reader.set(JP, jEnqueue("i-1", USER_TEXT, 0) + "\n");
+    await h.src.load(JP); // A 装载
+    const a = makeSinks();
+    const unA = h.src.observe(JP, a.s); // A 观察（journal-only）
+    // session 出现→B 装载→补接消费 B 的 session 装载引用（credit=1）
+    h.reader.set(SP, sUser("u1", USER_TEXT) + "\n");
+    await h.src.load(JP);
+    expect(h.audits.some((l) => l.includes("session-attached-late") && l.includes("credits=1"))).toBe(true);
+    // B release：credit 配对→跳过 session 侧一次（旧代码双扣→carry→下一装载误关新 session watcher）
+    h.src.release(JP);
+    expect(h.audits.some((l) => l.includes("release-session-credit") && l.includes("credits=0"))).toBe(true);
+    expect(h.watcher.active(SP).length).toBe(1); // session 句柄仍活（A 的联合观察持有）
+    // C 装载+观察：session 观察正常（若无 credit，B 双扣→carry→C 装载时 released-unobserved-carry 关掉新 session watcher）
+    const rowsC = await h.src.load(JP);
+    expect((rowsC ?? []).filter((r) => r.source === "session")).toHaveLength(1);
+    const c = makeSinks();
+    const unC = h.src.observe(JP, c.s);
+    expect(unC).not.toBeNull();
+    h.reader.set(SP, sUser("u1", USER_TEXT) + "\n" + sUser("u2", "second") + "\n");
+    h.watcher.notice(SP);
+    await until(() => a.log.appends.some((r) => r.source === "session"));
+    await until(() => c.log.appends.some((r) => r.source === "session"));
+    // 收尾：A/C 解绑+release → 双源句柄全关（引用账守恒，无孤儿）
+    h.src.release(JP);
+    unA?.();
+    unC?.();
+    await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
+    expect(h.audits.some((l) => l.includes("released-unobserved-carry"))).toBe(false);
+  });
+
+  it("F1-04：同一 sinks 对象重绑——包装身份隔离；旧 stop 迟到只关旧状态（不作用新绑定）", async () => {
+    const h = harness({ sessionFor: (f) => f.replace("/j/", "/s/") });
+    h.reader.set(JP, jEnqueue("i-1", USER_TEXT, 0) + "\n", "id-j1");
+    h.reader.set(SP, sUser("u1", USER_TEXT) + "\n");
+    await h.src.load(JP);
+    const { s, log } = makeSinks();
+    const un1 = h.src.observe(JP, s);
+    expect(un1).not.toBeNull();
+    // 同一 sinks 对象再次绑定（网关侧重挂场景）——旧代码直传 sinks：FH Set 按对象身份，
+    // 新绑定 add(S) 不增、旧 stop 删 S→关掉新绑定→un2 成功但实际已失效。
+    const un2 = h.src.observe(JP, s);
+    expect(un2).not.toBeNull();
+    // FileHistorySource 同文件共享 watcher（引用计数）：句柄数=1，两条观察各自持 ref。
+    // 隔离面在 sinks 集：旧代码直传 sinks→同一对象→新绑定 add(S) 不增、旧 stop 删 S→
+    // 引用还在但 sinks 已空→句柄关→un2 成功但实际已断流。
+    expect(h.watcher.active(JP).length).toBe(1);
+    expect(h.watcher.active(SP).length).toBe(1);
+    // 旧 stop 迟到：只收口 st1（sinks 集只删 wrap1），st2 的绑定不受影响（句柄仍活）
+    un1?.();
+    expect(h.watcher.active(JP).length).toBe(1);
+    expect(h.watcher.active(SP).length).toBe(1);
+    // 新绑定仍活：追加直达 st2 的 sinks
+    h.reader.set(JP, jEnqueue("i-1", USER_TEXT, 0) + "\n" + jEnqueue("i-3", "third", 0) + "\n", "id-j1");
+    h.watcher.notice(JP);
+    await until(() => log.appends.some((r) => r.event.kind === "turn-enqueued" && (r.event as { intentId?: string }).intentId === "i-3"));
+    // 收口 st2 + Y1：obs Map 状态壳不滞留（需先留一枚装载引用才能再绑——引用纪律）
+    un2?.();
+    expect(h.watcher.active(JP).length).toBe(0);
+    expect(h.watcher.active(SP).length).toBe(0);
+    await h.src.load(JP);
+    const un3 = h.src.observe(JP, s);
+    expect(un3).not.toBeNull();
+    un3?.();
+    expect(h.watcher.active(JP).length).toBe(0);
+    expect(h.watcher.active(SP).length).toBe(0);
+    h.src.release(JP);
+  });
+
+  it("R1-耗尽：三窗口全换代→有界重试耗尽→load=null+审计 load-revalidate-exhausted", async () => {
+    const h = harness({ sessionFor: (f) => f.replace("/j/", "/s/") });
+    // session 读改为可控 deferred（arm 后生效——首次装载与 journal-only observe 不挂起）
+    let arm = false;
+    const held: Array<(v: { text: string; identity: string } | Error) => void> = [];
+    const baseRead = h.reader.read.bind(h.reader);
+    h.reader.read = (p: string) => {
+      if (p === SP && arm) {
+        return new Promise((res, rej) => { held.push((v) => { if (v instanceof Error) rej(v); else res(v); }); });
+      }
+      return baseRead(p);
+    };
+    h.reader.set(JP, jEnqueue("i-1", USER_TEXT, 0) + "\n", "id-j1");
+    await h.src.load(JP);
+    const { s, log } = makeSinks();
+    const stops: Array<() => void> = [];
+    stops.push(h.src.observe(JP, s) ?? (() => {})); // 绑定 gen1（journal-only：session 未设）
+    h.reader.set(SP, sUser("u1", USER_TEXT) + "\n");
+    arm = true;
+    const ld = h.src.load(JP);
+    // 每轮：窗口内换代+重绑观察（当前活跃代）+通知失效→本轮复核必 stale→下一轮
+    for (let round = 2; round <= 4; round++) {
+      await until(() => held.length >= 1);
+      h.reader.set(JP, jEnqueue(`i-${round}`, "replaced", 0) + "\n", `id-j${round}`);
+      stops.push(h.src.observe(JP, s) ?? (() => {})); // 绑定当前活跃代（换代通知可失效）
+      h.watcher.notice(JP);
+      await until(() => log.invalidates.includes("replace"));
+      const settle = held.shift();
+      settle?.({ text: sUser("u1", USER_TEXT) + "\n", identity: `id-s${round}` });
+      await drain(8); // 当前轮结算（复核 stale→release→下一轮）
+    }
+    expect(await ld).toBeNull();
+    expect(h.audits.some((l) => l.includes("load-revalidate-exhausted"))).toBe(true);
+    for (const st of stops) st();
+    await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
+  });
+});

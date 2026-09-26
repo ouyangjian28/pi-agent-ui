@@ -17,7 +17,9 @@ const K = new Uint32Array([
   0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ]);
 
-/** SHA-256（FIPS 180-4），输入=字符串的 UTF-8 字节，输出=小写 64 位 hex。 */
+/** SHA-256（FIPS 180-4），输入=字符串的 UTF-8 字节，输出=小写 64 位 hex。
+ *  输入上界（3b2c-Y3）：字节长度 < 2^28（256MiB）——位长低 32 位经 int32 移位（len<<3），
+ *  超出即静默截断；当前读预算 8MiB 远低于此，未来放大须改用双字位长计算。 */
 export function sha256Hex(input: string): string {
   const bytes = new TextEncoder().encode(input);
   const len = bytes.length;

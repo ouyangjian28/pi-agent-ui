@@ -1129,6 +1129,15 @@ describe("RealReader 3b2b-R5（GPT 65→修复）：非法 UTF-8 fail-closed", (
     await writeFile(p, Buffer.concat([Buffer.from(`{"t":"x"}\n`, "utf8"), Buffer.from([0xff]), Buffer.from("\n", "utf8")]));
     await expect(new RealReader(MAX).read(p)).rejects.toThrow("read-failed");
   });
+  it("3b2c-F1-05：完整行含【合法】U+FFFD 字符（EF BF BD）→可读不拒（旧代码把合法字符误杀→整文件 4402）", async () => {
+    const d = await mkdtemp(join(tmpdir(), "rr-f105-"));
+    CLEANUP.push(d);
+    const p = join(d, "legal.jsonl");
+    // 用户真实输入可含 U+FFFD 字符本身（如「请解释字符 \uFFFD 的含义」）——EF BF BD 是合法 UTF-8
+    await writeFile(p, Buffer.concat([Buffer.from(`{"t":"x"}\n`, "utf8"), Buffer.from([0xef, 0xbf, 0xbd]), Buffer.from(" 请解释这个字符\n", "utf8")]));
+    const r = await new RealReader(MAX).read(p);
+    expect(r.text).toContain("\uFFFD 请解释这个字符\n");
+  });
   it("撕裂尾含非法 UTF-8（无 \\n）→容忍可读（本就不发布，偏移漂移不观察）", async () => {
     const d = await mkdtemp(join(tmpdir(), "rr-r5-"));
     CLEANUP.push(d);

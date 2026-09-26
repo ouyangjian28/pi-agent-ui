@@ -1943,6 +1943,82 @@ describe("ws-gateway 3b-2b③：DualHistorySource 接线验证", () => {
     }
   });
 
+  it("D8 3b2c-F1-03：journal 空文件（H=0）——A 先订阅；session 出现后 B 装载→空索引分支也分发，A 收到首批行", async () => {
+    const d = await dualRig();
+    try {
+      d.reader.set(d.jp, ""); // journal 存在但零完整行
+      const c = await authed(d.r);
+      await c.say({ t: "subscribe", requestId: "sub-1", file: "j.jsonl" });
+      const snap1 = c.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      expect(snap1.barrier).toBe(0); // 空流
+      // session 出现（一行 user）——不触发 watcher（B 装载自当盘）
+      d.reader.set(d.sp, sU("u1", TEXT_A) + "\n");
+      const c2 = await authed(d.r);
+      await c2.say({ t: "subscribe", requestId: "sub-2", file: "j.jsonl" });
+      const snap2 = c2.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      expect(snap2.barrier).toBe(1); // B：session 新行 1
+      // A 经空索引分支分发恰一次收到该行（旧代码：waterMark===0 分支只 append 不分发→A 永远收不到）
+      const aEvents = (frames: unknown[]): Array<{ intentId: string | null }> => {
+        const out: Array<{ intentId: string | null }> = [];
+        for (const f of frames) {
+          const ev = f as { t?: string; events?: Array<{ kind: string; intentId: string | null }> };
+          if (ev.t === "events") out.push(...(ev.events ?? []).filter((e) => e.kind === "message"));
+        }
+        return out;
+      };
+      await until(() => aEvents(c.frames()).length === 1);
+      expect(aEvents(c.frames())[0]?.intentId).toBeNull(); // 无 enqueue→null（归因面）
+      expect(aEvents(c2.frames()).length).toBe(0); // B 走快照不重收
+      expect(errFrames(c).filter((f) => f.code === 4404 || f.code === 4409).length).toBe(0);
+    } finally {
+      await d.dispose();
+    }
+  });
+
+  it("D9 3b2c-§8：恢复后新追加+全退再开+重复装载——恰一次纪律持续成立，无错流无重复", async () => {
+    const d = await dualRig();
+    try {
+      d.reader.set(d.jp, jEn("i-1", TEXT_A, 0) + "\n");
+      const c = await authed(d.r); // A：journal-only
+      await c.say({ t: "subscribe", requestId: "sub-1", file: "j.jsonl" });
+      d.reader.set(d.sp, sU("u1", TEXT_A) + "\n" + sU("u2", TEXT_B) + "\n");
+      const c2 = await authed(d.r); // B：触发 session 恢复装载
+      await c2.say({ t: "subscribe", requestId: "sub-2", file: "j.jsonl" });
+      const sess = (frames: unknown[]): string[] => {
+        const out: string[] = [];
+        for (const f of frames) {
+          const ev = f as { t?: string; events?: Array<{ kind: string; seq: number }> };
+          if (ev.t === "events") out.push(...(ev.events ?? []).filter((e) => e.kind === "message").map((e) => `${e.seq}`));
+        }
+        return out;
+      };
+      await until(() => sess(c.frames()).length === 2);
+      // ① 恢复后新追加（watcher 通知路径）：u3 → A 恰收 1 条新行（总数 3，无重复）
+      d.reader.set(d.sp, sU("u1", TEXT_A) + "\n" + sU("u2", TEXT_B) + "\n" + sU("u3", TEXT_C) + "\n");
+      d.watcher.notice(d.sp);
+      await until(() => sess(c.frames()).length === 3);
+      expect(new Set(sess(c.frames())).size).toBe(3); // 恰一次（seq 不重）
+      // ② 全退再开：B 退订→重订→快照含全部 4 行（J1+S3），A 无重复无错流
+      await c2.say({ t: "unsubscribe", requestId: "un-1", subscriptionId: (c2.frames().find((f) => f.t === "snapshot") as { subscriptionId?: string }).subscriptionId ?? "" });
+      const c3 = await authed(d.r);
+      await c3.say({ t: "subscribe", requestId: "sub-3", file: "j.jsonl" });
+      const snap3 = c3.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      expect(snap3.barrier).toBe(4); // journal 1 + session 3
+      expect(sess(c3.frames()).length).toBe(0); // 全走快照
+      expect(sess(c.frames()).length).toBe(3); // A 不变
+      // ③ 重复装载（同文件并发第二次订阅）：前缀成立不换流，A 无重复
+      const c4 = await authed(d.r);
+      await c4.say({ t: "subscribe", requestId: "sub-4", file: "j.jsonl" });
+      const snap4 = c4.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      expect(snap4.barrier).toBe(4);
+      expect(new Set(sess(c.frames())).size).toBe(3);
+      expect(errFrames(c).filter((f) => f.code === 4404 || f.code === 4409).length).toBe(0);
+      expect(errFrames(c4).filter((f) => f.code === 4404 || f.code === 4409).length).toBe(0);
+    } finally {
+      await d.dispose();
+    }
+  });
+
   it("D7 3b2b-R2：journal-only 订阅期 session 恢复+二次装载——续编行恰一次达 A（load 分发与活跃订阅协同）；后续通知不重复", async () => {
     const d = await dualRig();
     try {

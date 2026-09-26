@@ -175,6 +175,20 @@ describe("session-projection 3b-2b-R3/R4/R6（GPT 65→修复）", () => {
     payload: { kind: "prompt", rawText: "你好", attachments: [], sentAt: "2026-09-28T00:00:00Z" } });
   const goodConsumed = JSON.stringify({ t: "consumed", intentId: "I1", anchorEntryId: "u1", intervalEnd: { entryId: "a1", lengthHash: "x" } });
 
+  it("3b2c-Y2：归因匹配域=进入和解的意图（prompt/steer/followUp）——abort/takeover 合法行不消费序号", () => {
+    // 同 textHash 的 abort enqueue（schema 合法）+ 真 prompt enqueue：user 只应命中 prompt 意图
+    const abortEnqueue = JSON.stringify({ t: "enqueue", intentId: "IA", sessionId: "s1", leafId: "l1", generation: 1,
+      matchKey: matchKeyOf("你好", [], 0),
+      payload: { kind: "abort", rawText: "你好", attachments: [], sentAt: "2026-09-28T00:00:00Z" } });
+    const text = abortEnqueue + "\n" + goodEnqueue + "\n";
+    const r = journalAttributionOf(text);
+    expect(r.rejected).toBe(0); // abort 行 schema 合法——不属判坏
+    expect(r.enqueues.map((e) => e.intentId)).toEqual(["I1"]); // 但不入匹配域（旧代码会消费 ordinal 挤占真意图）
+    // 端到端：user 消息归因到 I1（若 abort 参与匹配，第一个同键位被 IA 占走→错配）
+    const rows = project(msgLine("u1", "user", "你好") + "\n", [enqueue("I1", "你好", 0, 1)]);
+    expect(rows[0]?.event.intentId).toBe("I1");
+  });
+
   it("R3：坏 enqueue/consumed 行不采信并计数；非 JSON/其他行型不计入 rejected；撕裂尾不参与", () => {
     const badMissing = JSON.stringify({ t: "enqueue", intentId: "BAD", generation: 1.5, matchKey: matchKeyOf("你好", [], 0) }); // 缺 sessionId/leafId+generation 非整数
     const badNullMk = JSON.stringify({ t: "enqueue", intentId: "BAD2", sessionId: "s", leafId: "l", generation: 1, matchKey: null });

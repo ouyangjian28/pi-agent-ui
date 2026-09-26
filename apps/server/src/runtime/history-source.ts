@@ -66,17 +66,21 @@ export class RealReader implements HistoryReaderPort {
     const { fh } = await openSafeFile(absPath);
     try {
       const [buf, st] = await Promise.all([readBounded(fh, this.maxBytes, absPath), fh.stat()]);
-      const text = buf.toString("utf8");
-      // 3b2b-R5：完整行含 U+FFFD=fail-closed（unreadable，可重试）。合法性论证：
-      // ①合法产物（我方写的 journal/session）完整行永不产生 U+FFFD——完整行里出现即真损坏；
-      // ②有损解码等价类（字节 ff vs fe 都解出 \uFFFD）会让同 digest 不同字节序列通过前缀校验
-      //  （假前缀）——拒绝含 U+FFFD 的完整行后，接受面上的行字符串与字节序列一一对应，
-      //  scanDigest 的字符串级比对获得字节级判等力；③撕裂尾（末段无 \n）可能含半个多字节
-      //  字符——本就不发布，容忍（偏移漂移同样不发布不观察）。
-      const lastNl = text.lastIndexOf("\n");
-      if (text.slice(0, lastNl + 1).includes("\uFFFD")) {
+      // 3b2c-F1-05：合法性判据=字节级（非字符值）——完整前缀（末 \n 前）用 fatal UTF-8 解码：
+      // 非法编码（0xff/0xfe/断裂多字节）拒；合法字符值（含真实用户输入的 U+FFFD=EF BF BD）放行
+      // （旧判据「完整行含 U+FFFD 即拒」会误杀含该合法字符的整文件）。撕裂尾（末段无 \n）
+      // lenient 解码容忍（本就不发布；补全后重读定位自然正确）。完整前缀字节↔字符串一一对应，
+      // scanDigest 字符串比对保有字节级判等力（有损解码等价类仍封死）。
+      const lastNl = buf.lastIndexOf(0x0a);
+      const prefix = buf.subarray(0, lastNl + 1);
+      const tail = buf.subarray(lastNl + 1);
+      let text: string;
+      try {
+        text = new TextDecoder("utf-8", { fatal: true }).decode(prefix);
+      } catch {
         throw new SafeOpenError("read-failed", absPath, "invalid-utf8-complete-line");
       }
+      if (tail.length > 0) text += new TextDecoder("utf-8").decode(tail);
       return { text, identity: `${st.dev}:${st.ino}` };
     } finally {
       await fh.close().catch(() => {});
