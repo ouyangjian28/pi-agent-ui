@@ -1,5 +1,5 @@
 {
-  "description": "契约 v1.2 §5.4 sanitizer 人工 golden 向量（期望值手写；测试=真实现对拍人工期望，非自证；c4 送审逐条审定）；B07 有界量词回归（二次方回溯防护+超界语义文档化）",
+  "description": "契约 v1.2 §5.4 sanitizer 人工 golden 向量（期望值手写；测试=真实现对拍人工期望，非自证；c4 送审逐条审定）；B07 有界量词回归（二次方回溯防护+超界语义文档化）；C4 POSIX 多段路径整体消费（GPT 3b2d D12）",
   "vectors": [
     {
       "name": "多段 POSIX 绝对路径遮蔽",
@@ -563,6 +563,69 @@
         "truncated": false
       },
       "limit": 200
+    },
+    {
+      "name": "C4/D12 POSIX 末段>255：整令牌遮（尾不回拉预览）",
+      "kind": "text",
+      "limit": 80,
+      "input": "/home/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaD12_PRIVATE_TAIL",
+      "expect": {
+        "text": "[path]",
+        "truncated": false
+      },
+      "note": "GPT 3b2d D12——旧规则只吃末段前255字，替换缩短把80界外密码尾拉回；新规则尾随余段整体消费"
+    },
+    {
+      "name": "C4 末段254（界内）：整遮",
+      "kind": "text",
+      "limit": 200,
+      "input": "/home/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaTAIL",
+      "expect": {
+        "text": "[path]",
+        "truncated": false
+      }
+    },
+    {
+      "name": "C4 末段255（界值）：整遮",
+      "kind": "text",
+      "limit": 200,
+      "input": "/home/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaTAIL",
+      "expect": {
+        "text": "[path]",
+        "truncated": false
+      }
+    },
+    {
+      "name": "C4 末段256（界外1）：整遮",
+      "kind": "text",
+      "limit": 200,
+      "input": "/home/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaTAIL",
+      "expect": {
+        "text": "[path]",
+        "truncated": false
+      }
+    },
+    {
+      "name": "C4 首段>255+后继段：整令牌遮（第二分支）",
+      "kind": "text",
+      "limit": 200,
+      "input": "/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/tail/secret_tail",
+      "expect": {
+        "text": "[path]",
+        "truncated": false
+      },
+      "note": "首段超长旧规则从后继段才起匹配→前缀透出；新第二分支=超长首段+≥1后继段整体遮"
+    },
+    {
+      "name": "C4 单段>255 仍不遮（声明语义保持）",
+      "kind": "text",
+      "limit": 200,
+      "input": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expect": {
+        "text": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "truncated": true
+      },
+      "note": "单段=命名性内容允许透出（vector45 同语义；limit 200 截断）"
     }
   ]
 }

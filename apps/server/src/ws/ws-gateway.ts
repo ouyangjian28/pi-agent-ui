@@ -740,12 +740,13 @@ export class WsGateway {
       // 同步回调返回后才写：回调侧 releaseWatcher 读到 null → 漏停孤儿 stop（N12）。
       if (stop !== null) w.unobserve = stop;
       // B4（3b2c）：observe 右侧执行期间源可能同步终止（onUnavailable/onInvalidate 摘除本 rec）。
-      // 复核不在位→立即停孤儿 stop（引用已消费即结算）；订阅已由回调侧退役——
-      // handleSubscribe 在 st.subs 复核后丢弃死快照，不再 emitFrames。
+      // 复核不在位→立即停孤儿 stop；订阅已由回调侧退役——handleSubscribe 在 st.subs 复核后丢弃死快照。
+      // C3（3b2e/GPT 3b2d D8）：消费判定归一为「真取得观察绑定（stop 非 null）」——同步终止
+      // 且 stop=null=从未建立绑定，本流引用未消费，settleLoadRef 须走 release（不得从 rec 已摘
+      // 反推已消费）；非 null：停孤儿 stop 后已结算，不再双释放。
       if (this.watchers.get(file) !== rec) {
         try { stop?.(); } catch { /* 宿主清理异常不阻断 */ }
         this.audit(`observe-sync-terminated conn=${st.id} file=${file}`);
-        return true; // 本流 observe 消费了引用（stop 即停=绑定已结算）
       }
       return stop !== null;
     }

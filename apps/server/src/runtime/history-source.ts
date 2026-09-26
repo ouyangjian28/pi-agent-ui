@@ -7,8 +7,8 @@
 //  ③ 引用纪律：每次 load 解析=+1 引用；observe 消耗一引用并绑定 sinks；release 消耗一引用——
 //    最后引用离开且未绑定时槽关闭（unobserve 同理）。网关纪律=每次 load 解析必配对 observe 或 release。
 //  ④ 初扫=先建 watcher（同步失败→抛错→load=null，R6）；读→投影（防御出口）→提交 entry。
-//    读期间错误进 earlyWatchErrors（提交后核账→watch-error-early 关闭）；读期间 release→releasePending
-//    （提交即弃）。
+//    读期间错误进 earlyWatchErrors（提交后核账→watch-error-early 关闭）；读期间 release→
+//    撤该参与者票据（结算返 null）；换代间隙到达→releaseCarry 结转由下一代吸收（3b2c-B1）。
 //  ⑤ watcher 活跃期错误：先重叠挂新（关闭事件丢失窗口；失败→unavailable watch-failed）再排重扫。
 // 语义要点（冻结落位，沿 3b-2a 首版）：
 //  ① 先监视后读取——观察期无窗口；建立失败=load=null（4402 fail-closed，不降快照）。
@@ -92,6 +92,10 @@ interface GenEntry {
   disposed: boolean;
   state: "active" | "closed";
   identity: string;
+  /** 注册序（3b2e-C2）：每次 watcher 注册独立递增。 */
+  regCounter: number;
+  /** 当前有效注册（3b2e-C2）：rearm 重挂后旧句柄回调凭 reg 失效（同代亦然，GPT 3b2d D3/D15）。 */
+  activeReg: number;
   /** 已发布基线（locator+digest；增量 diff 依据）。 */
   baseline: { locator: string; digest: string }[];
   /** 基线行缓存（load-join 返回副本；追加行重放给 onAppend）。 */
@@ -154,8 +158,7 @@ export class FileHistorySource implements HistorySourcePort {
   }
 
   private slotOf(file: string): FileSlot | null {
-    const abs = resolveWithinRoots(this.opts.journalFor !== undefined ? this.opts.journalFor(file) : file, this.opts.roots);
-    if (abs === null) {
+    const abs = resolveWithinRoots(this.opts.journalFor !== undefined ? this.opts.journalFor(file) : file, this.opts.roots);    if (abs === null) {
       this.audit(`load-rejected file=${file} reason=outside-roots`);
       return null;
     }
@@ -230,10 +233,23 @@ export class FileHistorySource implements HistorySourcePort {
     slot.awaitingBind += 1;
   }
 
+  /** 建立一次观察注册（3b2e-C2）：每次注册独立 reg 身份，activeReg 先于 watch() 生效——
+   *  rearm/重挂后旧句柄闭包（旧 reg）在 genNotice/genError 被 reg 门拒绝（同代亦然）。 */
+  private registerWatch(abs: string, slot: FileSlot, entry: GenEntry): { close(): void } {
+    const reg = ++entry.regCounter;
+    entry.activeReg = reg;
+    return this.watcherFactory().watch(
+      abs,
+      () => this.genNotice(slot, entry, reg),
+      (e) => this.genError(slot, entry, e, reg),
+    );
+  }
+
   /** 初扫（在 scanInFlight 内运行）：先建 watcher→读→投影防御→提交。任何失败→false（load=null）。 */
   private async initialScan(slot: FileSlot): Promise<boolean> {
     const { file, abs } = slot;
-    slot.earlyWatchErrors = 0; // B1/N2：每次初扫清零——上一代错误不污染本代
+    slot.earlyWatchErrors = 0; // B1/N2：每次初扫清零——上一代错误不污染本代（D1：合法旧 held 引用保槽时本行为必要防线）
+    slot.dirtyPending = false; // C1/D14（3b2e）：失败代折叠的 dirty 不跨入新初扫——新代无 notice 不得多读
     // 3b2c-B2：观察票据=entry 本体（提交前由 slot.pendingEntry 认领；回调不捕获 slot 现态）
     const entry: GenEntry = {
       file, abs, disposed: false, state: "active",
@@ -242,15 +258,13 @@ export class FileHistorySource implements HistorySourcePort {
       baselineRows: [],
       watchers: [],
       sinks: null,
+      regCounter: 0,
+      activeReg: 0,
     };
     slot.pendingEntry = entry;
     let handle: { close(): void };
     try {
-      handle = this.watcherFactory().watch(
-        abs,
-        () => this.genNotice(slot, entry),
-        (e) => this.genError(slot, entry, e),
-      );
+      handle = this.registerWatch(abs, slot, entry);
       entry.watchers.push(handle);
     } catch (e) {
       slot.pendingEntry = null;
@@ -369,13 +383,16 @@ export class FileHistorySource implements HistorySourcePort {
 
   /** 观察通知（票据=entry 本体，3b2c-B2）：初扫期（pendingEntry===entry）折 dirty；
    *  提交期（slot.entry===entry 且活跃）按绑定态推进；其余=旧代票据，丢弃。
-   *  原始回调直调（绕过句柄 close 门）同样被本身份门挡下——GPT 3b2b N4。 */
-  private genNotice(slot: FileSlot, entry: GenEntry): void {
+   *  原始回调直调（绕过句柄 close 门）同样被本身份门挡下——GPT 3b2b N4。
+   *  C2（3b2e/GPT 3b2d D15）：提交期另验 reg——同代 rearm 后的退役句柄（旧注册闭包）
+   *  不得驱动读（不依赖句柄 close 门，端口边界迟到旧通知即拒）。 */
+  private genNotice(slot: FileSlot, entry: GenEntry, reg: number): void {
     if (slot.pendingEntry === entry) {
       slot.dirtyPending = true; // 本代初扫在飞：折给完成后的跟进
       return;
     }
     if (slot.entry !== entry || entry.disposed || entry.state !== "active") return; // 旧代票据：丢弃
+    if (reg !== entry.activeReg) { this.audit(`notice-stale-reg-dropped file=${slot.file}`); return; } // 同代退役注册：丢弃
     if (entry.sinks === null || slot.scanInFlight !== null) { slot.dirtyPending = true; return; } // 未绑定/扫描在飞：折待补扫
     this.queueRescan(slot, "notice");
   }
@@ -408,6 +425,7 @@ export class FileHistorySource implements HistorySourcePort {
         slot.dirtyPending = false;
         this.queueRescan(slot, "follow-up"); // 在飞期折叠的恰一次跟进
       }
+      this.maybeReapSlot(slot); // C1/D2（3b2e）：在飞重扫曾挡住 unbind/release 侧回收——重扫终了的身份安全收尾点补收（静止槽不滞留 Map）
     }
   }
 
@@ -463,7 +481,7 @@ export class FileHistorySource implements HistorySourcePort {
     if (slot.entry !== entry || entry.disposed || entry.state !== "active") return;
     let fresh: { close(): void };
     try {
-      fresh = this.watcherFactory().watch(entry.abs, () => this.genNotice(slot, entry), (e) => this.genError(slot, entry, e));
+      fresh = this.registerWatch(entry.abs, slot, entry);
     } catch (e) {
       this.audit(`watch-rearm-failed file=${entry.file} kind=${errKind(e)}`);
       this.deliverUnavailable(slot, entry, "watch-failed");
@@ -478,7 +496,7 @@ export class FileHistorySource implements HistorySourcePort {
   /** watcher 错误：初扫期（entry 未提交）计入早期核账（装载 fail-closed）；活跃期先重叠挂新（关事件丢失窗口；失败→unavailable），再排重扫核实。 */
   /** 观察错误（票据=entry 本体，3b2c-B2/N3）：初扫期计入本代核账；活跃期重叠挂新；
    *  旧代票据直调（绕过句柄 close 门）丢弃——不得杀伤新代。 */
-  private genError(slot: FileSlot, entry: GenEntry, err: unknown): void {
+  private genError(slot: FileSlot, entry: GenEntry, err: unknown, reg: number): void {
     if (slot.pendingEntry === entry) { // 本代初扫期错误：不给可疑快照（提交后核账关停）
       slot.earlyWatchErrors += 1;
       this.audit(`watch-error-early file=${slot.file} kind=${errKind(err)}`);
@@ -487,6 +505,10 @@ export class FileHistorySource implements HistorySourcePort {
     }
     if (slot.entry !== entry || entry.disposed || entry.state !== "active") {
       this.audit(`watch-error-stale-dropped file=${slot.file} kind=${errKind(err)}`); // 旧代票据：丢弃（N3）
+      return;
+    }
+    if (reg !== entry.activeReg) { // C2（3b2e/GPT 3b2d D3）：同代退役注册——不得驱动 rearm 杀当前观察
+      this.audit(`watch-error-stale-reg-dropped file=${slot.file} kind=${errKind(err)}`);
       return;
     }
     this.audit(`watch-error file=${slot.file} kind=${errKind(err)}`);

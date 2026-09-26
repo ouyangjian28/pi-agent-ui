@@ -86,6 +86,10 @@ class FakeHistory implements HistorySourcePort {
   failNextObserve = false;
   /** 3b2c-B4 探针：observe 右侧在返回 stop 前同步回调 onUnavailable（同步终止） */
   syncUnavailableOnObserve = false;
+  /** 3b2e-C3 探针（GPT 3b2d D8）：observe 同步终止且返回 null——从未建立观察绑定 */
+  syncNullOnObserve = false;
+  /** 3b2e-C3 变体：同步 onInvalidate("replace") 且返回 null */
+  syncNullOnInvalidateOnObserve = false;
   /** 3b2c-B4：stop 闭包调用计数（孤儿 stop 是否被即停） */
   readonly stopped: string[] = [];
   /** B3：受控挂起——文件名命中时 load 等待对应 resolver（造 await 窗口） */
@@ -103,6 +107,8 @@ class FakeHistory implements HistorySourcePort {
     if (!this.observeGate()) return null; // R1：无活跃代可绑（换代竞态）
     this.sinks.set(file, sinks);
     if (this.syncUnavailableOnObserve) sinks.onUnavailable?.("deleted"); // B4：赋值返回前同步终止
+    if (this.syncNullOnObserve) { sinks.onUnavailable?.("deleted"); return null; } // C3/D8：同步终止+无绑定
+    if (this.syncNullOnInvalidateOnObserve) { sinks.onInvalidate?.("replace"); return null; } // C3 变体
     return () => { this.stopped.push(file); this.sinks.delete(file); };
   }
   release(file: string): void { this.releaseCalls.push(file); }
@@ -1697,6 +1703,59 @@ describe("3b2c-B3/B4——引用恰一次配对与同步终止", () => {
       expect(errFrames(c).some((f) => f.code === 4402)).toBe(true); // 同步终止→4402 历史源不可用
       expect(r.history.stopped.filter((f) => f === "x.jsonl")).toHaveLength(1); // 孤儿 stop 恰一次（旧=0 丢失）
       expect(r.audits.some((l) => l.includes("observe-sync-terminated"))).toBe(true);
+    } finally {
+      await r.dispose();
+    }
+  });
+});
+
+// ── 3b2e-C3（GPT 3b2d D8/D9）：observe 返回 null ≠ 已消费——未取得绑定必走未消费结算 ──
+describe("3b2e-C3——observe null 消费判定", () => {
+  it("C3/D8：同步 onUnavailable+observe 返回 null→无死快照+无孤儿 stop+引用必释放（恰一次）", async () => {
+    const r = await makeRig();
+    try {
+      r.history.put("x.jsonl", makeRows(2));
+      r.history.syncNullOnObserve = true; // 同步终止且从未建立观察绑定
+      const c = await authed(r);
+      await c.say({ t: "subscribe", requestId: "s1", file: "x.jsonl" });
+      await new Promise((res) => setTimeout(res, 8));
+      expect(c.frames().some((f) => f.t === "snapshot")).toBe(false); // 死快照不发
+      expect(errFrames(c).some((f) => f.code === 4402)).toBe(true);   // 同步终止→4402
+      expect(r.history.stopped).toHaveLength(0);                      // stop 从未取得——无可停
+      expect(r.history.releaseCalls.filter((f) => f === "x.jsonl")).toHaveLength(1); // null≠已消费：未消费出口必释放（旧代码=0 泄漏）
+      expect(r.audits.some((l) => l.includes("observe-sync-terminated"))).toBe(true);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("C3 变体：同步 onInvalidate+observe 返回 null→4409+无死快照+释放恰一次", async () => {
+    const r = await makeRig();
+    try {
+      r.history.put("x.jsonl", makeRows(2));
+      r.history.syncNullOnInvalidateOnObserve = true;
+      const c = await authed(r);
+      await c.say({ t: "subscribe", requestId: "s1", file: "x.jsonl" });
+      await new Promise((res) => setTimeout(res, 8));
+      expect(c.frames().some((f) => f.t === "snapshot")).toBe(false);
+      expect(errFrames(c).some((f) => f.code === 4409)).toBe(true);   // 盘面失效→4409 可重试
+      expect(r.history.stopped).toHaveLength(0);
+      expect(r.history.releaseCalls.filter((f) => f === "x.jsonl")).toHaveLength(1);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("C3/D9：load 本就 null（文件缺失）→不取引用不释放（null 前置于一切）", async () => {
+    const r = await makeRig();
+    try {
+      r.history.missing("x.jsonl"); // load 永返 null
+      const c = await authed(r);
+      await c.say({ t: "subscribe", requestId: "s1", file: "x.jsonl" });
+      await new Promise((res) => setTimeout(res, 8));
+      expect(c.frames().some((f) => f.t === "snapshot")).toBe(false);
+      expect(r.history.releaseCalls).toHaveLength(0); // 从未取得引用——零释放
+      expect(r.history.observeCalls).toHaveLength(0);
     } finally {
       await r.dispose();
     }

@@ -870,3 +870,119 @@ describe("FileHistorySource 3b2c-B1/B2——槽位代次隔离+原始回调身�
     expect(rows2).toEqual([]);
   });
 });
+
+// ── 3b2e-C1/C2（GPT 3b2d D1/D2/D3/D4/D14/D15）：生命周期收口+同代重挂退役句柄 reg 门 ──
+describe("FileHistorySource 3b2e-C1/C2——生命周期收口+watcher 注册身份", () => {
+  it("C1/D1+D14：合法旧 held 引用保槽——同槽再起靠两行清零存活（错误+dirty 不跨代）", async () => {
+    const text = `${jline(1)}\n`;
+    const r = new FakeReader();
+    const held3 = new HeldRead();
+    r.reads.push({ text, identity: "1:1" }, new Error("rescan boom"), held3, { text, identity: "1:1" });
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");                 // 初扫#1 → entryA
+    const skA = makeSinks();
+    const stopA = h.src.observe("a.jsonl", skA.s);
+    void h.src.load("a.jsonl");                  // 他方 C 合法加入活代（awaitingBind=1——跨代延续）
+    h.watcher.handles[0]!.triggerNotice();       // A 重扫读#2 失败 → unavailable → entryA 关
+    await until(() => skA.log.unavailables.length === 1);
+    stopA?.();                                   // no-op（代已关）
+    expect(h.audits.some((l) => l.includes("slot-reaped"))).toBe(false); // C 引用在——同槽再起可达
+    const pB = h.src.load("a.jsonl");            // B 初扫（读#3 挂起）
+    await until(() => h.watcher.handles.length === 2);
+    h.watcher.handles[1]!.rawError(new Error("early boom 2")); // 本代早期错误（earlyWatchErrors=1+dirty 留痕）
+    held3.resolve({ text, identity: "1:1" });
+    await expect(pB).resolves.toBeNull();        // fail-closed（watch-error-early）
+    expect(h.audits.some((l) => l.includes("slot-reaped"))).toBe(false); // 槽仍存活（C 在）
+    const rowsD = await h.src.load("a.jsonl");   // 读#4——同槽新初扫：靠 earlyWatchErrors 清零存活（D1）
+    expect(rowsD).not.toBeNull();
+    expect(h.audits.some((l) => l.includes("loaded file=a.jsonl") && l.includes("dirty=false"))).toBe(true); // D14：旧 dirty 不继承
+    const skD = makeSinks();
+    const stopD = h.src.observe("a.jsonl", skD.s);
+    await drain(8);
+    expect(r.calls).toBe(4);                     // 新代无 notice 不得多读（激活无补扫）
+    stopD?.();
+  });
+
+  it("C1/D2：挂起重扫终了收尾回收无主槽（不滞留 Map）", async () => {
+    const text = `${jline(1)}\n`;
+    const r = new FakeReader();
+    const held2 = new HeldRead();
+    r.reads.push({ text, identity: "1:1" }, held2);
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");
+    const sk = makeSinks();
+    const stop = h.src.observe("a.jsonl", sk.s);
+    h.watcher.handles[0]!.triggerNotice();       // 重扫挂起（读#2 held）
+    await until(() => r.calls === 2);
+    stop!();                                     // 最后 sink 离开——scanInFlight 在飞挡住回收
+    expect(activeHandles(h.watcher)).toHaveLength(0); // 句柄全关（closeEntry）
+    expect(h.audits.some((l) => l.includes("slot-reaped"))).toBe(false); // 在飞期不回收
+    held2.resolve({ text, identity: "1:1" });    // 放行旧读（entry 已 disposed → 丢弃）
+    await until(() => h.audits.some((l) => l.includes("slot-reaped")));   // 重扫 finally 补回收（D2 修复面）
+  });
+
+  it("C2/D15：同代 rearm 后旧句柄 rawNotice 不得多读（reg 注册身份门）", async () => {
+    const text = `${jline(1)}\n`;
+    const r = new FakeReader();
+    r.reads.push({ text, identity: "1:1" }, { text, identity: "1:1" });
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");
+    const sk = makeSinks();
+    const stop = h.src.observe("a.jsonl", sk.s);
+    h.watcher.handles[0]!.triggerNotice();       // 重扫+rearm（新句柄=新 reg；旧句柄关）
+    await until(() => r.calls === 2 && h.watcher.handles.length === 2);
+    expect(h.watcher.handles[0]!.closed).toBe(true);
+    h.watcher.handles[0]!.rawNotice();           // 旧注册闭包直调（绕句柄 closed 门）
+    await drain(8);
+    expect(r.calls).toBe(2);                     // 不得驱动读
+    expect(sk.log.invalidates).toEqual([]);      // 不得触发换身份误判
+    expect(h.audits.some((l) => l.includes("notice-stale-reg-dropped"))).toBe(true);
+    stop?.();
+  });
+
+  it("C2/D3：同代旧句柄 rawError 不得驱动 rearm 杀当前观察", async () => {
+    const text = `${jline(1)}\n`;
+    const r = new FakeReader();
+    r.reads.push({ text, identity: "1:1" }, { text, identity: "1:1" });
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");
+    const sk = makeSinks();
+    const stop = h.src.observe("a.jsonl", sk.s);
+    h.watcher.handles[0]!.triggerNotice();
+    await until(() => r.calls === 2 && h.watcher.handles.length === 2);
+    h.watcher.failNextSetup = true;              // 若被旧错误驱动 rearm → 建立失败 → watch-failed 杀观察
+    h.watcher.handles[0]!.rawError(new Error("old handle error"));
+    await drain(8);
+    expect(sk.log.unavailables).toEqual([]);     // 当前观察不受旧句柄错误影响
+    expect(activeHandles(h.watcher)).toHaveLength(1);
+    expect(h.audits.some((l) => l.includes("watch-error-stale-reg-dropped"))).toBe(true);
+    stop?.();
+  });
+
+  it("C2/D4（GPT 3b2d）：合法引用路径同槽换代——旧闭包直调不扰新代", async () => {
+    const text = `${jline(1)}\n`;
+    const r = new FakeReader();
+    r.reads.push({ text, identity: "1:1" }, { text: `${text}${jline(2)}\n`, identity: "9:9" }, { text, identity: "1:1" });
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");                 // entryA
+    const skA = makeSinks();
+    const stopA = h.src.observe("a.jsonl", skA.s);
+    void h.src.load("a.jsonl");                  // 他方 C 合法 load 保槽（awaitingBind=1）
+    h.watcher.handles[0]!.triggerNotice();       // 重扫 identity 9:9 → invalidate(replace) → entryA 关
+    await until(() => skA.log.invalidates.length === 1);
+    stopA?.();
+    const rowsB = await h.src.load("a.jsonl");   // B 新初扫（读#3；同槽——C 引用在）
+    expect(rowsB).not.toBeNull();
+    expect(h.audits.some((l) => l.includes("slot-reaped"))).toBe(false);
+    const skB = makeSinks();
+    const stopB = h.src.observe("a.jsonl", skB.s);
+    const callsBefore = r.calls;                 // =3
+    h.watcher.handles[0]!.rawNotice();           // 旧代闭包直调（entry 票据门）
+    h.watcher.handles[0]!.rawError(new Error("old gen error"));
+    await drain(8);
+    expect(r.calls).toBe(callsBefore);           // 新代不被驱动
+    expect(skB.log.invalidates).toEqual([]);     // 新代不被杀伤
+    expect(skB.log.unavailables).toEqual([]);
+    stopB?.();
+  });
+});
