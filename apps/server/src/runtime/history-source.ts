@@ -172,6 +172,9 @@ interface FileSlot {
 export class FileHistorySource implements HistorySourcePort {
   private readonly slots = new Map<string, FileSlot>();
   private genSeq = 0;
+  /** F4-2（fix4，GPT fix3 F3R-DISPOSE）：源级终止标记——dispose 后一切入口（load/observe/
+   *  初扫/重扫）拒绝起步：已排队未启动的初扫微任务在脱离 Map 的旧槽上建代+开 watcher=漏口（GPT 独立复现）。 */
+  private srcDisposed = false;
 
   constructor(private readonly opts: FileHistorySourceOpts) {}
 
@@ -191,7 +194,10 @@ export class FileHistorySource implements HistorySourcePort {
    *  生产路径不依赖本方法（网关 unobserve→releaseCarry 收口自然停；服务进程退出走进程边界）；
    *  测试宿主与嵌入式宿主用它保证 tmp 目录/句柄不跨用例泄漏。幂等，可重复调。 */
   dispose(): void {
+    if (this.srcDisposed) return; // 幂等
+    this.srcDisposed = true;
     for (const slot of this.slots.values()) {
+      for (const t of slot.pendingTickets) t.released = true; // 撤销待提交票据（在飞 load 一律 fail-closed）
       for (const entry of [slot.entry, slot.pendingEntry]) {
         if (entry === null) continue;
         entry.disposed = true; // 在飞续体/通知全失效（各回调身份门自弃）
@@ -231,6 +237,7 @@ export class FileHistorySource implements HistorySourcePort {
    * 加入语义：活跃代→基线快照副本+引用（R1）；初扫在飞→await 同一 promise（单飞）。
    */
   async load(file: string): Promise<readonly ScanRow[] | null> {
+    if (this.srcDisposed) return null; // F4-2：终止后拒绝起步（不重建槽）
     const slot = this.slotOf(file);
     if (slot === null) return null;
     const active = slot.entry;
@@ -314,6 +321,7 @@ export class FileHistorySource implements HistorySourcePort {
 
   /** 初扫（在 scanInFlight 内运行）：先建 watcher→读→投影防御→提交。任何失败→false（load=null）。 */
   private async initialScan(slot: FileSlot): Promise<boolean> {
+    if (this.srcDisposed) return false; // F4-2：dispose 先于排队微任务执行——不建代不开 watcher
     const { file, abs } = slot;
     slot.earlyWatchErrors = 0; // B1/N2：每次初扫清零——上一代错误不污染本代（D1：合法旧 held 引用保槽时本行为必要防线）
     slot.dirtyPending = false; // C1/D14（3b2e）：失败代折叠的 dirty 不跨入新初扫——新代无 notice 不得多读
@@ -389,6 +397,7 @@ export class FileHistorySource implements HistorySourcePort {
 
   /** 激活=绑定 sinks（消耗一次装载引用）。未激活期通知在此时一次重扫收敛。返回解绑闭包。 */
   observe(file: string, sinks: HistorySinks, opts?: { consumeLoadRef?: boolean }): (() => void) | null {
+    if (this.srcDisposed) return null; // F4-2：终止后拒绝新绑定
     const slot = this.slots.get(file);
     const entry = slot?.entry ?? null;
     if (slot === undefined || entry === null || entry.disposed || entry.state !== "active") return null;
@@ -510,6 +519,7 @@ export class FileHistorySource implements HistorySourcePort {
 
   /** 单飞重扫：占用 scanInFlight；在飞期新通知折 dirtyPending，完成后恰一次跟进。 */
   private async runRescan(slot: FileSlot, why: string): Promise<void> {
+    if (this.srcDisposed) return; // F4-2：终止后不重扫（dispose 已清 entry，身份门亦会拦；此处=入口显式拒绝）
     const entry = slot.entry;
     if (entry === null || entry.disposed || entry.state !== "active") return;
     if (slot.scanInFlight !== null) { slot.dirtyPending = true; return; } // 兜底（queueRescan 已挡并发）

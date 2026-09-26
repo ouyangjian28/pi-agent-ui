@@ -14,7 +14,7 @@ import { FileHistorySource, type HistoryReaderPort, type HistoryWatcherPort } fr
 import { DualHistorySource } from "../../../apps/server/src/runtime/dual-history-source.ts";
 import { ComputeSemaphore } from "../../../apps/server/src/ws/compute-semaphore.ts";
 import type { RecoveryEvidenceSnapshot, BadJournalEntry } from "../../../apps/server/src/runtime/recover.ts";
-import type { ScanRow } from "@pi-agent-ui/protocol";
+import type { ScanRow, SessionStatus } from "@pi-agent-ui/protocol";
 import { fnv1a64Hex, matchKeyOf, validateClientFrame } from "@pi-agent-ui/protocol";
 
 const tick = (): Promise<void> => new Promise((res) => setImmediate(() => res()));
@@ -2352,13 +2352,13 @@ describe("ws-gateway 3b3-fix3：F2 提交窗口同步化（GPT 双微任务探�
     }
     throw new Error("pageThrough：翻页不收敛");
   }
-  /** 双微任务：load() 调用点排队 M1，M1 排队 M2=动作。fix2 时代 await syncIndex 的恢复排在 M1 之后、
-   * M2 之前——M2 落在「索引已取得/未提交」窗口内即可打穿。fix3 同步化后提交段（st.closed 复核→
-   * syncIndex→引擎→绑定→快照）在 load 恢复的同一微任务内一气呵成，M2 只能落在提交前（合法拦截）
-   * 或提交后（合法后置生命周期），不存在中间态。断言按「最终零残留/每引用恰一次结算/不复活退役流」。 */
-  const afterMicrotasks = (depth: number, action: () => void): void => {
-    for (let i = 0; i < depth; i++) queueMicrotask(() => {});
-    queueMicrotask(action);
+  /** 真嵌套（fix4 F4-3，GPT fix3 F3R-TEST 勘正）：load 包装内排队 M1，M1 内再排 M2=动作。
+   *  时序：包装体先排 M1、返回 p 后调用方 await 才排 L → 序=[M1, L, M2]。L（load 续体=同步
+   *  提交段）一气呵成时 M2 落在提交后=合法后置生命周期；L 内任一 await 挂起（如恢复 async 的
+   *  窄变异 M-F2）时 M2 落进「索引已取得/未提交」窗口=打穿面。旧 afterMicrotasks（空微任务垫
+   *  后排队动作）恒把动作排在 L 之前=只测提交前置门（假嵌套——GPT 复现窄变异三例 SURVIVED）。 */
+  const nestAcrossCommit = (action: () => void): void => {
+    queueMicrotask(() => queueMicrotask(action));
   };
 
   it("F2/P-CLOSE-MICRO 提交窗双微任务关连接→要么关前拦截（零绑定）要么关后收口（绑定即清），恒零残留+引用恰一次", async () => {
@@ -2370,20 +2370,22 @@ describe("ws-gateway 3b3-fix3：F2 提交窗口同步化（GPT 双微任务探�
       const origLoad = r.history.load.bind(r.history);
       (r.history as { load: (f: string) => Promise<readonly ScanRow[] | null> }).load = (f: string) => {
         const p = origLoad(f);
-        afterMicrotasks(2, () => { a.closedByTransport(); }); // M2=提交边界两侧任意侧
+        nestAcrossCommit(() => { a.closedByTransport(); }); // M2=提交边界两侧任意侧（真嵌套）
         return p;
       };
       await a.say({ t: "subscribe", requestId: "s1", file });
-      await until(() => r.history.releaseCalls.filter((x) => x === file).length === 1, 3000);
-      // 关后无新绑定：若绑定发生在关前（合法），close 生命周期必须即清；若关前已拦，则从未绑定
+      await until(() => r.history.releaseCalls.some((x) => x === file) || r.history.stopped.includes(file), 3000);
+      // 关后无新绑定：真嵌套下动作=提交边界两侧任意侧——若绑定已发生（提交后关），close 生命周期必须即清
+      //（引用已消费进 observe：结算面=stop 非 release）；若提交前被拦，则从未绑定（结算面=release 恰一次）
       const bound = r.history.observeCalls.includes(file);
       if (bound) {
         await until(() => r.history.stopped.includes(file), 3000);
         expect(r.history.sinks.has(file)).toBe(false); // 最终零残留
+        expect(r.history.releaseCalls.filter((x) => x === file)).toHaveLength(0); // 引用已消费：结算面=stop
       } else {
         expect(r.history.stopped).toEqual([]);
+        expect(r.history.releaseCalls.filter((x) => x === file)).toHaveLength(1); // 每引用恰一次结算
       }
-      expect(r.history.releaseCalls.filter((x) => x === file)).toHaveLength(1); // 每引用恰一次结算
       // 单微任务变体（动作=关闭落在提交微任务之前）：关前窗口必须被 st.closed 复核拦下
       const b = await authed(r);
       const origLoad2 = FakeHistory.prototype.load;
@@ -2393,7 +2395,8 @@ describe("ws-gateway 3b3-fix3：F2 提交窗口同步化（GPT 双微任务探�
         return p;
       };
       await b.say({ t: "subscribe", requestId: "s2", file });
-      await until(() => r.history.releaseCalls.filter((x) => x === file).length === 2, 3000);
+      // b 的 M1 关闭恒落在其 L（提交段）之前→关前拦截：引用恰一次 release（bound 首相=0/1 起步，b 结算后=1/2）
+      await until(() => r.history.releaseCalls.filter((x) => x === file).length === (bound ? 1 : 2), 3000);
       const boundCount = r.history.observeCalls.filter((x) => x === file).length;
       expect(boundCount).toBe(bound ? 1 : 0); // b 关前被拦：不新增任何绑定
     } finally {
@@ -2412,9 +2415,13 @@ describe("ws-gateway 3b3-fix3：F2 提交窗口同步化（GPT 双微任务探�
       const oldStream = (a.frames().find((f) => f.t === "snapshot") as Record<string, unknown>).streamId;
       const b = await authed(r);
       const origLoad = FakeHistory.prototype.load;
+      let armed = true; // 一次性闩：仅首个（=b）load 注入——后续订阅者（c）的 load 不得每次都在其提交后自爆换流撤帧
       (r.history as { load: (f: string) => Promise<readonly ScanRow[] | null> }).load = function (f: string) {
         const p = origLoad.call(this, f);
-        afterMicrotasks(2, () => { r.history.invalidate(file, "replace"); }); // M2=提交边界两侧任意侧
+        if (armed) {
+          armed = false;
+          nestAcrossCommit(() => { r.history.invalidate(file, "replace"); }); // M2=提交边界两侧任意侧（真嵌套）
+        }
         return p;
       };
       await b.say({ t: "subscribe", requestId: "b1", file });
@@ -2557,6 +2564,158 @@ describe("ws-gateway 3b3-fix3：F2 提交窗口同步化（GPT 双微任务探�
       expect(after).toBeDefined();
       expect(after!.streamId).not.toBe(inFlight!.streamId); // 新账本=新流身份
       expect(r.audits.some((l) => l.includes("publish-seq-mismatch"))).toBe(false); // 旧循环身份门自止，无互踩
+    } finally {
+      await r.dispose();
+    }
+  });
+});
+
+describe("ws-gateway 3b3-fix4：F4-1 同步可重入提交资格复核（GPT fix3 F3R-COMMIT 探针固化）", () => {
+  /** 与 unknownStatus 同形的完整状态（GPT 复跑口径：不依赖畸形返回值）。 */
+  const statusShape = (file: string): SessionStatus => ({
+    session: { file, sessionId: null },
+    process: { phase: "idle" },
+    turn: { phase: "idle" },
+    backgroundTasks: { availability: "unknown", activeCount: null },
+    reap: { eligible: false, idleElapsedMs: null, idleRemainingMs: null, idleMs: 0 },
+    recovery: { availability: "unavailable", resumeBlocked: null, diskBlocked: null, unknownEffectCount: null, unattributableFragments: null, intentsCount: null, settledCount: null, evidenceHash: null },
+    statusVersion: 0,
+    serverTimeMs: 0,
+  } as unknown as SessionStatus);
+
+  it("F4/P-SYNC-CLOSE startSnapshot 冻结 status 的同步回调内关连接→提交资格复核拦截：零绑定/引用恰一次 release/无死帧", async () => {
+    let fired = false;
+    let victim: FakeConn | null = null;
+    const r = await makeRig({
+      statusFor: (file) => {
+        if (file === "f.jsonl" && !fired && victim !== null) {
+          fired = true;
+          victim.closedByTransport(); // 同步关连接（宿主回调重入）——st.closed=true、conns 摘除
+        }
+        return statusShape(file);
+      },
+    });
+    try {
+      r.history.put("f.jsonl", makeRows(5));
+      const a = await authed(r);
+      victim = a;
+      await a.say({ t: "subscribe", requestId: "s-a", file: "f.jsonl" });
+      await until(() => fired);
+      await tick(); await tick(); await tick();
+      expect(fired).toBe(true); // 探针确实打进了提交段
+      // 资格拦截：无快照帧（未承诺任何帧）、无绑定、引用恰一次 release（未消费路径）
+      expect(a.frames().some((f) => f.t === "snapshot")).toBe(false);
+      expect(r.gw["watchers"].has("f.jsonl")).toBe(false); // observe 未发生
+      expect(r.history.releaseCalls.filter((f) => f === "f.jsonl").length).toBe(1);
+      expect(r.history.stopped.includes("f.jsonl")).toBe(false); // 未建绑定即无 stop 结算
+      expect(r.audits.some((l) => l.includes("subscribe-commit-recheck-fail") && l.includes("why=closed"))).toBe(true);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("F4/P-SYNC-REPLACE B 订阅的 statusFor 回调内同步 invalidate（A 已绑观察）→B 身份复核拦截：B 旧坐标零承诺/引用恰一次/新流可续订", async () => {
+    let armB = false; // 只在 B 的订阅在飞时触发（A 的 status 冻结不触发）
+    let fired = false;
+    const r = await makeRig({
+      statusFor: (file) => {
+        if (file === "f.jsonl" && armB && !fired) {
+          fired = true;
+          r.history.invalidate("f.jsonl", "replace"); // 同步换流（宿主回调重入）——onInvalidate→registry 换新索引+退役 A
+        }
+        return statusShape(file);
+      },
+    });
+    try {
+      r.history.put("f.jsonl", makeRows(5));
+      const a = await authed(r);
+      await a.say({ t: "subscribe", requestId: "s-a", file: "f.jsonl" });
+      await until(() => a.frames().some((f) => f.t === "snapshot")); // A 已提交+绑定观察
+      const aSnap = a.frames().find((f) => f.t === "snapshot") as { streamId: string };
+      const b = await authed(r);
+      armB = true;
+      await b.say({ t: "subscribe", requestId: "s-b", file: "f.jsonl" });
+      await until(() => fired);
+      await tick(); await tick(); await tick();
+      expect(fired).toBe(true);
+      // 身份拦截：B 的旧索引承诺零帧（B 全程无 snapshot）；引用恰一次（B 的 load）；审计 why=identity
+      expect(b.frames().some((f) => f.t === "snapshot")).toBe(false);
+      expect(r.history.releaseCalls.filter((f) => f === "f.jsonl").length).toBe(1); // 仅 B 的未消费引用
+      expect(r.audits.some((l) => l.includes("subscribe-commit-recheck-fail") && l.includes("why=identity"))).toBe(true);
+      // A 被 invalidate 正常退役（4409）；换流后的新流 B 可续订：新 streamId 快照照发
+      await until(() => a.frames().some((f) => f.code === 4409));
+      armB = false;
+      await b.say({ t: "subscribe", requestId: "s-b2", file: "f.jsonl" });
+      await until(() => b.frames().some((f) => f.t === "snapshot"));
+      const bSnap = b.frames().filter((f) => f.t === "snapshot").pop() as { streamId: string };
+      expect(bSnap.streamId).not.toBe(aSnap.streamId); // 新流身份（B 首次订阅从未承诺旧坐标）
+    } finally {
+      await r.dispose();
+    }
+  });
+});
+
+describe("ws-gateway 3b3-fix4：F4-4 发布账本第四出口（GPT fix3 F3R-LEDGER：syncIndex 换流路回收）", () => {
+  const historySeqsPublic = (c: FakeConn): number[] => {
+    const out: number[] = [];
+    for (const f of c.frames()) {
+      if (f.t === "events" && f.origin === "history") {
+        for (const e of (f as { events: Array<{ seq: number }> }).events) out.push(e.seq);
+      }
+    }
+    return out;
+  };
+  it("F4/P-PS-REWRITE-RECYCLE 非前缀改写（订阅触发换流）→旧流发布账本项即刻回收：不滞留旧流/新流从新坐标起步", async () => {
+    const r = await makeRig();
+    try {
+      const file = "ps-rewrite.jsonl";
+      const ledger = () => (r.gw as unknown as { publishStates: Map<string, { streamId: string }> }).publishStates;
+      r.history.put(file, makeRows(5));
+      const a = await authed(r);
+      await a.say({ t: "subscribe", requestId: "s1", file });
+      await until(() => a.frames().some((f) => f.t === "snapshot"), 3000);
+      const s0 = (ledger().get(file) as { streamId: string }).streamId; // 旧流账本项在册
+      r.history.append(file, rowAt(6)); // 发布账本被触及（onAppend→claimPublish 已立）
+      await until(() => historySeqsPublic(a).some((x) => x === 6), 3000);
+      // 非前缀改写：同文件盘面重写（第 2 行内容变化=非前缀）→B 订阅触发 syncIndex 换流路
+      const rows2 = makeRows(5).map((row, i) => (i === 1 ? { ...row, raw: JSON.stringify({ t: "sending", seq: 2, z: "rw" }), event: { ...row.event, kind: "sending" as const } } : row));
+      r.history.put(file, rows2);
+      const b = await authed(r);
+      await b.say({ t: "subscribe", requestId: "s2", file });
+      await until(() => errFrames(b).some((f) => f.code === 4409) || b.frames().some((f) => f.t === "snapshot"), 3000);
+      // 账本只含新流（旧流项已随 registry.replace 回收——GPT 复现：fix3 版此路漏收，ledger 滞留旧流）
+      const after = ledger().get(file);
+      expect(after === undefined || after.streamId !== s0).toBe(true);
+      // 新流可续：append 后新坐标从新流水线起步，无 publish-seq-mismatch
+      r.history.append(file, rowAt(6));
+      await until(() => historySeqsPublic(b).length > 0, 3000);
+      expect(r.audits.some((l) => l.includes("publish-seq-mismatch"))).toBe(false);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("F4/P-PS-OVERBUDGET-CHURN 超容量失败分支（非前缀+索引超预算）不滞留旧流账本：失败路换流照回收", async () => {
+    const r = await makeRig({ indexLimits: { maxEventsPerStream: 8 } });
+    try {
+      const file = "ps-budget.jsonl";
+      const ledger = () => (r.gw as unknown as { publishStates: Map<string, { streamId: string }> }).publishStates;
+      r.history.put(file, makeRows(5));
+      const a = await authed(r);
+      await a.say({ t: "subscribe", requestId: "s1", file });
+      await until(() => a.frames().some((f) => f.t === "snapshot"), 3000);
+      r.history.append(file, rowAt(6));
+      await until(() => historySeqsPublic(a).some((x) => x === 6), 3000);
+      const s0 = (ledger().get(file) as { streamId: string }).streamId;
+      // 非前缀改写且新盘面超预算：syncIndex 换流路→overBudget 早退（claimPublish 之前）→仍须先回收旧流
+      const rows3 = makeRows(5).map((row, i) => (i === 1 ? { ...row, raw: JSON.stringify({ t: "sending", seq: 2, z: "rw" }), event: { ...row.event, kind: "sending" as const } } : row));
+      rows3.push(rowAt(7), rowAt(8), rowAt(9), rowAt(10)); // 超过预算 8
+      r.history.put(file, rows3);
+      const b = await authed(r);
+      await b.say({ t: "subscribe", requestId: "s2", file });
+      await until(() => errFrames(b).some((f) => f.code === 4402), 3000); // 超预算拒绝
+      const after = ledger().get(file);
+      expect(after === undefined || after.streamId !== s0).toBe(true); // 旧流账本项已回收（GPT 复现：早退路漏收）
     } finally {
       await r.dispose();
     }

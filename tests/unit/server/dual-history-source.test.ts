@@ -709,3 +709,42 @@ describe("DualHistorySource 3b-3⑤：fingerprints() 元数据面", () => {
     expect(h2.src.fingerprints("/j/a")).toEqual({ journal: FP_J1(), session: "" }); // journal-only 降级面
   });
 });
+
+describe("DualHistorySource 3b3-fix4 F4-2：dispose 终止语义（GPT fix3 F3R-DISPOSE 组合层漏口）", () => {
+  it("F4/P-DUAL-RETRY-DISPOSE 在飞 load 的等待窗内 dispose→重试循环不重开子源：load-aborted-disposed/零新 watcher", async () => {
+    const h = harness({ sessionFor: (f) => f.replace("/j/", "/s/") });
+    h.reader.set("/j/a", jEnqueue("i-1", USER_TEXT, 0) + "\n");
+    h.reader.set("/s/a", sUser("u1", USER_TEXT) + "\n");
+    h.reader.holdPaths.add("/s/a"); // session 读挂起→等待窗
+    const p = h.src.load("/j/a");
+    await until(() => h.reader.heldCount() === 1); // session load 在飞（journal 已装载并建 watcher）
+    const jHandlesBefore = h.watcher.handles.filter((x) => x.abs === "/j/a").length;
+    h.reader.set("/j/a", jEnqueue("i-2", "rewritten", 0) + "\n"); // 等待窗内 journal 盘面换代→revalidate 必走
+    h.src.dispose(); // 窗内终态
+    h.reader.releaseHold(); // 放行 session 结算→revalidate→continue→attempt 2 顶部 disposed 门
+    expect(await p).toBeNull(); // 重试不越终态（旧代码：continue 后重开两源 watcher——GPT 独立复现）
+    expect(h.audits.some((l) => l.includes("load-aborted-disposed"))).toBe(true);
+    await drain();
+    expect(h.watcher.handles.filter((x) => x.abs === "/j/a").length).toBe(jHandlesBefore); // 子源不重开
+    expect(h.watcher.handles.filter((x) => x.abs === "/j/a").every((x) => x.closed)).toBe(true); // 且已全关
+  });
+
+  it("F4/P-DUAL-OBS-COLLECT dispose 收口全部 ObsState：sinks 置空/通知静默/账本清空/入口拒绝", async () => {
+    const h = harness({ sessionFor: (f) => f.replace("/j/", "/s/") });
+    h.reader.set("/j/a", jEnqueue("i-1", USER_TEXT, 0) + "\n");
+    h.reader.set("/s/a", sUser("u1", USER_TEXT) + "\n");
+    await h.src.load("/j/a");
+    const { s, log } = makeSinks();
+    const stop = h.src.observe("/j/a", s);
+    expect(stop).not.toBeNull();
+    expect(h.src["obs"].size).toBe(1); // 观察账在册
+    h.src.dispose();
+    expect(h.src["obs"].size).toBe(0); // 全部收口（GPT 漏口③：账不滞留）
+    h.watcher.notice("/j/a"); // 子源通知→entry.sinks 已 null→不触达宿主回调
+    await drain();
+    expect(log.appends).toHaveLength(0);
+    expect(await h.src.load("/j/a")).toBeNull(); // 终态后拒绝
+    expect(h.src.observe("/j/a", s)).toBeNull();
+    if (stop !== null) expect(() => stop()).not.toThrow(); // 迟到 stop 幂等无害
+  });
+});

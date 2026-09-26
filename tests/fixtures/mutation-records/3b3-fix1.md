@@ -1,7 +1,7 @@
 # 3b3 修复轮变异记录（R-01/R-02/Y-01/Y-04）
 
 > **勘误（3b3-fix2，GPT 复审 §6-5）**：本档为摘要式旧标准（缺真实 diff/命令原文/退出码；引用的 /tmp/mut-3b3b.py 已随 /tmp 清理不可复原）。
-> 可信度依据：GPT 复审已独立复演六杀 6/6 KILLED（其报告 §5+探针日志 /tmp/pi-fix1-mutations/）。
+> 可信度依据：GPT **fix1 复审报告**（audits/gpt-adapter-3b3-fix1-review-2026-09-29.md，worktree gpt-3b3b-fix1-review commit 9af578f）已独立复演六杀 6/6 KILLED（探针日志 /tmp/pi-fix1-mutations/）。fix4 勘正：原写「其报告 §5」未指名——fix2 复审报告 §5 为文档勘误清单，非六杀复演。
 > 自本档之后（含 3b3-fix2.md）变异记录一律采用新标准：真实 diff+命令+退出码+还原校验。
 
 - 日期：2026-09-29；基线=519d620（Y 项提交）+RW7/d2Early 追加（同轮内）；脚本=/tmp/mut-3b3b.py（python 锚点+count 断言+还原）。

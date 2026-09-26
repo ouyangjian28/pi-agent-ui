@@ -555,6 +555,17 @@ export class WsGateway {
         this.opts.historySource?.release?.(file); // 3b2a-R1 失败口配对
         return;
       }
+      // F4-1（fix4，GPT fix3 F3R-COMMIT）：同步可重入提交资格复核——statusFor 是宿主回调
+      //（startSnapshot/startResync 冻结 status 时同步调用），回调内可同步关连接/触发换流；
+      // await 消除后同步回调即提交资格的最后窗口。复核失败：关临时引擎（未承诺任何帧）、
+      // 恰一次 release、不绑观察（连接死=无人收帧；索引身份变=旧坐标不可承诺）。
+      if (st.closed || this.registry.peek(file) !== index) {
+        const why = st.closed ? "closed" : "identity";
+        engine.close(4431, `commit-race:${why}`, false);
+        this.audit(`subscribe-commit-recheck-fail conn=${st.id} file=${file} why=${why}`);
+        this.opts.historySource?.release?.(file); // 3b2a-R1 失败口配对
+        return;
+      }
       // B3（w1b）：提交点重验——await 载入窗口内状态可能已变；旧快照 existing 不得作为唯一依据
       const current = st.subs.get(file);
       if (current === undefined && st.subs.size >= LIMITS.subscriptionsPerConn) {
@@ -685,6 +696,11 @@ export class WsGateway {
     }
     // 非前缀=改写：换流（registry.replace 后新 streamId）+R2：先重建新索引，
     // 再按【新】流身份退役全部旧流订阅（旧引擎不得接收新坐标事件；新流上尚无引擎）
+    // F4-4（fix4，GPT fix3 F3R-LEDGER 第四出口）：registry.replace 不触发 onStreamDropped 钩子
+    //（钩子只在 LRU 挤出时由 registry 自发）——旧流发布账本项必须在此显式回收（含下方
+    // overBudget 早退路：早退在 claimPublish 前，不回收则旧 ps 永不释放）。
+    const droppedStream = this.registry.peek(file)?.streamId;
+    if (droppedStream !== undefined) this.recyclePublishState(file, droppedStream);
     this.registry.replace(file);
     index = this.registry.get(file);
     for (const row of rows) index.append(row.source, row.locator, row.raw, row.event);

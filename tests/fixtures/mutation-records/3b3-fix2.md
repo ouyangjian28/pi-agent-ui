@@ -48,6 +48,9 @@
 ## 补强（GPT fix2 复审 §4 黄项要求；2026-09-30 追加）
 
 - **基线 commit**：变异执行时点工作区=基线 f870b40（`3b3-fix2: F1 ordered publish loop + ...`，f870b40d7c3dfd23b10704a469818ab230b7a0f4）之上的变异与还原；变异只动 ws-gateway.ts / history-source.ts 两文件。
-- **还原哈希**（还原后、本轮 fix3 改动前采样）：apps/server/src/ws/ws-gateway.ts sha256=5cc104978586ec6f…（f870b40 版本内容）；apps/server/src/runtime/history-source.ts sha256=56ed402211afc392…。与基线 commit 内容一致（`git show f870b40:<path> | sha256sum` 可复核）。
-- **阶段说明（785 vs 787）**：变异复跑时点=785+7（F1/F3 修复+杀手已入、F4 补测与文档收尾未入）；fix2 终态=787+7（+F4 根 typecheck 用例修正与文档/本档）。两数差异=F4/文档面，与 M-F1/M-F3 杀手集无关。
-- fix1 档（3b3-fix1.md）勘误头已在上轮补齐；其独立复演证据=GPT fix2 复审报告 §5 六杀复演 6/6 KILLED（/home/yyj/ai/worktrees/gpt-3b3-fix2-review/projects/pi-agent-ui/audits/gpt-adapter-3b3-fix2-review-2026-09-30.md）。
+- **还原哈希（fix4 勘正）**：fix3 补强时误将**当时工作树**（ce527e4 世代）内容哈希标为 f870b40——张冠李戴，撤回。f870b40 真实内容哈希（`git show f870b40:<path> | sha256sum`）：
+  - apps/server/src/ws/ws-gateway.ts = ed18e6e4e8053c0bfb3951e35447638cf84f760ad55a66b72b54c058169a7c5e
+  - apps/server/src/runtime/history-source.ts = 56ed402211afc392ea15540a7c6a106c4dff24ff78276a1cd48d6c56ffe85325
+  - 误记的 5cc104978586ec6f… = ce527e4（fix3 提交）世代 ws-gateway 内容，非本档基线。
+- **阶段说明（785 vs 787；fix4 勘正归因）**：变异复跑时点=785+7（F1/F3 修复+杀手已入）；fix2 终态=787+7。增量 +2=real-fs 集成新增 RF13（撕裂尾指纹）/RF14（非前缀分支真指纹）两个 it——原记「F4 补测」有误（F4=composition.test.ts 类型修正，不新增用例）。与 M-F1/M-F3 杀手集无关。
+- fix1 档（3b3-fix1.md）勘误头已在上轮补齐；其独立复演证据=GPT **fix1 复审报告**（audits/gpt-adapter-3b3-fix1-review-2026-09-29.md，worktree gpt-3b3b-fix1-review commit 9af578f）六杀复演 6/6 KILLED、探针日志 /tmp/pi-fix1-mutations/（fix4 勘正：原写「fix2 复审报告 §5」错引——fix2 复审 §5 为文档勘误清单）。

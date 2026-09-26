@@ -1480,3 +1480,34 @@ describe("FileHistorySource 3b-3⑤：整文件指纹短路（契约 §1.3——
     expect(log.appends).toHaveLength(0);
   });
 });
+
+describe("FileHistorySource 3b3-fix4 F4-2：dispose 终止语义（GPT fix3 F3R-DISPOSE 三漏口封堵）", () => {
+  it("F4/P-DISPOSE-PRE-SCAN load 后同步 dispose（排队初扫未启动）→微任务被入口门拦截：不建代/零 watcher/槽不复活", async () => {
+    const h = harness({ reader: (() => { const r = new FakeReader(); r.reads.push({ text: jline(1), identity: "1:1" }); return r; })() });
+    const p = h.src.load("f.jsonl"); // 初扫=排队微任务（尚未执行）
+    h.src.dispose(); // 同步终态：先于微任务
+    expect(await p).toBeNull(); // 票据被撤+入口门——fail-closed
+    expect(h.watcher.handles).toHaveLength(0); // 脱离 Map 的旧槽不再建代开 watcher（GPT 独立复现的漏口）
+    expect(h.src["slots"].size).toBe(0); // dispose 已清槽；后续 load 不重建
+    expect(await h.src.load("f.jsonl")).toBeNull(); // 终态后拒绝起步
+    expect(h.src.observe("f.jsonl", makeSinks().s)).toBeNull(); // 终态后拒绝绑定
+    expect(h.watcher.handles).toHaveLength(0); // 两次拒绝都不开 watcher
+  });
+
+  it("F4/P-DISPOSE-IN-FLIGHT 初扫在飞（挂起读）dispose→撤票+已建句柄全关+通知静默：结算 fail-closed 且无孤儿 watcher", async () => {
+    const held = new HeldRead();
+    const h = harness({ reader: (() => { const r = new FakeReader(); r.reads.push(held); return r; })() });
+    const p = h.src.load("f.jsonl");
+    await new Promise<void>((res) => queueMicrotask(() => res())); // 初扫已起步（reader 在飞）
+    expect(h.watcher.handles).toHaveLength(1); // 读前已建 watcher（注册先于执行）
+    const { log } = makeSinks(); // sinks 终态后不再触达（s 未绑定期望面用 log 验证）
+    h.src.dispose(); // 挂起窗内终态
+    held.resolve({ text: jline(1), identity: "1:1" }); // 放行读
+    expect(await p).toBeNull(); // 撤票/弃代——fail-closed
+    expect(h.watcher.handles[0]?.closed).toBe(true); // 无孤儿 watcher（句柄全关）
+    h.watcher.handles[0]?.rawNotice(); // 旧闭包泄漏模拟：终态后通知静默
+    await new Promise<void>((res) => setTimeout(res, 20));
+    expect(log.appends).toHaveLength(0); // sinks 从未绑定/不再触达
+    expect(h.src["slots"].size).toBe(0);
+  });
+});

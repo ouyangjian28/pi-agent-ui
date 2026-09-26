@@ -80,6 +80,9 @@ export class DualHistorySource implements HistorySourcePort {
    *  splice）。旧单条 Map 会「后注册覆盖前注册」→最新 stop 后旧注册失活但仍占观察→恢复晚附找不到
    *  入口（丢 session 事件）。 */
   private readonly obs = new Map<string, ObsState[]>();
+  /** F4-2（fix4）：组合层终止标记——在飞 load 的重试循环不得在 dispose 后重开子源（GPT 独立复现：
+   *  session 等待窗内 dispose→journal.currentRows=null→continue 下一 attempt 新建两源 watcher）。 */
+  private disposed = false;
 
   constructor(private readonly opts: DualHistorySourceOpts) {
     this.journalSrc = new FileHistorySource({
@@ -144,6 +147,7 @@ export class DualHistorySource implements HistorySourcePort {
   }
 
   async load(file: string): Promise<readonly ScanRow[] | null> {
+    if (this.disposed) return null; // F4-2：终止后拒绝起步
     if (this.sessionSrc === null || this.opts.sessionFor === undefined) {
       const jrows = await this.journalSrc.load(file);
       if (jrows === null) return null;
@@ -151,6 +155,7 @@ export class DualHistorySource implements HistorySourcePort {
       return jrows;
     }
     for (let attempt = 1; attempt <= LOAD_ATTEMPTS; attempt++) {
+      if (this.disposed) { this.audit(`load-aborted-disposed file=${file} attempt=${attempt}`); return null; } // F4-2：重试不越终态
       const jrows = await this.journalSrc.load(file); // journal 引用（+1）——成功路径由 observe/release 配对
       if (jrows === null) return null; // journal=事实源：失败整体 fail-closed
       let srows: readonly ScanRow[] | null;
@@ -206,6 +211,7 @@ export class DualHistorySource implements HistorySourcePort {
   }
 
   observe(file: string, sinks: HistorySinks): (() => void) | null {
+    if (this.disposed) return null; // F4-2：终止后拒绝新绑定
     // 3b2c-F1-04/F2-02：每次绑定用独立转发包装（对象身份隔离）——子源 Set 按对象身份增删：
     // 同一 sinks 对象重绑时旧解绑删旧包装、新解绑删新包装，互不误删（旧代码直接传 sinks，
     // 同对象重绑=旧 stop 删掉新绑定，返回已失效的成功 stop）。
@@ -242,8 +248,16 @@ export class DualHistorySource implements HistorySourcePort {
     }
   }
 
-  /** 收尾透传（3b3-fix3 RF14）：双子源全停（详见 FileHistorySource.dispose）。幂等。 */
+  /** 收尾（3b3-fix3 RF14 补面；fix4 F4-2 按 GPT F3R-DISPOSE 修正）：先标组合层终态（在飞 load
+   *  重试不重开子源）、逐个收口自己的 ObsState（sinks/unJ/unS 不滞留——宿主长持源对象不保留回调），
+   *  再透传双子源全停。幂等。 */
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    for (const regs of this.obs.values()) {
+      for (const st of [...regs]) this.closeObsState(st);
+    }
+    this.obs.clear();
     this.journalSrc.dispose();
     this.sessionSrc?.dispose();
   }
