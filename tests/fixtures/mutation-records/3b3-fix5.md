@@ -13,7 +13,7 @@ GPT fix4 §7 要求：窄变异合法存活应如实接受；回归杀伤用**�
   +        if (false && (st.closed || this.registry.peek(file) !== index)) {
   ```
 - 命令：`npx vitest run tests/unit/server/ws-gateway.test.ts -t "F5/P-RETIRE"`
-- 结果：exit 1，KILLED（2 failed：F5/P-RETIRE-OVERFLOW + F5/P-RETIRE-AUDIT-REENTRY——死连接复活绑定/引用双结算暴露）。
+- 结果：exit 1，KILLED（2 failed：F5/P-RETIRE-OVERFLOW + F5/P-RETIRE-AUDIT-REENTRY）。**fix6 归因勘正（GPT fix5 复审指正）**：原记「死连接复活绑定/引用双结算暴露」不准——去门后源码推演值=observe 2/stop 1/release 0+孤儿观察（FakeHistory 返 stop→consumedRef=true 不 release）；且两测试先断 recheck2-fail 审计存在，门恒假时审计断言先失败（失败信号=审计缺席，非绑定/引用计数）。
 - 还原：`cp /tmp/f5-gw.bak apps/server/src/ws/ws-gateway.ts`；还原校验=sha256 同值 a2d83cbba60bd018…968e，复跑 F5/P-RETIRE 2/2 过。
 
 ## M-F5-2a 分发循环逐 sink 双门移除（F5-2 同批残余通知）
@@ -44,7 +44,7 @@ GPT fix4 §7 要求：窄变异合法存活应如实接受；回归杀伤用**�
 - 结果：exit 1，KILLED（1 failed：终态后 obs 滞留 1 项/审计缺席）。
 - 还原：`cp /tmp/f5-dual.bak apps/server/src/runtime/dual-history-source.ts`；还原校验=sha256 同值 30319bbf…4c9e8。
 
-## M-F5-2c attachSessionIfObserved 快照迭代+晚附迟到回收回退（F5-2 晚附窗）
+## M-F5-2c attachSessionIfObserved 快照迭代+晚附迟到回收回退（F5-2 晚附窗；fix6 标注：**合并变异**——两处合并不证各自必要，独立必要性由 M-F5-2b 口径类推+源码对照承担）
 
 - diff（apps/server/src/runtime/dual-history-source.ts，两处合并变异）：`for (const st of [...regs])` 还原为 `for (const st of regs)`（活注册表边迭代边 splice）+晚附迟到绑定回收块删除。
 - 命令：`npx vitest run tests/unit/server/dual-history-source.test.ts -t "F5/P-LATE-ATTACH-REENTRY"`

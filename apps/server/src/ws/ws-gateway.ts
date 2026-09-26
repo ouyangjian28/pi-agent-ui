@@ -556,9 +556,10 @@ export class WsGateway {
         return;
       }
       // F4-1（fix4，GPT fix3 F3R-COMMIT）：同步可重入提交资格复核——statusFor 是宿主回调
-      //（startSnapshot/startResync 冻结 status 时同步调用），回调内可同步关连接/触发换流；
-      // await 消除后同步回调即提交资格的最后窗口。复核失败：关临时引擎（未承诺任何帧）、
-      // 恰一次 release、不绑观察（连接死=无人收帧；索引身份变=旧坐标不可承诺）。
+      //（startSnapshot/startResync 冻结 status 时同步调用），回调内可同步关连接/触发换流。
+      //（fix6 勘正：await 消除后本门一度是提交资格最后窗口；fix5 recheck2 门加入后退旧入队
+      //  溢出/撤帧审计等后续同步宿主回调点另有设防，本门不再是「最后」窗口，为提交段第一道门。）
+      // 复核失败：关临时引擎（未承诺任何帧）、恰一次 release、不绑观察（连接死=无人收帧；索引身份变=旧坐标不可承诺）。
       if (st.closed || this.registry.peek(file) !== index) {
         const why = st.closed ? "closed" : "identity";
         engine.close(4431, `commit-race:${why}`, false);

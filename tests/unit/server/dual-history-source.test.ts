@@ -844,3 +844,66 @@ describe("DualHistorySource 3b3-fix5 F5-2：dispose 通知/注册窗口（GPT fi
     if (stopA !== null) expect(() => stopA()).not.toThrow(); // 迟到 stop 幂等
   });
 });
+
+describe("DualHistorySource 3b3-fix6 F6-1：终止通知注册资格门（GPT fix5 P11/P12）", () => {
+  // 三注册序 B→A→C：wrap 转发门=st.closed/st.sinks===null/组合层终态——终止回调内 dispose 或
+  // 退订他人后，后继宿主回调不再开始；正常终止事件照投。
+  const rig = () => {
+    const reader = new PathReader();
+    const watcher = new PathWatcher();
+    const made = new DualHistorySource({ roots: ["/j"], reader, watcher }); // journal-only：invalidate 面单一子源
+    return { reader, watcher, made };
+  };
+
+  it("F6/P-DUAL-TERM-DISPOSE 终止回调内整体 dispose→后继注册零回调（invalidate 面）", async () => {
+    const { reader, watcher, made } = rig();
+    reader.set("/j/a", jEnqueue("i-1", USER_TEXT, 0) + "\n");
+    await made.load("/j/a");
+    const b = makeSinks(), a = makeSinks(), c = makeSinks();
+    let armed = true;
+    const aS: HistorySinks = {
+      onAppend: (r) => { a.log.appends.push(r); },
+      onInvalidate: (reason) => { a.log.invalidates.push(reason); if (armed) { armed = false; made.dispose(); } },
+      onUnavailable: (reason) => { a.log.unavailables.push(reason); },
+      onLive: () => {}, onStatus: () => {},
+    };
+    expect(made.observe("/j/a", b.s)).not.toBeNull();
+    expect(made.observe("/j/a", aS)).not.toBeNull();
+    expect(made.observe("/j/a", c.s)).not.toBeNull();
+    reader.set("/j/a", jEnqueue("i-9", "rewritten", 0) + "\n"); // 非前缀重写→invalidate(rewrite)
+    watcher.notice("/j/a");
+    await until(() => a.log.invalidates.length > 0); // 重扫/投影异步：等 A 的终止回调已发
+    expect(b.log.invalidates).toHaveLength(1); // B 先于 A：正常终止事件照投
+    expect(a.log.invalidates).toHaveLength(1); // A 回调已开始（dispose 不撤回进行中回调）
+    expect(c.log.invalidates).toHaveLength(0); // C：dispose 后不再开始（旧代码：wrap 直捕 sinks 照投）
+    expect(c.log.appends).toHaveLength(0);
+    expect(watcher.handles.every((x) => x.closed)).toBe(true);
+    expect(made["obs"].size).toBe(0); // 观察账全收
+  });
+
+  it("F6/P-DUAL-TERM-UNBIND 终止回调内退订他人→该注册零回调，其余照投", async () => {
+    const { reader, watcher, made } = rig();
+    reader.set("/j/a", jEnqueue("i-1", USER_TEXT, 0) + "\n");
+    await made.load("/j/a");
+    const b = makeSinks(), a = makeSinks(), c = makeSinks();
+    let stopC: (() => void) | null = null;
+    let armed = true;
+    const aS: HistorySinks = {
+      onAppend: (r) => { a.log.appends.push(r); },
+      onInvalidate: (reason) => { a.log.invalidates.push(reason); if (armed && stopC !== null) { armed = false; stopC(); } },
+      onUnavailable: (reason) => { a.log.unavailables.push(reason); },
+      onLive: () => {}, onStatus: () => {},
+    };
+    expect(made.observe("/j/a", b.s)).not.toBeNull();
+    expect(made.observe("/j/a", aS)).not.toBeNull();
+    stopC = made.observe("/j/a", c.s);
+    expect(stopC).not.toBeNull();
+    reader.set("/j/a", jEnqueue("i-9", "rewritten", 0) + "\n");
+    watcher.notice("/j/a");
+    await until(() => a.log.invalidates.length > 0);
+    expect(b.log.invalidates).toHaveLength(1);
+    expect(a.log.invalidates).toHaveLength(1);
+    expect(c.log.invalidates).toHaveLength(0); // C 在终态窗内被退订：转发门拦（旧代码：wrap 不读 ObsState.closed）
+    expect(c.log.appends).toHaveLength(0);
+  });
+});

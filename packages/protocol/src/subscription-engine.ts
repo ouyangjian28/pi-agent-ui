@@ -25,6 +25,13 @@ import type {
 } from "./contracts.ts";
 import type { IndexedEvent, ReadIndex } from "./read-index.ts";
 
+/** F6-3（fix6，GPT fix5 P6）：宿主 status 纯数据化——getter/toJSON 在此一次性求值，
+ *  后续序列化（页预算实测/入队序列化/缓存重发）不再触宿主代码；wire 格式本就是 JSON，
+ *  往返即等价快照（undefined 字段丢弃与线格式一致）。 */
+function freezeStatus(s: SessionStatus): SessionStatus {
+  return JSON.parse(JSON.stringify(s)) as SessionStatus;
+}
+
 export type SubscribeRequest =
   | { readonly kind: "init"; readonly requestId: string }
   | { readonly kind: "resync"; readonly requestId: string; readonly cursor: EventCursor }
@@ -180,7 +187,11 @@ export class SubscriptionEngine {
    *  引擎状态（expectNext/缓存/相态）在核验通过后才提交。条数上限照旧。 */
   private servePageFrom(requestId: string, from: EventCursor): ServerFrame {
     const est = this.d.estimateEvent ?? estimateHistoryEventBytes;
-    const status = this.d.status(); // 冻结先取（C6-01：信封含真实 status，非事后取）
+    const status = freezeStatus(this.d.status()); // 冻结先取（C6-01：信封含真实 status，非事后取）；
+    // F6-3（fix6，GPT fix5 P6）：**资格门前纯数据化**——宿主 status 可能携带 getter/toJSON（
+    // 合法 JS 对象，接口未强制纯数据）。JSON 往返一次性求值全部宿主行为，后续任何序列化
+    //（页预算实测/入队实测/缓存重发）不再触宿主代码——入队段序列化重入（toJSON 内
+    // invalidate→撤帧）不可能发生在入队段。
     const rows: IndexedEvent[] = [];
     let bytes = LIMITS.envelopeOverheadBytes; // 贪心粗估起点（仅用于快筛；终判=整帧实测）
     let last = from.seq - 1;

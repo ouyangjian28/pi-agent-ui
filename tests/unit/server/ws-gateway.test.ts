@@ -2744,6 +2744,38 @@ describe("ws-gateway 3b3-fix4：F4-4 发布账本第四出口（GPT fix3 F3R-LED
   });
 });
 
+describe("ws-gateway 3b3-fix6：F6-3 宿主 status 纯数据化（GPT fix5 P6 序列化重入边界）", () => {
+  it("F6/P-SERIAL-REENTRY status 带 getter/toJSON→资格门冻结恰一次求值，下游序列化零宿主代码", async () => {
+    let calls = 0;
+    const frozen = {
+      session: { file: "f.jsonl", sessionId: null }, process: { phase: "idle" }, turn: { phase: "idle" },
+      backgroundTasks: { availability: "unknown", activeCount: null },
+      reap: { eligible: false, idleElapsedMs: null, idleRemainingMs: null, idleMs: 0 },
+      recovery: { availability: "unavailable", resumeBlocked: null, diskBlocked: null, unknownEffectCount: null, unattributableFragments: null, intentsCount: null, settledCount: null, evidenceHash: null },
+      statusVersion: 7, serverTimeMs: 0,
+    } as unknown as SessionStatus;
+    const host = {
+      ...frozen,
+      get statusVersion() { calls += 1; return 7; }, // getter：每次序列化都会再求值
+      toJSON() { calls += 1; return frozen; },
+    };
+    const r = await makeRig({ statusFor: () => host });
+    r.history.put("f.jsonl", makeRows(3));
+    const c = await authed(r);
+    await c.say({ t: "subscribe", requestId: "s-1", file: "f.jsonl" });
+    await until(() => c.frames().some((f) => f.t === "snapshot"));
+    // 求值恰发生在资格门冻结（freezeStatus 一次 JSON 往返）：后续页预算实测+入队序列化零宿主代码
+    expect(calls).toBe(1); // freezeStatus 恰一次 JSON 往返（toJSON×1；getter 不再被求值）
+    const before = calls;
+    JSON.stringify(c.frames().find((f) => f.t === "snapshot")); // 下游再序列化任意次
+    JSON.stringify(c.frames().find((f) => f.t === "snapshot"));
+    expect(calls).toBe(before); // 纯数据：不再触宿主
+    const snap = c.frames().find((f) => f.t === "snapshot") as { status?: { session?: string; statusVersion?: number } };
+    expect(snap.status?.session).toEqual({ file: "f.jsonl", sessionId: null });
+    expect(snap.status?.statusVersion).toBe(7);
+  });
+});
+
 describe("ws-gateway 3b3-fix5：F5-1 门后重入提交资格复核（GPT fix4 P3/P4 探针固化）", () => {
   /** 同 tick 直投：绕过 say 双跳——微任务续体先于 drain 的 setImmediate 运行（P3/P4 竞态窗口） */
   const raw = (c: FakeConn, obj: unknown): void => {

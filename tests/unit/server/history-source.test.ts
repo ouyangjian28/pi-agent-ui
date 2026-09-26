@@ -1565,3 +1565,84 @@ describe("FileHistorySource 3b3-fix5 F5-2：分发循环逐行/逐 sink 生命�
     expect(b.log.appends).toHaveLength(2); // B 不受影响（成员资格粒度，非整批误杀）
   });
 });
+
+describe("FileHistorySource 3b3-fix6 F6-1：终止通知成员资格可撤销（GPT fix5 P11/P12）", () => {
+  // 三注册序 B→A→C：B/A 各收一次终止事件；A 的回调内 dispose（或退订 C）后，C 不再被开始回调。
+  const rig3 = () => {
+    const r = new FakeReader();
+    const h = harness({ reader: r });
+    return { r, h };
+  };
+
+  it("F6/P-TERM-DISPOSE 终止回调内整体 dispose→后继注册零回调（invalidate 面）", async () => {
+    const { r, h } = rig3();
+    r.reads.push({ text: `${jline(1)}\n`, identity: "1:1" }, { text: `${jline(9)}\n`, identity: "2:2" }); // 非前缀重写→invalidate(rewrite)
+    await h.src.load("f.jsonl");
+    const b = makeSinks(), a = makeSinks(), c = makeSinks();
+    let armed = true;
+    const aSinks: HistorySinks = {
+      onAppend: (row) => { a.log.appends.push(row); },
+      onInvalidate: (reason) => { a.log.invalidates.push(reason); if (armed) { armed = false; h.src.dispose(); } },
+      onUnavailable: (reason) => { a.log.unavailables.push(reason); },
+      onLive: (ev) => { a.log.lives.push(ev); }, onStatus: (st) => { a.log.statuses.push(st); },
+    };
+    expect(h.src.observe("f.jsonl", b.s)).not.toBeNull();
+    expect(h.src.observe("f.jsonl", aSinks)).not.toBeNull();
+    expect(h.src.observe("f.jsonl", c.s)).not.toBeNull();
+    activeHandles(h.watcher)[0]?.triggerNotice();
+    await drain();
+    expect(b.log.invalidates).toHaveLength(1); // B 已投递（先于 A）
+    expect(a.log.invalidates).toHaveLength(1); // A 自身回调已开始（dispose 不撤回进行中回调）
+    expect(c.log.invalidates).toHaveLength(0); // C：dispose 后不再开始（旧代码：照投）
+    expect(c.log.appends).toHaveLength(0);
+    expect(h.watcher.handles.every((x) => x.closed)).toBe(true);
+    expect(await h.src.load("f.jsonl")).toBeNull(); // 源级终态
+  });
+
+  it("F6/P-TERM-UNBIND 终止回调内退订他人→该注册零回调，其余照投（invalidate 面）", async () => {
+    const { r, h } = rig3();
+    r.reads.push({ text: `${jline(1)}\n`, identity: "1:1" }, { text: `${jline(9)}\n`, identity: "2:2" });
+    await h.src.load("f.jsonl");
+    const b = makeSinks(), a = makeSinks(), c = makeSinks();
+    let stopC: (() => void) | null = null;
+    let armed = true;
+    const aSinks: HistorySinks = {
+      onAppend: (row) => { a.log.appends.push(row); },
+      onInvalidate: (reason) => { a.log.invalidates.push(reason); if (armed && stopC !== null) { armed = false; stopC(); } },
+      onUnavailable: (reason) => { a.log.unavailables.push(reason); },
+      onLive: (ev) => { a.log.lives.push(ev); }, onStatus: (st) => { a.log.statuses.push(st); },
+    };
+    expect(h.src.observe("f.jsonl", b.s)).not.toBeNull();
+    expect(h.src.observe("f.jsonl", aSinks)).not.toBeNull();
+    stopC = h.src.observe("f.jsonl", c.s);
+    expect(stopC).not.toBeNull();
+    activeHandles(h.watcher)[0]?.triggerNotice();
+    await drain();
+    expect(b.log.invalidates).toHaveLength(1);
+    expect(a.log.invalidates).toHaveLength(1);
+    expect(c.log.invalidates).toHaveLength(0); // C 在终态窗内被退订：不再开始（旧代码：照投）
+    expect(c.log.appends).toHaveLength(0);
+  });
+
+  it("F6/P-TERM-DISPOSE-UNAVAIL 读失败→unavailable 面同型：终止回调内 dispose→后继注册零回调", async () => {
+    const { r, h } = rig3();
+    r.reads.push({ text: `${jline(1)}\n`, identity: "1:1" }, new Error("boom"));
+    await h.src.load("f.jsonl");
+    const b = makeSinks(), a = makeSinks(), c = makeSinks();
+    let armed = true;
+    const aSinks: HistorySinks = {
+      onAppend: (row) => { a.log.appends.push(row); },
+      onInvalidate: (reason) => { a.log.invalidates.push(reason); },
+      onUnavailable: (reason) => { a.log.unavailables.push(reason); if (armed) { armed = false; h.src.dispose(); } },
+      onLive: (ev) => { a.log.lives.push(ev); }, onStatus: (st) => { a.log.statuses.push(st); },
+    };
+    expect(h.src.observe("f.jsonl", b.s)).not.toBeNull();
+    expect(h.src.observe("f.jsonl", aSinks)).not.toBeNull();
+    expect(h.src.observe("f.jsonl", c.s)).not.toBeNull();
+    activeHandles(h.watcher)[0]?.triggerNotice();
+    await drain();
+    expect(b.log.unavailables).toHaveLength(1); // 正常终止事件照投（B 先于 A）
+    expect(a.log.unavailables).toHaveLength(1);
+    expect(c.log.unavailables).toHaveLength(0); // dispose 后不再开始
+  });
+});

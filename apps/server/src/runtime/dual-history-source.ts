@@ -60,14 +60,18 @@ interface ObsState {
 }
 
 /** 3b2c-F2-02：注册级转发包装（observe 与晚附共用同构）——每次绑定独立对象身份，
- *  子源 Set 按身份增删；exactOptionalPropertyTypes 下可选方法条件展开。 */
-function wrapSinks(sinks: HistorySinks): HistorySinks {
+ *  子源 Set 按身份增删；exactOptionalPropertyTypes 下可选方法条件展开。
+ *  F6-1（fix6，GPT fix5 P11/P12）：每次转发前复核**注册资格**（st.closed/st.sinks===null/
+ *  组合层终态）——终止/追加通知分发中宿主回调内 dispose 或退订他人后，不再开始后继宿主回调。 */
+function wrapSinks(st: ObsState, alive: () => boolean): HistorySinks {
+  const host = st.sinks as HistorySinks; // 包装时注册必活（closed 注册不绑子源）
+  const ok = () => !st.closed && st.sinks !== null && alive();
   return {
-    onAppend: (row) => sinks.onAppend(row),
-    ...(sinks.onInvalidate !== undefined ? { onInvalidate: (r) => sinks.onInvalidate?.(r) } : {}),
-    ...(sinks.onUnavailable !== undefined ? { onUnavailable: (r) => sinks.onUnavailable?.(r) } : {}),
-    onLive: (ev) => sinks.onLive(ev),
-    onStatus: (s) => sinks.onStatus(s),
+    onAppend: (row) => { if (ok()) host.onAppend(row); },
+    ...(host.onInvalidate !== undefined ? { onInvalidate: (r) => { if (ok()) host.onInvalidate?.(r); } } : {}),
+    ...(host.onUnavailable !== undefined ? { onUnavailable: (r) => { if (ok()) host.onUnavailable?.(r); } } : {}),
+    onLive: (ev) => { if (ok()) host.onLive(ev); },
+    onStatus: (s) => { if (ok()) host.onStatus(s); },
   };
 }
 
@@ -201,7 +205,7 @@ export class DualHistorySource implements HistorySourcePort {
     let attached = 0;
     for (const st of [...regs]) { // F5-2：快照迭代——补接审计回调可重入收口当前注册（splice 活注册表）
       if (st.closed || st.sinks === null || st.unS !== null) continue;
-      const wrap = wrapSinks(st.sinks);
+      const wrap = wrapSinks(st, () => !this.disposed);
       const unS = this.sessionSrc.observe?.(file, wrap, { consumeLoadRef: false }) ?? null;
       // F5-2（fix5，GPT fix4 P11 同型）：补接 observe 也是宿主回调面——期间 dispose/本注册收口
       // 的迟到绑定就地回收，不挂到已死状态上（孤儿 stop 无人兑付）。
@@ -225,7 +229,8 @@ export class DualHistorySource implements HistorySourcePort {
     // 3b2c-F1-04/F2-02：每次绑定用独立转发包装（对象身份隔离）——子源 Set 按对象身份增删：
     // 同一 sinks 对象重绑时旧解绑删旧包装、新解绑删新包装，互不误删（旧代码直接传 sinks，
     // 同对象重绑=旧 stop 删掉新绑定，返回已失效的成功 stop）。
-    const wrap = wrapSinks(sinks);
+    const st: ObsState = { file, sinks, unJ: null, unS: null, closed: false }; // F6-1：先立后填——wrap 需引用注册身份（sinks 字段即注册资格面）
+    const wrap = wrapSinks(st, () => !this.disposed);
     const unJ = this.journalSrc.observe?.(file, wrap) ?? null;
     if (unJ === null) return null; // 3b2b-R1b：journal=事实源——绑定失败=整组失败（不透 session-only 观察）
     let unS: (() => void) | null = null;
@@ -241,7 +246,8 @@ export class DualHistorySource implements HistorySourcePort {
       this.audit(`observe-aborted-disposed file=${file}`);
       return null;
     }
-    const st: ObsState = { file, sinks, unJ, unS, closed: false };
+    st.unJ = unJ;
+    st.unS = unS;
     const regs = this.obs.get(file) ?? [];
     regs.push(st);
     this.obs.set(file, regs);

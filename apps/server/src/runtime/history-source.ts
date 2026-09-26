@@ -479,7 +479,13 @@ export class FileHistorySource implements HistorySourcePort {
   }
 
   private unbind(slot: FileSlot, entry: GenEntry, sinks: HistorySinks): void {
-    if (slot.entry !== entry || entry.disposed) return; // 已换代/已失效：no-op
+    if (entry.disposed) {
+      // F6-1：终态窗内（终止分发进行中）退订=成员资格撤销——摘 Set 后返回；
+      // 不重开代/不重审计（closeEntry 已收口，分发循环按 !has 跳过）。
+      entry.sinks?.delete(sinks);
+      return;
+    }
+    if (slot.entry !== entry) return; // 已换代：no-op
     entry.sinks?.delete(sinks);
     if (entry.sinks !== null && entry.sinks.size === 0) entry.sinks = null; // 末位解绑=未绑定
     if (slot.awaitingBind === 0 && entry.sinks === null) {
@@ -702,33 +708,46 @@ export class FileHistorySource implements HistorySourcePort {
   }
 
   private deliverInvalidate(slot: FileSlot, entry: GenEntry, reason: HistoryInvalidateReason): void {
-    const sinks = [...entry.sinks ?? []]; // 先捕（closeEntry 会摘 sinks）
+    const sinks = [...entry.sinks ?? []]; // 先捕（closeEntry 不清 sinks——F6-1 终止分发仍以 Set 为成员面）
     this.closeEntry(slot, entry, `invalidate file=${entry.file} reason=${reason}`);
     this.audit(`invalidate file=${entry.file} reason=${reason}`);
-    try {
-      for (const sk of sinks) sk.onInvalidate?.(reason);
-    } catch (e) {
-      this.audit(`invalidate-cb-error file=${entry.file} kind=${errKind(e)}`);
-    }
+    this.deliverTerminal(entry, sinks, "invalidate", reason);
   }
 
   private deliverUnavailable(slot: FileSlot, entry: GenEntry, reason: HistoryUnavailableReason): void {
-    const sinks = [...entry.sinks ?? []]; // 先捕（closeEntry 会摘 sinks）
+    const sinks = [...entry.sinks ?? []];
     this.closeEntry(slot, entry, `unavailable file=${entry.file} reason=${reason}`);
     this.audit(`unavailable file=${entry.file} reason=${reason}`);
-    try {
-      for (const sk of sinks) sk.onUnavailable?.(reason);
-    } catch (e) {
-      this.audit(`unavailable-cb-error file=${entry.file} kind=${errKind(e)}`);
-    }
+    this.deliverTerminal(entry, sinks, "unavailable", reason);
   }
 
-  /** 逻辑失效先行（摘登记+disposed/state+sinks），再关 OS watcher。 */
+  /** F6-1（fix6，GPT fix5 P11/P12）：终止通知投递——**成员资格可撤销**。
+   *  快照循环内：①回调内整体 dispose（srcDisposed）→ 不再开始后继宿主回调（整批停）；
+   *  ②回调内退订他人（unbind 在终态窗内仍可摘 Set 成员）→ 跳过该注册，其余照投；
+   *  ③正常终止事件（无上述重入）→ 全量投递（不以 entry.disposed 吞掉终止事件——
+   *  closeEntry 先行置 disposed 是正常序，非撤销信号）。分发完毕置空 sinks=迟到成员核对判据。 */
+  private deliverTerminal(entry: GenEntry, sinks: readonly HistorySinks[], kind: "invalidate" | "unavailable", reason: string): void {
+    for (const sk of sinks) {
+      if (this.srcDisposed) return; // 源级终态：dispose 之后不再开始后继宿主回调
+      const cur = entry.sinks;
+      if (cur === null || !cur.has(sk)) continue; // 注册已被回调内撤销：跳过该注册
+      try {
+        if (kind === "invalidate") sk.onInvalidate?.(reason as HistoryInvalidateReason);
+        else sk.onUnavailable?.(reason as HistoryUnavailableReason);
+      } catch (e) {
+        this.audit(`${kind}-cb-error file=${entry.file} kind=${errKind(e)}`);
+      }
+    }
+    entry.sinks = null; // 终止分发完毕：清注册面（迟到核对以 null 判定）
+  }
+
+  /** 逻辑失效先行（摘登记+disposed/state），再关 OS watcher。F6-1：**不在此清 sinks**——
+   *  终止分发（deliverInvalidate/deliverUnavailable）以该 Set 为成员资格面（回调内退订他人仍可摘），
+   *  分发完毕由 deliverTerminal 置空；非终止关闭路（released-unobserved 等）本来就 sinks===null。 */
   private closeEntry(slot: FileSlot, entry: GenEntry, auditLine: string): void {
     if (slot.entry === entry) slot.entry = null;
     entry.disposed = true;
     entry.state = "closed";
-    entry.sinks = null;
     const ws = entry.watchers.splice(0, entry.watchers.length);
     for (const w of ws) {
       try { w.close(); } catch { /* 已关 */ }
