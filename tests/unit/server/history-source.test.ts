@@ -1208,25 +1208,29 @@ describe("RealReader 3b2c-F2-03（GPT fix2）：BOM 保留与字节坐标", () =
     const r = await new RealReader(MAX).read(p);
     expect(r.text.startsWith(line1)).toBe(true);
   });
-  it("Y3-03：撕裂尾补全两次写入对照——补齐第三字节+换行后完整发布，前缀 locator 不漂移", async () => {
+  it("Y3-03/Y4-01：同一 JSON 行追加补全两次写入——截断在其第三字节前，补余下字节+换行后完整发布，前缀 locator 不漂移", async () => {
     const d = await mkdtemp(join(tmpdir(), "rr-torn3-"));
     CLEANUP.push(d);
     const p = join(d, "torn3.jsonl");
-    const torn = Buffer.concat([Buffer.from(`${line1}\n`, "utf8"), Buffer.from([0xe4, 0xb8])]);
-    await writeFile(p, torn);
+    // 完整 u2 行：content 内含「中」（E4 B8 AD）；截断点=第三字节 AD 之前（保留 E4 B8 两字节）
+    const fullLine2 = JSON.stringify({ type: "message", id: "u2", timestamp: 2, message: { role: "user", content: "中" } });
+    const full2 = Buffer.from(fullLine2, "utf8");
+    const zhong = Buffer.from("中", "utf8"); // E4 B8 AD
+    const cutAt = full2.indexOf(zhong.subarray(0, 2)) + 2; // 第三字节之前
+    const prefix2 = full2.subarray(0, cutAt); // 撕裂尾=完整 u2 行的真字节前缀
+    const rest2 = Buffer.concat([full2.subarray(cutAt), Buffer.from("\n", "utf8")]);
+    await writeFile(p, Buffer.concat([Buffer.from(`${line1}\n`, "utf8"), prefix2]));
     const r1 = await new RealReader(MAX).read(p);
     const rows1 = sessionToScanRows({ sessionText: r1.text, enqueues: [], consumed: [] });
-    expect(rows1.filter((x) => (x.event as { entryId?: string }).entryId === "u2")).toHaveLength(0); // 撕裂尾不发布
-    // 补全「中」第三字节+换行+完整第二行
-    const fullLine2 = JSON.stringify({ type: "message", id: "u2", timestamp: 2, message: { role: "user", content: "中" } });
-    await writeFile(p, Buffer.concat([Buffer.from(`${line1}\n`, "utf8"), Buffer.from(`${fullLine2}\n`, "utf8")]));
+    expect(rows1.filter((x) => (x.event as { entryId?: string }).entryId === "u2")).toHaveLength(0); // 撕裂态：u2 不发布（残行延发）
+    await appendFile(p, rest2); // 追加补全：余下字节+换行（不重写已落盘前缀）
     const r2 = await new RealReader(MAX).read(p);
     const rows2 = sessionToScanRows({ sessionText: r2.text, enqueues: [], consumed: [] });
     const u1Row = rows2.find((x) => (x.event as { entryId?: string }).entryId === "u1");
-    const u2Row = rows2.find((x) => (x.event as { entryId?: string }).entryId === "u2");
-    expect(u2Row).toBeDefined(); // 补全后发布
+    const u2Rows = rows2.filter((x) => (x.event as { entryId?: string }).entryId === "u2");
+    expect(u2Rows).toHaveLength(1); // 补全后恰一条 u2
     expect(u1Row?.locator).toBe("0"); // 首行 locator 不漂移（同位不改写）
-    expect(u2Row?.locator).toBe(String(Buffer.byteLength(`${line1}\n`, "utf8"))); // 真字节偏移
+    expect(u2Rows[0]?.locator).toBe(String(Buffer.byteLength(`${line1}\n`, "utf8"))); // 真字节偏移
   });
 });
 

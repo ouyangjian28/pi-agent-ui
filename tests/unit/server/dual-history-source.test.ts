@@ -636,6 +636,10 @@ describe("DualHistorySource 3b2c-fix1——五阻断闭合（GPT 72→修复）"
       const unE = h.src.observe(JP, e.s);
       expect(unE).not.toBeNull();
       expect(h.watcher.active(SP).length).toBe(1);
+      // 后继周期新行交付：session 追加 u6→E 收（晚附链路在新周期仍活）
+      h.reader.set(SP, sUser("u1", USER_TEXT) + "\n" + sUser("u2", "both") + "\n" + sUser("u6", "new-cycle") + "\n");
+      h.watcher.notice(SP);
+      await until(() => e.log.appends.some((r) => r.source === "session" && (r.event as { entryId?: string }).entryId === "u6"));
       unE?.();
       await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
       expect(h.audits.some((l) => l.includes("released-unobserved-carry"))).toBe(false);
@@ -660,11 +664,25 @@ describe("DualHistorySource 3b2c-fix1——五阻断闭合（GPT 72→修复）"
       h.reader.set(SP, sUser("u1", USER_TEXT) + "\n" + sUser("u2", "once") + "\n");
       h.watcher.notice(SP);
       await until(() => a.log.appends.some((r) => r.source === "session") && b.log.appends.some((r) => r.source === "session"));
+      // C 同样收到本次追加（三条注册=三条交付流）
+      await until(() => c.log.appends.some((r) => r.source === "session"));
+      // 后继周期：A/B/C 全退后 D 装载+observe→双源句柄重开+新行交付
       unA?.();
       unB?.();
       unC?.();
       await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
       expect(h.audits.some((l) => l.includes("released-unobserved-carry"))).toBe(false);
+      h.reader.set(SP, sUser("u1", USER_TEXT) + "\n" + sUser("u2", "once") + "\n" + sUser("u7", "d-cycle") + "\n");
+      await h.src.load(JP);
+      const dS = makeSinks();
+      const unD = h.src.observe(JP, dS.s);
+      expect(unD).not.toBeNull();
+      expect(h.watcher.active(SP).length).toBe(1);
+      h.reader.set(SP, sUser("u1", USER_TEXT) + "\n" + sUser("u2", "once") + "\n" + sUser("u7", "d-cycle") + "\n" + sUser("u8", "d-live") + "\n");
+      h.watcher.notice(SP);
+      await until(() => dS.log.appends.some((r) => r.source === "session" && (r.event as { entryId?: string }).entryId === "u8"));
+      unD?.();
+      await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
     });
   });
 });

@@ -2116,12 +2116,13 @@ describe("ws-gateway 3b-2b③：DualHistorySource 接线验证", () => {
         }
         return evs.filter((e) => e.kind === "message").length === 1;
       });
-      const cEv: Array<{ kind: string; seq: number }> = [];
+      const cEv: Array<{ kind: string; seq: number; entryId?: string }> = [];
       for (const f of cC.frames()) {
-        const ev = f as { t?: string; events?: Array<{ kind: string; seq: number }> };
+        const ev = f as { t?: string; events?: Array<{ kind: string; seq: number; entryId?: string }> };
         if (ev.t === "events") cEv.push(...(ev.events ?? []));
       }
       expect(cEv.filter((e) => e.kind === "message").map((e) => e.seq)).toEqual([5]);
+      expect(cEv.filter((e) => e.kind === "message").map((e) => e.entryId)).toEqual(["u5"]); // Y4-02：帧级身份逐条
       expect(errFrames(cC).filter((f) => f.code === 4404 || f.code === 4409).length).toBe(0);
     } finally {
       await d.dispose();
