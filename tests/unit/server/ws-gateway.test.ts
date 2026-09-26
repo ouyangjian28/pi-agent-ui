@@ -1942,4 +1942,47 @@ describe("ws-gateway 3b-2b③：DualHistorySource 接线验证", () => {
       await d.dispose();
     }
   });
+
+  it("D7 3b2b-R2：journal-only 订阅期 session 恢复+二次装载——续编行恰一次达 A（load 分发与活跃订阅协同）；后续通知不重复", async () => {
+    const d = await dualRig();
+    try {
+      d.reader.set(d.jp, jEn("i-1", TEXT_A, 0) + "\n");
+      // session 缺→A 订阅=journal-only（快照 barrier=1）
+      const c = await authed(d.r);
+      await c.say({ t: "subscribe", requestId: "sub-1", file: "j.jsonl" });
+      const snap1 = c.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      expect(snap1.barrier).toBe(1);
+      // session 出现（两行：u1 可归因 i-1；u2 无对应 enqueue→intentId=null）——不触发 watcher（新槽首次装载自当盘）
+      d.reader.set(d.sp, sU("u1", TEXT_A) + "\n" + sU("u2", TEXT_B) + "\n");
+      const sessEvents = (frames: unknown[]): Array<{ intentId: string | null; role?: string }> => {
+        const out: Array<{ intentId: string | null; role?: string }> = [];
+        for (const f of frames) {
+          const ev = f as { t?: string; events?: Ev[] };
+          if (ev.t === "events") out.push(...(ev.events ?? []).filter((e) => e.kind === "message"));
+        }
+        return out;
+      };
+      const c2 = await authed(d.r);
+      await c2.say({ t: "subscribe", requestId: "sub-2", file: "j.jsonl" });
+      const snap2 = c2.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      expect(snap2.barrier).toBe(3); // B：journal 1+session 新行 2（fresh 首扫）
+      // A 经 load 续编分发恰一次收到两行 session 事件（去分发块则 A 永远收不到——R2 第四面）
+      await until(() => sessEvents(c.frames()).length === 2);
+      const got = sessEvents(c.frames());
+      expect(got.filter((e) => e.intentId === "i-1").length).toBe(1); // u1 归因
+      expect(got.filter((e) => e.intentId === null).length).toBe(1); // u2 无匹配
+      // B 引擎建于 syncIndex 之后：B 的两行走快照（恰一次），不再收 live 分发
+      expect(sessEvents(c2.frames()).length).toBe(0);
+      const page2 = snap2.page as Ev[];
+      expect(page2.filter((e) => e.kind === "message").length).toBe(2);
+      // 随后 watcher 通知到达：源基线已前移→无重复编入
+      d.watcher.notice(d.sp);
+      await new Promise((res) => setTimeout(res, 30));
+      expect(sessEvents(c.frames()).length).toBe(2);
+      expect(sessEvents(c2.frames()).length).toBe(0);
+      expect(errFrames(c).filter((f) => f.code === 4404 || f.code === 4409).length).toBe(0);
+    } finally {
+      await d.dispose();
+    }
+  });
 });
