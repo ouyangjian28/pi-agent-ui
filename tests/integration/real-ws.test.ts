@@ -175,7 +175,11 @@ describe("3b-3③ real-ws：真实传输+慢客户端矩阵", () => {
     }
   }, 20000);
 
-  it("RW2 停读套接字（真慢客户端）：live 积压转运→连接级 4431（retryable=true 断链重连）；订阅级不误杀", async () => {
+  it("RW2 停读套接字同负载对照（R-01 修复后语义）：pause+1.2MB 突发→零误杀；resume→全量恰一次；连接存活", async () => {
+    // R-01 复核：分发按有界批次让出事件循环后，连接队列排水与生产交替推进——停读（用户态不收）
+    // 不再造成队列饥饿误杀。pause() 只是停读：内核收发缓冲仍会吸收（回环可吸收数 MB），用户态
+    // ws.bufferedAmount 只计未冲刷字节；两级门（订阅 1024/连接 1MiB 队列、4MiB 缓冲）在此负载
+    // （~1.2MB）均不应触发。真持续背压（≥4MiB bufferedAmount）门=ws-support.test.ts 单元面。
     const r = await makeRig();
     try {
       await seedJournal(r.jp, 250);
@@ -188,25 +192,76 @@ describe("3b-3③ real-ws：真实传输+慢客户端矩阵", () => {
         await a.say({ t: "subscribe", requestId: "s2", file: "j.jsonl", snapshotId: snap.snapshotId, historyNext: snap.historyNext });
         await until(() => a.frames.filter((f) => f.t === "snapshot").some((f) => f.hasMore === false));
         await settle(WARM);
-        a.pauseSocket(); // 真停读：内核缓冲+服务端出账都无法前进
-        await appendBurst(r.jp, 251, 7000); // ~1.2MB 事件流（超 connQueueBytes 1MiB+订阅积压 1024）
-        await settle(1200); // 服务端侧堆积判定的观察窗（不依赖客户端反馈）
-        a.resumeSocket(); // 恢复读：堆积帧倾泻（含 4431 错误帧与 close）
-        await until(() => a.closed !== null || a.errs(4431).length > 0, 5000);
-        await settle(400);
-        // 3b3c 两级语义（同步排水修正后）：live 引擎 outbox 由同步排水搬运→真慢客户端积压转入连接发送队列；
-        // 订阅级 4431 只属于 paging 滞留（RW1 面），本场景不触发。
-        expect(a.errs(4431).some((x) => x.retryable === false)).toBe(false); // 无订阅级误杀
-        const conn4431 = a.errs(4431).find((x) => x.retryable === true);
-        expect(conn4431).toBeDefined(); // 连接级 4431（发送队列超限，可重连续读）
-        expect((conn4431 as { message?: string }).message).toContain("发送队列超限");
+        a.pauseSocket(); // 停读（对照：RW1 同规模突发+正常读）
+        await appendBurst(r.jp, 251, 7000); // ~1.2MB 事件流
+        await settle(1200); // 服务端侧观察窗（不依赖客户端反馈）
+        expect(a.errs(4431).length).toBe(0); // 无任何 4431（订阅级/连接级均不误杀）
+        expect(a.closed).toBeNull(); // 连接未被断
+        a.resumeSocket(); // 恢复读：堆积帧倾泻
+        await until(() => {
+          const evs = a.frames.filter((f) => f.t === "events");
+          return evs.reduce((n, f) => n + ((f as { events?: unknown[] }).events?.length ?? 0), 0) >= 6750;
+        }, 8000);
+        await settle(300);
+        // 恰一次：seq 集合 251..7000 各出现一次（无缺无重）——停读期间缓冲+恢复后倾泻不丢帧
+        const seqs: number[] = [];
+        for (const f of a.frames) {
+          if (f.t !== "events") continue;
+          for (const ev of (f as { events?: { seq?: number }[] }).events ?? []) if (typeof ev.seq === "number") seqs.push(ev.seq);
+        }
+        expect(seqs.length).toBe(6750);
+        const uniq = new Set(seqs);
+        expect(uniq.size).toBe(6750);
+        for (let q = 251; q <= 7000; q++) expect(uniq.has(q)).toBe(true);
+        expect(a.closed).toBeNull(); // 全程存活
       } finally {
         a.dispose();
       }
     } finally {
       await r.dispose();
     }
-  });
+  }, 20000);
+
+  it("RW6 快客户端单突发（R-01 反例 P-FAST 复现）：正常读+6750 行单突发→全量恰一次零错", async () => {
+    // GPT 3b-3 审读 R-01/P-FAST：修复前同步分发循环内连接队列排水饥饿→events=0+连接级 4431
+    // （frames=929 inflight=0 bytes=1,049,274）。修复=分发按有界批次让出事件循环（>256 行批次
+    // 每 16 条 setImmediate）。本用例=正常读取客户端同一突发负载，逐 seq 断言恰一次。
+    const r = await makeRig();
+    try {
+      await seedJournal(r.jp, 250);
+      const a = openClient(r.url);
+      try {
+        await a.hello();
+        await a.say({ t: "subscribe", requestId: "s1", file: "j.jsonl" });
+        await until(() => a.frames.some((f) => f.t === "snapshot"));
+        const snap = a.frames.find((f) => f.t === "snapshot") as Record<string, unknown>;
+        await a.say({ t: "subscribe", requestId: "s2", file: "j.jsonl", snapshotId: snap.snapshotId, historyNext: snap.historyNext });
+        await until(() => a.frames.filter((f) => f.t === "snapshot").some((f) => f.hasMore === false));
+        await settle(WARM); // 观察建立
+        await appendBurst(r.jp, 251, 7000); // 单突发 6750 行（P-FAST 同负载）
+        await until(() => {
+          const evs = a.frames.filter((f) => f.t === "events");
+          return evs.reduce((n, f) => n + ((f as { events?: unknown[] }).events?.length ?? 0), 0) >= 6750;
+        }, 10_000);
+        await settle(300);
+        const seqs: number[] = [];
+        for (const f of a.frames) {
+          if (f.t !== "events") continue;
+          for (const ev of (f as { events?: { seq?: number }[] }).events ?? []) if (typeof ev.seq === "number") seqs.push(ev.seq);
+        }
+        expect(a.errs(4431).length).toBe(0); // 无连接级/订阅级 4431
+        expect(a.closed).toBeNull();
+        expect(seqs.length).toBe(6750);
+        const uniq = new Set(seqs);
+        expect(uniq.size).toBe(6750);
+        for (let q = 251; q <= 7000; q++) expect(uniq.has(q)).toBe(true);
+      } finally {
+        a.dispose();
+      }
+    } finally {
+      await r.dispose();
+    }
+  }, 20000);
 
   it("RW3 字节门两级：262,145B 应用帧→4404（帧超字节上限）；>1MiB 传输帧→close 1009", async () => {
     const r = await makeRig();
@@ -236,10 +291,15 @@ describe("3b-3③ real-ws：真实传输+慢客户端矩阵", () => {
   it("RW4 Origin/token 真路径：白名单外 Origin→HTTP 403 拒握手；坏 token→4401+close 1008", async () => {
     const r = await makeRig();
     try {
-      const rejectP = new Promise<number>((res) => {
+      const rejectP = new Promise<number>((res, rej) => {
         const ws = new WebSocket(r.url, { headers: { Origin: "http://evil.example" } });
-        ws.on("unexpected-response", (_req, rs) => { res(rs.statusCode ?? 0); ws.terminate(); });
+        // R-05：握手被拒后 ws 处于 CONNECTING 态——原版 terminate() 会再触发
+        // "WebSocket was closed before the connection was established" error（unhandled→vitest exit1）。
+        // 改为显式收敛 error/close：预期拒握手只 res；非预期异常才升级 reject。
+        ws.on("unexpected-response", (_req, rs) => { res(rs.statusCode ?? 0); });
         ws.on("open", () => { res(-1); ws.terminate(); });
+        ws.on("error", (e: Error) => { if (!/closed before the connection/i.test(e.message)) rej(e); });
+        ws.on("close", () => {});
       });
       expect(await rejectP).toBe(403);
       const a = openClient(r.url);

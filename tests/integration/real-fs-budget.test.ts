@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appendFile, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WsGateway, type ConnMeta, type GatewayConnHooks, type WsGatewayOpts } from "../../apps/server/src/ws/ws-gateway.ts";

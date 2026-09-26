@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { appendFile, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WsGateway, type ConnMeta, type GatewayConnHooks, type WsGatewayOpts } from "../../apps/server/src/ws/ws-gateway.ts";
+import { WsGateway, type ConnMeta, type GatewayConnHooks } from "../../apps/server/src/ws/ws-gateway.ts";
 import { TokenAuthority } from "../../apps/server/src/ws/token-auth.ts";
 import { DualHistorySource } from "../../apps/server/src/runtime/dual-history-source.ts";
 import { ComputeSemaphore } from "../../apps/server/src/ws/compute-semaphore.ts";

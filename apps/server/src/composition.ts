@@ -4,8 +4,8 @@
 // - 授权根与历史根同源：roots 同时是网关 file 授权域与 DualHistorySource 的 journal 根
 //   （resolveWithinRoots 同一口径——网关授权什么，源就最多能读什么，不允许源比网关授权面更宽）。
 // - token fail-closed：tokenFile 缺失/非法/空集合→startServer 抛错拒绝启动（TokenAuthority.fromFile 语义）。
-// - 热轮换：默认间隔轮询（mtime+size 指纹在 TokenAuthority 内；本层直接周期驱动 gateway.applyTokenReload
-//   ——reload 幂等：文件未变=changed:false 无操作；变了→revoked 摘要→网关撤销既有连接 4401+1008）。
+// - 热轮换：默认间隔轮询（周期全量读 tokenFile 并重新校验——无 mtime/size 指纹短路；TokenAuthority.reload
+//   对相同集合返回 changed:false（内容比对），对变更集合撤销 revoked→网关撤销既有连接 4401+1008）。
 // - dispose 顺序（冻结）：摘 onConnection → 停轮询/SIGHUP → gateway.dispose()（存量连接 1000
 //   "server-shutdown" 优雅关+文件观察器全解绑→DH 双源句柄归零）→ adapter.dispose()（传输层
 //   兜底 1001+关自建 server）→ tokens.dispose()。gateway 先于 adapter：应用层告别帧先于传输层断链。
@@ -15,6 +15,7 @@ import { TokenAuthority } from "./ws/token-auth.ts";
 import { WsGateway } from "./ws/ws-gateway.ts";
 import { ComputeSemaphore } from "./ws/compute-semaphore.ts";
 import { DualHistorySource } from "./runtime/dual-history-source.ts";
+import { isAbsolute } from "node:path";
 
 export interface ServerConfig {
   /** token 文件（0600 {version:1,tokens:[...]}；缺失/非法/空→拒绝启动）。 */
@@ -55,10 +56,44 @@ export interface PiAgentUiServer {
 
 const DEFAULT_TOKEN_POLL_MS = 5_000;
 
+/** 数值配置门（R-04）：有限安全整数且 >0——NaN/±Infinity/负数/分数/超安全整数一律拒启，
+ * 否则会绕过读取侧硬限（如 maxScanBytes=NaN 时 `total > maxBytes` 恒 false）。 */
+function requireFinitePosInt(name: string, v: number, max: number): number {
+  if (!Number.isSafeInteger(v) || v <= 0 || v > max) {
+    throw new Error(`${name} 非法（须为 1..${max} 的安全整数，实值 ${String(v)}）：拒绝启动`);
+  }
+  return v;
+}
+
+/** 绝对路径校验（R-04）：roots/sessionRoots/scanDir 元素必须非空绝对路径——相对根会把授权域
+ * 绑到进程 cwd，属配置错误面。 */
+function requireAbsPaths(name: string, paths: readonly string[]): readonly string[] {
+  for (const p of paths) {
+    if (typeof p !== "string" || p.length === 0 || !isAbsolute(p)) {
+      throw new Error(`${name} 含非法元素（须非空绝对路径，实值 ${JSON.stringify(p)}）：拒绝启动`);
+    }
+  }
+  return paths;
+}
+
 /** 启动生产服务（fail-closed：任何配置/环境错误=抛错，不启动）。 */
 export async function startServer(config: ServerConfig): Promise<PiAgentUiServer> {
   if (config.allowedOrigins.length === 0) throw new Error("allowedOrigins 为空：拒绝启动（空白名单=配置错误）");
+  for (const o of config.allowedOrigins) {
+    // Origin=非空合法来源串（scheme://host[:port]）；空串/裸串属配置错误
+    if (typeof o !== "string" || o.length === 0 || !/^[a-z][a-z0-9+.-]*:\/\/[^\s]+$/i.test(o)) {
+      throw new Error(`allowedOrigins 含非法来源（须非空合法 Origin 串，实值 ${JSON.stringify(o)}）：拒绝启动`);
+    }
+  }
   if (config.roots.length === 0) throw new Error("roots 为空：拒绝启动");
+  requireAbsPaths("roots", config.roots);
+  if (config.sessionRoots !== undefined) requireAbsPaths("sessionRoots", config.sessionRoots);
+  if (config.scanDir !== undefined && !isAbsolute(config.scanDir)) throw new Error("scanDir 非法（须绝对路径）：拒绝启动");
+  if (config.maxScanBytes !== undefined) requireFinitePosInt("maxScanBytes", config.maxScanBytes, 1024 * 1024 * 1024); // 1GiB 上界
+  if (config.tokenPollMs !== undefined && config.tokenPollMs !== 0) {
+    // 0=禁用轮询；正值须为安全整数且 ≤ Node 定时器上限（2^31-1）
+    requireFinitePosInt("tokenPollMs", config.tokenPollMs, 2_147_483_647);
+  }
   const audit = (line: string): void => { try { config.audit?.(line); } catch { /* 审计异常不阻断 */ } };
 
   // token fail-closed：缺失/不可读/非法/空集合→fromFile 抛错

@@ -1,7 +1,7 @@
 // 3b-3① 生产组合根受控测试：配置门（fail-closed）+组装生命周期+真升级冒烟。
 // 真网络行为只做最小冒烟（403 拒绝/hello 认证/dispose 告别码）；慢客户端矩阵归 ③ real-ws。
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtemp, mkdir, chmod, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, chmod, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { request as httpReq } from "node:http";
@@ -48,6 +48,40 @@ afterEach(async () => {
 });
 
 describe("3b-3① composition", () => {
+  describe("R-04 配置门（非法数值/路径/Origin → 拒绝启动）", () => {
+    it("maxScanBytes：NaN/±Infinity/负数/分数/超 1GiB → 拒绝启动", async () => {
+      for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1, 0.5, 1024 * 1024 * 1024 + 1]) {
+        const { cfg } = await mkCfg({ maxScanBytes: bad });
+        await expect(startServer(cfg)).rejects.toThrow("maxScanBytes 非法");
+      }
+    });
+    it("tokenPollMs：负数/分数/超定时器上限 → 拒绝启动；0 与合法正值 → 接受", async () => {
+      for (const bad of [-1, 0.5, 2_147_483_648]) {
+        const { cfg } = await mkCfg({ tokenPollMs: bad });
+        await expect(startServer(cfg)).rejects.toThrow("tokenPollMs 非法");
+      }
+      // 0=禁用轮询合法（默认 makeCfg 即 0）；1ms 合法正值也接受（启动即关）
+      const r0 = await mkCfg({ tokenPollMs: 0 });
+      const s0 = await start(r0.cfg); await s0.dispose();
+      const r1 = await mkCfg({ tokenPollMs: 1 });
+      const s1 = await start(r1.cfg); await s1.dispose();
+    });
+    it("roots/sessionRoots/scanDir：相对路径 → 拒绝启动", async () => {
+      const a = await mkCfg({ roots: ["relative/dir"] });
+      await expect(startServer(a.cfg)).rejects.toThrow("roots 含非法元素");
+      const b = await mkCfg({ sessionRoots: ["rel"] });
+      await expect(startServer(b.cfg)).rejects.toThrow("sessionRoots 含非法元素");
+      const c = await mkCfg({ scanDir: "rel/scan" });
+      await expect(startServer(c.cfg)).rejects.toThrow("scanDir 非法");
+    });
+    it("allowedOrigins：空串/裸串（无 scheme） → 拒绝启动", async () => {
+      for (const bad of ["", "localhost:3000"]) {
+        const { cfg } = await mkCfg({ allowedOrigins: [bad] });
+        await expect(startServer(cfg)).rejects.toThrow("allowedOrigins 含非法来源");
+      }
+    });
+  });
+
   it("空 allowedOrigins/空 roots → 拒绝启动（配置门）", async () => {
     const { cfg } = await mkCfg();
     await expect(startServer({ ...cfg, allowedOrigins: [] })).rejects.toThrow(/allowedOrigins/);
@@ -130,6 +164,47 @@ describe("3b-3① composition", () => {
     const closedInfo = await closed;
     expect(closedInfo.code).toBe(1000);
     expect(closedInfo.reason).toBe("server-shutdown");
+  });
+
+  it("R-03 生产流身份随机：两实例首流不同 id；跨实例 cursor → 4404 拒绝", async () => {
+    const cfgA = await mkCfg();
+    const dir = cfgA.dir; // 公共 journal 根=A 的 dir；B 显式指到同一根
+    const cfgB = await mkCfg({ roots: [dir], sessionRoots: undefined, scanDir: dir });
+    // 公共 journal 根=dir（两实例同授权面）
+    await writeFile(join(dir, "r3.jsonl"), `${JSON.stringify({ t: "session-init", sessionId: "sid-r3", leafId: "l0", ts: 1, cwd: dir })}\n${JSON.stringify({ t: "enqueue", intentId: "i-1", sessionId: "sid-r3", leafId: "l0", generation: 1, matchKey: { textHash: "th-r3-1", attachmentIdentity: "", ordinal: 0 }, payload: { kind: "prompt", rawText: "hello r3", attachments: [], sentAt: "2026-09-26T00:00:00Z" } })}\n`, "utf8");
+    const a = await start(cfgA.cfg);
+    const b = await start(cfgB.cfg);
+    // 简易客户端：hello→welcome→subscribe→收集帧
+    const openSub = async (port: number, file: string, cursor?: { streamId: string; seq: number }) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}`, { origin: ORIGIN });
+      await new Promise<void>((res, rej) => { ws.on("open", res); ws.on("error", (e) => rej(e as Error)); });
+      const got: { t?: string; streamId?: string; code?: number; requestId?: string }[] = [];
+      ws.on("message", (d) => got.push(JSON.parse(String(d))));
+      ws.send(JSON.stringify({ t: "hello", protocolVersion: 1, token: TOKEN }));
+      await new Promise<void>((r) => setTimeout(r, 150));
+      const reqId = `sub-${port}`;
+      ws.send(JSON.stringify({ t: "subscribe", requestId: reqId, file, ...(cursor !== undefined ? { cursor } : {}) }));
+      await new Promise<void>((r) => setTimeout(r, 300));
+      ws.terminate();
+      return got;
+    };
+    const fa = await openSub(a.port, "r3.jsonl");
+    const fb = await openSub(b.port, "r3.jsonl");
+    const snapA = fa.find((f) => f.t === "snapshot");
+    const snapB = fb.find((f) => f.t === "snapshot");
+    expect(snapA?.streamId).toBeDefined();
+    expect(snapB?.streamId).toBeDefined();
+    // 随机身份：base64url 16B（22 字符，非 id-N 计数器）
+    expect(snapA?.streamId).toMatch(/^[A-Za-z0-9_-]{20,}$/);
+    expect(snapA?.streamId).not.toBe(snapB?.streamId);
+    // 跨实例 cursor：A 的 streamId 在 B 属未知流 → 4404（非快照洗白）
+    const fc = await openSub(b.port, "r3.jsonl", { streamId: snapA!.streamId!, seq: 1 });
+    expect(fc.some((f) => f.code === 4404)).toBe(true);
+    expect(fc.some((f) => f.t === "snapshot" && f.streamId === snapA?.streamId)).toBe(false);
+    await a.dispose();
+    await b.dispose();
+    await rm(cfgA.dir, { recursive: true, force: true });
+    await rm(cfgB.dir, { recursive: true, force: true });
   });
 
   it("reloadTokens：写新 token 文件→轮换生效（旧 token 拒新 hello）", async () => {

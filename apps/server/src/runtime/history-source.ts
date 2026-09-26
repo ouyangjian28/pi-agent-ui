@@ -512,16 +512,21 @@ export class FileHistorySource implements HistorySourcePort {
       if (read.identity !== entry.identity) {
         entry.identity = read.identity; // 后续追加/换代判据跟到新 inode
         this.audit(`fingerprint-skip-identity-change file=${entry.file} why=${why}`);
-      } else {
-        this.audit(`fingerprint-skip file=${entry.file} why=${why}`);
+        // R-02：同字节换 inode 的观察交接窗口——读到重挂之间新 inode 的追加无人观察（旧 watch
+        // 绑旧 inode 收不到新 inode 事件）。重挂后强制一次核对读：有追加→正常前缀路径补发；
+        // 无追加→同指纹+同 identity=纯 skip（不再排，无自触发环）。
+        this.rearmWatcher(slot, entry);
+        this.queueRescan(slot, "identity-handoff-verify");
+        return;
       }
+      this.audit(`fingerprint-skip file=${entry.file} why=${why}`);
       this.rearmWatcher(slot, entry);
       return;
     }
-    if (read.identity !== entry.identity) {
-      this.deliverInvalidate(slot, entry, "replace");
-      return;
-    }
+    // R-02：换 inode 不再单独构成换流判据——先做前缀判定。纯追加=同流交接（身份跟进+前缀
+    // 补发）；前缀破（改写/截短）才 invalidate，且 inode 已变时报 replace（换流）。原先
+    // 「identity 变即 replace」会让「新 inode 上先追加、后重扫」误判换流（漏读窗口变丢流）。
+    const inodeChanged = read.identity !== entry.identity;
     const rows = await this.projectSafely(read.text, slot.file);
     if (rows === null) { this.deliverUnavailable(slot, entry, "unreadable"); return; }
     const digests = rows.map((r) => ({ locator: r.locator, digest: scanDigest(r) }));
@@ -529,25 +534,43 @@ export class FileHistorySource implements HistorySourcePort {
     const common = Math.min(digests.length, entry.baseline.length);
     for (let i = 0; i < common; i++) {
       if (digests[i]?.locator !== entry.baseline[i]?.locator || digests[i]?.digest !== entry.baseline[i]?.digest) {
-        this.deliverInvalidate(slot, entry, "rewrite");
+        this.deliverInvalidate(slot, entry, inodeChanged ? "replace" : "rewrite");
         return;
       }
     }
     if (digests.length < entry.baseline.length) {
-      this.deliverInvalidate(slot, entry, "truncate");
+      this.deliverInvalidate(slot, entry, inodeChanged ? "replace" : "truncate");
       return;
     }
+    if (inodeChanged) {
+      entry.identity = read.identity; // 纯追加下的 inode 交接：身份跟进（同指纹分支同型）
+      this.audit(`inode-handoff-append file=${entry.file} why=${why}`);
+    }
     const appended = rows.length - entry.baseline.length;
+    // R-01：大批量新编入行分发按有界批次让出事件循环（每 16 条 setImmediate）——否则下游
+    // 连接队列的 setImmediate 排水在同步循环内饥饿：队列自溢出→正常读取的快客户端被 4431 误杀。
+    // 让出窗口复核纪律（与 await 后复核同型）：失效/换代→丢弃；并发重扫已推进 baseline→跳到
+    // 新水位续推（余下行的所有权归推进者，本循环不重复分发）。
+    const sinksSnapshot = [...(entry.sinks ?? [])];
+    // R-01：小批量（≤256 行）保持同步语义；大批量每 16 条让出（下游连接队列 setImmediate 排水
+    // 不再饥饿——正常读取的快客户端不会被队列自溢出误杀）。
+    const yieldBatch = appended > 256;
+    let done = 0;
     for (let i = entry.baseline.length; i < rows.length; i++) {
+      if (yieldBatch && done > 0 && (done & 15) === 0) {
+        await new Promise<void>((r) => setImmediate(() => r()));
+        if (entry.disposed || entry.state !== "active" || slot.entry !== entry) return; // 让出窗口失效/换代：丢弃
+        if (entry.baseline.length > i) i = entry.baseline.length; // 并发重扫已推进：跳到新水位（不重发）
+      }
+      done++;
       const row = rows[i];
       if (row === undefined) continue;
       try {
-        for (const sk of entry.sinks ?? []) {
+        for (const sk of sinksSnapshot) {
           try { sk.onAppend(row); } catch (e) { this.audit(`append-cb-error file=${entry.file} kind=${errKind(e)}`); }
         }
       } catch (e) {
-        this.audit(`append-cb-error file=${entry.file} kind=${errKind(e)}`);
-      }
+        this.audit(`append-cb-error file=${entry.file} kind=${errKind(e)}`); }
       entry.baselineRows.push(row);
       entry.baseline.push(digests[i] as { locator: string; digest: string });
     }

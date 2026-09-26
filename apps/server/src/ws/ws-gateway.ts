@@ -21,7 +21,7 @@ import { createHash } from "node:crypto";
 import type {
   ClientFrame, LiveEvent, RecoveryBlockReason, SanitizedText, ServerFrame, SessionStatus,
 } from "@pi-agent-ui/protocol";
-import { LIMITS, SubscriptionEngine, validateClientFrame, type HistoryEvent } from "@pi-agent-ui/protocol";
+import { LIMITS, SubscriptionEngine, validateClientFrame, type HistoryEvent , defaultStreamId } from "@pi-agent-ui/protocol";
 import type { ScanRow } from "@pi-agent-ui/protocol";
 import { ReadIndexRegistry, FileOverBudgetError } from "@pi-agent-ui/protocol";
 import type { ReadIndex } from "@pi-agent-ui/protocol";
@@ -182,7 +182,7 @@ export class WsGateway {
   private readonly authRateCfg: { limit: number; windowMs: number; baseBlockMs: number; maxBlockMs: number };
   private readonly authFailures = new Map<string, { fails: number[]; strikes: number; blockedUntil: number }>();
   private static readonly AUTH_RATE_MAP_MAX = 1024; // 防护表上界（超出=淘汰最旧非封锁项）
-  private seq = 0;
+
   private listVersion = 0;
   private listFingerprint = ""; // 目录内容指纹（W1-11）
   private disposed = false;
@@ -192,7 +192,9 @@ export class WsGateway {
     this.auditFn = opts.audit ?? (() => {});
     // W1-02：默认单调时钟（performance.now 单调；缺失环境回落 Date.now——墙钟回拨仅影响相对间隔的下界）
     this.now = opts.now ?? (typeof performance !== "undefined" && typeof performance.now === "function" ? () => performance.now() : () => Date.now());
-    this.newIdFn = opts.newId ?? (() => `id-${++this.seq}`);
+    // R-03：默认不覆盖协议层随机流身份（crypto 16B base64url）——计数器默认会在生产组合下
+    // 使独立实例首流均为 id-2（跨实例 cursor 误中）。测试需要确定性 id 时显式注入 opts.newId。
+    this.newIdFn = opts.newId ?? defaultStreamId;
     // B4：预算可注入（受控测试可小阈）；D1（w1d）：maxStreams 可注入+流身份静默丢失钩子——
     // LRU 挤出/宽容换流必须协调旧持有者（4409 退旧+撤帧+清理），不得让旧引擎接收新流坐标
     this.registry = new ReadIndexRegistry(
@@ -488,7 +490,7 @@ export class WsGateway {
       let frames: readonly ServerFrame[];
       let index: ReadIndex | typeof WsGateway.INDEX_BUDGET;
       try {
-        index = this.syncIndex(file, rows);
+        index = await this.syncIndex(file, rows);
       } catch {
         this.errFrame(st, 4402, "会话索引构建失败", requestId);
         this.opts.historySource?.release?.(file); // 3b2a-R1 失败口配对
@@ -613,7 +615,7 @@ export class WsGateway {
     this.audit(`index-fingerprint file=${file} journal=${fp.journal.slice(0, 12)} session=${fp.session === "" ? "-" : fp.session.slice(0, 12)}`);
   }
 
-  private syncIndex(file: string, rows: readonly ScanRow[]): ReadIndex | typeof WsGateway.INDEX_BUDGET {
+  private async syncIndex(file: string, rows: readonly ScanRow[]): Promise<ReadIndex | typeof WsGateway.INDEX_BUDGET> {
     let index: ReadIndex;
     try {
       index = this.registry.get(file);
@@ -637,7 +639,7 @@ export class WsGateway {
       // 建立，其快照含之；同 continueFrom 分发纪律；先退异身份引擎再分发，不给旧流喂新坐标）。
       if (rows.length > 0) {
         const fresh = index.read(1, rows.length);
-        this.dispatchHistoryBatch(file, fresh);
+        await this.dispatchHistoryBatch(file, fresh);
       }
       return index;
     }
@@ -653,7 +655,7 @@ export class WsGateway {
       this.recordFingerprints(file, index);
       if (appended > 0) {
         const fresh = index.read(before + 1, appended);
-        this.dispatchHistoryBatch(file, fresh);
+        await this.dispatchHistoryBatch(file, fresh);
       }
       if (index.overBudget) { this.closeSubscriptionsFor(file, "index-over-budget"); return WsGateway.INDEX_BUDGET; }
       return index;
@@ -857,11 +859,28 @@ export class WsGateway {
 
   /** 3b3c：批量编入分发（syncIndex 首装/续编两路共用）——每 16 条检欠量同步排水，
    * 防同 tick 大批量续编（如恢复期 session 首装 1100 行）把 live 引擎 outbox 堆爆积压门。 */
-  private dispatchHistoryBatch(file: string, fresh: readonly { event: HistoryEvent }[]): void {
+  /** R-01：让出事件循环（setImmediate）——同步分发大批量新编入行会让连接队列的 setImmediate
+   * 排水饥饿：队列自溢出→正常读取的快客户端被 4431 误杀（P-FAST 反例）。每 16 条让一次，
+   * 生产/排水交替推进（排水每轮 16 帧同量级）。 */
+  private yieldToLoop(): Promise<void> {
+    return new Promise<void>((r) => setImmediate(() => r()));
+  }
+
+  private async dispatchHistoryBatch(file: string, fresh: readonly { event: HistoryEvent }[]): Promise<void> {
+    // 引擎集合在分发起点冻结：中途新建的引擎（本次请求方的引擎在 syncIndex 后建立）其快照
+    // 屏障已含全部新编入行，不得再经 onHistoryAppend 收一遍（恰一次纪律）；已闭引擎天然忽略。
+    const engines: SubscriptionEngine[] = [];
+    this.forEachEngine(file, (e) => engines.push(e));
+    // R-01：小批量（≤256 行/连接，远离 1024 帧队列上限）保持同步语义（既有行为/时序不变）；
+    // 大批量每 16 条让出事件循环，防连接队列排水饥饿（P-FAST 反例：6750 行单突发→队列自溢出）。
+    const yieldBatch = fresh.length > 256;
     for (let i = 0; i < fresh.length; i++) {
       const fe = fresh[i]!;
-      this.forEachEngine(file, (e) => e.onHistoryAppend(fe.event));
-      if ((i & 15) === 15) this.pumpIfBacklogged(file);
+      for (const e of engines) e.onHistoryAppend(fe.event);
+      if ((i & 15) === 15) {
+        this.pumpIfBacklogged(file);
+        if (yieldBatch && i + 1 < fresh.length) await this.yieldToLoop(); // 大批量中段让出（尾批由末尾 schedulePump 收）
+      }
     }
     this.schedulePump(file);
   }

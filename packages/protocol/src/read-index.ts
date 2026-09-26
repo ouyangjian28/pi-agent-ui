@@ -204,7 +204,7 @@ export class ReadIndexRegistry {
 }
 
 /** boot 内随机流 ID（16B base64url）；无 crypto 时退化为进程内计数（boot 隔离靠进程边界） */
-function defaultStreamId(): StreamId {
+export function defaultStreamId(): StreamId {
   const g = globalThis as { crypto?: { getRandomValues?: (a: Uint8Array) => Uint8Array } };
   if (typeof g.crypto?.getRandomValues === "function") {
     const b = new Uint8Array(16);

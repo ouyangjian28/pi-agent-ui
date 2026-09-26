@@ -196,9 +196,14 @@ describe("DualHistorySource 3b-2b②——合成与归因", () => {
     h.reader.set("/s/a", sUser("u1", USER_TEXT) + "\n" + sUser("u2", "second") + "\n");
     h.watcher.notice("/s/a");
     await until(() => log.appends.some((r) => r.source === "session"));
-    // 任一源盘面换代（identity 变+内容变——3b-3⑤ 起同字节换 inode 走指纹短路不失效）
-    // →invalidate 转发（watch 瞬错=重挂自愈，不产失效——设计面）
+    // R-02 后语义：换 inode 纯追加=同流交接（前缀补发，不失效）——先证交接面
     h.reader.set("/s/a", sUser("u1", USER_TEXT) + "\n" + sUser("u2", "second") + "\n" + sUser("u3", "third") + "\n", `dev-ino-${Date.now()}`);
+    h.watcher.notice("/s/a");
+    await until(() => log.appends.some((r) => r.source === "session" && r.raw.includes("u3")));
+    expect(log.invalidates).toEqual([]);
+    // 任一源盘面改写换代（identity 变+前缀破）→invalidate("replace") 转发
+    // （watch 瞬错=重挂自愈，不产失效——设计面；同字节换 inode 走指纹短路不失效——3b-3⑤）
+    h.reader.set("/s/a", sUser("u1x", USER_TEXT) + "\n" + sUser("u2", "second") + "\n", `dev-ino-${Date.now() + 1}`);
     h.watcher.notice("/s/a");
     await until(() => log.invalidates.length > 0);
     expect(log.invalidates).toContain("replace");

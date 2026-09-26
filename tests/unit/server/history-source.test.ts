@@ -612,17 +612,29 @@ describe("FileHistorySource 真盘（3b-2a+R7 证据分级）", () => {
     activeHandles(w)[0]?.triggerNotice();
     await until(() => sk2.log.invalidates.includes("truncate"));
     stop2!();
-    // 替换（rename over→dev:ino 变化）→invalidate(replace)
-    const tmp2 = join(root, "real2.jsonl");
-    await writeFile(tmp2, `${jline(1)}\n${jline(2)}\n`, "utf8");
+    // R-02：rename over 纯追加（前缀成立+inode 变）→同流交接（inode-handoff-append+前缀补发），不失效
+    const tmpA = join(root, "realA.jsonl");
+    await writeFile(tmpA, `${jline(1)}\n${jline(2)}\n`, "utf8");
     const rows3 = await src.load(file);
     expect(rows3).not.toBeNull();
     const sk3 = makeSinks();
     const stop3 = src.observe(file, sk3.s);
+    await rename(tmpA, file);
+    activeHandles(w)[0]?.triggerNotice();
+    await until(() => sk3.log.appends.length === 1);
+    expect(sk3.log.invalidates).toEqual([]);
+    stop3!();
+    // 替换（rename over 改写→前缀破+dev:ino 变）→invalidate(replace)
+    const tmp2 = join(root, "real2.jsonl");
+    await writeFile(tmp2, `${jline(9)}\n${jline(2)}\n`, "utf8");
+    const rows4a = await src.load(file);
+    expect(rows4a).not.toBeNull();
+    const sk3b = makeSinks();
+    const stop3b = src.observe(file, sk3b.s);
     await rename(tmp2, file);
     activeHandles(w)[0]?.triggerNotice();
-    await until(() => sk3.log.invalidates.includes("replace"));
-    stop3!();
+    await until(() => sk3b.log.invalidates.includes("replace"));
+    stop3b!();
     // 删除（活跃订阅期 unlink→missing→deleted）
     const rows4 = await src.load(file);
     expect(rows4).not.toBeNull();
@@ -811,14 +823,16 @@ describe("FileHistorySource 3b2c-B1/B2——槽位代次隔离+原始回调身�
     // N4 的 stopA 后槽被回收（slot-reaped），旧闭包指向死槽=双重保护；本例用 carry=2 锚让 A→B 同槽
     // 且 B 的成功 load 只吸收一个（剩 carry=1 保槽），旧闭包 genNotice(slot, entryA) 落在活槽上——身份门是唯一防线。
     const r = new FakeReader();
-    r.reads.push({ text, identity: "1:1" }, { text, identity: "9:9" }, { text, identity: "1:1" }, { text, identity: "1:1" });
+    // R-02 后读序列：读1=代 A 初扫；读2=notice 重扫（同字节换 inode→skip-identity-change）；
+    // 读3/读4=强制核对读链（identity 9:9→1:1 再变→再核对→1:1 稳定收敛纯 skip）；读5=代 B 初扫。
+    r.reads.push({ text, identity: "1:1" }, { text, identity: "9:9" }, { text, identity: "1:1" }, { text, identity: "1:1" }, { text, identity: "1:1" });
     const h = harness({ reader: r });
     expect(await h.src.load("a.jsonl")).not.toBeNull(); // 代 A（读1）
     const stopA = h.src.observe("a.jsonl", makeSinks().s);
     h.src.release("a.jsonl");
     h.src.release("a.jsonl"); // 超额释放压力例×2——单次 load 已被 observe 消费后再放两笔（非合法两他方 load）：carry=2，B 的成功 load 只吸收一（剩 1 保槽）；合法路径同槽换代由 D4 固化（3b2h H-C5-01：恰两笔，carry 计数证据见测试尾）
     h.watcher.handles[0]?.triggerNotice();
-    await until(() => r.calls === 2); // 重扫 9:9 → replace 关代 A（读2；槽因 carry 存活）
+    await until(() => r.calls >= 4); // 读2 skip+读3/4 核对链收敛（identity 稳定→纯 skip 停）
     stopA?.();
     // 代 B：同槽新初扫（读3）+绑定
     const b = makeSinks();
@@ -997,13 +1011,14 @@ describe("FileHistorySource 3b2e-C1/C2——生命周期收口+watcher 注册身
   it("C2/D4（GPT 3b2d）：合法引用路径同槽换代——旧闭包直调不扰新代", async () => {
     const text = `${jline(1)}\n`;
     const r = new FakeReader();
-    r.reads.push({ text, identity: "1:1" }, { text: `${text}${jline(2)}\n`, identity: "9:9" }, { text, identity: "1:1" });
+    // 读2=新 inode 上的改写（前缀破）→invalidate(replace) 关代 A（R-02 后纯追加+换 inode=交接不失效）
+    r.reads.push({ text, identity: "1:1" }, { text: `${jline(9)}\n`, identity: "9:9" }, { text, identity: "1:1" });
     const h = harness({ reader: r });
     await h.src.load("a.jsonl");                 // entryA
     const skA = makeSinks();
     const stopA = h.src.observe("a.jsonl", skA.s);
     void h.src.load("a.jsonl");                  // 他方 C 合法 load 保槽（awaitingBind=1）
-    h.watcher.handles[0]!.triggerNotice();       // 重扫 identity 9:9 → invalidate(replace) → entryA 关
+    h.watcher.handles[0]!.triggerNotice();       // 重扫 identity 9:9 改写 → invalidate(replace) → entryA 关
     await until(() => skA.log.invalidates.length === 1);
     stopA?.();
     const rowsB = await h.src.load("a.jsonl");   // B 新初扫（读#3；同槽——C 引用在）
@@ -1297,9 +1312,13 @@ describe("FileHistorySource 3b-3⑤：整文件指纹短路（契约 §1.3——
     const { s: sk, log } = makeSinks();
     h.src.observe("a.jsonl", sk);
     // rename-over 同字节：inode 变、内容不变→短路（观察一致面不换流）
-    r.reads.push({ text: t1, identity: "9:9" });
+    // R-02：skip-identity-change 后强制一次核对读（identity-handoff-verify）——先喂「同内容同新 inode」
+    // 的核对读（→纯 skip 收敛，无追加），再喂真追加读。
+    // 读序列先行入队（verify 读会被立即消费——与触发竞态无关）
+    r.reads.push({ text: t1, identity: "9:9" }, { text: t1, identity: "9:9" }); // 读2=skip-id；读3=verify（同指纹+同 identity→纯 skip 收敛）
     h.watcher.handles[0]?.triggerNotice();
     await until(() => h.audits.some((l) => l.includes("fingerprint-skip-identity-change")));
+    await until(() => h.audits.some((l) => l.includes("fingerprint-skip") && !l.includes("identity-change")));
     expect(log.invalidates).toEqual([]);
     expect(log.appends).toEqual([]);
     // 新 inode 上继续追加（身份已跟进 9:9）→正常 onAppend 不失效
@@ -1351,5 +1370,86 @@ describe("FileHistorySource 3b-3⑤：整文件指纹短路（契约 §1.3——
     await until(() => log.appends.length === 1);
     expect(log.invalidates).toEqual([]);
     (un as () => void)();
+  });
+
+  // R-02（GPT 3b-3 反例 P-INODE）：同字节换 inode 的观察交接窗口四象限+收敛性。
+  // 机制=skip-identity-change 后强制一次核对读（identity-handoff-verify）——读到重挂之间
+  // 新 inode 的追加由核对读补发；无追加=纯 skip 收敛（不再排，无自触发环）。
+  it("R-02/W1 追加先于重扫（读快照已含）→正常前缀路径（不进 skip 分支）", async () => {
+    const t1 = `${jline(1)}\n`;
+    const r = new FakeReader();
+    r.reads.push({ text: t1, identity: "1:1" });
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");
+    const { s: sk, log } = makeSinks();
+    h.src.observe("a.jsonl", sk);
+    // rename 后、重扫读发生前已有追加：重扫读直接见新行（指纹已变）→正常 append
+    r.reads.push({ text: `${t1}${jline(2)}\n`, identity: "9:9" });
+    h.watcher.handles[0]?.triggerNotice();
+    await until(() => log.appends.length === 1);
+    expect(log.invalidates).toEqual([]);
+    expect(h.audits.some((l) => l.includes("fingerprint-skip-identity-change"))).toBe(false); // 未走 skip
+  });
+
+  it("R-02/W2 读后重挂前追加（读快照不含）→核对读补发恰一次", async () => {
+    const t1 = `${jline(1)}\n`;
+    const r = new FakeReader();
+    r.reads.push({ text: t1, identity: "1:1" });
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");
+    const { s: sk, log } = makeSinks();
+    h.src.observe("a.jsonl", sk);
+    // 重扫读挂起：rename 已发生（读结果=旧字节），重挂前新 inode 已追加 jline2——
+    // 读快照不含新行 → skip-identity-change → 核对读（读3）见新行 → 前缀补发。
+    const held = new HeldRead();
+    r.reads.push(held, { text: `${t1}${jline(2)}\n`, identity: "9:9" }, { text: `${t1}${jline(2)}\n`, identity: "9:9" });
+    h.watcher.handles[0]?.triggerNotice();
+    await until(() => r.calls >= 2);
+    held.resolve({ text: t1, identity: "9:9" }); // 释放旧快照（漏读窗口在此刻形成）
+    await until(() => log.appends.length === 1, 3000);
+    expect(log.invalidates).toEqual([]);
+    expect(h.audits.some((l) => l.includes("identity-handoff-verify")) || h.audits.some((l) => l.includes("fingerprint-skip-identity-change"))).toBe(true);
+    expect(log.appends).toHaveLength(1); // 恰一次
+  });
+
+  it("R-02/W3 重挂后追加→新 watch notice 正常路径；核对读无追加=纯 skip 收敛", async () => {
+    const t1 = `${jline(1)}\n`;
+    const r = new FakeReader();
+    r.reads.push({ text: t1, identity: "1:1" });
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");
+    const { s: sk, log } = makeSinks();
+    h.src.observe("a.jsonl", sk);
+    r.reads.push({ text: t1, identity: "9:9" }, { text: t1, identity: "9:9" }, { text: `${t1}${jline(2)}\n`, identity: "9:9" });
+    h.watcher.handles[0]?.triggerNotice();
+    await until(() => h.audits.some((l) => l.includes("fingerprint-skip") && !l.includes("identity-change"))); // 核对读收敛
+    expect(log.appends).toHaveLength(0);
+    const live = h.watcher.handles.filter((x) => !x.closed).pop(); // rearm 后新 inode 句柄
+    live?.triggerNotice();
+    await until(() => log.appends.length === 1);
+    expect(log.invalidates).toEqual([]);
+  });
+
+  it("R-02/收敛性：连续同字节 rename（identity 链变）核对读有限收敛，无自触发环", async () => {
+    const t1 = `${jline(1)}\n`;
+    const r = new FakeReader();
+    r.reads.push({ text: t1, identity: "1:1" });
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");
+    const { s: sk, log } = makeSinks();
+    h.src.observe("a.jsonl", sk);
+    // rename→9:9→核对（读3=9:9 纯 skip）；再 rename→8:8→核对（读5=8:8 纯 skip）
+    r.reads.push({ text: t1, identity: "9:9" }, { text: t1, identity: "9:9" }, { text: t1, identity: "8:8" }, { text: t1, identity: "8:8" });
+    h.watcher.handles[0]?.triggerNotice();
+    await until(() => h.audits.filter((l) => l.includes("fingerprint-skip-identity-change")).length >= 1);
+    const live = h.watcher.handles.filter((x) => !x.closed).pop();
+    live?.triggerNotice();
+    await until(() => h.audits.filter((l) => l.includes("fingerprint-skip-identity-change")).length >= 2, 3000);
+    await new Promise((res) => setTimeout(res, 60)); // 静止观察窗：无新读
+    const calls = r.calls;
+    await new Promise((res) => setTimeout(res, 80));
+    expect(r.calls).toBe(calls); // 无环：identity 稳定后不再自触发
+    expect(log.invalidates).toEqual([]);
+    expect(log.appends).toHaveLength(0);
   });
 });
