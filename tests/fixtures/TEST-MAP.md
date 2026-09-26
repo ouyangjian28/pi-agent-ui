@@ -442,3 +442,24 @@
 
 - 变异四杀（基线 c50f323；脚本 /tmp/mut-3b2c-fix2.py；**patch 存档=tests/fixtures/mutation-records/3b2b-fix2.md**——GPT F 面证据完备要求）：M-F2-01 observe credit 块禁用→1 挂；M-F2-02 observe 登记退单条覆盖→1 挂；M-F2-02b closeObsState 清整列表不按身份→1 挂；M-F2-03 去前缀 ignoreBOM→2 挂。还原后全仓 729+7 复验绿。
 - 措辞纠偏（fix2 §6/Y4）：D9 标题与 TEST-MAP 行去「全退再开」表述（B 退订≠真全退，真全退=D10）；session-projection.ts 头注释去「插入行不漂移」（改「同位改写/中插会移动后续偏移→前缀校验检出→换流」）；history-source RealReader 注释改「fatal+ignoreBOM 下完整前缀字节序列→字符串为单射」（不再笼统称「一一对应」）。
+
+
+## 3b2b-fix3 修复轮（GPT 76→修复；基线 ce50b50；734+7+tsc0+lint0）
+
+**模型变更**：引用守恒从「credit 补记账双账本」改为**单账本免扣模型**——FH.observe 增 `consumeLoadRef:false` 免扣绑定（只绑 sinks 不动 awaitingBind）；晚附统一免扣；DH credit 账整个删除。「谁的 load 谁结算」：每次成功 load 的引用只由装载方自己的 observe/release 结算，晚附永不消耗他人引用（F3-01 双扣与 F3-02 carry 两条路径从根上消失）。
+
+| 断言面 | 用例 | 状态 |
+|---|---|---|
+| F3-01 交错结算守恒：晚附后 B observe + C release 交错（两笔 load 两笔结算）→无 release-carry；A/B 全退零句柄；后继 D 双源观察建立+session 新行直达 | dual 3b2c-fix3 F3-01 | 🟢 |
+| F3-02 多注册×多 load：A/B 两注册+C/D 两装载→晚附免扣双绑定（regs=2）→C/D release 各结算（无 carry）→当前交付 A/B 双达→后继 E 周期双源 | dual 3b2c-fix3 F3-02 | 🟢 |
+| F3-02b 多注册×单 load：晚附双绑定免扣；C observe 结算唯一引用；无任何 carry | dual 3b2c-fix3 F3-02b | 🟢 |
+| F1-02/F2-01 重写（免扣模型）：晚附 regs=1 无 credits 字段；B release 结算自己的债（session 句柄仍活）；B observe 消耗自己那份；后继周期零 carry 零孤儿 | dual 3b2c-fix1 F1-02/F2-01（重写） | 🟢 |
+| F3-03 D10 类型收窄：unsub helper find 回调类型谓词（unknown→typed）——typecheck 三段真实全绿 | ws-gateway D10 + tsc | 🟢 |
+| Y3-02 F1-04 尾部去无配对 release（载入已由 observe 配对）+断言无 release-carry | dual 3b2c-fix1 F1-04（尾） | 🟢 |
+| Y3-03 D10 快照逐条：page seqs [1,2,3,4]+kinds 到达序 [turn-enqueued,message,turn-enqueued,message]+intentId [i-1,i-2]+entryId [u1,u4] | ws-gateway D10（强化） | 🟢 |
+| Y3-03 D11 帧级订阅身份：A/B 后续 events 帧 subscriptionId 各自匹配本连接快照（events 帧不携 streamId；帧不串连接=同流同序直接证据） | ws-gateway D11（强化） | 🟢 |
+| Y3-03 currentRows 副本语义+合法周期：两次返回引用不等+改返回数组不污染内部；load→currentRows×3→release→重开装载/观察无 carry | history-source F2 组（强化） | 🟢 |
+| Y3-03 撕裂尾补全对照：撕裂态 u2 不发布→补全第三字节+换行后发布+u1 locator 不漂移+u2 locator=真字节偏移 | history-source RealReader（强化） | 🟢 |
+
+- 变异三杀（基线 ce50b50；/tmp/mut-3b2c-fix3.py；**真实 unified diff+失败测试名存档=tests/fixtures/mutation-records/3b2b-fix3.md**）：M-F3-01 免扣门失效（free 绑定也扣）→3 挂（F1-02/F3-01/F3-02）；M-F3-02 晚附退消费模式→3 挂（同三用例）；M-F3-03 晚附只绑首个注册→2 挂（F3-02/F3-02b）。还原后全仓 734+7 复验绿。
+- 上轮证据档勘误（Y3-01）：mutation-records/3b2b-fix2.md 非可应用 unified diff（M-F2-02 文字替换若逐字执行会被下一行 obs.set 覆盖）——本轮起存 `git diff` 原文+失败测试名清单。
