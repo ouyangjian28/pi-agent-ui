@@ -408,24 +408,23 @@ describe("DualHistorySource 3b2c-fix1——五阻断闭合（GPT 72→修复）"
     await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
   });
 
-  it("F1-02：late-attach 引用 credit——B 的 release 不双扣；A 先退出后 C 重开可续流（无静默断流）", async () => {
+  it("F1-02（fix3 免扣模型）：晚附不消耗装载方引用——B release 结算自己的债；C 重开续流零静默断流", async () => {
     const h = harness({ sessionFor: (f) => f.replace("/j/", "/s/") });
     h.reader.set(JP, jEnqueue("i-1", USER_TEXT, 0) + "\n");
     await h.src.load(JP); // A 装载
     const a = makeSinks();
     const unA = h.src.observe(JP, a.s); // A 观察（journal-only）
-    // session 出现→B 装载→补接消费 B 的 session 装载引用（credit=1）
+    // session 出现→B 装载→晚附**免扣**绑 A（不消耗 B 的 session 装载引用——谁的 load 谁结算）
     h.reader.set(SP, sUser("u1", USER_TEXT) + "\n");
     await h.src.load(JP);
-    expect(h.audits.some((l) => l.includes("session-attached-late") && l.includes("credits=1"))).toBe(true);
-    // B release：credit 配对→跳过 session 侧一次（旧代码双扣→carry→下一装载误关新 session watcher）
+    expect(h.audits.some((l) => l.includes("session-attached-late") && l.includes("regs=1"))).toBe(true);
+    // B release：结算 B 自己的 session 引用（旧 credit 模型在此双扣→carry→下一装载误关 watcher）
     h.src.release(JP);
-    expect(h.audits.some((l) => l.includes("release-session-credit") && l.includes("credits=0"))).toBe(true);
-    expect(h.watcher.active(SP).length).toBe(1); // session 句柄仍活（A 的联合观察持有）
-    // A 先退出（旧 session 槽真正回收后的重开场景）：双源句柄全关
+    expect(h.watcher.active(SP).length).toBe(1); // session 句柄仍活（A 的免扣绑定持有）
+    // A 先退出：双源句柄全关
     unA?.();
     await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
-    // C 装载+观察（load→observe 二选一配对，不再额外 release）：session 事件直达 C
+    // C 装载+观察：session 事件直达 C
     const rowsC = await h.src.load(JP);
     expect((rowsC ?? []).filter((r) => r.source === "session")).toHaveLength(1);
     const c = makeSinks();
@@ -434,37 +433,36 @@ describe("DualHistorySource 3b2c-fix1——五阻断闭合（GPT 72→修复）"
     h.reader.set(SP, sUser("u1", USER_TEXT) + "\n" + sUser("u2", "second") + "\n");
     h.watcher.notice(SP);
     await until(() => c.log.appends.some((r) => r.source === "session"));
-    // 收尾：C 解绑即配对完成（observe 已消耗装载引用，无需 release）→双源句柄全关（无孤儿无 carry）
     unC?.();
     await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
     expect(h.audits.some((l) => l.includes("released-unobserved-carry"))).toBe(false);
+    expect(h.audits.some((l) => l.includes("release-carry"))).toBe(false);
   });
 
-  it("F2-01：observe 出口也消费 credit——B 走 observe 配对不遗留；后继 C load/release 零孤儿", async () => {
+  it("F2-01（fix3 免扣模型）：observe 出口结算自己的引用——零 carry；后继 C load/release 零孤儿", async () => {
     const h = harness({ sessionFor: (f) => f.replace("/j/", "/s/") });
     h.reader.set(JP, jEnqueue("i-1", USER_TEXT, 0) + "\n");
     await h.src.load(JP); // A 装载
     const a = makeSinks();
     const unA = h.src.observe(JP, a.s); // A 观察（journal-only；session 缺）
-    // session 出现→B 装载→晚附绑 A（消耗 B 的 session 引用，credit=1）
+    // session 出现→B 装载→晚附免扣绑 A（B 的 session 引用原封不动留给 B 自己的结算出口）
     h.reader.set(SP, sUser("u1", USER_TEXT) + "\n");
     await h.src.load(JP);
-    expect(h.audits.some((l) => l.includes("session-attached-late") && l.includes("credits=1"))).toBe(true);
-    // B 走 **observe** 出口（端口契约：load→observe|release 二选一）——旧代码只在 release 消费
-    // credit→observe 路径把 credit 带到下一周期→后继 caller 的 release 误跳→session watcher 孤儿。
+    expect(h.audits.some((l) => l.includes("session-attached-late") && l.includes("regs=1"))).toBe(true);
+    // B 走 **observe** 出口（端口契约：load→observe|release 二选一）——消耗自己那份引用
+    // （旧 credit 模型：observe 先无条件消耗一笔真实引用再扣 credit=双扣→下一 caller 造 carry）
     const b = makeSinks();
     const unB = h.src.observe(JP, b.s);
     expect(unB).not.toBeNull();
-    expect(h.audits.some((l) => l.includes("observe-session-credit") && l.includes("credits=0"))).toBe(true);
-    // A/B 全退：双源句柄归零（B 的 session 绑定零额外消耗，stop 即结算）
+    // A/B 全退：双源句柄归零
     unA?.();
     unB?.();
     await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
-    // C load→release（合法配对）：credit 已空→session 侧正常释放，无残留免扣额度→零孤儿
+    // C load→release（合法配对）：正常结算，无残留→零孤儿
     await h.src.load(JP);
     h.src.release(JP);
     await until(() => h.watcher.active(SP).length === 0);
-    expect(h.audits.filter((l) => l.includes("release-session-credit"))).toHaveLength(0);
+    expect(h.audits.some((l) => l.includes("release-carry"))).toBe(false);
     expect(h.audits.some((l) => l.includes("released-unobserved-carry"))).toBe(false);
   });
 
@@ -532,7 +530,8 @@ describe("DualHistorySource 3b2c-fix1——五阻断闭合（GPT 72→修复）"
     un3?.();
     expect(h.watcher.active(JP).length).toBe(0);
     expect(h.watcher.active(SP).length).toBe(0);
-    h.src.release(JP);
+    // Y3-02：末尾不再有多余无配对 release（载入已由 observe 配对——多余 release 会制造 carry 噪声）
+    expect(h.audits.some((l) => l.includes("release-carry"))).toBe(false);
   });
 
   it("R1-耗尽：三窗口全换代→有界重试耗尽→load=null+审计 load-revalidate-exhausted", async () => {
@@ -570,5 +569,102 @@ describe("DualHistorySource 3b2c-fix1——五阻断闭合（GPT 72→修复）"
     expect(h.audits.some((l) => l.includes("load-revalidate-exhausted"))).toBe(true);
     for (const st of stops) st();
     await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
+  });
+
+  describe("3b2c-fix3——引用守恒单账本（免扣晚附，GPT F3-01/02 反例）", () => {
+    it("F3-01：晚附后交错结算（B observe + C release）无 carry；后继 D 双源观察+新行直达", async () => {
+      const h = harness({ sessionFor: (f) => f.replace("/j/", "/s/") });
+      h.reader.set(JP, jEnqueue("i-1", USER_TEXT, 0) + "\n");
+      await h.src.load(JP); // A 装载
+      const a = makeSinks();
+      const unA = h.src.observe(JP, a.s); // A 观察（journal-only；session 缺）
+      // session 出现→B 装载（晚附免扣绑 A；B 的 session 引用待结算）
+      h.reader.set(SP, sUser("u1", USER_TEXT) + "\n");
+      await h.src.load(JP); // B
+      expect(h.audits.some((l) => l.includes("session-attached-late") && l.includes("regs=1"))).toBe(true);
+      await h.src.load(JP); // C（另一笔待结算引用——GPT 探针的交错窗口）
+      const b = makeSinks();
+      const unB = h.src.observe(JP, b.s); // B 走 observe 出口
+      h.src.release(JP); // C 走 release 出口
+      // 两笔 load 恰被两笔结算配对：无 release-carry（旧 credit 模型在此双扣→carry→后继 session 断流）
+      expect(h.audits.some((l) => l.includes("release-carry"))).toBe(false);
+      // A/B 全退
+      unA?.();
+      unB?.();
+      await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
+      // D 重开：双源观察均建立（旧模型 carry 会吃掉 D 的 session 装载→只剩 journal watcher）
+      await h.src.load(JP);
+      const d = makeSinks();
+      const unD = h.src.observe(JP, d.s);
+      expect(unD).not.toBeNull();
+      expect(h.watcher.active(JP).length).toBe(1);
+      expect(h.watcher.active(SP).length).toBe(1);
+      h.reader.set(SP, sUser("u1", USER_TEXT) + "\n" + sUser("u2", "fresh") + "\n");
+      h.watcher.notice(SP);
+      await until(() => d.log.appends.some((r) => r.source === "session"));
+      unD?.();
+      await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
+      expect(h.audits.some((l) => l.includes("released-unobserved-carry"))).toBe(false);
+    });
+
+    it("F3-02：多注册×多 load——晚附双绑定免扣；C/D release 各结算；当前交付双达+后继周期双源", async () => {
+      const h = harness({ sessionFor: (f) => f.replace("/j/", "/s/") });
+      h.reader.set(JP, jEnqueue("i-1", USER_TEXT, 0) + "\n");
+      await h.src.load(JP);
+      const a = makeSinks();
+      const unA = h.src.observe(JP, a.s);
+      await h.src.load(JP);
+      const b = makeSinks();
+      const unB = h.src.observe(JP, b.s); // 两注册（journal-only）
+      // session 出现→C/D 两笔装载→晚附免扣绑 A/B 两注册（regs=2；旧 credit 模型恒记 1 credit）
+      h.reader.set(SP, sUser("u1", USER_TEXT) + "\n");
+      await Promise.all([h.src.load(JP), h.src.load(JP)]);
+      expect(h.audits.some((l) => l.includes("session-attached-late") && l.includes("regs=2"))).toBe(true);
+      h.src.release(JP); // C
+      h.src.release(JP); // D——两笔引用恰被两笔 release 结算：无 carry
+      expect(h.audits.some((l) => l.includes("release-carry"))).toBe(false);
+      // 当前交付：session 追加→A/B 各收（GPT 探针 delivery [1,1]）
+      h.reader.set(SP, sUser("u1", USER_TEXT) + "\n" + sUser("u2", "both") + "\n");
+      h.watcher.notice(SP);
+      await until(() => a.log.appends.some((r) => r.source === "session") && b.log.appends.some((r) => r.source === "session"));
+      // A/B 全退→后继 E 周期双源（旧模型 carry 会让 E 只剩 journal watcher）
+      unA?.();
+      unB?.();
+      await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
+      await h.src.load(JP);
+      const e = makeSinks();
+      const unE = h.src.observe(JP, e.s);
+      expect(unE).not.toBeNull();
+      expect(h.watcher.active(SP).length).toBe(1);
+      unE?.();
+      await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
+      expect(h.audits.some((l) => l.includes("released-unobserved-carry"))).toBe(false);
+    });
+
+    it("F3-02b：多注册×单 load——晚附双绑定免扣；C observe 结算唯一引用；无任何 carry", async () => {
+      const h = harness({ sessionFor: (f) => f.replace("/j/", "/s/") });
+      h.reader.set(JP, jEnqueue("i-1", USER_TEXT, 0) + "\n");
+      await h.src.load(JP);
+      const a = makeSinks();
+      const unA = h.src.observe(JP, a.s);
+      await h.src.load(JP);
+      const b = makeSinks();
+      const unB = h.src.observe(JP, b.s);
+      h.reader.set(SP, sUser("u1", USER_TEXT) + "\n");
+      await h.src.load(JP); // C 单笔装载→晚附绑 A/B（regs=2，免扣）
+      expect(h.audits.some((l) => l.includes("session-attached-late") && l.includes("regs=2"))).toBe(true);
+      const c = makeSinks();
+      const unC = h.src.observe(JP, c.s); // C 走 observe 出口结算唯一引用
+      expect(unC).not.toBeNull();
+      expect(h.audits.some((l) => l.includes("release-carry"))).toBe(false);
+      h.reader.set(SP, sUser("u1", USER_TEXT) + "\n" + sUser("u2", "once") + "\n");
+      h.watcher.notice(SP);
+      await until(() => a.log.appends.some((r) => r.source === "session") && b.log.appends.some((r) => r.source === "session"));
+      unA?.();
+      unB?.();
+      unC?.();
+      await until(() => h.watcher.active(JP).length === 0 && h.watcher.active(SP).length === 0);
+      expect(h.audits.some((l) => l.includes("released-unobserved-carry"))).toBe(false);
+    });
   });
 });

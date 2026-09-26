@@ -56,8 +56,9 @@ export interface ConnMeta {
  *  或 release（丢弃引用）；observe 返回 null=源无活跃代（装载后失效竞态）——订阅方不得静默断流。 */
 export interface HistorySourcePort {
   load(file: string): Promise<readonly ScanRow[] | null>;
-  /** 绑定观察（消耗一次 load 引用）；null=无可绑定的活跃代。返回解绑闭包。 */
-  observe?(file: string, sinks: HistorySinks): (() => void) | null;
+  /** 3b2c-F3-01/02：绑定观察（默认消耗一次 load 引用）；consumeLoadRef:false=免扣绑定
+   *  （只绑 sinks 不动 awaitingBind——晚附专用，谁的 load 谁结算）。null=无可绑定的活跃代。返回解绑闭包。 */
+  observe?(file: string, sinks: HistorySinks, opts?: { consumeLoadRef?: boolean }): (() => void) | null;
   /** 释放一次 load 引用（load 解析后不 observe 的出口：失败口/重复订阅丢弃）。 */
   release?(file: string): void;
 }

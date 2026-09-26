@@ -1144,6 +1144,32 @@ describe("FileHistorySource 3b2c-F2（GPT fix2 §7.5）：currentRows 无副作�
     expect(activeHandles(h.watcher)).toHaveLength(0);
     expect(h.audits.some((l) => l.includes("released-unobserved-carry"))).toBe(false);
   });
+
+  it("Y3-03：副本语义（两次返回引用不等+改返回数组不污染内部）+合法周期 load→currentRows×3→release→重开无 carry", async () => {
+    const t12 = `${jline(1)}\n${jline(2)}\n`;
+    const r = new FakeReader();
+    r.reads.push({ text: t12, identity: "1:1" });
+    const h = harness({ reader: r });
+    await h.src.load("a.jsonl");
+    const c1 = h.src.currentRows("a.jsonl") as unknown[];
+    const c2 = h.src.currentRows("a.jsonl") as unknown[];
+    expect(c1).not.toBe(c2); // 每次都是新副本（非内部数组引用）
+    c1.pop();
+    expect((h.src.currentRows("a.jsonl") as unknown[]).length).toBe(2); // 改副本不污染内部
+    expect(r.calls).toBe(1);
+    // 合法周期：release 结算装载引用→重开装载/观察正常（无 carry 噪声、无静默断流）
+    h.src.release("a.jsonl");
+    r.reads.push({ text: t12, identity: "1:2" });
+    const again = await h.src.load("a.jsonl");
+    expect(again).not.toBeNull();
+    const sk = makeSinks();
+    const stop = h.src.observe("a.jsonl", sk.s);
+    expect(stop).not.toBeNull();
+    stop!();
+    expect(activeHandles(h.watcher)).toHaveLength(0);
+    expect(h.audits.some((l) => l.includes("release-carry"))).toBe(false);
+    expect(h.audits.some((l) => l.includes("released-unobserved-carry"))).toBe(false);
+  });
 });
 
 describe("RealReader 3b2c-F2-03（GPT fix2）：BOM 保留与字节坐标", () => {
@@ -1181,6 +1207,26 @@ describe("RealReader 3b2c-F2-03（GPT fix2）：BOM 保留与字节坐标", () =
     await writeFile(p, Buffer.concat([Buffer.from(`${line1}\n`, "utf8"), Buffer.from([0xe4, 0xb8])]));
     const r = await new RealReader(MAX).read(p);
     expect(r.text.startsWith(line1)).toBe(true);
+  });
+  it("Y3-03：撕裂尾补全两次写入对照——补齐第三字节+换行后完整发布，前缀 locator 不漂移", async () => {
+    const d = await mkdtemp(join(tmpdir(), "rr-torn3-"));
+    CLEANUP.push(d);
+    const p = join(d, "torn3.jsonl");
+    const torn = Buffer.concat([Buffer.from(`${line1}\n`, "utf8"), Buffer.from([0xe4, 0xb8])]);
+    await writeFile(p, torn);
+    const r1 = await new RealReader(MAX).read(p);
+    const rows1 = sessionToScanRows({ sessionText: r1.text, enqueues: [], consumed: [] });
+    expect(rows1.filter((x) => (x.event as { entryId?: string }).entryId === "u2")).toHaveLength(0); // 撕裂尾不发布
+    // 补全「中」第三字节+换行+完整第二行
+    const fullLine2 = JSON.stringify({ type: "message", id: "u2", timestamp: 2, message: { role: "user", content: "中" } });
+    await writeFile(p, Buffer.concat([Buffer.from(`${line1}\n`, "utf8"), Buffer.from(`${fullLine2}\n`, "utf8")]));
+    const r2 = await new RealReader(MAX).read(p);
+    const rows2 = sessionToScanRows({ sessionText: r2.text, enqueues: [], consumed: [] });
+    const u1Row = rows2.find((x) => (x.event as { entryId?: string }).entryId === "u1");
+    const u2Row = rows2.find((x) => (x.event as { entryId?: string }).entryId === "u2");
+    expect(u2Row).toBeDefined(); // 补全后发布
+    expect(u1Row?.locator).toBe("0"); // 首行 locator 不漂移（同位不改写）
+    expect(u2Row?.locator).toBe(String(Buffer.byteLength(`${line1}\n`, "utf8"))); // 真字节偏移
   });
 });
 

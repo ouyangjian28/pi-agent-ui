@@ -182,13 +182,10 @@ export class DualHistorySource implements HistorySourcePort {
     return null; // 有界重装仍不稳定=fail-closed（4402）
   }
 
-  /** 3b2c-F1-02：late-attach 经 sessionSrc.observe 消费掉的「装载方待结算引用」账（file→笔数）。
-   *  对应装载方随后的 release 跳过 session 侧一次——否则双扣→releaseCarry→下一装载
-   *  released-unobserved-carry 误关新 session watcher（静默断流）。 */
-  private readonly sessionReleaseCredits = new Map<string, number>();
-
-  /** 3b2c-F2-02：晚附给**全部**活跃且未绑 session 的注册各配独立 wrap（与 observe 同构，不再传
-   *  原 sinks）；首个成功绑定消耗装载方 session 引用（credit+1），后续绑定零额外消耗。 */
+  /** 3b2c-F3-01/F3-02：晚附给**全部**活跃且未绑 session 的注册各配独立 wrap（与 observe 同构）。
+   *  统一走**免扣绑定**（consumeLoadRef:false）——晚附只建立观察，不消耗任何装载方的
+   *  待结算引用；引用守恒收敛为单一账本：每次成功 load 的引用只由装载方自己的
+   *  observe/release 结算（F2 的 credit 补记账删除——两本互不知情的账正是 F3-01/02 的根因）。 */
   private attachSessionIfObserved(file: string): void {
     if (this.sessionSrc === null || this.opts.sessionFor === undefined) return;
     const regs = this.obs.get(file);
@@ -197,15 +194,14 @@ export class DualHistorySource implements HistorySourcePort {
     for (const st of regs) {
       if (st.closed || st.sinks === null || st.unS !== null) continue;
       const wrap = wrapSinks(st.sinks);
-      const unS = this.sessionSrc.observe?.(file, wrap) ?? null;
+      const unS = this.sessionSrc.observe?.(file, wrap, { consumeLoadRef: false }) ?? null;
       if (unS !== null) {
         st.unS = unS;
         attached++;
       }
     }
     if (attached > 0) {
-      this.sessionReleaseCredits.set(file, (this.sessionReleaseCredits.get(file) ?? 0) + 1);
-      this.audit(`session-attached-late file=${file} regs=${attached} credits=${this.sessionReleaseCredits.get(file)}`);
+      this.audit(`session-attached-late file=${file} regs=${attached}`);
     }
   }
 
@@ -224,17 +220,6 @@ export class DualHistorySource implements HistorySourcePort {
     const regs = this.obs.get(file) ?? [];
     regs.push(st);
     this.obs.set(file, regs);
-    // 3b2c-F2-01：credit 对称结算——端口契约「每次成功 load 配对 observe **或** release 二选一」。
-    // 晚附已代本次装载方消耗 session 引用（credit），则装载方走 observe 出口时也必须消费 credit
-    // （旧代码只在 release 消费→observe 路径把 credit 带到下一周期→后继 load/release 误跳释放→
-    // session watcher 孤儿）。
-    const credit = this.sessionReleaseCredits.get(file) ?? 0;
-    if (credit > 0) {
-      const left = credit - 1;
-      if (left === 0) this.sessionReleaseCredits.delete(file);
-      else this.sessionReleaseCredits.set(file, left);
-      this.audit(`observe-session-credit file=${file} credits=${left}`);
-    }
     return () => this.closeObsState(st);
   }
 
@@ -258,18 +243,10 @@ export class DualHistorySource implements HistorySourcePort {
   }
 
   release(file: string): void {
+    // 3b2c-F3-01/F3-02：引用守恒=单一账本——晚附已改免扣绑定，装载方的 release 直接
+    // 配对结算自己的两源引用，无需 credit 补记账（删除后 F3-01 双扣与 F3-02 carry 两条路径一并消失）。
     this.journalSrc.release?.(file);
     if (this.sessionSrc !== null && this.opts.sessionFor !== undefined) {
-      // 3b2c-F1-02：credit 配对——late-attach 已把这份装载引用转为长期观察（由联合 stop 结算），
-      // 本次 release 跳过 session 侧一次（精确笔数配对，不误扣并发 caller 的引用）。
-      const credit = this.sessionReleaseCredits.get(file) ?? 0;
-      if (credit > 0) {
-        const left = credit - 1;
-        if (left === 0) this.sessionReleaseCredits.delete(file); // 3b2c-F2-02 黄项：归零删键（不积累壳）
-        else this.sessionReleaseCredits.set(file, left);
-        this.audit(`release-session-credit file=${file} credits=${left}`);
-        return;
-      }
       this.sessionSrc.release?.(file);
     }
   }

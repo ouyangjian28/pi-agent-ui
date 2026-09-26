@@ -351,14 +351,18 @@ export class FileHistorySource implements HistorySourcePort {
   }
 
   /** 激活=绑定 sinks（消耗一次装载引用）。未激活期通知在此时一次重扫收敛。返回解绑闭包。 */
-  observe(file: string, sinks: HistorySinks): (() => void) | null {
+  observe(file: string, sinks: HistorySinks, opts?: { consumeLoadRef?: boolean }): (() => void) | null {
     const slot = this.slots.get(file);
     const entry = slot?.entry ?? null;
     if (slot === undefined || entry === null || entry.disposed || entry.state !== "active") return null;
     entry.sinks = entry.sinks === null ? new Set([sinks]) : entry.sinks;
     entry.sinks.add(sinks); // 多订阅各自收（网关场景恒单元素）
-    if (slot.awaitingBind > 0) slot.awaitingBind -= 1;
-    this.audit(`observed file=${file} awaiting=${slot.awaitingBind}`);
+    // 3b2c-F3-01/02：consumeLoadRef=false = 「免扣绑定」——只绑 sinks，不动 awaitingBind。
+    // 供 DualHistorySource 晚附用：晚附的观察不消耗任何装载方的待结算引用（谁的 load 谁结算），
+    // 从根上消除「绑定顺手烧掉别人的引用再另记账补偿」的双账本漂移（credit 账删除）。
+    const free = opts?.consumeLoadRef === false;
+    if (!free && slot.awaitingBind > 0) slot.awaitingBind -= 1;
+    this.audit(`observed file=${file} awaiting=${slot.awaitingBind}${free ? " free=1" : ""}`);
     if (slot.dirtyPending) {
       slot.dirtyPending = false;
       this.queueRescan(slot, "activate");

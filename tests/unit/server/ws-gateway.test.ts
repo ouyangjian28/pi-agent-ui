@@ -2068,7 +2068,7 @@ describe("ws-gateway 3b-2b③：DualHistorySource 接线验证", () => {
       d.reader.set(d.jp, jEn("i-1", TEXT_A, 0) + "\n");
       d.reader.set(d.sp, sU("u1", TEXT_A) + "\n");
       const unsub = async (c: { frames(): unknown[]; say(m: unknown): Promise<void> }, tag: string) => {
-        const snap = c.frames().find((f) => f.t === "snapshot") as { subscriptionId?: string };
+        const snap = c.frames().find((f): f is { t?: string; subscriptionId?: string } => (f as { t?: string }).t === "snapshot");
         await c.say({ t: "unsubscribe", requestId: `un-${tag}`, subscriptionId: snap?.subscriptionId ?? "" });
       };
       const cA = await authed(d.r);
@@ -2090,6 +2090,12 @@ describe("ws-gateway 3b-2b③：DualHistorySource 接线验证", () => {
       await cC.say({ t: "subscribe", requestId: "sub-c", file: "j.jsonl" });
       const snapC = cC.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
       expect(snapC.barrier).toBe(4);
+      // Y3-03：快照逐条核对（不止 barrier 计数——错误内容/错误条目同样过关的窗口封死）
+      const pageC = snapC.page as Array<{ seq: number; kind: string; intentId?: string | null; entryId?: string }>;
+      expect(pageC.map((e) => e.seq)).toEqual([1, 2, 3, 4]);
+      expect(pageC.map((e) => e.kind)).toEqual(["turn-enqueued", "message", "turn-enqueued", "message"]); // 到达序：J1,S1,J2,S4
+      expect(pageC.filter((e) => e.kind === "turn-enqueued").map((e) => e.intentId)).toEqual(["i-1", "i-2"]);
+      expect(pageC.filter((e) => e.kind === "message").map((e) => e.entryId)).toEqual(["u1", "u4"]);
       const liveOf = (frames: unknown[]): number => {
         let n = 0;
         for (const f of frames) {
@@ -2164,6 +2170,20 @@ describe("ws-gateway 3b-2b③：DualHistorySource 接线验证", () => {
       expect(b.map((e) => e.intentId)).toEqual(a.map((e) => e.intentId));
       const snapC = cC.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
       expect(snapC.streamId).toBe(snapA.streamId); // 同流不换
+      // Y3-03：帧级订阅身份核对——A/B 后续 events 帧的 subscriptionId 各自匹配本连接快照
+      //（events 帧不携 streamId；帧不串连接+seq 连续=同流同序的直接证据）
+      const subIdOf = (frames: unknown[]): string =>
+        (frames.find((f): f is { t?: string; subscriptionId?: string } => (f as { t?: string }).t === "snapshot")?.subscriptionId ?? "");
+      const frameSubs = (frames: unknown[]): string[] => {
+        const out: string[] = [];
+        for (const f of frames) {
+          const ev = f as { t?: string; subscriptionId?: string };
+          if (ev.t === "events") out.push(ev.subscriptionId ?? "");
+        }
+        return out;
+      };
+      expect(frameSubs(cA.frames()).every((sid) => sid === subIdOf(cA.frames()))).toBe(true);
+      expect(frameSubs(cB.frames()).every((sid) => sid === subIdOf(cB.frames()))).toBe(true);
       expect(errFrames(cA).filter((f) => f.code === 4404 || f.code === 4409).length).toBe(0);
       expect(errFrames(cB).filter((f) => f.code === 4404 || f.code === 4409).length).toBe(0);
     } finally {
