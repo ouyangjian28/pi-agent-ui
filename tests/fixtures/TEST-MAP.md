@@ -463,3 +463,9 @@
 
 - 变异三杀（基线 ce50b50；/tmp/mut-3b2c-fix3.py；**真实 unified diff+失败测试名存档=tests/fixtures/mutation-records/3b2b-fix3.md**）：M-F3-01 免扣门失效（free 绑定也扣）→3 挂（F1-02/F3-01/F3-02）；M-F3-02 晚附退消费模式→3 挂（同三用例）；M-F3-03 晚附只绑首个注册→2 挂（F3-02/F3-02b）。还原后全仓 734+7 复验绿。
 - 上轮证据档勘误（Y3-01）：mutation-records/3b2b-fix2.md 非可应用 unified diff（M-F2-02 文字替换若逐字执行会被下一行 obs.set 覆盖）——本轮起存 `git diff` 原文+失败测试名清单。
+
+## 3b-3⑤ 整文件指纹（2026-09-29；repo f6c7912/84e9bc0）
+- 断言面：①sha256HexBytes 对拍 node:crypto（空/随机 1·55·56·119·120·1000/撕裂多字节尾/64KiB+与字符串入口一致）②同内容同身份 notice→fingerprint-skip 无 append 无 invalidate（幂等静默）③同字节换 inode→skip-identity-change 不失效+后续新 inode 真追加仍达（rearm 后用最新活句柄）④内容增长→正常 append+指纹跟进→再同内容→skip ⑤真盘 rename 覆盖同字节（真新 inode）无 invalidate+后续真追加（RealReader+RealWatcher 冒烟）⑥Dual.fingerprints（未装载 null/双源两指纹/journal-only session=""——session 子源槽以逻辑 file 键控）⑦网关 index-fingerprint 审计（journal/session 12hex；session=- 面=删文件+notice 代退役后再装载）
+- 语义变更披露：**同字节换 inode 从「invalidate(replace)」改为「短路不换流」**（契约 §1.3 指纹=变更检测触发器；观察一致面）。两处旧测试随之更新：hs「replace（身份变化）」改 identity 变+内容变；dual「observe 双子源」换代步加 u3 行。
+- 变异四杀：M-FP-1 短路门 if(false)→4 挂；M-FP-2 跳过不跟进 identity→2 挂（短路自陷：后续新 inode 追加误判 replace）；M-FP-3 追加后指纹不更新→1 挂；M-FP-4 网关不记指纹→1 挂。全部 KILLED（tests/fixtures/mutation-records/3b3-fingerprint.md，真实 diff+失败用例名+还原后 747+7 复验）。
+- 踩坑：①tests 直接跑 tsc 严格面下 ReadResult 可选 fingerprint 的收窄要显式展开（in 收窄不动）②python 追加测试后搬移进 describe 时吞了前一 it 的闭合括号（suite-in-test+EOF 缺括号——vitest 部分收集假象 673/680，tsc 才是真相）③网关审计与双源审计是两条线（dualRig 的 audits 原只接双源——makeRig 透传 audit 并入）④session 子源槽键=逻辑 file 非 session 路径（journalFor 是映射器）。
