@@ -136,7 +136,10 @@ export class SubscriptionEngine {
       if (cached) {
         // R1：缓存重发同样整帧终判（防御层——装页已按最坏信封预留，此处不应触发；触发=显式失败）
         const f = this.emitPage(req.requestId, cur, cached.events, cached.done, cached.status);
-        if ((this.d.estimateFrame ?? estimateFrameBytes)(f) > LIMITS.pageFrameBudgetBytes) {
+        const cachedOver = (this.d.estimateFrame ?? estimateFrameBytes)(f) > LIMITS.pageFrameBudgetBytes;
+        // F9-1（fix9，GPT fix8 P8）：估帧回调内宿主可关引擎——预算结果解读前先验 closed（4431 不得抢盖既成关闭事实）
+        if ((this.phase as string) === "closed") return [err4404(req.requestId)];
+        if (cachedOver) {
           this.close(4431, "事件超预算", false);
           return [{ t: "error", code: 4431, message: "事件超预算", retryable: false, requestId: req.requestId }];
         }
@@ -151,7 +154,10 @@ export class SubscriptionEngine {
           if ((this.phase as string) === "closed") return [err4404(req.requestId)]; // F7-3：H+1 冻结窗同型重入复核（GPT fix6 P10；freeze 窗内宿主可关引擎，类型系统不可见）
           const empty: PageCache = { pageFrom: { streamId: this.streamId, seq: cur.seq }, barrier: this.barrier, events: [], done: true, status };
           const f = this.emitPage(req.requestId, empty.pageFrom, empty.events, true, status);
-          if ((this.d.estimateFrame ?? estimateFrameBytes)({ ...(f as { requestId: string }), requestId: MAX_ENVELOPE_REQUEST_ID } as ServerFrame) > LIMITS.pageFrameBudgetBytes) {
+          const h1Over = (this.d.estimateFrame ?? estimateFrameBytes)({ ...(f as { requestId: string }), requestId: MAX_ENVELOPE_REQUEST_ID } as ServerFrame) > LIMITS.pageFrameBudgetBytes;
+          // F9-1（fix9，GPT fix8 P9）：同上——预算结果解读前先验 closed（旧序：超限即 close+4431，绕过下方终检）
+          if ((this.phase as string) === "closed") return [err4404(req.requestId)];
+          if (h1Over) {
             this.close(4431, "事件超预算", false);
             return [{ t: "error", code: 4431, message: "事件超预算", retryable: false, requestId: req.requestId }];
           }
@@ -227,7 +233,10 @@ export class SubscriptionEngine {
       const f = this.emitPage(requestId, page, events, done, status);
       // R1：终判按最坏重试信封（64B requestId）测——缓存重发不因合法 requestId 变长击穿页预算
       const worst = { ...(f as { requestId: string }), requestId: MAX_ENVELOPE_REQUEST_ID } as ServerFrame; // 快照帧必有 requestId；上界克隆仅供测量
-      if (measure(worst) <= LIMITS.pageFrameBudgetBytes) { frame = f; break; }
+      const over = measure(worst) > LIMITS.pageFrameBudgetBytes;
+      // F9-1（fix9，GPT fix8 P10a）：终判回调内宿主可关引擎——预算结果解读前先验 closed
+      if ((this.phase as string) === "closed") return err4404(requestId);
+      if (!over) { frame = f; break; }
       if (events.length === 0) {
         // 首条即超整帧预算：无截断/占位规则→显式失败（4431 关订阅；retryable=false=订阅已亡，恢复=重新订阅）
         this.close(4431, "事件超预算", false);
@@ -240,6 +249,8 @@ export class SubscriptionEngine {
     }
     // 退空仍无成页数据可发（from≤barrier 说明确有待发事件）→首条即超：显式失败（C6-01）
     if (events.length === 0 && from.seq <= this.barrier) {
+      // F9-1（fix9，GPT fix8 P10b）：退空判定口的宿主回调已在终判循环发生——解读前先验 closed
+      if ((this.phase as string) === "closed") return err4404(requestId);
       this.close(4431, "事件超预算", false);
       return { t: "error", code: 4431, message: "事件超预算", retryable: false, requestId };
     }

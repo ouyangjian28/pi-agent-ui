@@ -2950,14 +2950,16 @@ describe("ws-gateway 3b3-fix7 F7-3：续页/H+1 冻结窗重入资格复核（GP
 });
 
 describe("ws-gateway 3b3-fix8 F8-1：宿主时钟窗整合（GPT fix7 P10——网关公开 now 注入面）", () => {
-  it("F8/P-PAGE-NOW 续页提交时钟窗内 invalidate→4409 后零退役快照、新订阅新流、观察已收口", async () => {
+  it("F8/P-PAGE-NOW 入站时钟窗内 invalidate→4409 后零退役快照、新订阅新流、观察已收口（网关级防线例，engine.handle 未及调用）", async () => {
     let clock = 1_000;
     let arm = false;
     let rig: Rig | null = null;
     const r = await makeRig({
       now: () => {
         if (arm && rig !== null) {
-          arm = false; // 一次性：下一次 now()（=续页 lastPageAt 提交点）同步失效流
+          // 一次性：实际触发点=入站帧时钟 st.lastFrameAt（ws-gateway.ts:321，FakeConn.say 内先于 engine.handle）
+          // ——网关级防线例（sub 已被 retire 删，4404 来自请求与订阅状态不符）；真引擎提交点例见 F9/P-PAGE-NOW-COMMIT
+          arm = false;
           rig.history.invalidate("f.jsonl", "rewrite");
         }
         return ++clock;
@@ -2977,7 +2979,7 @@ describe("ws-gateway 3b3-fix8 F8-1：宿主时钟窗整合（GPT fix7 P10——�
       await a.say({ t: "subscribe", requestId: "pg-2", file: "f.jsonl", snapshotId: f1.snapshotId!, historyNext: f1.historyNext! });
       await until(() => a.frames().some((f) => f.t === "error" && (f as { code?: number }).code === 4404));
       const frames = a.frames();
-      // 顺序与资格：4409（流退役广播，requestId=""）在前、4404（续页按入口同语义拒）在后；零退役快照
+      // 顺序：4409（流退役广播，requestId=""）在前、4404（网关级：sub 已被 retire 删除→请求与订阅状态不符）在后；零退役快照
       const i4409 = frames.findIndex((f) => f.t === "error" && (f as { code?: number }).code === 4409 && (f as { requestId?: string }).requestId === "");
       const i4404 = frames.findIndex((f) => f.t === "error" && (f as { code?: number }).code === 4404);
       expect(i4409).toBeGreaterThanOrEqual(0);
@@ -2993,6 +2995,71 @@ describe("ws-gateway 3b3-fix8 F8-1：宿主时钟窗整合（GPT fix7 P10——�
       await until(() => a.frames().filter((f) => f.t === "snapshot").length >= 2);
       const newSnap = a.frames().filter((f) => f.t === "snapshot").pop() as { streamId: string };
       expect(newSnap.streamId).not.toBe(f1.historyNext!.streamId);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("F9/P-PAGE-NOW-COMMIT 引擎页提交时钟窗内 invalidate→4409 后 4404、零退役快照（真提交点：freeze 内 arm，pageAt=now() 触发）", async () => {
+    const frozen: SessionStatus = {
+      session: { file: "f.jsonl", sessionId: null }, process: { phase: "idle" }, turn: { phase: "idle" },
+      backgroundTasks: { availability: "unknown", activeCount: null },
+      reap: { eligible: false, idleElapsedMs: null, idleRemainingMs: null, idleMs: 0 },
+      recovery: { availability: "unavailable", resumeBlocked: null, diskBlocked: null, unknownEffectCount: null, unattributableFragments: null, intentsCount: null, settledCount: null, evidenceHash: null },
+      statusVersion: 7, serverTimeMs: 0,
+    } as unknown as SessionStatus;
+    let freezes = 0;
+    let arm = false;
+    let clock = 1_000;
+    let rig: Rig | null = null;
+    const host = {
+      ...frozen,
+      toJSON() {
+        freezes += 1;
+        if (freezes === 2) arm = true; // 第 2 次冻结=第 2 页（第 1 页 200 行已发）——arm 留给下一个 now()
+        return frozen;
+      },
+    };
+    const r = await makeRig({
+      statusFor: () => host,
+      now: () => {
+        if (arm && rig !== null) {
+          arm = false; // 一次性：入站 :321 时钟早于 freeze（未触发）；此处=引擎 pageAt 提交尾时钟
+          rig.history.invalidate("f.jsonl", "rewrite");
+        }
+        return ++clock;
+      },
+    });
+    rig = r;
+    try {
+      const a = await authed(r);
+      r.history.put("f.jsonl", makeRows(201));
+      await a.say({ t: "subscribe", requestId: "s-1", file: "f.jsonl" });
+      await until(() => {
+        const snap = a.frames().filter((f) => f.t === "snapshot").pop() as { hasMore?: boolean; snapshotId?: string; historyNext?: { streamId: string; seq: number } } | undefined;
+        return snap?.hasMore === true && snap.historyNext !== undefined && snap.snapshotId !== undefined;
+      });
+      const f1 = a.frames().filter((f) => f.t === "snapshot").pop() as { snapshotId: string; historyNext: { streamId: string; seq: number } };
+      await a.say({ t: "subscribe", requestId: "pg-2", file: "f.jsonl", snapshotId: f1.snapshotId, historyNext: f1.historyNext });
+      // 双条件等待：基线=4404 到达；变异（删 F8-1 提交尾门）=旧引擎返回退役第 2 页快照（count≥2）——首败落在下方快照计数断言（expected 2 to be 1），不靠 until 超时
+      await until(() => a.frames().some((f) => f.t === "error" && (f as { code?: number }).code === 4404) || a.frames().filter((f) => f.t === "snapshot").length >= 2);
+      const frames = a.frames();
+      expect(frames.filter((f) => f.t === "snapshot")).toHaveLength(1); // 退役第 2 页零泄漏（M-F8-COMMIT 杀伤面：删门→此处 expected 2 to be 1）
+      // 顺序：4409（流退役广播）在前、4404（引擎提交尾终检，requestId=pg-2）在后
+      const i4409 = frames.findIndex((f) => f.t === "error" && (f as { code?: number }).code === 4409 && (f as { requestId?: string }).requestId === "");
+      const i4404 = frames.findIndex((f) => f.t === "error" && (f as { code?: number }).code === 4404);
+      expect(i4409).toBeGreaterThanOrEqual(0);
+      expect(i4404).toBeGreaterThan(i4409);
+      const e4404 = frames.filter((f) => f.t === "error" && (f as { code?: number }).code === 4404);
+      expect(e4404).toHaveLength(1);
+      expect((e4404[0] as { requestId?: string }).requestId).toBe("pg-2");
+      expect(r.history.stopped).toContain("f.jsonl");
+      expect(r.history.sinks.has("f.jsonl")).toBe(false);
+      // 新订阅走新流
+      await a.say({ t: "subscribe", requestId: "s-3", file: "f.jsonl" });
+      await until(() => a.frames().filter((f) => f.t === "snapshot").length >= 2);
+      const newSnap = a.frames().filter((f) => f.t === "snapshot").pop() as { streamId: string };
+      expect(newSnap.streamId).not.toBe(f1.historyNext.streamId);
     } finally {
       await r.dispose();
     }

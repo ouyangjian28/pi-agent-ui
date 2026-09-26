@@ -1,0 +1,20 @@
+--- a/packages/protocol/src/subscription-engine.ts
++++ b/packages/protocol/src/subscription-engine.ts
+@@ -148,7 +148,7 @@
+       if (cur.seq === this.barrier + 1) {
+         if (this.phase === "live") {
+           const status = freezeStatus(this.d.status()); // 首次生成冻结（C6-05）；重试走上方缓存分支
+-          if ((this.phase as string) === "closed") return [err4404(req.requestId)]; // F7-3：H+1 冻结窗同型重入复核（GPT fix6 P10；freeze 窗内宿主可关引擎，类型系统不可见）
++          void 0; // MUTATION M-F7-PAGE 重演（fix8 复核）: H+1 冻结复核删除
+           const empty: PageCache = { pageFrom: { streamId: this.streamId, seq: cur.seq }, barrier: this.barrier, events: [], done: true, status };
+           const f = this.emitPage(req.requestId, empty.pageFrom, empty.events, true, status);
+           if ((this.d.estimateFrame ?? estimateFrameBytes)({ ...(f as { requestId: string }), requestId: MAX_ENVELOPE_REQUEST_ID } as ServerFrame) > LIMITS.pageFrameBudgetBytes) {
+@@ -202,7 +202,7 @@
+     // invalidate（引擎 close+phase=closed）。冻结后复核资格：closed→按入口同语义拒（err4404），
+     // 不得用旧坐标出页/复活引擎（旧代码：旧快照排 4409 后+done=true enterLive 把 closed 引擎
+     // 改回 live——「4409→旧快照」倒序与复活两病）。
+-    if (this.phase === "closed") return err4404(requestId);
++    void 0; // MUTATION M-F7-PAGE 重演（fix8 复核）: servePageFrom 冻结复核删除
+     // F6-3（fix6，GPT fix5 P6）：**资格门前纯数据化**——宿主 status 可能携带 getter/toJSON（
+     // 合法 JS 对象，接口未强制纯数据）。JSON 往返一次性求值全部宿主行为，后续任何序列化
+     //（页预算实测/入队实测/缓存重发）不再触宿主代码——入队段序列化重入（toJSON 内

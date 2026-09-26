@@ -38,4 +38,5 @@
 
 本档原 diff 记录为自然语言摘要（当时 /tmp 日志已无，不重建当时原始记录）。fix8 轮已在 fix8 基线（SE sha c25d0815…，HS/DUAL 同本档基线）上重新复跑三变异并留存真实 unified diff+失败断言+还原哈希，见 **tests/fixtures/mutation-records/3b3-fix8.md「跨轮重演」节**。要点变化：
 - M-F7-1 / M-F7-WRAP：重演 KILLED，断言与本档记录一致。
-- **M-F7-PAGE：fix8 基线上窄变异合法 SURVIVED**（F8-1 提交尾/H+1 终检在同窗纵深拦截，可观测行为等价）——本档「双杀」结论仅属 fix7 基线；独立杀伤归因已移交 M-F8-COMMIT/M-F8-H1（复合变异 M-F7-PAGE+F8 四口同删在双探针上 KILLED，见 fix8 档）。
+- **M-F7-PAGE：fix8 基线上窄变异合法 SURVIVED**（F8-1 提交尾/H+1 终检在同窗纵深拦截，可观测行为等价）——本档「双杀」结论仅属 fix7 基线；独立杀伤归因已移交 M-F8-COMMIT/M-F8-H1（复合变异四口同删在双探针上 KILLED，见 fix8 档；**fix9 二次勘正**：该杀的首败断言=快照计数 `expected 2 to be 1`，非 4404 计数；且四口复合在 fix9 基线已不杀，需六口——见 fix9 档）。
+- 另一全称勘正（GPT fix8 复审 P17）：本档「本修复轮新增的门」说法对 M-F7-WRAP 不成立——wrap ok() 门为 **fix6 已有门**（fix7 只是补了晚附独占杀伤窗探针），fix7 新增的是 F7-1 finally 与 F7-3 冻结复核两处。

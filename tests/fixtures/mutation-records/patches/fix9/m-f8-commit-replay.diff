@@ -1,0 +1,12 @@
+--- a/packages/protocol/src/subscription-engine.ts
++++ b/packages/protocol/src/subscription-engine.ts
+@@ -258,8 +258,7 @@
+     // 完成后、引擎状态写入（expectNext/lastPageAt/rememberPage/phase/enterLive）之前：closed→入口同语义
+     // err4404，不写任何状态、不返回退役快照、也不让 done-else 分支把 closed 复活成 paging
+     //（终检后到返回之间零宿主调用=等效原子提交）。宿主时钟先取值，锚点语义不变（C5-05：页生成时刻）。
+-    const pageAt = this.d.now();
+-    if ((this.phase as string) === "closed") return err4404(requestId);
++    const pageAt = this.d.now(); // MUTATION M-F8-COMMIT: 提交尾门删除
+     this.expectNext = done ? null : { streamId: this.streamId, seq: last + 1 };
+     this.lastPageAt = pageAt; // 固定期限锚点=页生成时刻（C5-05：缓存重试不续命）
+     this.rememberPage({ pageFrom: page, barrier: this.barrier, events, done, status });

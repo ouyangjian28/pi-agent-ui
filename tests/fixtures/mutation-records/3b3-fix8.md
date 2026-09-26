@@ -6,7 +6,7 @@
 
 ## M-F8-COMMIT servePageFrom 提交尾终检删除（F8-1 / GPT fix7 P9/P10）
 
-- diff（packages/protocol/src/subscription-engine.ts，基线 c25d0815…）：
+- diff（packages/protocol/src/subscription-engine.ts，基线 c25d0815…；全量 unified diff=**tests/fixtures/mutation-records/patches/fix8/m-f8-commit.diff**——fix9 入仓勘正：原 /tmp 文件无 diff 头，此为同一变异在 fix8 提交态 47d1a3c 上重建的带文件头版本）：
   ```diff
   -    const pageAt = this.d.now();
   -    if ((this.phase as string) === "closed") return err4404(requestId);
@@ -22,7 +22,7 @@
 ## M-F8-H1 + M-F8-CACHED + M-F8-GRACE 三口联合删除（F8-1 / GPT fix7 P8/P11/P10）
 
 - 联合跑理由：三口各属不同分支（H+1/缓存重发/宽限窗），互不重叠；各自探针只触自己的分支。
-- diff（节选；全量=档尾附录指针 /tmp/f8-m-h1cachedgrace.diff）：
+- diff（节选；全量=**tests/fixtures/mutation-records/patches/fix8/m-f8-h1-cached-grace.diff**（原 /tmp 文件已入仓））：
   ```diff
          const graceNow = this.d.now();
   -      if ((this.phase as string) === "closed") return [err4404(req.requestId)];
@@ -46,10 +46,11 @@
 
 > 原始 fix7 档为自然语言摘要（当时 /tmp 日志已无，不重建当时记录）；以下为 **fix8 基线上的新复跑**（2026-10-02），真实 diff+退出码+还原哈希落本档；fix7 档已加指针节。
 
-- **M-F7-1 重演**（history-source.ts cc084943…）：deliverTerminal try/finally 回退为旧尾清。KILLED：`-t "F7/P-TERM-RETAIN"` → exit 1，AssertionError: `expected Set{ { …(5) }, { …(5) }, { …(5) } } to be null`（源级提前 return 出口滞留旧 sinks 面）。diff=/tmp/f8r-m-f7-1.diff；还原 sha256 同值。
-- **M-F7-WRAP 重演**（dual-history-source.ts 892d3c1c…）：wrapSinks ok() 门全删。KILLED：`-t "F7/P-LATE-WATCH-FAIL"` → exit 1，AssertionError: `expected [ 'watch-failed' ] to have a length of +0 but got 1`（已收口注册漏收终止回调）。diff=/tmp/f8r-m-f7-wrap.diff；还原 sha256 同值。
+- **M-F7-1 重演**（history-source.ts cc084943…）：deliverTerminal try/finally 回退为旧尾清。KILLED：`-t "F7/P-TERM-RETAIN"` → exit 1，AssertionError: `expected Set{ { …(5) }, { …(5) }, { …(5) } } to be null`（源级提前 return 出口滞留旧 sinks 面）。diff=patches/fix8/replay-m-f7-1.diff；还原 sha256 同值。
+- **M-F7-WRAP 重演**（dual-history-source.ts 892d3c1c…）：wrapSinks ok() 门全删。KILLED：`-t "F7/P-LATE-WATCH-FAIL"` → exit 1，AssertionError: `expected [ 'watch-failed' ] to have a length of +0 but got 1`（已收口注册漏收终止回调）。diff=patches/fix8/replay-m-f7-wrap.diff；还原 sha256 同值。
 - **M-F7-PAGE 重演（窄）**（subscription-engine.ts c25d0815…）：两处 F7-3 冻结复核删除。**合法 SURVIVED（fix8 新结论）**：`P-PAGE-REENTRY`/`P-H1-FREEZE` 均 exit 0——F8-1 提交尾/H+1 终检在同窗内纵深拦截（closed 同样返 4404，可观测行为等价）。fix7 档「双杀」结论属 fix7 基线（彼时无 F8 终检）；fix8 基线上独立杀伤归因移交 M-F8-COMMIT/H1。
-- **复合变异 M-F7-PAGE+M-F8-COMMIT/H1**（同删四口）：KILLED 双探针——`P-PAGE-REENTRY`/`P-H1-FREEZE` 均 exit 1，AssertionError: `expected 2 to be 1`（4404 计数=引擎拒帧+网关退役链各一）。diff=/tmp/f8r-m-page-f8compound.diff；还原 sha256 回 c25d0815…（同值）。
+- **复合变异 M-F7-PAGE+M-F8-COMMIT/H1**（同删四口）：KILLED 双探针——`P-PAGE-REENTRY`/`P-H1-FREEZE` 均 exit 1，AssertionError: `expected 2 to be 1`。diff=patches/fix8/replay-m-page-f8compound.diff；还原 sha256 回 c25d0815…（同值）。
+  - **fix9 勘正（GPT fix8 复审 P16 采纳）**：旧注「4404 计数=引擎拒帧+网关退役链各一」归因错误。fix9 在 fix9 基线上重验复合变异（见 3b3-fix9.md）：首败断言为**快照计数** `expect(c.frames().filter((f)=>f.t==="snapshot").length).toBe(1)`（ws-gateway.test.ts:2880/P-PAGE-REENTRY、:2920/P-H1-FREEZE）——引擎拒门已删后退役旧快照排在 4409 后，不存在两份 4404 的路径；当时仅凭 `expected 2 to be 1` 一行推断归因不成立。另：同一四口复合在 fix9 基线上已杀不动（F9-1 预算口先验纵深覆盖），需六口复合同删才重现，防御层叠加如实记录。
 
 ## 汇总
 

@@ -1,0 +1,55 @@
+--- a/packages/protocol/src/subscription-engine.ts
++++ b/packages/protocol/src/subscription-engine.ts
+@@ -151,18 +151,15 @@
+       if (cur.seq === this.barrier + 1) {
+         if (this.phase === "live") {
+           const status = freezeStatus(this.d.status()); // 首次生成冻结（C6-05）；重试走上方缓存分支
+-          if ((this.phase as string) === "closed") return [err4404(req.requestId)]; // F7-3：H+1 冻结窗同型重入复核（GPT fix6 P10；freeze 窗内宿主可关引擎，类型系统不可见）
++          void 0; // MUTATION M-F7-PAGE 重演: H+1 冻结复核删除
+           const empty: PageCache = { pageFrom: { streamId: this.streamId, seq: cur.seq }, barrier: this.barrier, events: [], done: true, status };
+           const f = this.emitPage(req.requestId, empty.pageFrom, empty.events, true, status);
+           const h1Over = (this.d.estimateFrame ?? estimateFrameBytes)({ ...(f as { requestId: string }), requestId: MAX_ENVELOPE_REQUEST_ID } as ServerFrame) > LIMITS.pageFrameBudgetBytes;
+-          // F9-1（fix9，GPT fix8 P9）：同上——预算结果解读前先验 closed（旧序：超限即 close+4431，绕过下方终检）
+-          if ((this.phase as string) === "closed") return [err4404(req.requestId)];
+-          if (h1Over) {
++          if (h1Over) { // MUTATION M-F9-BUDGET 重演: H+1 先验删除
+             this.close(4431, "事件超预算", false);
+             return [{ t: "error", code: 4431, message: "事件超预算", retryable: false, requestId: req.requestId }];
+           }
+-          // F8-1（fix8，GPT fix7 P8）：H+1 唯一宿主回调=estimateFrame 终判——其后终检 closed：不 rememberPage、不返回退役空页
+-          if ((this.phase as string) === "closed") return [err4404(req.requestId)];
++          void 0; // MUTATION M-F8-H1 重演: H+1 终检删除
+           this.rememberPage(empty);
+           return [f];
+         }
+@@ -208,7 +205,7 @@
+     // invalidate（引擎 close+phase=closed）。冻结后复核资格：closed→按入口同语义拒（err4404），
+     // 不得用旧坐标出页/复活引擎（旧代码：旧快照排 4409 后+done=true enterLive 把 closed 引擎
+     // 改回 live——「4409→旧快照」倒序与复活两病）。
+-    if (this.phase === "closed") return err4404(requestId);
++    void 0; // MUTATION M-F7-PAGE 重演: servePageFrom 冻结复核删除
+     // F6-3（fix6，GPT fix5 P6）：**资格门前纯数据化**——宿主 status 可能携带 getter/toJSON（
+     // 合法 JS 对象，接口未强制纯数据）。JSON 往返一次性求值全部宿主行为，后续任何序列化
+     //（页预算实测/入队实测/缓存重发）不再触宿主代码——入队段序列化重入（toJSON 内
+@@ -233,10 +230,7 @@
+       const f = this.emitPage(requestId, page, events, done, status);
+       // R1：终判按最坏重试信封（64B requestId）测——缓存重发不因合法 requestId 变长击穿页预算
+       const worst = { ...(f as { requestId: string }), requestId: MAX_ENVELOPE_REQUEST_ID } as ServerFrame; // 快照帧必有 requestId；上界克隆仅供测量
+-      const over = measure(worst) > LIMITS.pageFrameBudgetBytes;
+-      // F9-1（fix9，GPT fix8 P10a）：终判回调内宿主可关引擎——预算结果解读前先验 closed
+-      if ((this.phase as string) === "closed") return err4404(requestId);
+-      if (!over) { frame = f; break; }
++      if (measure(worst) <= LIMITS.pageFrameBudgetBytes) { frame = f; break; } // MUTATION M-F9-BUDGET 重演: 终判口先验删除
+       if (events.length === 0) {
+         // 首条即超整帧预算：无截断/占位规则→显式失败（4431 关订阅；retryable=false=订阅已亡，恢复=重新订阅）
+         this.close(4431, "事件超预算", false);
+@@ -258,8 +252,7 @@
+     // 完成后、引擎状态写入（expectNext/lastPageAt/rememberPage/phase/enterLive）之前：closed→入口同语义
+     // err4404，不写任何状态、不返回退役快照、也不让 done-else 分支把 closed 复活成 paging
+     //（终检后到返回之间零宿主调用=等效原子提交）。宿主时钟先取值，锚点语义不变（C5-05：页生成时刻）。
+-    const pageAt = this.d.now();
+-    if ((this.phase as string) === "closed") return err4404(requestId);
++    const pageAt = this.d.now(); // MUTATION M-F8-COMMIT 重演: 提交尾门删除
+     this.expectNext = done ? null : { streamId: this.streamId, seq: last + 1 };
+     this.lastPageAt = pageAt; // 固定期限锚点=页生成时刻（C5-05：缓存重试不续命）
+     this.rememberPage({ pageFrom: page, barrier: this.barrier, events, done, status });

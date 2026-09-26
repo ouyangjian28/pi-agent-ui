@@ -606,9 +606,10 @@ describe("3b3-fix8 F8-1：页提交资格统一终检（GPT fix7 P8/P9/P10/P11�
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ t: "error", code: 4404, requestId: "r-2" });
     expect(eng.state.phase).toBe("closed");
-    // 重发：closed 入口拒——空页未入缓存（旧代码命中缓存回退役空页）
+    // 缓存未复填直证（GPT fix8 §Y9-2：重发 4404 来自 closed 入口拒，不能独立证缓存空——以缓存长度为准）
+    expect((eng as unknown as { recentPages: unknown[] })["recentPages"]).toHaveLength(0);
     const again = errOf(eng.handle({ kind: "page", requestId: "r-3", snapshotId: f1.snapshotId, historyNext: { streamId: "s-1", seq: 4 } }));
-    expect(again[0]).toMatchObject({ t: "error", code: 4404 });
+    expect(again[0]).toMatchObject({ t: "error", code: 4404 }); // 入口同语义（与缓存证据互补，不单独归因）
   });
 
   it("F8/P-CACHED-EST 缓存重发 estimateFrame 关引擎→4404：不返回退役缓存页（GPT fix7 P11——本分支此前无任何 closed 检查）", () => {
@@ -623,6 +624,67 @@ describe("3b3-fix8 F8-1：页提交资格统一终检（GPT fix7 P8/P9/P10/P11�
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ t: "error", code: 4404, requestId: "r-4" }); // 旧代码：返回退役缓存 f2
     expect(eng.state.phase).toBe("closed");
+  });
+
+  // F9-1（fix9，GPT fix8 B9-1/P8/P9/P10）：预算失败早退口不得抢盖 closed——估帧回调返回后先验 closed 再解读预算结果。
+  // 对照（未关闭且真超限→4431）：既有用例⑲（"首条即超→显式失败"）+ 本组 F9/P-BUDGET-NOCLOSE。
+  const B = LIMITS.pageFrameBudgetBytes;
+
+  it("F9/P-BUDGET-CACHED 缓存重发估帧回调关引擎+返回超限→4404 非 4431（GPT fix8 P8）", () => {
+    let armed = false;
+    const { eng } = mkEng(201, { estimateFrame: () => { if (armed) { armed = false; eng.close(4431, "宿主重入", false); return B + 1; } return 64; } });
+    const f1 = S(eng.startSnapshot("r-1")[0]);
+    S(eng.handle({ kind: "page", requestId: "r-2", snapshotId: f1.snapshotId, historyNext: f1.historyNext! })[0]); // 页 2 完成并缓存（estimator=64）
+    armed = true; // 缓存重发：estimator=关引擎+超限
+    const res = errOf(eng.handle({ kind: "page", requestId: "r-3", snapshotId: f1.snapshotId, historyNext: f1.historyNext! }));
+    expect(res).toHaveLength(1);
+    expect(res[0]).toMatchObject({ t: "error", code: 4404, requestId: "r-3" }); // 旧代码：4431 抢盖（估帧超限即 close+4431，终检不可达）
+    expect(eng.state.phase).toBe("closed");
+    expect(res.some((f) => f.t === "snapshot")).toBe(false);
+  });
+
+  it("F9/P-BUDGET-H1 H+1 估帧回调关引擎+返回超限→4404 非 4431（GPT fix8 P9）", () => {
+    let armed = false;
+    const { eng } = mkEng(3, { estimateFrame: () => { if (armed) { armed = false; eng.close(4431, "宿主重入", false); return B + 1; } return 64; } });
+    const f1 = S(eng.startSnapshot("r-1")[0]); // 3 行单页 done→live
+    armed = true; // H+1 空页估帧终判回调=关引擎+超限
+    const res = errOf(eng.handle({ kind: "page", requestId: "h1-1", snapshotId: f1.snapshotId, historyNext: { streamId: "s-1", seq: 4 } }));
+    expect(res).toHaveLength(1);
+    expect(res[0]).toMatchObject({ t: "error", code: 4404, requestId: "h1-1" }); // 旧代码：4431 抢盖
+    expect(eng.state.phase).toBe("closed");
+  });
+
+  it("F9/P-BUDGET-PAGE-SHRINK 续页终判持续超限且首轮关引擎→4404 非 4431（GPT fix8 P10 输入A：退空口）", () => {
+    let armed = false;
+    const { eng } = mkEng(201, { estimateFrame: () => { if (armed) { if (!eng.state || (eng.state.phase as string) !== "closed") eng.close(4431, "宿主重入", false); return B + 1; } return 64; } });
+    const f1 = S(eng.startSnapshot("r-1")[0]);
+    armed = true; // 第 2 页 1 条：终判首轮关+超限→退条→次轮仍超限→events 空→旧代码 4431
+    const res = errOf(eng.handle({ kind: "page", requestId: "r-2", snapshotId: f1.snapshotId, historyNext: f1.historyNext! }));
+    expect(res).toHaveLength(1);
+    expect(res[0]).toMatchObject({ t: "error", code: 4404, requestId: "r-2" });
+    expect(eng.state.phase).toBe("closed");
+  });
+
+  it("F9/P-BUDGET-PAGE-EMPTY 续页首轮关+超限、次轮通过→退空判定口 4404 非 4431（GPT fix8 P10 输入B）", () => {
+    let step = 0; // 0=基线64；1=关+超限（仅一次）；2=通过64；3=超限（持续）
+    const { eng } = mkEng(201, { estimateFrame: () => { if (step === 1) { step = 2; eng.close(4431, "宿主重入", false); return B + 1; } return step === 3 ? B + 1 : 64; } });
+    const f1 = S(eng.startSnapshot("r-1")[0]); // 调用=64（step0）
+    step = 1; // 第 2 页终判首轮：关引擎+超限→退条；次轮 step2=64 通过（events 已空）→退空判定口
+    const res = errOf(eng.handle({ kind: "page", requestId: "r-2", snapshotId: f1.snapshotId, historyNext: f1.historyNext! }));
+    expect(res).toHaveLength(1);
+    expect(res[0]).toMatchObject({ t: "error", code: 4404, requestId: "r-2" }); // 旧代码：4431（退空口）
+    expect(eng.state.phase).toBe("closed");
+  });
+
+  it("F9/P-BUDGET-NOCLOSE 对照：未关闭且真超限→4431（预算失败语义保留，不因 F9-1 一律 4404）", () => {
+    let armed = false;
+    const { eng } = mkEng(201, { estimateFrame: () => (armed ? B + 1 : 64) }); // 无关闭，仅续页起超限
+    const f1 = S(eng.startSnapshot("r-1")[0]);
+    armed = true;
+    const res = errOf(eng.handle({ kind: "page", requestId: "r-2", snapshotId: f1.snapshotId, historyNext: f1.historyNext! }));
+    expect(res).toHaveLength(1);
+    expect(res[0]).toMatchObject({ t: "error", code: 4431, retryable: false, requestId: "r-2" });
+    expect(eng.state.phase).toBe("closed"); // 4431 仍关订阅（语义不变）
   });
 
   it("F8/P-PAGE-NOW-ENGINE 续页提交尾 lastPageAt=now() 关引擎→4404：GPT fix7 P10 引擎序列（装页/终判毕→时钟窗失效）", () => {
@@ -647,7 +709,7 @@ describe("3b3-fix8 F8-1：页提交资格统一终检（GPT fix7 P8/P9/P10/P11�
     armed = true; // 宽限检查 now() 调用时关闭
     const out = errOf(eng.handle({ kind: "page", requestId: "r-2", snapshotId: f1.snapshotId, historyNext: { streamId: "s-1", seq: 1 } }));
     expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({ t: "error", code: 4404, requestId: "r-2" }); // 旧代码：宽限未过期→落缓存分支返回退役首页
+    expect(out[0]).toMatchObject({ t: "error", code: 4404, requestId: "r-2" }); // 旧代码（删门后）：close 已清 recentPages→缓存未命中→落状态门 4409（游标不符）；4404 优先于 4409，且非"退役首页"
     expect(eng.state.phase).toBe("closed");
   });
 });

@@ -1,0 +1,22 @@
+--- a/apps/server/src/runtime/dual-history-source.ts
++++ b/apps/server/src/runtime/dual-history-source.ts
+@@ -65,13 +65,13 @@
+  *  组合层终态）——终止/追加通知分发中宿主回调内 dispose 或退订他人后，不再开始后继宿主回调。 */
+ function wrapSinks(st: ObsState, alive: () => boolean): HistorySinks {
+   const host = st.sinks as HistorySinks; // 包装时注册必活（closed 注册不绑子源）
+-  const ok = () => !st.closed && st.sinks !== null && alive();
++  void alive; // MUTATION M-F7-WRAP 重演: ok() 门删除
+   return {
+-    onAppend: (row) => { if (ok()) host.onAppend(row); },
+-    ...(host.onInvalidate !== undefined ? { onInvalidate: (r) => { if (ok()) host.onInvalidate?.(r); } } : {}),
+-    ...(host.onUnavailable !== undefined ? { onUnavailable: (r) => { if (ok()) host.onUnavailable?.(r); } } : {}),
+-    onLive: (ev) => { if (ok()) host.onLive(ev); },
+-    onStatus: (s) => { if (ok()) host.onStatus(s); },
++    onAppend: (row) => { host.onAppend(row); },
++    ...(host.onInvalidate !== undefined ? { onInvalidate: (r) => { host.onInvalidate?.(r); } } : {}),
++    ...(host.onUnavailable !== undefined ? { onUnavailable: (r) => { host.onUnavailable?.(r); } } : {}),
++    onLive: (ev) => { host.onLive(ev); },
++    onStatus: (s) => { host.onStatus(s); },
+   };
+ }
+ 

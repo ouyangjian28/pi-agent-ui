@@ -1,0 +1,29 @@
+--- a/packages/protocol/src/subscription-engine.ts
++++ b/packages/protocol/src/subscription-engine.ts
+@@ -126,7 +126,7 @@
+       // F8-1（fix8，GPT fix7 P11）：now=宿主回调（宽限检查内可关引擎）——取值后统一终检 closed→入口同语义 4404
+       if (this.expectNext === null) {
+         const graceNow = this.d.now();
+-        if ((this.phase as string) === "closed") return [err4404(req.requestId)];
++        void 0; // MUTATION M-F8-GRACE: 宽限窗终检删除
+         if (graceNow - this.lastPageAt > LIMITS.snapshotTailGraceMs) {
+           return [{ t: "error", code: 4409, message: "快照已释放，请按游标续读", retryable: true, requestId: req.requestId }];
+         }
+@@ -141,7 +141,7 @@
+           return [{ t: "error", code: 4431, message: "事件超预算", retryable: false, requestId: req.requestId }];
+         }
+         // F8-1（fix8，GPT fix7 P11）：缓存重发=宿主回调（estimateFrame）后的提交点——终检 closed（本分支此前无检查；不返回退役缓存页）
+-        if ((this.phase as string) === "closed") return [err4404(req.requestId)];
++        void 0; // MUTATION M-F8-CACHED: 缓存重发终检删除
+         return [f];
+       }
+       // 追平补页（C5-05 收紧+C6-05 幂等）：仅 live 态（空页 done，生成入缓存——重试同 statusVersion）；paging 期 H+1 属超前（跳页）
+@@ -156,7 +156,7 @@
+             return [{ t: "error", code: 4431, message: "事件超预算", retryable: false, requestId: req.requestId }];
+           }
+           // F8-1（fix8，GPT fix7 P8）：H+1 唯一宿主回调=estimateFrame 终判——其后终检 closed：不 rememberPage、不返回退役空页
+-          if ((this.phase as string) === "closed") return [err4404(req.requestId)];
++          void 0; // MUTATION M-F8-H1: H+1 终检删除
+           this.rememberPage(empty);
+           return [f];
+         }

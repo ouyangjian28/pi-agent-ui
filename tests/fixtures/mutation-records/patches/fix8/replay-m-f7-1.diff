@@ -1,0 +1,34 @@
+--- a/apps/server/src/runtime/history-source.ts
++++ b/apps/server/src/runtime/history-source.ts
+@@ -730,21 +730,18 @@
+    *  都释放旧注册成员面（否则宿主长持 stop 闭包会经 entry→Set 间接保留整套旧 sinks 链：
+    *  dispose 只遍历当前 slot.entry/pendingEntry，找不到已摘下的旧 entry，无人替它清）。 */
+   private deliverTerminal(entry: GenEntry, sinks: readonly HistorySinks[], kind: "invalidate" | "unavailable", reason: string): void {
+-    try {
+-      for (const sk of sinks) {
+-        if (this.srcDisposed) return; // 源级终态：dispose 之后不再开始后继宿主回调
+-        const cur = entry.sinks;
+-        if (cur === null || !cur.has(sk)) continue; // 注册已被回调内撤销：跳过该注册
+-        try {
+-          if (kind === "invalidate") sk.onInvalidate?.(reason as HistoryInvalidateReason);
+-          else sk.onUnavailable?.(reason as HistoryUnavailableReason);
+-        } catch (e) {
+-          this.audit(`${kind}-cb-error file=${entry.file} kind=${errKind(e)}`);
+-        }
++    for (const sk of sinks) {
++      if (this.srcDisposed) return; // MUTATION M-F7-1 重演: 旧尾清
++      const cur = entry.sinks;
++      if (cur === null || !cur.has(sk)) continue;
++      try {
++        if (kind === "invalidate") sk.onInvalidate?.(reason as HistoryInvalidateReason);
++        else sk.onUnavailable?.(reason as HistoryUnavailableReason);
++      } catch (e) {
++        this.audit(`${kind}-cb-error file=${entry.file} kind=${errKind(e)}`);
+       }
+-    } finally {
+-      entry.sinks = null; // 终止分发收尾（全出口）：清注册面（迟到核对以 null 判定）
+     }
++    entry.sinks = null;
+   }
+ 
+   /** 逻辑失效先行（摘登记+disposed/state），再关 OS watcher。F6-1：**不在此清 sinks**——

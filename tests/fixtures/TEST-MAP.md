@@ -558,3 +558,11 @@
 - **F8-3 终态回归产物绑定基线**：全套机器 JSON=tests/fixtures/run-records/3b3-fix8-vitest.json（833 total/passed 826/skipped 7/failed 0/success true，干净基线 c25d0815 生成——变异态下曾生成一次，发现后重生成覆盖，事故如实入变异档）；tsc0（根）+lint0；新增用例清单=上列 8 探针（818→826）。
 - 变异（3b3-fix8.md）：M-F8-COMMIT 三杀（P-PAGE-NOW 网关例合法存活=分发层防线，如实标注）；M-F8-H1/CACHED/GRACE 联合跑各杀各口；跨轮重演 M-F7-1/M-F7-WRAP KILLED、**M-F7-PAGE 窄变异 fix8 基线合法 SURVIVED（F8-1 纵深覆盖，杀伤归因移交 M-F8-COMMIT/H1；复合四口同删 KILLED 双探针）**。
 - 终态：44 files **826 passed+7 skipped**+tsc0（根）+lint0（较 fix7 +8=上列探针）。
+
+## 3b3-fix9 修复轮（GPT fix8 复审 84→修复；2026-10-03）
+
+- **F9-1 预算失败出口先验 closed（GPT fix8 B9-1 P8/P9/P10）**：subscription-engine.ts 四口——①缓存重发估帧；②H+1 估帧；③servePageFrom 终判循环（measure 返回后）；④退空判定口——全部改为「宿主回调求值与预算结果解读分离：先验 closed→err4404，再消费超限判定（真超限仍 4431）」。旧病：回调内宿主关引擎后返回超限→旧序立即 close+4431 抢盖既成关闭事实、绕过 F8-1 终检。对照（未关闭真超限→4431）=既有⑲+F9/P-BUDGET-NOCLOSE。
+- **F9-2 真网关提交点整合例+注释勘正（GPT fix8 Y9-1/Y9-2）**：新增 F9/P-PAGE-NOW-COMMIT（freeze 内 arm、pageAt=now() 触发 invalidate→4409 先于 4404、快照恒 1、观察收口、新订阅新流；双条件等待使变异首败落在快照计数断言非 until 超时）；P-PAGE-NOW 注释勘正（arm 实际=入站帧时钟 ws-gateway.ts:321，非 :408；该例=网关级防线例，engine.handle 未及调用）；P-H1-EST 加缓存长度直证（recentPages.length===0，重发 4404 属入口拒不能独立证缓存空）；P-GRACE-NOW 旧注勘正（删门后落状态门 4409，非「退役首页」）。
+- **F9-3 变异实物入仓+归因勘正（GPT fix8 D9-1/P16/P17）**：新增 tests/fixtures/mutation-records/patches/{fix8,fix9}/ 共 9 个入仓 unified diff（含重建带文件头的 m-f8-commit.diff）；fix8 档 P16 归因勘正（复合杀伤首败断言=**快照计数** expected 2 to be 1 @ws-gateway.test.ts:2880/:2920，非 4404 计数；六口复合重验实证）；fix7 档全称勘正（M-F7-WRAP 门属 fix6 已有，非 fix7 新增）。
+- 变异（3b3-fix9.md）：M-F9-BUDGET 四口先验删除→4 定向探针 KILLED（断言=4431≠4404）；NOCLOSE 对照存活（4431 语义保留）；M-F8-COMMIT 重演双杀（引擎序列+新真提交点网关例，后者=expected [snapshot…] to have length 1 but got 2）；**复合四口在 fix9 基线 SURVIVED（F9-1 先验与 F7-3 冻结复核同窗纵深叠加，如实记录）→六口同删才 KILLED（快照计数首败）**。
+- 终态：44 files **832 passed+7 skipped**（JSON=tests/fixtures/run-records/3b3-fix9-vitest.json）+tsc0（根）+lint0；运行清单（前后哈希+命令+退出码+事故节）=tests/fixtures/run-records/3b3-fix9-run-manifest.md（fix9 增量 +6=引擎 5+网关 1）。
