@@ -21,8 +21,10 @@
 import { fnv1a64Hex, sanitizeText } from "./sanitizer.ts";
 import { attributeSessionEntries, type ConsumedInterval } from "./session-attribution.ts";
 import type { ScanRow } from "./read-index.ts";
-import type { HistoryEvent } from "./contracts.ts";
+import type { HistoryEvent, SanitizedText } from "./contracts.ts";
 import { attachmentIdentity, normalizeText, textHash, type AttachmentMultiset, type IntentMatchKey } from "./identity.ts";
+import { journalLineSchemaError, type UnknownRecord } from "./journal-schema.ts";
+import { sha256Hex12 } from "./sha256.ts";
 
 /** 消息预览截断上限（契约 §5.4：preview 200 代码单元——与 journal 面同一预算）。 */
 export const SESSION_PREVIEW_LIMIT = 200;
@@ -61,12 +63,30 @@ type Block =
 const MESSAGE_ROLES = new Set(["user", "assistant", "toolResult", "system"]);
 const STOP_REASONS = new Set(["stop", "length", "aborted", "toolUse"]);
 
-/** 附件块 AttachmentId 派生（v1 冻结点：type+稳定标识字段 fnv1a64——写侧 enqueue 派生须同构；
- *  无稳定标识时退化为 null 组件——同输入同 id，跨侧一致即可匹配）。 */
+/** 附件块 AttachmentId 派生（3b2b-R4：与写侧 canon 统一=identity.ts 三审冻结
+ *  「每附件 SHA-256 前 12hex、多重集保重复」）：
+ *  ①有 data 字符串（真实图片块 {type:'image',data:base64,mimeType}）→sha256(data) 前 12hex
+ *    （写侧对同一 base64 数据同法派生——冻结点，不含 mimeType：同一数据不因字段杂音分身）；
+ *  ②有 id 或 url 的具名块→sha256(type\nid\nurl) 前 12hex；
+ *  ③无可证明身份的未知块→"u:"+fnv1a64(键序规范化 JSON)——确定性（同内容同 id，多重集语义成立），
+ *    且恒不与写侧 12hex 面相交（不可匹配：含未知块的多重集永不会等于写侧身份）。 */
 function attachmentIdOfBlock(type: string, block: Record<string, unknown>): string {
+  const data = typeof block["data"] === "string" ? block["data"] : null;
+  if (data !== null) return sha256Hex12(data);
   const id = typeof block["id"] === "string" ? block["id"] : null;
   const url = typeof block["url"] === "string" ? block["url"] : null;
-  return fnv1a64Hex(JSON.stringify([type, id, url]));
+  if (id !== null || url !== null) return sha256Hex12(`${type}\n${id ?? ""}\n${url ?? ""}`);
+  return `u:${fnv1a64Hex(canonicalJson(block))}`;
+}
+
+/** 键序规范化 JSON（未知块确定性序列化：与宿主写入键序无关）。 */
+function canonicalJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(",")}]`;
+  if (typeof v === "object" && v !== null) {
+    const keys = Object.keys(v as Record<string, unknown>).sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson((v as Record<string, unknown>)[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(v) ?? "null";
 }
 
 /** content 归一为块数组：字符串=单 text 块；数组=逐块投影（text→text；toolCall→toolCall；
@@ -161,9 +181,15 @@ function matchUserIntents(
  *  供 session 投影归因（DualHistorySource 在 session 扫描时从 journal 盘面现读派生——
  *  完整行前缀即耐久事实，撕裂尾不参与，与两源各自行边界纪律一致）。不可解析/非法行忽略
  *  （归因缺证→session 条目 intentId=null，不猜测）。 */
-export function journalAttributionOf(text: string): { enqueues: readonly SessionEnqueueRef[]; consumed: readonly ConsumedInterval[] } {
+/** 3b2b-R3（GPT 3b-2b 审读）：归因采信与正式投影同一行 schema 纪律——enqueue/consumed 行
+ *  先经 journalLineSchemaError 判合法才提取；判坏的行跳过并计数（不猜：缺字段/非法
+ *  generation/坏嵌套的行在 events 投影里是 journal-corrupt，归因同样不得采信——两读侧
+ *  不得一面判坏一面采信）。非 JSON 行/其他行型不属归因面，不计入 rejected。
+ *  返回 rejected=被拒的 enqueue/consumed 行数（调用方审计；撕裂尾不计——本就不参与）。 */
+export function journalAttributionOf(text: string): { enqueues: readonly SessionEnqueueRef[]; consumed: readonly ConsumedInterval[]; rejected: number } {
   const enqueues: SessionEnqueueRef[] = [];
   const consumed: ConsumedInterval[] = [];
+  let rejected = 0;
   const segments = text.split("\n");
   const complete = text.length === 0 ? 0 : segments.length - 1; // 完整行界：末段无 \n=撕裂尾不参与（同 sessionToScanRows 口径）
   for (let i = 0; i < complete; i++) {
@@ -172,25 +198,22 @@ export function journalAttributionOf(text: string): { enqueues: readonly Session
     let parsed: unknown;
     try { parsed = JSON.parse(raw); } catch { continue; }
     if (typeof parsed !== "object" || parsed === null) continue;
-    const r = parsed as Record<string, unknown>;
+    const r = parsed as UnknownRecord;
+    if (r["t"] !== "enqueue" && r["t"] !== "consumed") continue;
+    if (journalLineSchemaError(r) !== null) { rejected += 1; continue; } // 坏行不采信（同正式投影判坏口径）
     if (r["t"] === "enqueue") {
-      const intentId = r["intentId"], gen = r["generation"], mk = r["matchKey"];
-      if (typeof intentId !== "string" || (gen !== null && typeof gen !== "number")) continue;
-      if (typeof mk !== "object" || mk === null) continue;
-      const m = mk as Record<string, unknown>;
-      const th = m["textHash"], ai = m["attachmentIdentity"], ord = m["ordinal"];
-      if (typeof th !== "string" || typeof ai !== "string" || typeof ord !== "number") continue;
-      enqueues.push({ intentId, generation: gen, matchKey: { textHash: th, attachmentIdentity: ai, ordinal: ord } });
-    } else if (r["t"] === "consumed") {
-      const intentId = r["intentId"], anchor = r["anchorEntryId"], end = r["intervalEnd"];
-      if (typeof intentId !== "string" || typeof anchor !== "string") continue;
-      if (typeof end !== "object" || end === null) continue;
-      const e = end as Record<string, unknown>;
-      if (typeof e["entryId"] !== "string" || typeof e["lengthHash"] !== "string") continue;
-      consumed.push({ intentId, anchorEntryId: anchor, intervalEnd: { entryId: e["entryId"], lengthHash: e["lengthHash"] } });
+      const mk = r["matchKey"] as UnknownRecord;
+      enqueues.push({
+        intentId: r["intentId"] as string,
+        generation: r["generation"] as number,
+        matchKey: { textHash: mk["textHash"] as string, attachmentIdentity: mk["attachmentIdentity"] as string, ordinal: mk["ordinal"] as number },
+      });
+    } else {
+      const end = r["intervalEnd"] as UnknownRecord;
+      consumed.push({ intentId: r["intentId"] as string, anchorEntryId: r["anchorEntryId"] as string, intervalEnd: { entryId: end["entryId"] as string, lengthHash: end["lengthHash"] as string } });
     }
   }
-  return { enqueues, consumed };
+  return { enqueues, consumed, rejected };
 }
 
 /** session 文本 → 扫描行。只发布完整行；撕裂尾不发布（与 journalToScanRows 同口径）。 */
@@ -236,10 +259,17 @@ export function sessionToScanRows(input: SessionProjectionInput): ScanRow[] {
       const generation = um !== undefined ? um.generation : null;
       const base = { seq: 0, ts: null as number | null, generation, intentId };
       const preview = textBlocksOf(msg.content);
+      // 3b2b-R6：stopReason=length 的正文被模型截断——textPreview.truncated 合并真实
+      //（即便预览未达限也置位；契约 §3.5「length 加 textPreview.truncated」）；
+      // 无正文时仍发 {text:"",truncated:true} 占位以保留截断信号。非 length 不改写。
+      let pv: SanitizedText | undefined = preview.length > 0 ? sanitizeText(preview, SESSION_PREVIEW_LIMIT) : undefined;
+      if (msg.stopReason === "length") {
+        pv = { text: pv !== undefined ? pv.text : "", truncated: true };
+      }
       rows.push({
         source: "session" as const, locator, raw,
         event: { ...base, kind: "message" as const, entryId: msg.entryId, role: msg.role,
-          ...(preview.length > 0 ? { textPreview: sanitizeText(preview, SESSION_PREVIEW_LIMIT) } : {}),
+          ...(pv !== undefined ? { textPreview: pv } : {}),
           ...(msg.stopReason !== null ? { stopReason: msg.stopReason } : {}),
           ...(msg.toolCallId !== null ? { toolCallId: msg.toolCallId } : {}),
           final: finalOf(msg.role, msg.stopReason) } satisfies HistoryEvent,

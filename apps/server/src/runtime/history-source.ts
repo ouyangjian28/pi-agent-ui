@@ -66,7 +66,18 @@ export class RealReader implements HistoryReaderPort {
     const { fh } = await openSafeFile(absPath);
     try {
       const [buf, st] = await Promise.all([readBounded(fh, this.maxBytes, absPath), fh.stat()]);
-      return { text: buf.toString("utf8"), identity: `${st.dev}:${st.ino}` };
+      const text = buf.toString("utf8");
+      // 3b2b-R5：完整行含 U+FFFD=fail-closed（unreadable，可重试）。合法性论证：
+      // ①合法产物（我方写的 journal/session）完整行永不产生 U+FFFD——完整行里出现即真损坏；
+      // ②有损解码等价类（字节 ff vs fe 都解出 \uFFFD）会让同 digest 不同字节序列通过前缀校验
+      //  （假前缀）——拒绝含 U+FFFD 的完整行后，接受面上的行字符串与字节序列一一对应，
+      //  scanDigest 的字符串级比对获得字节级判等力；③撕裂尾（末段无 \n）可能含半个多字节
+      //  字符——本就不发布，容忍（偏移漂移同样不发布不观察）。
+      const lastNl = text.lastIndexOf("\n");
+      if (text.slice(0, lastNl + 1).includes("\uFFFD")) {
+        throw new SafeOpenError("read-failed", absPath, "invalid-utf8-complete-line");
+      }
+      return { text, identity: `${st.dev}:${st.ino}` };
     } finally {
       await fh.close().catch(() => {});
     }
@@ -346,6 +357,15 @@ export class FileHistorySource implements HistorySourcePort {
       this.queueRescan(slot, "activate");
     }
     return () => this.unbind(slot, entry, sinks);
+  }
+
+  /** 3b2b-R1：当前活跃代基线行副本（无引用副作用）——DualHistorySource 装载等待窗后的复核面。
+   *  无活跃代（槽未建/已失效/已淘汰）=null；副本语义=调用方持快照，后续追加不影响已取值。 */
+  currentRows(file: string): readonly ScanRow[] | null {
+    const slot = this.slots.get(file);
+    const entry = slot?.entry ?? null;
+    if (slot === undefined || entry === null || entry.disposed || entry.state !== "active") return null;
+    return [...entry.baselineRows];
   }
 
   /** 释放一次装载引用（网关失败口/第二订阅丢弃 load 用）。最后引用离开且未绑定→槽关闭。 */

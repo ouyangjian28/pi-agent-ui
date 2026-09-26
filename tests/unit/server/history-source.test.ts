@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { mkdtemp, rm, writeFile, appendFile, rename, unlink, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FileHistorySource, type HistoryReaderPort, type HistoryWatcherPort } from "../../../apps/server/src/runtime/history-source.ts";
+import { FileHistorySource, RealReader, type HistoryReaderPort, type HistoryWatcherPort } from "../../../apps/server/src/runtime/history-source.ts";
 import type { HistoryInvalidateReason, HistorySinks, HistoryUnavailableReason } from "../../../apps/server/src/ws/ws-gateway.ts";
 import type { ScanRow } from "@pi-agent-ui/protocol";
 
@@ -1116,5 +1116,26 @@ describe("FileHistorySource 3b2g-R1/R2——回收身份门与注册提交重入
     expect(sk.log.unavailables).toEqual([]); // 干净退出不推 watch-failed
     expect(h.audits.some((l) => l.includes("watch-rearm-superseded"))).toBe(true);
     await until(() => h.audits.some((l) => l.includes("slot-reaped"))); // 槽终了回收（D2 终了收尾面）
+  });
+});
+
+describe("RealReader 3b2b-R5（GPT 65→修复）：非法 UTF-8 fail-closed", () => {
+  const MAX = 8 * 1024 * 1024;
+  it("完整行含非法 UTF-8（字节 0xff）→read-failed（旧代码有损解码为 U+FFFD 行，等价类假前缀可乘）", async () => {
+    const d = await mkdtemp(join(tmpdir(), "rr-r5-"));
+    CLEANUP.push(d);
+    const p = join(d, "bad.jsonl");
+    // 完整行（带 \n）里一个非法字节 0xff：两种不同损坏（0xff/0xfe）旧代码都解码为 "\uFFFD\n" 同 digest
+    await writeFile(p, Buffer.concat([Buffer.from(`{"t":"x"}\n`, "utf8"), Buffer.from([0xff]), Buffer.from("\n", "utf8")]));
+    await expect(new RealReader(MAX).read(p)).rejects.toThrow("read-failed");
+  });
+  it("撕裂尾含非法 UTF-8（无 \\n）→容忍可读（本就不发布，偏移漂移不观察）", async () => {
+    const d = await mkdtemp(join(tmpdir(), "rr-r5-"));
+    CLEANUP.push(d);
+    const p = join(d, "torn.jsonl");
+    await writeFile(p, Buffer.concat([Buffer.from(`{"t":"x"}\n`, "utf8"), Buffer.from([0xff])])); // 尾段无换行=撕裂尾
+    const r = await new RealReader(MAX).read(p);
+    expect(r.text).toContain(`{"t":"x"}`);
+    expect(r.text).toContain("\uFFFD"); // 撕裂尾的有损解码仍在（不发布即无害）
   });
 });

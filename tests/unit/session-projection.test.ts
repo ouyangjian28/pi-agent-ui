@@ -6,7 +6,7 @@
 // - 归因：user 三元组（textHash/附件/ordinal 按序消费）+区间面（含锚自身回退）+孤儿 toolResult=null
 // - final 映射全表+补全角色；预览脱敏（密码遮蔽走 sanitizer）+截断 200
 import { describe, expect, it } from "vitest";
-import { SESSION_PREVIEW_LIMIT, fnv1a64Hex, matchKeyOf, sessionToScanRows, type SessionEnqueueRef } from "@pi-agent-ui/protocol";
+import { SESSION_PREVIEW_LIMIT, fnv1a64Hex, journalAttributionOf, matchKeyOf, sessionToScanRows, sha256Hex12, type SessionEnqueueRef } from "@pi-agent-ui/protocol";
 import type { ScanRow } from "@pi-agent-ui/protocol";
 
 function msgLine(id: string, role: string, content: unknown, extra: Record<string, unknown> = {}): string {
@@ -166,5 +166,69 @@ describe("session-projection 3b-2b①", () => {
   it("空文本/纯换行→零行", () => {
     expect(project("")).toHaveLength(0);
     expect(project("\n\n")).toHaveLength(2); // 两个空行=两 corrupt
+  });
+});
+
+describe("session-projection 3b-2b-R3/R4/R6（GPT 65→修复）", () => {
+  const goodEnqueue = JSON.stringify({ t: "enqueue", intentId: "I1", sessionId: "s1", leafId: "l1", generation: 1,
+    matchKey: matchKeyOf("你好", [], 0),
+    payload: { kind: "prompt", rawText: "你好", attachments: [], sentAt: "2026-09-28T00:00:00Z" } });
+  const goodConsumed = JSON.stringify({ t: "consumed", intentId: "I1", anchorEntryId: "u1", intervalEnd: { entryId: "a1", lengthHash: "x" } });
+
+  it("R3：坏 enqueue/consumed 行不采信并计数；非 JSON/其他行型不计入 rejected；撕裂尾不参与", () => {
+    const badMissing = JSON.stringify({ t: "enqueue", intentId: "BAD", generation: 1.5, matchKey: matchKeyOf("你好", [], 0) }); // 缺 sessionId/leafId+generation 非整数
+    const badNullMk = JSON.stringify({ t: "enqueue", intentId: "BAD2", sessionId: "s", leafId: "l", generation: 1, matchKey: null });
+    const badAnchor = JSON.stringify({ t: "consumed", intentId: "I1", anchorEntryId: 3, intervalEnd: { entryId: "a1", lengthHash: "x" } }); // 锚非字符串
+    const other = JSON.stringify({ t: "sending", intentId: "I1" });
+    const text = [goodEnqueue, badMissing, badNullMk, badAnchor, "{oops", other].join("\n") + "\n" + goodConsumed; // 末行无 \n=撕裂尾
+    const r = journalAttributionOf(text);
+    expect(r.rejected).toBe(3); // 三行 enqueue/consumed 判坏；notJson/other/撕裂尾不计
+    expect(r.enqueues.map((e) => e.intentId)).toEqual(["I1"]);
+    expect(r.enqueues[0]?.matchKey).toEqual(matchKeyOf("你好", [], 0)); // 好行提取保真
+    expect(r.consumed).toHaveLength(0); // 好的 consumed 在撕裂尾，不参与
+  });
+
+  it("R4：真实图片块（data 字段）身份=sha256 前 12hex——同图同 id 按序消费，异图不误配", () => {
+    const imgLine = (id: string, data: string): string => JSON.stringify({ type: "message", id, message: { role: "user", content: [
+      { type: "text", text: "看图" }, { type: "image", data, mimeType: "image/png" }] } });
+    const d1 = "aGVsbG8=", d2 = "d29ybGQ=";
+    const text = imgLine("u1", d1) + "\n" + imgLine("u2", d1) + "\n" + imgLine("u3", d2) + "\n";
+    const rows = project(text, [enqueue("I1", "看图", 0, 1, [sha256Hex12(d1)]), enqueue("I2", "看图", 1, 1, [sha256Hex12(d1)])]);
+    expect(rows[0]?.event.intentId).toBe("I1"); // 同图同键→ordinal 按序
+    expect(rows[1]?.event.intentId).toBe("I2");
+    expect(rows[2]?.event.intentId).toBeNull(); // 异图身份不同→不误配（旧代码无 data/id/url 全塌缩同 id 会误配）
+  });
+
+  it("R4：多重集换序等价（AB=BA 同组）；未知块 u: 前缀不可匹配写侧 12hex 面", () => {
+    const two = (id: string, a: string, b: string): string => JSON.stringify({ type: "message", id, message: { role: "user", content: [
+      { type: "text", text: "两图" }, { type: "image", data: a }, { type: "image", data: b }] } });
+    const text = two("u1", "QQ==", "RUQ=") + "\n" + two("u2", "RUQ=", "QQ==") + "\n";
+    const idA = sha256Hex12("QQ=="), idB = sha256Hex12("RUQ=");
+    const rows = project(text, [enqueue("I1", "两图", 0, 1, [idA, idB]), enqueue("I2", "两图", 1, 1, [idB, idA])]);
+    expect(rows[0]?.event.intentId).toBe("I1"); // 换序同身份→同组按序
+    expect(rows[1]?.event.intentId).toBe("I2");
+    const unk = JSON.stringify({ type: "message", id: "u9", message: { role: "user", content: [
+      { type: "text", text: "看图" }, { type: "mystery", foo: { b: 1, a: 2 } }] } });
+    const rows2 = project(unk + "\n", [enqueue("I9", "看图", 0, 1, [idA])]);
+    expect(rows2[0]?.event.intentId).toBeNull(); // 未知块派生 u: 前缀，恒不等于写侧 12hex 面
+    // 键序规范化：未知块内容同构但键序不同→同 id（确定性）
+    const unk2 = JSON.stringify({ type: "message", id: "u10", message: { role: "user", content: [
+      { type: "text", text: "看图" }, { type: "mystery", foo: { a: 2, b: 1 } }] } });
+    const r3 = project(unk + "\n" + unk2 + "\n", [enqueue("I1x", "看图", 0, 1, ["u:" + fnv1a64Hex('{"foo":{"a":2,"b":1},"type":"mystery"}')]),
+      enqueue("I2x", "看图", 1, 1, ["u:" + fnv1a64Hex('{"foo":{"a":2,"b":1},"type":"mystery"}')])]);
+    expect(r3[0]?.event.intentId).toBe("I1x");
+    expect(r3[1]?.event.intentId).toBe("I2x");
+  });
+
+  it("R6：stopReason=length→textPreview.truncated=true（短正文也置位）；非 length 对照 false；空正文占位保留信号", () => {
+    const text = [
+      msgLine("a1", "assistant", [{ type: "text", text: "短" }], { stopReason: "length" }),
+      msgLine("a2", "assistant", [{ type: "text", text: "短" }], { stopReason: "stop" }),
+      msgLine("a3", "assistant", "", { stopReason: "length" }),
+    ].join("\n") + "\n";
+    const rows = project(text);
+    expect((rows[0]?.event as { textPreview?: { truncated: boolean } }).textPreview).toMatchObject({ truncated: true });
+    expect((rows[1]?.event as { textPreview?: { truncated: boolean } }).textPreview).toMatchObject({ truncated: false });
+    expect((rows[2]?.event as { textPreview?: { text: string; truncated: boolean } }).textPreview).toEqual({ text: "", truncated: true });
   });
 });

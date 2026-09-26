@@ -621,7 +621,17 @@ export class WsGateway {
     if (index.isPrefixOf(rows)) {
       // 3b-2b②：按源余量续编（journal 先 session 后）——live 到达序与重扫固定源序交错时，
       // 位置续编（waterMark 起逐位）会跨源错位（把 session 行当 journal 余量编入）。
-      index.continueFrom(rows);
+      // 3b2b-R2：续编行=活跃订阅未见过的新编入事实（journal-only→双源恢复的首批 session 行/观察
+      // 空窗余量）——必须同步分发给现有引擎，不能只更新索引供本次请求方快照读；请求方引擎尚未
+      // 建立（syncIndex 先于 new SubscriptionEngine），其快照屏障在装载后固定，续编行进快照不进
+      // live——每订阅恰一次（已在索引内的行不会经此重复：onAppend 路径入索引后即非余量）。
+      const before = index.waterMark;
+      const appended = index.continueFrom(rows);
+      if (appended > 0) {
+        const fresh = index.read(before + 1, appended);
+        for (const fe of fresh) this.forEachEngine(file, (e) => e.onHistoryAppend(fe.event));
+        this.schedulePump(file);
+      }
       if (index.overBudget) { this.closeSubscriptionsFor(file, "index-over-budget"); return WsGateway.INDEX_BUDGET; }
       return index;
     }
