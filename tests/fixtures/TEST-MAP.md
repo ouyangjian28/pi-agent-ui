@@ -414,11 +414,11 @@
 |---|---|---|
 | F1-01 session 缺失等待窗内 journal 合法追加→降级出口也复核：返回吸收增长的 cur=[J1,J2]（不透旧快照 [J1]→假 4409+J2 丢）；session-missing 审计；合法增长不触发 load-revalidate | dual 3b2c-fix1 F1-01 | 🟢 |
 | F1-02 late-attach 引用 credit：attach 消耗 B 的 session 装载引用记账（credits=1）；B release 走 release-session-credit 跳过 session 侧一次（不双扣→无 carry 误关新 watcher）；C 装载+观察后 session 事件仍直达；收尾双源句柄全关+无 released-unobserved-carry 审计 | dual 3b2c-fix1 F1-02 | 🟢 |
-| F1-04 同一 sinks 对象重绑：包装身份隔离（FH sinks 集按 wrap 对象增删，共享 watcher 引用计数下 1 句柄 2 ref）；旧 stop 迟到只收口旧状态（句柄仍活，新绑定续收追加）；全解绑后需新装载引用再绑（引用纪律） | dual 3b2c-fix1 F1-04 | 🟢 |
+| F1-04/F2-02 同 sinks 合法重绑（各自有 load 配对）：包装身份隔离（FH sinks 集按 wrap 对象增删，共享 watcher 引用计数下 1 句柄 2 ref）；重叠期追加=两注册各交付一次（多注册语义，fix2 版补断言）；旧 stop 迟到只关旧注册（句柄仍活，新注册续收恰一次）；全解绑后需新装载引用再绑（引用纪律） | dual 3b2b-fix2 F1-04/F2-02 | 🟢 |
 | R1 耗尽：三窗口全换代（每轮窗口内换代+重绑当前活跃代+通知失效）→有界重试耗尽→load=null+load-revalidate-exhausted 审计 | dual 3b2c-fix1 R1-耗尽 | 🟢 |
 | F1-05 完整行含**合法** U+FFFD 字符（EF BF BD）→可读不拒（字节级判据只拒非法编码，不误杀合法字符值→不 4402 整文件） | history-source RealReader 3b2c-F1-05 | 🟢 |
 | F1-03 网关：journal 空文件（H=0）A 先订阅（barrier=0）；session 出现后 B 装载→空索引分支也分发既有引擎→A 恰一次收到首批行；B 走快照；无 4404/4409 | ws-gateway D8 | 🟢 |
-| §8-D9 恢复后新追加（notice 路径 u3 恰一次 seq 不重）+全退再开（B 退订重订快照 barrier=4 全量、A 不变）+重复装载（第二次订阅前缀成立不换流无重复） | ws-gateway D9 | 🟢 |
+| §8-D9 恢复后新追加（notice 路径 u3 恰一次 seq 不重）+B 退订再开（B 退订重订快照 barrier=4 全量、A 不变——共享观察未归零，**非真全退**；真全退=3b2b-fix2 节 D10）+重复装载（第二次订阅前缀成立不换流无重复） | ws-gateway D9 | 🟢 |
 | Y2 归因匹配域=进入和解的意图：abort/takeover 合法行不消费 ordinal（rejected=0 但不入 enqueues）；端到端 user 仍归因真 prompt 意图 | session-projection 3b2c-Y2 | 🟢 |
 | Y3 SHA-256 golden 入仓：NIST 三向量+前 12hex；边界长度 0..72+119/120/1000 与 node:crypto 对拍；多字节 UTF-8；64KiB 块循环 | sha256.test.ts ×4 | 🟢 |
 | Y5 drain 批量上限测试改条件等待（有截止），不再固定 5ms 定时假设 | ws-support drain 批量上限 | 🟢 |
@@ -426,3 +426,19 @@
 
 - 变异七杀（基线 9d7e378；/tmp/mut-3b2c-fix1.py python 锚点+count 断言+git checkout 还原）：M-F1-01 降级出口退返旧快照 jrows→1 挂；M-F1-02 credit 恒 0（release 双扣）→1 挂；M-F1-03 空索引分发块禁用→1 挂（D8）；M-F1-04 包装退直传 sinks→1 挂；M-F1-05 去 fatal 解码→5 挂（含既有非法字节组）；M-Y2 kind 过滤禁用→1 挂；M-R1 复核门禁用→2 挂。还原后 721+7 全绿。
 - 措辞勘正（Y4）：上轮 M-R1 变异实际由 R1b（换代丢代）路径挂——「R1a 返旧快照」当时无独立杀伤（本轮 F1-01 补上：M-F1-01 专杀降级出口返旧快照）；M-R5 的「U+FFFD fail-closed」措辞收窄为「完整行非法 UTF-8 字节 fail-closed」（合法 U+FFFD 字符放行是 F1-05 语义）。
+
+## 3b2b-fix2 修复轮（GPT 74→修复；基线 c50f323；729+7+tsc0+lint0）
+
+| 断言面 | 用例 | 状态 |
+|---|---|---|
+| F2-01 observe 出口对称消费 credit：B 走 observe 配对→observe-session-credit credits=0 审计；A/B 全退双源句柄归零；后继 C load/release 正常释放 session 侧（零孤儿+零 release-session-credit+无 carry） | dual 3b2b-fix2 F2-01 | 🟢 |
+| F2-02 多注册登记：新注册先停、旧注册仍活→session 恢复晚附补接旧注册（regs=1 审计；session 追加直达旧注册 A——旧单条 Map 会丢恢复入口）；收尾零句柄 | dual 3b2b-fix2 F2-02 | 🟢 |
+| F1-02 重设计（合法配对版）：A 先退出（旧 session 槽真回收后的重开场景）再 C load+observe 续流；C 配对完成后**不再额外 release**（旧版多一笔无配对 release——GPT §5.1 盲区①修正） | dual 3b2b-fix2 F1-02 | 🟢 |
+| F2-03 BOM 保留三例：①开头 BOM 保留→第二行 locator=真字节偏移（BOM 3B+行1+\n）；②有/无 BOM 两输入文本不同（不折叠同 text）；③撕裂尾=未完成多字节序列容忍可读 | history-source F2-03 组 | 🟢 |
+| currentRows 无副作用固化（§7.5）：load→currentRows×3 恒等快照副本+reader.calls 仍=1（不重扫）+未装载文件→null；observe→stop 零句柄收尾（引用账不被扰动） | history-source F2 组 | 🟢 |
+| D10 真全退再开（§7.5）：A+B 都退订→双源句柄归零→无人观察期盘面增长→C 再开快照含全部 4 行（无 live 补发）→新行 u5 notice 恰一次 live 直达（seq=5） | ws-gateway D10 | 🟢 |
+| D11 双引擎逐条身份（§7.5）：A/B 在线 session 恢复+后续追加→双引擎 seq 序列一致且严格递增 [2,3,4]、entryId [u1,u2,u3]、归因一致 [i-1,null,null]、streamId 同流不换 | ws-gateway D11 | 🟢 |
+| F2-04 调试文件清理：tests/dbg/ 删除→lint 恢复 0 | lint | 🟢 |
+
+- 变异四杀（基线 c50f323；脚本 /tmp/mut-3b2c-fix2.py；**patch 存档=tests/fixtures/mutation-records/3b2b-fix2.md**——GPT F 面证据完备要求）：M-F2-01 observe credit 块禁用→1 挂；M-F2-02 observe 登记退单条覆盖→1 挂；M-F2-02b closeObsState 清整列表不按身份→1 挂；M-F2-03 去前缀 ignoreBOM→2 挂。还原后全仓 729+7 复验绿。
+- 措辞纠偏（fix2 §6/Y4）：D9 标题与 TEST-MAP 行去「全退再开」表述（B 退订≠真全退，真全退=D10）；session-projection.ts 头注释去「插入行不漂移」（改「同位改写/中插会移动后续偏移→前缀校验检出→换流」）；history-source RealReader 注释改「fatal+ignoreBOM 下完整前缀字节序列→字符串为单射」（不再笼统称「一一对应」）。
