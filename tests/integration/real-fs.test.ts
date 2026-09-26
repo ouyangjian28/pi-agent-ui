@@ -332,6 +332,33 @@ describe("3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真
     }
   });
 
+  it("RF11 3b3c：恢复期大批量续编（session 首装 1100 行）→既有 live 引擎同步排水不被积压门误杀", async () => {
+    const r = await makeRig();
+    try {
+      await writeFile(r.jp, jEn("i-1", "seed", 0) + "\n"); // journal-only
+      const a = await r.authed();
+      await a.say({ t: "subscribe", requestId: "s-a", file: "j.jsonl" });
+      await until(() => a.frames().some((f) => f.t === "snapshot"));
+      const aSub = (a.frames().find((f) => f.t === "snapshot") as { subscriptionId: string }).subscriptionId;
+      await settle(WARM);
+      // 无人翻页观察窗内 session 落盘 1100 行→B 装载触发 syncIndex 批量续编分发给 A
+      let big = "";
+      for (let k = 1; k <= 1100; k++) big += sU(`u${k}`, `line ${k}`) + "\n";
+      await writeFile(r.sp, big);
+      const b = await r.authed();
+      await b.say({ t: "subscribe", requestId: "s-b", file: "j.jsonl" });
+      await until(() => b.frames().some((f) => f.t === "snapshot"));
+      // A 不被慢客户端门误杀：1100 行恰一次到达（同步排水保证 outbox 有界）
+      await until(() => a.events(aSub).length >= 1100, 8000);
+      await settle(300);
+      expect(a.events(aSub).length).toBe(1100);
+      expect(errFrames(a).length).toBe(0); // 无 4431/4404/4409——快客户端零误伤
+      expect(a.sent.length).toBeGreaterThan(0); // 连接仍在收帧（FakeConn 无 alive——以持续收帧为准）
+    } finally {
+      await r.dispose();
+    }
+  });
+
   it("RF10 4404 真路径：从未装载文件的 resync cursor→4404（错流门）", async () => {
     const r = await makeRig();
     try {

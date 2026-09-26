@@ -95,6 +95,12 @@ export class SubscriptionEngine {
     return { phase: this.phase, barrier: this.barrier, liveSeq: this.liveSeq, buffered: this.buffered.length + this.outbox.length };
   }
 
+  /** 3b3c：仅 outbox（可排水面）深度——宿主同步排水判据；paging 期 buffered（快照滞留积压）
+   * 是慢客户端门的合法状态，不得触发同步排水（否则每事件一帧碎片化，见 RW1 实测 1025 帧超限）。 */
+  get outboxDepth(): number {
+    return this.outbox.length;
+  }
+
   // ---- 客户端请求 ----
   /** 处理续页请求（本引擎已存在；init/resync 由宿主建新引擎后调 startSnapshot/startResync）。 */
   handle(req: SubscribeRequest): ServerFrame[] {

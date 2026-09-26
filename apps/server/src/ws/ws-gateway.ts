@@ -21,7 +21,7 @@ import { createHash } from "node:crypto";
 import type {
   ClientFrame, LiveEvent, RecoveryBlockReason, SanitizedText, ServerFrame, SessionStatus,
 } from "@pi-agent-ui/protocol";
-import { LIMITS, SubscriptionEngine, validateClientFrame } from "@pi-agent-ui/protocol";
+import { LIMITS, SubscriptionEngine, validateClientFrame, type HistoryEvent } from "@pi-agent-ui/protocol";
 import type { ScanRow } from "@pi-agent-ui/protocol";
 import { ReadIndexRegistry, FileOverBudgetError } from "@pi-agent-ui/protocol";
 import type { ReadIndex } from "@pi-agent-ui/protocol";
@@ -633,8 +633,7 @@ export class WsGateway {
       // 建立，其快照含之；同 continueFrom 分发纪律；先退异身份引擎再分发，不给旧流喂新坐标）。
       if (rows.length > 0) {
         const fresh = index.read(1, rows.length);
-        for (const fe of fresh) this.forEachEngine(file, (e) => e.onHistoryAppend(fe.event));
-        this.schedulePump(file);
+        this.dispatchHistoryBatch(file, fresh);
       }
       return index;
     }
@@ -650,8 +649,7 @@ export class WsGateway {
       this.recordFingerprints(file, index);
       if (appended > 0) {
         const fresh = index.read(before + 1, appended);
-        for (const fe of fresh) this.forEachEngine(file, (e) => e.onHistoryAppend(fe.event));
-        this.schedulePump(file);
+        this.dispatchHistoryBatch(file, fresh);
       }
       if (index.overBudget) { this.closeSubscriptionsFor(file, "index-over-budget"); return WsGateway.INDEX_BUDGET; }
       return index;
@@ -734,7 +732,7 @@ export class WsGateway {
             this.audit(`index-over-budget file=${file} waterMark=${index.waterMark}`);
             this.closeSubscriptionsFor(file, "index-over-budget");
           }
-          this.schedulePump(file);
+          if (!this.pumpIfBacklogged(file)) this.schedulePump(file); // 3b3c：达批同步排水，防同 tick 批量编入饥饿泵定时器
         },
         onInvalidate: (reason) => {
           if (this.watchers.get(file) !== rec) return; // R3：旧闭包不得退新订阅
@@ -812,16 +810,32 @@ export class WsGateway {
     this.pendingPumps.add(file);
     this.tmr(() => {
       this.pendingPumps.delete(file);
-      const w = this.watchers.get(file);
-      if (w === undefined) return;
-      for (const c of w.refs) {
-        const sub = c.subs.get(file);
-        if (sub === undefined || c.closed) continue;
-        const frames = sub.engine.drain();
-        if (frames.length > 0) this.emitFrames(c, frames);
-        if (frames.length >= LIMITS.liveFramesPerDrain) this.schedulePump(file); // 仍有积压→续泵
-      }
+      this.pumpFile(file);
     }, 0);
+  }
+
+  /** 排水泵体：逐连接排空引擎 outbox→入队（异步调度与同步排水共用）。 */
+  private pumpFile(file: string): void {
+    const w = this.watchers.get(file);
+    if (w === undefined) return;
+    for (const c of w.refs) {
+      const sub = c.subs.get(file);
+      if (sub === undefined || c.closed) continue;
+      const frames = sub.engine.drain();
+      if (frames.length > 0) this.emitFrames(c, frames);
+      if (frames.length >= LIMITS.liveFramesPerDrain) this.schedulePump(file); // 仍有积压→续泵
+    }
+  }
+
+  /** 3b3c：批量编入欠量达批即同步排水。同 tick 大批量编入（重放/突发）会在泵定时器到期前把
+   * live 引擎 outbox 堆过 1024 积压门——快客户端被慢客户端门误杀（RW1 实测 1100 行同 tick 追加）。
+   * 达批同步排水保证快客户端 outbox 有界；真慢客户端由连接队列两级门（帧数/字节+在途）接管。
+   * 返回是否已排水（未达批由调用方走异步 schedulePump 收尾）。 */
+  private pumpIfBacklogged(file: string): boolean {
+    let hit = false;
+    this.forEachEngine(file, (e) => { if (e.outboxDepth >= LIMITS.maxEventsPerLiveFrame) hit = true; });
+    if (hit) this.pumpFile(file);
+    return hit;
   }
 
   private releaseWatcher(st: ConnState, file: string): void {
@@ -835,6 +849,17 @@ export class WsGateway {
       this.pendingPumps.delete(file);
       try { w.unobserve?.(); } catch { /* 宿主清理异常不阻断 */ }
     }
+  }
+
+  /** 3b3c：批量编入分发（syncIndex 首装/续编两路共用）——每 16 条检欠量同步排水，
+   * 防同 tick 大批量续编（如恢复期 session 首装 1100 行）把 live 引擎 outbox 堆爆积压门。 */
+  private dispatchHistoryBatch(file: string, fresh: readonly { event: HistoryEvent }[]): void {
+    for (let i = 0; i < fresh.length; i++) {
+      const fe = fresh[i]!;
+      this.forEachEngine(file, (e) => e.onHistoryAppend(fe.event));
+      if ((i & 15) === 15) this.pumpIfBacklogged(file);
+    }
+    this.schedulePump(file);
   }
 
   /** 3b-2：文件级观察收口（无引擎可退时的兑底）——退全部引用+unobserve。 */
