@@ -619,10 +619,9 @@ export class WsGateway {
       return index;
     }
     if (index.isPrefixOf(rows)) {
-      for (let i = index.waterMark; i < rows.length; i++) {
-        const row = rows[i];
-        if (row !== undefined) index.append(row.source, row.locator, row.raw, row.event);
-      }
+      // 3b-2b②：按源余量续编（journal 先 session 后）——live 到达序与重扫固定源序交错时，
+      // 位置续编（waterMark 起逐位）会跨源错位（把 session 行当 journal 余量编入）。
+      index.continueFrom(rows);
       if (index.overBudget) { this.closeSubscriptionsFor(file, "index-over-budget"); return WsGateway.INDEX_BUDGET; }
       return index;
     }

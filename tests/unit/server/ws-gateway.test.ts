@@ -10,11 +10,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WsGateway, type ConnMeta, type GatewayConnHooks, type HistoryInvalidateReason, type HistorySinks, type HistorySourcePort, type HistoryUnavailableReason, type WsGatewayOpts } from "../../../apps/server/src/ws/ws-gateway.ts";
 import { TokenAuthority } from "../../../apps/server/src/ws/token-auth.ts";
-import { FileHistorySource } from "../../../apps/server/src/runtime/history-source.ts";
+import { FileHistorySource, type HistoryReaderPort, type HistoryWatcherPort } from "../../../apps/server/src/runtime/history-source.ts";
+import { DualHistorySource } from "../../../apps/server/src/runtime/dual-history-source.ts";
 import { ComputeSemaphore } from "../../../apps/server/src/ws/compute-semaphore.ts";
 import type { RecoveryEvidenceSnapshot, BadJournalEntry } from "../../../apps/server/src/runtime/recover.ts";
 import type { ScanRow } from "@pi-agent-ui/protocol";
-import { validateClientFrame } from "@pi-agent-ui/protocol";
+import { matchKeyOf, validateClientFrame } from "@pi-agent-ui/protocol";
 
 const tick = (): Promise<void> => new Promise((res) => setImmediate(() => res()));
 async function until(cond: () => boolean, ms = 2000): Promise<void> {
@@ -1758,6 +1759,187 @@ describe("3b2e-C3——observe null 消费判定", () => {
       expect(r.history.observeCalls).toHaveLength(0);
     } finally {
       await r.dispose();
+    }
+  });
+});
+
+describe("ws-gateway 3b-2b③：DualHistorySource 接线验证", () => {
+  class PathReader implements HistoryReaderPort {
+    readonly files = new Map<string, { text: string; identity: string }>();
+    readonly failPaths = new Set<string>();
+    read(absPath: string): Promise<{ text: string; identity: string }> {
+      if (this.failPaths.has(absPath)) return Promise.reject(new Error("EACCES " + absPath));
+      const f = this.files.get(absPath);
+      if (!f) return Promise.reject(new Error("ENOENT " + absPath));
+      return Promise.resolve({ text: f.text, identity: f.identity });
+    }
+    set(path: string, text: string, identity?: string): void { this.files.set(path, { text, identity: identity ?? `dev-ino-${path}` }); }
+  }
+  class PathWatcher implements HistoryWatcherPort {
+    readonly handles: { abs: string; closed: boolean; onNotice: () => void; onError: (e: unknown) => void }[] = [];
+    watch(abs: string, onNotice: () => void, onError: (e: unknown) => void) {
+      const h = { abs, closed: false, onNotice, onError };
+      this.handles.push(h);
+      return { close: () => { h.closed = true; } };
+    }
+    notice(abs: string) { const h = [...this.handles].filter((x) => x.abs === abs && !x.closed).pop(); if (h) h.onNotice(); }
+  }
+  const TEXT_A = "hello gateway";
+  const TEXT_B = "second turn";
+  const TEXT_C = "third leg";
+  const jEn = (i: string, t: string, o: number) => JSON.stringify({ t: "enqueue", intentId: i, sessionId: "s", generation: 1, leafId: "L", matchKey: matchKeyOf(t, [], o), payload: { kind: "prompt", rawText: t, attachments: [], sentAt: "1" } });
+  const sU = (id: string, t: string) => JSON.stringify({ type: "message", id, parentId: null, timestamp: 1, message: { role: "user", content: t } });
+  interface DualRig { r: Rig; reader: PathReader; watcher: PathWatcher; jp: string; sp: string; audits: string[]; dispose(): Promise<void>; }
+  async function dualRig(over: { sessionFor?: (f: string) => string } = {}): Promise<DualRig> {
+    const jr = await mkdtemp(join(tmpdir(), "dw-j-"));
+    const sr = await mkdtemp(join(tmpdir(), "dw-s-"));
+    const reader = new PathReader();
+    const watcher = new PathWatcher();
+    const audits: string[] = [];
+    const dual = new DualHistorySource({
+      roots: [jr],
+      sessionRoots: [sr],
+      sessionFor: over.sessionFor ?? ((_f: string) => join(sr, "sess.jsonl")),
+      reader,
+      watcher,
+      audit: (l) => { audits.push(l); },
+    });
+    const r = await makeRig({ historySource: dual, roots: [jr], scanDir: jr });
+    return { r, reader, watcher, jp: join(jr, "j.jsonl"), sp: join(sr, "sess.jsonl"), audits, dispose: async () => { await r.dispose(); await rm(jr, { recursive: true, force: true }); await rm(sr, { recursive: true, force: true }); } };
+  }
+  type Ev = { kind: string; intentId: string | null; seq: number; role?: string };
+
+  it("D1 双源快照：journal 前 session 后；session user 事件带归因 intentId；无错流", async () => {
+    const d = await dualRig();
+    try {
+      d.reader.set(d.jp, jEn("i-1", TEXT_A, 0) + "\n");
+      d.reader.set(d.sp, sU("u1", TEXT_A) + "\n");
+      const c = await authed(d.r);
+      await c.say({ t: "subscribe", requestId: "sub-1", file: "j.jsonl" });
+      const snap = c.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      expect(snap).toBeDefined();
+      expect(snap.barrier).toBe(2); // 两源屏障：journal 1 + session 1
+      const page = snap.page as Ev[];
+      expect(page.map((e) => e.kind)).toEqual(["turn-enqueued", "message"]); // journal 先 session 后
+      expect(page[1]?.intentId).toBe("i-1"); // §3.5 归因：user 三元组命中 enqueue
+      expect(page[1]?.role).toBe("user");
+      expect(errFrames(c).length).toBe(0);
+    } finally {
+      await d.dispose();
+    }
+  });
+
+  it("D2 live 追加双源各自到货→history 帧续投；交错不换流（无 4404/4409）", async () => {
+    const d = await dualRig();
+    try {
+      d.reader.set(d.jp, jEn("i-1", TEXT_A, 0) + "\n");
+      d.reader.set(d.sp, sU("u1", TEXT_A) + "\n");
+      const c = await authed(d.r);
+      await c.say({ t: "subscribe", requestId: "sub-1", file: "j.jsonl" });
+      // journal 追加（live 到达序=journal 先到）
+      d.reader.set(d.jp, jEn("i-1", TEXT_A, 0) + "\n" + jEn("i-2", TEXT_B, 0) + "\n");
+      d.watcher.notice(d.jp);
+      await until(() => { const f = c.frames().filter((x) => x.t === "events") as Array<{ events: Ev[]; origin: string }>; return f.some((x) => x.events.some((e) => e.kind === "turn-enqueued" && e.intentId === "i-2")); });
+      // session 追加（session 后到——到达序与固定源序一致的简单面）
+      d.reader.set(d.sp, sU("u1", TEXT_A) + "\n" + sU("u2", TEXT_B) + "\n");
+      d.watcher.notice(d.sp);
+      await until(() => { const f = c.frames().filter((x) => x.t === "events") as Array<{ events: Ev[] }>; return f.some((x) => x.events.some((e) => e.kind === "message" && e.intentId === "i-2")); });
+      expect(errFrames(c).filter((f) => f.code === 4404 || f.code === 4409).length).toBe(0); // 未换流
+    } finally {
+      await d.dispose();
+    }
+  });
+
+  it("D3 session 盘面换代→invalidate(replace)→旧订阅退役 4409；新订阅新流", async () => {
+    const d = await dualRig();
+    try {
+      d.reader.set(d.jp, jEn("i-1", TEXT_A, 0) + "\n");
+      d.reader.set(d.sp, sU("u1", TEXT_A) + "\n");
+      const c = await authed(d.r);
+      await c.say({ t: "subscribe", requestId: "sub-1", file: "j.jsonl" });
+      const snap1 = c.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      const stream1 = (snap1.streamId as string) ?? "";
+      // session 文件身份换代（重写+identity 变）→ 子源 invalidate(replace) 转发
+      d.reader.set(d.sp, sU("u1x", TEXT_A) + "\n", "dev-ino-changed");
+      d.watcher.notice(d.sp);
+      await until(() => errFrames(c).some((f) => f.code === 4409) || c.closes.length > 0);
+      expect(errFrames(c).some((f) => f.code === 4409)).toBe(true); // 旧订阅退役
+      // 新订阅走换流重建：新 streamId ≠ 旧
+      await c.say({ t: "subscribe", requestId: "sub-2", file: "j.jsonl" });
+      const snaps = c.frames().filter((f) => f.t === "snapshot") as Array<Record<string, unknown>>;
+      const snap2 = snaps[snaps.length - 1] as Record<string, unknown> | undefined;
+      expect(snap2).toBeDefined();
+      expect(String(snap2?.streamId ?? "")).not.toBe(stream1);
+    } finally {
+      await d.dispose();
+    }
+  });
+
+  it("D4 session 缺失→journal-only 降级（审计 session-missing；快照仅 journal 行；非 4402）", async () => {
+    const d = await dualRig();
+    try {
+      d.reader.set(d.jp, jEn("i-1", TEXT_A, 0) + "\n");
+      const c = await authed(d.r);
+      await c.say({ t: "subscribe", requestId: "sub-1", file: "j.jsonl" });
+      const snap = c.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      expect(snap).toBeDefined();
+      expect(snap.barrier).toBe(1);
+      expect((snap.page as Ev[]).every((e) => e.kind === "turn-enqueued")).toBe(true);
+      expect(errFrames(c).length).toBe(0); // 降级≠失败
+      expect(d.audits.some((l) => l.includes("session-missing"))).toBe(true);
+    } finally {
+      await d.dispose();
+    }
+  });
+
+  it("D6 交错 live 追加后二次装载：分流前缀成立不换流+continueFrom 余量序（journal 先）无重无漏", async () => {
+    const d = await dualRig();
+    try {
+      d.reader.set(d.jp, jEn("i-1", TEXT_A, 0) + "\n");
+      d.reader.set(d.sp, sU("u1", TEXT_A) + "\n");
+      const c = await authed(d.r);
+      await c.say({ t: "subscribe", requestId: "sub-1", file: "j.jsonl" });
+      // 到达序交错：journal i-2 先到、session u2 后到（≠固定源序的 session 面在 journal 后本一致；再交叉一次）
+      d.reader.set(d.jp, jEn("i-1", TEXT_A, 0) + "\n" + jEn("i-2", TEXT_B, 0) + "\n");
+      d.watcher.notice(d.jp);
+      await until(() => { const f = c.frames().filter((x) => x.t === "events") as Array<{ events: Ev[] }>; return f.some((x) => x.events.some((e) => e.intentId === "i-2")); });
+      d.reader.set(d.sp, sU("u1", TEXT_A) + "\n" + sU("u2", TEXT_B) + "\n");
+      d.watcher.notice(d.sp);
+      await until(() => { const f = c.frames().filter((x) => x.t === "events") as Array<{ events: Ev[] }>; return f.some((x) => x.events.some((e) => e.kind === "message" && e.intentId === "i-2")); });
+      // 盘面再各长一行（j3/s3），二次装载才有余量：固定源序重扫对交错编入索引→分流前缀成立+余量续编
+      d.reader.set(d.jp, jEn("i-1", TEXT_A, 0) + "\n" + jEn("i-2", TEXT_B, 0) + "\n" + jEn("i-3", TEXT_C, 0) + "\n");
+      d.reader.set(d.sp, sU("u1", TEXT_A) + "\n" + sU("u2", TEXT_B) + "\n" + sU("u3", TEXT_C) + "\n");
+      const c2 = await authed(d.r);
+      // 退掉首订阅→观察引用释放→二次装载走 load+syncIndex（前缀分支）而非共享观察快照路径
+      const sub1 = (c.frames().find((f) => f.t === "snapshot") as Record<string, unknown>).subscriptionId as string;
+      await c.say({ t: "unsubscribe", requestId: "un-1", subscriptionId: sub1 });
+      await until(() => d.watcher.handles.every((h) => h.closed));
+      await c2.say({ t: "subscribe", requestId: "sub-2", file: "j.jsonl" });
+      const snap = c2.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      expect(snap).toBeDefined();
+      expect(snap.barrier).toBe(6); // 首载 2+live 2+余量续编 2
+      const page = snap.page as Ev[];
+      expect(page.map((e) => e.seq).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6]); // 无重无漏（位置续编会把 s2 重复编入+漏 j3）
+      expect(page.filter((e) => e.kind === "turn-enqueued").map((e) => e.intentId).sort()).toEqual(["i-1", "i-2", "i-3"]);
+      expect(page.filter((e) => e.kind === "message").map((e) => e.intentId).sort()).toEqual(["i-1", "i-2", "i-3"]); // 归因两面
+      expect(errFrames(c2).filter((f) => f.code === 4404 || f.code === 4409).length).toBe(0); // 未换流
+    } finally {
+      await d.dispose();
+    }
+  });
+
+  it("D5 journal 读失败→整体 fail-closed→4402 retryable（session 在也不能洗白）", async () => {
+    const d = await dualRig();
+    try {
+      d.reader.set(d.sp, sU("u1", TEXT_A) + "\n");
+      d.reader.failPaths.add(d.jp);
+      const c = await authed(d.r);
+      await c.say({ t: "subscribe", requestId: "sub-1", file: "j.jsonl" });
+      const e = errFrames(c).pop();
+      expect(e?.code).toBe(4402);
+      expect(e?.retryable).toBe(true);
+    } finally {
+      await d.dispose();
     }
   });
 });
