@@ -332,7 +332,7 @@
 | **C3 observe null≠已消费（D8/D9）** | watchFile 同步终止分支 return stop!==null——null=从未取得观察绑定→consumedRef=false→settleLoadRef 必走未消费 release（旧代码反推已消费=泄漏）。反例：D8 同步 onUnavailable+null→无死快照+4402+stop 零调用+release 恰 1（旧=0）；变体同步 onInvalidate+null→4409+release 恰 1；D9 load 本就 null（文件缺失）→不取引用零释放+observe 零调用 | ws-gateway +3 it | ✅ |
 | **C4 POSIX 多段整体消费（D12）** | 规则⑨双分支：{2,32}段+尾随余段整体消费（尾类含 /——深路径>32 段一并吃尽）｜首段>255+≥1 后继段整遮（旧规则从后继段起匹配→前缀透出）；单段>255 仍不遮（声明语义保持）。golden 57→63（D12/末段254/255/256/首段超长+后继段/单段>255 截断）；类路径垫 300KB 4ms+单段长垫线性（50K→31ms/100K→64/200K→120/300K→185） | contracts-sanitizer +6 向量 | ✅ |
 | **C5 核销表改写** | ①撤 M-B1「结构性不可达」结论（见 3b2c 变异行勘正）；②N4b 超额释放压力例如实标注+合法路径 D4 固化；③「无主槽有界回收」按 3b2f R1/R2 收窄：D2 只证在飞重扫终了收尾回收成立；Map 按文件名盲删可被审计回调重入 load 删新槽（GPT F10）——3b2g R1 身份门后重新成立（F10 固化+M-R1 杀）；④已认可项不重开（UTF-8 65535/R2 串行/R6 五例/D5 emoji）；⑤M4≠M-B07/M-R6 术语分立（M4-retire=observe unbind 闭包 no-op 变异） | TEST-MAP 本节+3b2c 行勘正 | ✅ |
-| **变异七组（基线 b892d0a）** | M-C1a 去 earlyWatchErrors 清零→D1 挂；M-C1b 去 finally maybeReapSlot→D2 挂；M-C1c 去 dirtyPending 清零→D14 挂；M-C2a 去 genNotice reg 门→D15 挂；M-C2b 去 genError reg 门→D3 挂；M-C3 同步终止回 return true→3 挂【3b2f 归属勘正：3 挂=既有 R1 observe-missed（缺 4409）+D8 unavailable+D8 invalidate 变体（release 0 应 1）；D9 仍通过——:740 return 是整个 observe 分支的统一返回值，非仅同步终止内支】；M-C4 规则⑨回旧形→向量 5 挂。七杀零存活 | 七杀 | ✅ |
+| **变异七组（基线 b892d0a）** | M-C1a 去 earlyWatchErrors 清零→D1 挂；M-C1b 去 finally maybeReapSlot→D2 挂；M-C1c 去 dirtyPending 清零→D14 挂；M-C2a 去 genNotice reg 门→D15 挂；M-C2b 去 genError reg 门→D3 挂；M-C3 同步终止回 return true→3 挂【3b2f 归属勘正：3 挂=既有 R1 observe-missed（缺 4409）+D8 unavailable+D8 invalidate 变体（release 0 应 1）；D9 仍通过——ws-gateway watchFile 的 observe 分支统一返回值（return stop !== null；符号锚，行号随代码漂移）是整个分支的返回，非仅同步终止内支】；M-C4 规则⑨回旧形→向量 5 挂。七杀零存活 | 七杀 | ✅ |
 
 ## adapter 切片③-3b2g 修复轮（GPT 3b2f 复审 89/100 三必修 R1/R2/R3；基线 0b62eff）
 | 面 | 断言落点 | 状态 |
@@ -341,3 +341,12 @@
 | **R2 注册返回后身份复核（F4/F5）** | registerWatch 在 watch() 返回后复核（reg===activeReg 且 entry=提交/在飞现役且未死）——不匹配即关返回句柄返 null，调用方不推送不 splice：嵌套建立失败（F4）旧句柄推入已关代=孤儿；嵌套建立成功（F5）外层 splice 关掉真正的新注册+唯一开放句柄通知被 reg 门误拒。反例 F4：watch-rearm-superseded+无孤儿（activeHandles=0）；F5：closed=[T,T,F]+superseded+#2 闭包直调拒+跟进重扫交付追加（append 送达 sinks 证明 #3 链活）。替身=FakeWatcher.errorOnRegBeforeReturn（句柄建立后返回前同步 onError；failNestedSetup 由探针现场置位驱动嵌套建立失败） | history-source +2 it（R2/F4、R2/F5） | ✅ |
 | **R3 披露同步** | ①N4b 测试源码注释勘正（「他方两笔未配对引用」→「超额释放压力例——单次 load 已被 observe 消费后再放两笔；合法路径由 D4 固化」）；②M-C3 三挂归属勘正（见 3b2e 变异行）；③无主槽回收行按 R1/R2 收窄后本节重新核销；④D14 审计断言定位恢复代（auditsBeforeB 锚+切片——全量扫描可被首代 loaded 满足）；⑤sanitizer 顶部注释对齐整体消费语义（去「链式匹配分段遮」旧词） | TEST-MAP+测试源码+sanitizer 注释 | ✅ |
 | **变异两组（基线 0b62eff）** | M-R1 去 Map 身份门→F10 挂（1 failed）；M-R2 去返回后复核块→F4+F5 挂（2 failed）。还原后 48/48（全套 661+7） | 两杀 | ✅ |
+
+## adapter 切片③-3b2i 修复轮（GPT 3b2h 复审 95/100：R1/R2 closed，唯一阻断=H-C5-01 N4b 披露小补；基线 847aa84）
+| 面 | 断言落点 | 状态 |
+| --- | --- | --- |
+| **H-C5-01 N4b 定点修** | 撤 3b2g 误增的第三笔 release，回原两笔超额释放；注释同步「carry=2，B 的成功 load 只吸收一（剩 1 保槽）」。计数证据：测试尾探针笔后审计序列恰 [carry=1, carry=2, carry=2]（endsWith 匹配——审计行带时间戳+history-source 前缀）；三笔超额版会现 carry=3 即挂——只改文字不改计数必被抓住 | history-source N4b it 内（carry 计数三断言） | ✅ |
+| **H-C2-02 建议：H5 入仓（生命周期半边独立杀伤）** | 注册#2 建立并留档后、返回前最后订阅 stop（entry 关闭）——无嵌套注册 reg===activeReg 恒成立，唯一防线=复核块生命周期半边。断言：regCount=2（无嵌套，区别于 F4/F5）+activeHandles=0（仅留 reg 门的窄变异下=#2 追加进已关代=孤儿 1）+无 watch-failed+watch-rearm-superseded+slot-reaped。替身=FakeWatcher.callOnRegBeforeReturn（{atReg,fn} 一次性同步钩） | history-source +1 it（R2/H5） | ✅ |
+| **变异复杀（基线 847aa84，独立 git archive 副本）** | M-life-only（3b2h H-C2-02 原网存活者）：复核块仅留 reg 门、去生命周期半边（entry 归属+disposed/state）→文件域 1 failed（H5）+全仓 661 passed+1 failed（H5）——原网三杀一存活→补杀闭环；与 M-reg-only（GPT 3b2h：仅留 reg 门对侧，F5 杀）合成「两半边各有独立入仓证据」 | 一杀（存活者补杀） | ✅ |
+| **锚点清理** | TEST-MAP 3b2e 变异行「:740」陈旧裸行号→符号锚「ws-gateway watchFile 的 observe 分支统一返回值（return stop !== null）」 | TEST-MAP | ✅ |
+
