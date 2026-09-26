@@ -44,3 +44,10 @@
 | M-F3 | F3 重挂后核对读 | W5（history-source） | 1 KILLED | 67/67 过 |
 
 还原校验：`git diff` 仅含本轮计划内改动（11 文件 +337/-49）；全套 npm test 44 files 785+7 过（见 TEST-MAP 3b3-fix2 节）。
+
+## 补强（GPT fix2 复审 §4 黄项要求；2026-09-30 追加）
+
+- **基线 commit**：变异执行时点工作区=基线 f870b40（`3b3-fix2: F1 ordered publish loop + ...`，f870b40d7c3dfd23b10704a469818ab230b7a0f4）之上的变异与还原；变异只动 ws-gateway.ts / history-source.ts 两文件。
+- **还原哈希**（还原后、本轮 fix3 改动前采样）：apps/server/src/ws/ws-gateway.ts sha256=5cc104978586ec6f…（f870b40 版本内容）；apps/server/src/runtime/history-source.ts sha256=56ed402211afc392…。与基线 commit 内容一致（`git show f870b40:<path> | sha256sum` 可复核）。
+- **阶段说明（785 vs 787）**：变异复跑时点=785+7（F1/F3 修复+杀手已入、F4 补测与文档收尾未入）；fix2 终态=787+7（+F4 根 typecheck 用例修正与文档/本档）。两数差异=F4/文档面，与 M-F1/M-F3 杀手集无关。
+- fix1 档（3b3-fix1.md）勘误头已在上轮补齐；其独立复演证据=GPT fix2 复审报告 §5 六杀复演 6/6 KILLED（/home/yyj/ai/worktrees/gpt-3b3-fix2-review/projects/pi-agent-ui/audits/gpt-adapter-3b3-fix2-review-2026-09-30.md）。

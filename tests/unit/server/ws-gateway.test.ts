@@ -2285,7 +2285,9 @@ describe("ws-gateway 3b3-fix2：F1/F2 发布循环", () => {
       a.closedByTransport(); // 窗口内关连接（GPT P-CLOSE 的发布期等价面）
       b.closedByTransport();
       await until(() => r.history.stopped.includes(file), 3000); // 全关→unobserve（收口未被在飞循环阻塞）
-      expect(r.history.releaseCalls).toContain(file); // load 引用恰一次结算
+      // GPT fix2 复审勘正：精确计数（非 contains）——a 活订阅已消费引用（结算面=stop），
+      // b 关在 load 后提交前（未消费→release 结算）：本文件 release 恰 1 次。
+      expect(r.history.releaseCalls.filter((x) => x === file)).toHaveLength(1);
       expect(r.audits.some((l) => l.includes("publish-seq-mismatch"))).toBe(false);
       const n = a.frames().length;
       await new Promise((res) => setTimeout(res, 30));
@@ -2324,6 +2326,237 @@ describe("ws-gateway 3b3-fix2：F1/F2 发布循环", () => {
       r.history.append(file, rowAt(1221));
       await until(() => historySeqs(c).some((s) => s === 1221), 4000);
       expect(historySeqs(c)).toEqual([1221]); // 只收新追加（旧坐标全走快照页，无越页直投）
+    } finally {
+      await r.dispose();
+    }
+  });
+});
+
+describe("ws-gateway 3b3-fix3：F2 提交窗口同步化（GPT 双微任务探针固化）", () => {
+  const historySeqs = (c: FakeConn): number[] => {
+    const out: number[] = [];
+    for (const f of c.frames()) {
+      if (f.t === "events" && f.origin === "history") {
+        for (const e of (f as { events: Array<{ seq: number }> }).events) out.push(e.seq);
+      }
+    }
+    return out;
+  };
+  /** 快照/续页翻完（engine→live；buffered 才能落 outbox 交付）。fix2 同名助手的作用域副本。 */
+  async function pageThrough3(c: FakeConn, file: string): Promise<void> {
+    for (let i = 0; i < 64; i++) {
+      const snap = c.frames().filter((f) => f.t === "snapshot").pop() as Record<string, unknown> | undefined;
+      if (snap === undefined) throw new Error("pageThrough：无快照帧");
+      if (snap.hasMore !== true) return;
+      await c.say({ t: "subscribe", requestId: `pg3-${i}`, file, snapshotId: snap.snapshotId, historyNext: snap.historyNext });
+    }
+    throw new Error("pageThrough：翻页不收敛");
+  }
+  /** 双微任务：load() 调用点排队 M1，M1 排队 M2=动作。fix2 时代 await syncIndex 的恢复排在 M1 之后、
+   * M2 之前——M2 落在「索引已取得/未提交」窗口内即可打穿。fix3 同步化后提交段（st.closed 复核→
+   * syncIndex→引擎→绑定→快照）在 load 恢复的同一微任务内一气呵成，M2 只能落在提交前（合法拦截）
+   * 或提交后（合法后置生命周期），不存在中间态。断言按「最终零残留/每引用恰一次结算/不复活退役流」。 */
+  const afterMicrotasks = (depth: number, action: () => void): void => {
+    for (let i = 0; i < depth; i++) queueMicrotask(() => {});
+    queueMicrotask(action);
+  };
+
+  it("F2/P-CLOSE-MICRO 提交窗双微任务关连接→要么关前拦截（零绑定）要么关后收口（绑定即清），恒零残留+引用恰一次", async () => {
+    const r = await makeRig();
+    try {
+      const file = "f3-close.jsonl";
+      r.history.put(file, makeRows(3));
+      const a = await authed(r);
+      const origLoad = r.history.load.bind(r.history);
+      (r.history as { load: (f: string) => Promise<readonly ScanRow[] | null> }).load = (f: string) => {
+        const p = origLoad(f);
+        afterMicrotasks(2, () => { a.closedByTransport(); }); // M2=提交边界两侧任意侧
+        return p;
+      };
+      await a.say({ t: "subscribe", requestId: "s1", file });
+      await until(() => r.history.releaseCalls.filter((x) => x === file).length === 1, 3000);
+      // 关后无新绑定：若绑定发生在关前（合法），close 生命周期必须即清；若关前已拦，则从未绑定
+      const bound = r.history.observeCalls.includes(file);
+      if (bound) {
+        await until(() => r.history.stopped.includes(file), 3000);
+        expect(r.history.sinks.has(file)).toBe(false); // 最终零残留
+      } else {
+        expect(r.history.stopped).toEqual([]);
+      }
+      expect(r.history.releaseCalls.filter((x) => x === file)).toHaveLength(1); // 每引用恰一次结算
+      // 单微任务变体（动作=关闭落在提交微任务之前）：关前窗口必须被 st.closed 复核拦下
+      const b = await authed(r);
+      const origLoad2 = FakeHistory.prototype.load;
+      (r.history as { load: (f: string) => Promise<readonly ScanRow[] | null> }).load = function (f: string) {
+        const p = origLoad2.call(this, f);
+        queueMicrotask(() => { b.closedByTransport(); }); // M1：落在 load 恢复之前
+        return p;
+      };
+      await b.say({ t: "subscribe", requestId: "s2", file });
+      await until(() => r.history.releaseCalls.filter((x) => x === file).length === 2, 3000);
+      const boundCount = r.history.observeCalls.filter((x) => x === file).length;
+      expect(boundCount).toBe(bound ? 1 : 0); // b 关前被拦：不新增任何绑定
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("F2/P-REPLACE-MICRO 提交窗双微任务 onInvalidate(replace)→旧流即退（4409），任何时序都不复活退役流坐标", async () => {
+    const r = await makeRig();
+    try {
+      const file = "f3-replace.jsonl";
+      r.history.put(file, makeRows(5));
+      const a = await authed(r);
+      await a.say({ t: "subscribe", requestId: "a1", file });
+      await until(() => a.frames().some((f) => f.t === "snapshot"), 3000);
+      const oldStream = (a.frames().find((f) => f.t === "snapshot") as Record<string, unknown>).streamId;
+      const b = await authed(r);
+      const origLoad = FakeHistory.prototype.load;
+      (r.history as { load: (f: string) => Promise<readonly ScanRow[] | null> }).load = function (f: string) {
+        const p = origLoad.call(this, f);
+        afterMicrotasks(2, () => { r.history.invalidate(file, "replace"); }); // M2=提交边界两侧任意侧
+        return p;
+      };
+      await b.say({ t: "subscribe", requestId: "b1", file });
+      // 旧流必退（无论 M2 落在 b 提交前/后）：a 恒收 4409
+      await until(() => errFrames(a).some((f) => f.code === 4409), 3000);
+      // b：要么被拦/要么提交于 invalidate 之前（快照引用提交时点当前流=old，随后同样被退）
+      await until(() => errFrames(b).some((f) => f.code === 4409) || b.frames().some((f) => f.t === "snapshot"), 3000);
+      // 收敛：再订阅者必得新流，且永不等于退役流
+      const c = await authed(r);
+      await c.say({ t: "subscribe", requestId: "c1", file });
+      await until(() => c.frames().some((f) => f.t === "snapshot"), 3000);
+      const newStream = (c.frames().find((f) => f.t === "snapshot") as Record<string, unknown>).streamId;
+      expect(newStream).not.toBe(oldStream);
+      // 退役后旧流不再产新帧（不复活）
+      const n = historySeqs(a).length;
+      await new Promise((res) => setTimeout(res, 40));
+      expect(historySeqs(a).length).toBe(n);
+      expect(r.audits.some((l) => l.includes("publish-seq-mismatch"))).toBe(false);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("F2/P-REPLACE-NEWGEN 换流窗内另一请求已建新代→旧盘面 load 返回者再 replace，绝不复活退役流/最终归属唯一", async () => {
+    const r = await makeRig();
+    try {
+      const file = "f3-newgen.jsonl";
+      r.history.put(file, makeRows(5));
+      const a = await authed(r);
+      await a.say({ t: "subscribe", requestId: "a1", file });
+      await until(() => a.frames().some((f) => f.t === "snapshot"), 3000);
+      const s0 = (a.frames().find((f) => f.t === "snapshot") as Record<string, unknown>).streamId;
+      // 旧盘面快照：第 4 行内容改写（与 c 的新代内容必非前缀）；b 的 load 挂起在自管闸门上
+      const staleRows: ScanRow[] = r.history.rows(file).map((row, i) =>
+        i === 3
+          ? { ...row, raw: JSON.stringify({ t: "sending", seq: 4, z: "stale" }), event: { ...row.event, kind: "sending" } }
+          : row,
+      );
+      let releaseB!: () => void;
+      const bGate = new Promise<void>((res) => { releaseB = res; });
+      let staleServed = false;
+      const origLoad = FakeHistory.prototype.load;
+      (r.history as { load: (f: string) => Promise<readonly ScanRow[] | null> }).load = function (f: string) {
+        const p = origLoad.call(this, f);
+        if (!staleServed) { // 仅首个（=b）吃旧盘面+挂起；c 直通当前盘面
+          staleServed = true;
+          return p.then(() => bGate.then(() => staleRows as readonly ScanRow[]));
+        }
+        return p;
+      };
+      const b = await authed(r);
+      await b.say({ t: "subscribe", requestId: "b1", file });
+      // 窗口内：换流+盘面改写+c 已在新代上完成订阅
+      r.history.invalidate(file, "replace");
+      r.history.put(file, makeRows(30));
+      const c = await authed(r);
+      await c.say({ t: "subscribe", requestId: "c1", file });
+      await until(() => c.frames().some((f) => f.t === "snapshot"), 3000);
+      const s1 = (c.frames().find((f) => f.t === "snapshot") as Record<string, unknown>).streamId;
+      expect(s1).not.toBe(s0);
+      releaseB(); // 放行 b：旧盘面行进入已换流世界
+      // b 非前缀→再 replace：c 的 s1 引擎被退（4409），b 提交自己的当前流 s2
+      await until(() => errFrames(c).some((f) => f.code === 4409), 3000);
+      await until(() => b.frames().some((f) => f.t === "snapshot"), 3000);
+      const s2 = (b.frames().find((f) => f.t === "snapshot") as Record<string, unknown>).streamId;
+      expect(s2).not.toBe(s0);
+      expect(s2).not.toBe(s1); // 旧盘面再换流：不搭 s1 的车（内容不同源）
+      // （引用结算断言移至末尾：活订阅持票，关时才释放）
+      // 最终归属唯一：s2 流上可续（追加即达；s2 索引 5 行→续编分得 seq=6）
+      r.history.append(file, rowAt(31));
+      await until(() => historySeqs(b).some((x) => x === 6), 4000);
+      // 收口：三连接全关→每份 load 引用恰一次结算（活订阅持票，关时释放）
+      a.closedByTransport();
+      b.closedByTransport();
+      c.closedByTransport();
+      // 每绑定恰一次结算（B3：引用已消费进 observe——结算面=stop 而非 release；逐次换流重挂亦然）
+      const obs = r.history.observeCalls.filter((x) => x === file).length;
+      const stops = r.history.stopped.filter((x) => x === file).length;
+      await until(() => r.history.stopped.filter((x) => x === file).length >= obs, 3000);
+      expect(stops).toBe(obs); // 观察绑定全收口，无孤儿
+      expect(r.history.sinks.has(file)).toBe(false); // 最终零残留
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("Y-F2-LEDGER/PUBLISH-STATES-CHURN LRU 挤出/换流后发布账本回收（size 与 registry 同步，无残留增长）", async () => {
+    const r = await makeRig({ registryMaxStreams: 4 });
+    try {
+      const ledger = () => (r.gw as unknown as { publishStates: Map<string, { streamId: string }> }).publishStates;
+      const files = Array.from({ length: 6 }, (_, i) => `churn-${i}.jsonl`);
+      for (const f of files) r.history.put(f, makeRows(3));
+      for (const [i, f] of files.entries()) {
+        const c = await authed(r);
+        await c.say({ t: "subscribe", requestId: `s${i}`, file: f });
+        await until(() => c.frames().some((x) => x.t === "snapshot"), 3000);
+      }
+      await until(() => ledger().size <= 4, 3000); // 6 流容量 4：挤出 2 条旧账本项
+      expect(ledger().size).toBe(4); // 与活动流数一致（GPT 复现：fix2 时代 40 文件 churn 后仍残留 40）
+      // 换流回收：对已活文件 invalidate→该文件账本项随流身份消失
+      const target = files[5] as string; // noUncheckedIndexedAccess 下显式非空（6 项恒有第 6）
+      r.history.invalidate(target, "replace");
+      await until(() => !ledger().has(target), 3000);
+      expect(ledger().size).toBe(3);
+      // 收口断言（dispose）：全连接关闭后账本与 registry 同空
+      r.gw.dispose();
+      expect(ledger().size).toBe(0);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("Y-F2-LEDGER/PUBLISH-IN-FLIGHT-RECYCLE 在飞发布循环遇换流回收→循环自止无互踩，后续订阅新流照常", async () => {
+    const r = await makeRig();
+    try {
+      const ledger = () => (r.gw as unknown as { publishStates: Map<string, { streamId: string; nextSeq: number }> }).publishStates;
+      const file = "f3-ledger.jsonl";
+      r.history.put(file, makeRows(20));
+      const a = await authed(r);
+      await a.say({ t: "subscribe", requestId: "a1", file });
+      await until(() => a.frames().some((f) => f.t === "snapshot"));
+      r.history.put(file, makeRows(1220));
+      const b = await authed(r);
+      await b.say({ t: "subscribe", requestId: "b1", file });
+      await until(() => historySeqs(a).length >= 100, 4000); // 发布让出窗中段（在飞）
+      const inFlight = ledger().get(file);
+      expect(inFlight).toBeDefined(); // 旧流账本项存在（循环在飞）
+      r.history.invalidate(file, "replace"); // 换流→回收旧流账本项（循环仍在飞）
+      await until(() => !ledger().has(file), 3000);
+      await until(() => errFrames(a).some((f) => f.code === 4409) && errFrames(b).some((f) => f.code === 4409), 3000);
+      // 后续订阅新流照常（新账本项重立+可续编）
+      const c = await authed(r);
+      await c.say({ t: "subscribe", requestId: "c1", file });
+      await until(() => c.frames().some((f) => f.t === "snapshot"), 3000);
+      await pageThrough3(c, file); // 翻完快照页→live（events 帧才可交付）
+      r.history.append(file, rowAt(1221));
+      await until(() => historySeqs(c).some((x) => x === 1221), 4000);
+      expect(historySeqs(c)).toEqual([1221]); // 只收新追加（恰一次）
+      const after = ledger().get(file);
+      expect(after).toBeDefined();
+      expect(after!.streamId).not.toBe(inFlight!.streamId); // 新账本=新流身份
+      expect(r.audits.some((l) => l.includes("publish-seq-mismatch"))).toBe(false); // 旧循环身份门自止，无互踩
     } finally {
       await r.dispose();
     }

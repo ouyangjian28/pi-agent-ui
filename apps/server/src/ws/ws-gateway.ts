@@ -222,6 +222,7 @@ export class WsGateway {
         // 钩子异常不回灌 registry（get/evict 路径保持纯逻辑语义）
         try {
           const retired = this.retireEnginesForFile(file, null, `index-${reason}`);
+          this.recyclePublishState(file, index.streamId); // Y-F2-LEDGER：账本随流身份消失回收
           this.audit(`index-dropped file=${file} streamId=${index.streamId} reason=${reason} retired=${retired}`);
         } catch { /* 协调失败不影响 registry 语义；后续订阅入口的身份防线兜底 */ }
       },
@@ -507,7 +508,7 @@ export class WsGateway {
       let frames: readonly ServerFrame[];
       let index: ReadIndex | typeof WsGateway.INDEX_BUDGET;
       try {
-        index = await this.syncIndex(file, rows);
+        index = this.syncIndex(file, rows); // F2（fix3）：同步调用——此处不再产生微任务让出点
       } catch {
         this.errFrame(st, 4402, "会话索引构建失败", requestId);
         this.opts.historySource?.release?.(file); // 3b2a-R1 失败口配对
@@ -634,7 +635,10 @@ export class WsGateway {
     this.audit(`index-fingerprint file=${file} journal=${fp.journal.slice(0, 12)} session=${fp.session === "" ? "-" : fp.session.slice(0, 12)}`);
   }
 
-  private async syncIndex(file: string, rows: readonly ScanRow[]): Promise<ReadIndex | typeof WsGateway.INDEX_BUDGET> {
+  /** F2（3b3-fix3）：真同步——async 声明+调用方 await 即使函数体无 await 也让微任务（GPT 双微任务探针
+   *  P-CLOSE-MICRO/P-REPLACE-MICRO 复现：await 已履约 Promise 仍排队恢复）→未提交窗口。去 async+去调用
+   *  await 后，handleSubscribe 提交段（load 复核后→引擎建立→绑定→快照发出）无任何让出点。 */
+  private syncIndex(file: string, rows: readonly ScanRow[]): ReadIndex | typeof WsGateway.INDEX_BUDGET {
     let index: ReadIndex;
     try {
       index = this.registry.get(file);
@@ -769,7 +773,9 @@ export class WsGateway {
           // 旧游标按错流拒。网关只负责退役：该文件全部引擎 4409+撤帧+释放观察引用，不自动重装载
           //（新订阅走 handleSubscribe→syncIndex 同源路径）。
           this.audit(`history-invalidate file=${file} reason=${reason}`);
+          const droppedStream = this.registry.peek(file)?.streamId;
           this.registry.replace(file);
+          if (droppedStream !== undefined) this.recyclePublishState(file, droppedStream); // Y-F2-LEDGER
           const retired = this.retireEnginesForFile(file, null, `history-${reason}`);
           if (retired === 0) this.releaseWatcherFor(file); // 无活跃引擎（不应发生：观察存在⇒有引用）——仍幂等收口
         },
@@ -778,7 +784,9 @@ export class WsGateway {
           // 3b-2/R4：不可用=终该文件订阅（4402 文案随原因，不复用索引超预算文案）；流身份不可信
           //（内容/身份未知）——registry.replace 后下次装载新流身份；不波及无关订阅/连接。
           this.audit(`history-unavailable file=${file} reason=${reason}`);
+          const droppedStream = this.registry.peek(file)?.streamId;
           this.registry.replace(file);
+          if (droppedStream !== undefined) this.recyclePublishState(file, droppedStream); // Y-F2-LEDGER
           this.closeSubscriptionsFor(file, `history-${reason}`, `历史源不可用（${reason}），请重新订阅`);
         },
         onLive: (ev) => {
@@ -886,8 +894,19 @@ export class WsGateway {
     return new Promise<void>((r) => setImmediate(() => r()));
   }
 
+  /** Y-F2-LEDGER（3b3-fix3）：发布账本随流身份消失回收（LRU 挤出/触顶宽容换流/源失效/不可用）。
+   *  身份安全：仅当 ps 仍指向被废流才删——在飞发布循环闭包持 ps 引用不受影响（其 peek 身份门自止）；
+   *  新流 claim 重立账本项；旧循环 finally 不删 Map 项（只翻 publishing 位），无互踩。 */
+  private recyclePublishState(file: string, droppedStreamId: string): void {
+    const ps = this.publishStates.get(file);
+    if (ps !== undefined && ps.streamId === droppedStreamId) this.publishStates.delete(file);
+  }
+
   /** F1（3b3-fix2）：登记/推进历史发布游标（syncIndex 三路装载与 onAppend 共用）。
-   *  首建=按 firstNewSeq 立账；换流=旧游标作废重立（nextSeq 重置）；同流=只前不后（min 防回退重发）。 */
+   *  首建=按 firstNewSeq 立账；换流=旧游标作废重立（nextSeq 重置）；同流=取更低待发点（min）。
+   *  Y-F2-LEDGER 勘正（3b3-fix3）：min 并非「防回退重发」——三路入口给的都是新编入区间起点，
+   *  在飞发布未走到的更低待发点才是较小值；取 min 保证不跳过任何未发布 seq（跳发=恰一次破坏），
+   *  在飞循环按游标自会带走，无重发（游标推进单调）。 */
   private claimPublish(file: string, index: ReadIndex, firstNewSeq: number): void {
     const ps = this.publishStates.get(file);
     if (ps === undefined || ps.streamId !== index.streamId) {

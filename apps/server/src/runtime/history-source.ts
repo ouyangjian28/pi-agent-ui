@@ -187,6 +187,31 @@ export class FileHistorySource implements HistorySourcePort {
     return this.opts.watcher ?? new RealWatcher();
   }
 
+  /** 收尾（3b3-fix3，GPT fix2 复审 RF14 夹具卫生补面）：全代逻辑失效+关全部 OS watcher+清槽。
+   *  生产路径不依赖本方法（网关 unobserve→releaseCarry 收口自然停；服务进程退出走进程边界）；
+   *  测试宿主与嵌入式宿主用它保证 tmp 目录/句柄不跨用例泄漏。幂等，可重复调。 */
+  dispose(): void {
+    for (const slot of this.slots.values()) {
+      for (const entry of [slot.entry, slot.pendingEntry]) {
+        if (entry === null) continue;
+        entry.disposed = true; // 在飞续体/通知全失效（各回调身份门自弃）
+        entry.state = "closed";
+        entry.activeReg = entry.regCounter + 1; // 在飞注册回调失效（reg 门）
+        for (const w of entry.watchers.splice(0, entry.watchers.length)) {
+          try { w.close(); } catch { /* 已关 */ }
+        }
+        entry.sinks = null;
+      }
+      slot.entry = null;
+      slot.pendingEntry = null;
+      slot.scanInFlight = null;
+      slot.dirtyPending = false;
+      slot.rescanQueued = false;
+      slot.followUpReason = null;
+    }
+    this.slots.clear();
+  }
+
   private slotOf(file: string): FileSlot | null {
     const abs = resolveWithinRoots(this.opts.journalFor !== undefined ? this.opts.journalFor(file) : file, this.opts.roots);    if (abs === null) {
       this.audit(`load-rejected file=${file} reason=outside-roots`);

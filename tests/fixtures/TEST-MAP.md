@@ -503,10 +503,18 @@
 
 ## 3b3-fix2 修复轮（GPT 复审 74→修复；2026-09-29）
 - F1 分发乱序（publishStates 单飞发布循环）：syncIndex 三路（首装/续编/非前缀重建）+onAppend 统一 claimPublish→publishLoop 按 nextSeq 账本逐条有序投递（读批 16、backlog>256 让出、让出后索引身份复核）；引擎增 historyBarrier（快照/页已含 seq 跳过，恰一次）；publishLoop 异常退位 stopped 标志不补启（防同步重入环——实测栈爆反例自捕自修）；删 dispatchHistoryBatch。
-- F2 await 后不复检（结构性闭合）：syncIndex 全同步无 await（P-CLOSE/P-REPLACE 窗口从根消失）；发布让出窗口的关流/换流由循环身份复核+retire 兜底。测试：F2/P-CLOSE（发布中段双闭→stopped+release 恰一次+关后零帧）、F2/P-REPLACE（中段 invalidate→双 4409+旧流发布中止+新订阅新流快照）。
+- F2 await 后不复检（**部分闭合，勘误披露**）：syncIndex 函数体去 await，但声明仍 async+调用方仍 await——**等已履约 Promise 也让微任务，未提交窗口未消失**（GPT fix2 复审双微任务探针 P-CLOSE-MICRO/P-REPLACE-MICRO 2/2 复现；fix2 宣称「窗口从根消失」错误，撤回）。真闭合=3b3-fix3 同步化（见下节）。发布让出窗口的关流/换流由循环身份复核+retire 兜底不变。测试：F2/P-CLOSE（发布中段双闭→stopped+release 恰一次+关后零帧）、F2/P-REPLACE（中段 invalidate→双 4409+旧流发布中止+新订阅新流快照）——两者测的是**发布窗**，fix3 补提交窗探针。
 - F3 inode 前缀追加交接漏读：rescanOnce inodeChanged→handoffVerify 标志→重挂后 queueRescan('inode-handoff-verify')；followUpReason 字段穿透在飞折叠（审计可辨）；W5 杀手（读后重挂前追加+读前追加→appends 恰 2）。
 - F4 根 typecheck：composition.test.ts:172 显式 undefined 违 exactOptionalPropertyTypes→省略键。
 - Y-04 残余：指纹语义钉死（read-index 字段+recordFingerprints 注释：最后事件编入/装载时点摘要，非实时版本，恢复面禁用）；RF13 撕裂尾（不编入→指纹停旧值≠盘字节；补全→跟进全量 SHA-256）；RF14 直驱 syncIndex 非前缀分支→重建路指纹=新源字节（三路统一之重建路真指纹）；RF9 unobserved 两源分开（journal+session 槽各一条）。
 - 文档勘误：TEST-MAP 两级 4431 retryable 口径（订阅级两触发面帧内恒 false；RW2=零误杀目标非连接级正例）+R-03 base64url→hex+BG4 触达重排+BG5 单次瞬时采样；契约换流全集 inode 例外原位；composition.ts reload 假描述（changed:true 无条件）；read-index 注释 hex。
 - 变异两杀（新标准档 tests/fixtures/mutation-records/3b3-fix2.md）：M-F1 屏障判定移除→P-ORDER 翻页不收敛 exit1；M-F3 核对读移除→W5 until 超时 exit1。fix1 档补勘误头（旧标准说明+GPT 独立复演依据）。
 - 终态：44 files 787+7+tsc0（根）+lint0，无 RangeError/unhandled。披露：全套首跑曾 1 例失败（tail 截断未捕获用例名，其后 5 连跑全绿不可复现——按抖动记录，不掩饰）。
+
+## 3b3-fix3 修复轮（GPT fix2 复审 81→修复；2026-09-30）
+- F2 真同步化（**唯一🔴闭合**）：syncIndex 去 async 声明+调用方去 await（等已履约 Promise 也让微任务——GPT 双微任务探针 P-CLOSE-MICRO/P-REPLACE-MICRO 2/2 复现的根因）；提交段（load 复核→syncIndex→引擎→绑定→快照）无任何让出点，未提交窗口不存在。发布让出窗口（publishLoop yield）的关流/换流仍由循环身份复核+retire 兜底（fix2 已有）。
+- 探针固化（公开端口双微任务排程=load() 调用点 queueMicrotask×2 后动作）：F2/P-CLOSE-MICRO（双微任务关→关前拦截零绑定或关后收口，恒零残留+引用恰一次；单微任务变体=关前窗口 st.closed 拦截+release 恰 2）；F2/P-REPLACE-MICRO（双微任务 invalidate→旧流必退 4409，任何时序不复活退役流坐标）；F2/P-REPLACE-NEWGEN（换流窗内新代已建+旧盘面 load 返回→非前缀再 replace，s0/s1/s2 三流互异、最终归属唯一、收口每绑定恰一次 stop）。
+- Y-F2-LEDGER 发布账本回收：recyclePublishState（身份安全——仅 ps.streamId===被废流才删；在飞循环闭包持引用不受影响）挂三面=registry onStreamDropped（LRU 挤出/触顶宽容换流）+onInvalidate+onUnavailable。测试：PUBLISH-STATES-CHURN（registryMaxStreams=4×6 文件→ledger≤4 与 registry 同步；invalidate 后该文件项即回收；dispose 后清空）、PUBLISH-IN-FLIGHT-RECYCLE（在飞循环遇换流→账本即删+循环身份门自止无 publish-seq-mismatch+新流新账本可续编）。
+- 黄项清理：claimPublish 注释勘正（min=取更低待发点防跳发，非「防回退重发」——三路入口均给新编入区间起点）；read-index.ts:11 头注释 base64url→hex；TEST-MAP 3b3③ 断言面 RW2 残句「连接级 4431 retryable=true」删（与 RW2 零误杀目标矛盾）；3b-3④ 标题「内存峰值」→「内存采样」（历史命名，实为单次瞬时 heapUsed 采样）；fix2 节 F2 行撤回「结构性闭合」宣称（改为部分闭合+勘误披露，真闭合=本轮）；变异档 3b3-fix2.md 补强（基线 commit f870b40d7c3dfd23b10704a469818ab230b7a0f4+还原哈希 ws-gateway 5cc104978586ec6f…/history-source 56ed402211afc392…+785 vs 787 阶段说明）；P-CLOSE release 断言改精确计数（本文件恰 1：b 关在提交前未消费→release，a 活订阅已消费→stop 结算）。
+- RF14 夹具卫生：Rig 接口补 dual 声明；RF14 裸 dual.load 配对 release（try/finally）；rig.dispose 加 dual.dispose()——**为此补 FileHistorySource.dispose()（全代失效+关 watcher+清槽，幂等）+DualHistorySource.dispose() 透传**（生产不依赖，测试/嵌入宿主收尾面）。
+- 终态：44 files 792+7+tsc0（根）+lint0。

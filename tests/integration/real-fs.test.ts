@@ -69,6 +69,8 @@ interface Rig {
   audits: string[];
   jp: string;
   sp: string;
+  /** 3b3-fix3（GPT fix2 复审 RF14 夹具卫生）：真双源句柄入接口类型（此前裸用未声明） */
+  dual: DualHistorySource;
   dispose(): Promise<void>;
 }
 async function makeRig(): Promise<Rig> {
@@ -107,6 +109,7 @@ async function makeRig(): Promise<Rig> {
     gw, conn, authed, audits, jp, sp, dual,
     dispose: async () => {
       gw.dispose();
+      dual.dispose(); // RF14 卫生：真源 watcher/代收尾（tmp 目录删除前停观察）
       await rm(jr, { recursive: true, force: true });
       await rm(sr, { recursive: true, force: true });
     },
@@ -412,7 +415,8 @@ describe("3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真
       await settle(WARM); // 释放观察→后续改盘不被源主动发现（无观察者无重扫）
       await writeFile(r.jp, jEn("i-9", TEXT_C, 0) + "\n"); // 改写：非前缀（行内容变）
       const rows = await r.dual.load("j.jsonl"); // 全真源读新内容
-      await r.gw["syncIndex"]("j.jsonl", rows); // 直驱非前缀分支（waterMark>0 且非前缀）
+      try {
+        await r.gw["syncIndex"]("j.jsonl", rows); // 直驱非前缀分支（waterMark>0 且非前缀）
       const newIdx = r.gw["registry"].peek("j.jsonl") as { streamId: string; journalFingerprint: string; sessionFingerprint: string };
       expect(newIdx.streamId).not.toBe(oldStream); // 换流重建（registry.replace 新 streamId；此分支特有——无观察者在场，排除 onInvalidate 路）
       expect(newIdx.journalFingerprint).toBe(sha256HexBytes(readFileSync(r.jp))); // 重建路指纹=新源字节
@@ -420,6 +424,9 @@ describe("3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真
       // 注：stream-replaced-disk 审计仅 retired>0 时发——本用例已退订（无引擎），断言流身份变化即可
       const fp = r.dual.fingerprints?.("j.jsonl");
       expect(newIdx.sessionFingerprint).toBe(fp?.session ?? ""); // 与源指纹函数一致（字段非自造）
+      } finally {
+        r.dual.release("j.jsonl"); // RF14 卫生：裸 load 引用配对结算（失败路径也释放）
+      }
     } finally {
       await r.dispose();
     }

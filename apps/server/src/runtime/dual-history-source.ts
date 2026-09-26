@@ -242,6 +242,12 @@ export class DualHistorySource implements HistorySourcePort {
     }
   }
 
+  /** 收尾透传（3b3-fix3 RF14）：双子源全停（详见 FileHistorySource.dispose）。幂等。 */
+  dispose(): void {
+    this.journalSrc.dispose();
+    this.sessionSrc?.dispose();
+  }
+
   release(file: string): void {
     // 3b2c-F3-01/F3-02：引用守恒=单一账本——晚附已改免扣绑定，装载方的 release 直接
     // 配对结算自己的两源引用，无需 credit 补记账（删除后 F3-01 双扣与 F3-02 carry 两条路径一并消失）。
