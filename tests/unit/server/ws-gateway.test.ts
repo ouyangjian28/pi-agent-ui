@@ -2917,7 +2917,7 @@ describe("ws-gateway 3b3-fix7 F7-3：续页/H+1 冻结窗重入资格复核（GP
       const first = c.frames().filter((f) => f.t === "snapshot").pop() as { snapshotId: string; streamId: string };
       await c.say({ t: "subscribe", requestId: "h1-1", file: "f.jsonl", snapshotId: first.snapshotId, historyNext: { streamId: first.streamId, seq: 4 } }); // barrier=3→H+1
       await until(() => c.frames().some((f) => f.t === "error" && (f as { code?: number }).code === 4409));
-      expect(c.frames().filter((f) => f.t === "snapshot").length).toBe(1); // 无 H+1 空页快照（旧代码：done 空页+enterLive 复活）
+      expect(c.frames().filter((f) => f.t === "snapshot").length).toBe(1); // 无 H+1 空页快照（fix8 勘正措辞：H+1 分支不调 enterLive，旧病=退役空页快照漏出+rememberPage 落账）
       const e4404 = c.frames().filter((f) => f.t === "error" && (f as { code?: number }).code === 4404);
       expect(e4404).toHaveLength(1);
       expect((e4404[0] as { requestId?: string }).requestId).toBe("h1-1");
@@ -2948,3 +2948,54 @@ describe("ws-gateway 3b3-fix7 F7-3：续页/H+1 冻结窗重入资格复核（GP
     }
   });
 });
+
+describe("ws-gateway 3b3-fix8 F8-1：宿主时钟窗整合（GPT fix7 P10——网关公开 now 注入面）", () => {
+  it("F8/P-PAGE-NOW 续页提交时钟窗内 invalidate→4409 后零退役快照、新订阅新流、观察已收口", async () => {
+    let clock = 1_000;
+    let arm = false;
+    let rig: Rig | null = null;
+    const r = await makeRig({
+      now: () => {
+        if (arm && rig !== null) {
+          arm = false; // 一次性：下一次 now()（=续页 lastPageAt 提交点）同步失效流
+          rig.history.invalidate("f.jsonl", "rewrite");
+        }
+        return ++clock;
+      },
+    });
+    rig = r;
+    try {
+      const a = await authed(r);
+      r.history.put("f.jsonl", makeRows(201)); // 第 1 页 200 行 + 续页 1 行
+      await a.say({ t: "subscribe", requestId: "s-1", file: "f.jsonl" });
+      await until(() => {
+        const snap = a.frames().filter((f) => f.t === "snapshot").pop() as { hasMore?: boolean; snapshotId?: string; historyNext?: { streamId: string; seq: number } } | undefined;
+        return snap?.hasMore === true && snap.historyNext !== undefined && snap.snapshotId !== undefined;
+      });
+      const f1 = a.frames().filter((f) => f.t === "snapshot").pop() as { snapshotId: string; historyNext: { streamId: string; seq: number } };
+      arm = true;
+      await a.say({ t: "subscribe", requestId: "pg-2", file: "f.jsonl", snapshotId: f1.snapshotId!, historyNext: f1.historyNext! });
+      await until(() => a.frames().some((f) => f.t === "error" && (f as { code?: number }).code === 4404));
+      const frames = a.frames();
+      // 顺序与资格：4409（流退役广播，requestId=""）在前、4404（续页按入口同语义拒）在后；零退役快照
+      const i4409 = frames.findIndex((f) => f.t === "error" && (f as { code?: number }).code === 4409 && (f as { requestId?: string }).requestId === "");
+      const i4404 = frames.findIndex((f) => f.t === "error" && (f as { code?: number }).code === 4404);
+      expect(i4409).toBeGreaterThanOrEqual(0);
+      expect(i4404).toBeGreaterThan(i4409);
+      expect(frames.filter((f) => f.t === "snapshot")).toHaveLength(1); // 旧坐标第 2 页零泄漏（快照恒 1 帧）
+      const e4404 = frames.filter((f) => f.t === "error" && (f as { code?: number }).code === 4404);
+      expect(e4404).toHaveLength(1);
+      expect((e4404[0] as { requestId?: string }).requestId).toBe("pg-2");
+      expect(r.history.stopped).toContain("f.jsonl"); // 观察收口（无孤儿观察；retire 链 releaseWatcher→unobserve）
+      expect(r.history.sinks.has("f.jsonl")).toBe(false);
+      // 新订阅走新流（按 requestId 等待：s-3 的快照到位）
+      await a.say({ t: "subscribe", requestId: "s-3", file: "f.jsonl" });
+      await until(() => a.frames().filter((f) => f.t === "snapshot").length >= 2);
+      const newSnap = a.frames().filter((f) => f.t === "snapshot").pop() as { streamId: string };
+      expect(newSnap.streamId).not.toBe(f1.historyNext!.streamId);
+    } finally {
+      await r.dispose();
+    }
+  });
+});
+

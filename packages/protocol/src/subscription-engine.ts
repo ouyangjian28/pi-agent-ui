@@ -123,8 +123,13 @@ export class SubscriptionEngine {
       const cur = req.historyNext;
       if (cur.streamId !== this.streamId) return [err4404(req.requestId)]; // B01：完整游标域（错流不命中缓存）
       // 末页宽限=固定期限（自页生成时刻；重试不续命——C5-05）：过期→4409（按游标续读）
-      if (this.expectNext === null && this.d.now() - this.lastPageAt > LIMITS.snapshotTailGraceMs) {
-        return [{ t: "error", code: 4409, message: "快照已释放，请按游标续读", retryable: true, requestId: req.requestId }];
+      // F8-1（fix8，GPT fix7 P11）：now=宿主回调（宽限检查内可关引擎）——取值后统一终检 closed→入口同语义 4404
+      if (this.expectNext === null) {
+        const graceNow = this.d.now();
+        if ((this.phase as string) === "closed") return [err4404(req.requestId)];
+        if (graceNow - this.lastPageAt > LIMITS.snapshotTailGraceMs) {
+          return [{ t: "error", code: 4409, message: "快照已释放，请按游标续读", retryable: true, requestId: req.requestId }];
+        }
       }
       // 幂等优先（C6-05）：命中最近 2 页缓存→页内容+status 快照复用+新 envelope（不重调 status、不续命 TTL）
       const cached = this.recentPages.find((p) => p.pageFrom.seq === cur.seq);
@@ -135,6 +140,8 @@ export class SubscriptionEngine {
           this.close(4431, "事件超预算", false);
           return [{ t: "error", code: 4431, message: "事件超预算", retryable: false, requestId: req.requestId }];
         }
+        // F8-1（fix8，GPT fix7 P11）：缓存重发=宿主回调（estimateFrame）后的提交点——终检 closed（本分支此前无检查；不返回退役缓存页）
+        if ((this.phase as string) === "closed") return [err4404(req.requestId)];
         return [f];
       }
       // 追平补页（C5-05 收紧+C6-05 幂等）：仅 live 态（空页 done，生成入缓存——重试同 statusVersion）；paging 期 H+1 属超前（跳页）
@@ -148,6 +155,8 @@ export class SubscriptionEngine {
             this.close(4431, "事件超预算", false);
             return [{ t: "error", code: 4431, message: "事件超预算", retryable: false, requestId: req.requestId }];
           }
+          // F8-1（fix8，GPT fix7 P8）：H+1 唯一宿主回调=estimateFrame 终判——其后终检 closed：不 rememberPage、不返回退役空页
+          if ((this.phase as string) === "closed") return [err4404(req.requestId)];
           this.rememberPage(empty);
           return [f];
         }
@@ -234,8 +243,14 @@ export class SubscriptionEngine {
       this.close(4431, "事件超预算", false);
       return { t: "error", code: 4431, message: "事件超预算", retryable: false, requestId };
     }
+    // F8-1（fix8，GPT fix7 P9/P10）：提交资格统一终检——全部宿主回调（est 填装/measure 终判/now 时钟）
+    // 完成后、引擎状态写入（expectNext/lastPageAt/rememberPage/phase/enterLive）之前：closed→入口同语义
+    // err4404，不写任何状态、不返回退役快照、也不让 done-else 分支把 closed 复活成 paging
+    //（终检后到返回之间零宿主调用=等效原子提交）。宿主时钟先取值，锚点语义不变（C5-05：页生成时刻）。
+    const pageAt = this.d.now();
+    if ((this.phase as string) === "closed") return err4404(requestId);
     this.expectNext = done ? null : { streamId: this.streamId, seq: last + 1 };
-    this.lastPageAt = this.d.now(); // 固定期限锚点=页生成时刻（C5-05：缓存重试不续命）
+    this.lastPageAt = pageAt; // 固定期限锚点=页生成时刻（C5-05：缓存重试不续命）
     this.rememberPage({ pageFrom: page, barrier: this.barrier, events, done, status });
     if (done) this.enterLive();
     else this.phase = "paging";

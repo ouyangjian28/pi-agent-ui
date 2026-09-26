@@ -549,3 +549,12 @@
 - **F7-3 续页/H+1 冻结窗重入资格复核（P9/P10）**：servePageFrom freezeStatus 后 + H+1 补页 freeze 后各加 phase==="closed" 复核（按入口同语义 err4404；H+1 处 `as string` cast——freeze 窗内宿主可关引擎，类型不可见）+enterLive 加 closed 幂等门。旧病：freeze stringify 求值 toJSON 期间宿主 invalidate→引擎 close+撤帧→旧坐标快照排 4409 后漏出+done=true enterLive 复活 closed 引擎（H+1 路根本没走 freezeStatus 原样重演）。探针 3：F7/P-PAGE-REENTRY（201 行第 2 次冻结窗注入 invalidate→4409 后 4404 恰 1、快照恒 1 帧、新订阅新流）、F7/P-H1-FREEZE（3 行 live→H+1 冻结窗注入→无空页快照）、F7/P-SERIAL-GETTER（getter-only 无 toJSON：冻结恰一次求值+帧内纯数据——GPT P6「至少有 getter-only 或 proxy 直接例」）。
 - 变异三路（tests/fixtures/mutation-records/3b3-fix7.md，真实 diff+退出码+还原哈希）：M-F7-1 KILLED（P-TERM-RETAIN）；M-F7-PAGE 双杀 KILLED（P-PAGE-REENTRY+P-H1-FREEZE；cast 落地后终态代码原样复跑）；M-F7-WRAP KILLED（P-LATE-WATCH-FAIL）。
 - 终态：44 files **818 passed+7 skipped**+tsc0（根）+lint0（较 fix6 +5：F7-1×1+F7-2×1+F7-3×3）。
+
+## 3b3-fix8 修复轮（GPT fix7 复审 84→修复；2026-10-02）
+
+- **F8-1 页最终提交/返回资格覆盖宿主回调后的统一终检（GPT fix7 P8/P9/P10/P11）**：subscription-engine.ts 四处补 `(this.phase as string)==="closed"`→err4404——①handle 入口末页宽限窗（now=宿主回调，GPT P10 同型）；②缓存重发分支（此前完全无检查，P11）；③H+1 分支 estimateFrame 终判后（P8）；④servePageFrom 提交尾（est 填装/measure 终判/now 全部完成后、expectNext/lastPageAt/rememberPage/enterLive/phase 写入前——终检后到返回零宿主调用=等效原子提交，P9/P10）。旧病：冻结复核之后仍调宿主回调→closed 后照写页缓存/expectNext/phase、返回退役快照；非末页 else 直接赋 paging 复活；401 宽限 now 同型。
+- 探针 8（引擎直测 7+网关整合 1）：P-PAGE-EST-EVENT（estEvent 关）/P-PAGE-EST-FRAME（分立端口）/P-PAGE-NONFINAL（401 条 done-else 不复活）/P-H1-EST（H+1 estFrame 关，空页不入缓存）/P-CACHED-EST（缓存重发）/P-GRACE-NOW（宽限窗）/P-PAGE-NOW-ENGINE（提交尾 lastPageAt=now() 关——GPT P10 引擎序列直测）/P-PAGE-NOW（网关整合：now→invalidate→4409 先于 4404、快照恒 1、新订阅新流；注=arm 实际在网关分发层 now() 早触发，该例证真实系统防线，引擎提交点杀伤=P-PAGE-NOW-ENGINE）。
+- **F8-2 披露强度落到实物**：fix8 变异档全真实 unified diff+失败断言原文+退出码+还原哈希（tests/fixtures/mutation-records/3b3-fix8.md）；fix6 档 M-F6-WRAP 原结果段原位加撤回声明（仅解释当时两例）；fix7 档原自然语言摘要=不重建当时记录，加「fix8 重演勘正」节指向新复跑证据；F7/P-H1-FREEZE 测试注释勘正（H+1 分支不调 enterLive，旧病=退役空页漏出）。
+- **F8-3 终态回归产物绑定基线**：全套机器 JSON=tests/fixtures/run-records/3b3-fix8-vitest.json（833 total/passed 826/skipped 7/failed 0/success true，干净基线 c25d0815 生成——变异态下曾生成一次，发现后重生成覆盖，事故如实入变异档）；tsc0（根）+lint0；新增用例清单=上列 8 探针（818→826）。
+- 变异（3b3-fix8.md）：M-F8-COMMIT 三杀（P-PAGE-NOW 网关例合法存活=分发层防线，如实标注）；M-F8-H1/CACHED/GRACE 联合跑各杀各口；跨轮重演 M-F7-1/M-F7-WRAP KILLED、**M-F7-PAGE 窄变异 fix8 基线合法 SURVIVED（F8-1 纵深覆盖，杀伤归因移交 M-F8-COMMIT/H1；复合四口同删 KILLED 双探针）**。
+- 终态：44 files **826 passed+7 skipped**+tsc0（根）+lint0（较 fix7 +8=上列探针）。

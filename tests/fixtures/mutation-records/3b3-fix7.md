@@ -33,3 +33,9 @@
 | M-F7-WRAP | F7-2 wrap 转发门（窄） | F7/P-LATE-WATCH-FAIL | 1 KILLED | 过（sha256 同值） |
 
 窄变异纪律：三变异均只移除本修复轮新增的门/收尾，不夹带其它行为；杀手=对应新探针（无「借旧探针充杀」）。还原校验全部 sha256 同值；基线测试全绿后落档。
+
+## fix8 重演勘正（GPT fix7 F8-2 要求；2026-10-02）
+
+本档原 diff 记录为自然语言摘要（当时 /tmp 日志已无，不重建当时原始记录）。fix8 轮已在 fix8 基线（SE sha c25d0815…，HS/DUAL 同本档基线）上重新复跑三变异并留存真实 unified diff+失败断言+还原哈希，见 **tests/fixtures/mutation-records/3b3-fix8.md「跨轮重演」节**。要点变化：
+- M-F7-1 / M-F7-WRAP：重演 KILLED，断言与本档记录一致。
+- **M-F7-PAGE：fix8 基线上窄变异合法 SURVIVED**（F8-1 提交尾/H+1 终检在同窗纵深拦截，可观测行为等价）——本档「双杀」结论仅属 fix7 基线；独立杀伤归因已移交 M-F8-COMMIT/M-F8-H1（复合变异 M-F7-PAGE+F8 四口同删在双探针上 KILLED，见 fix8 档）。

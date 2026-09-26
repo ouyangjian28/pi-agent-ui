@@ -21,6 +21,8 @@
 
 ## M-F6-WRAP wrapSinks ok() 资格门移除（F6-1 DUAL 面）——合法存活
 
+> **fix7 撤回声明（GPT fix6 P7；fix7 复审 F8-2 要求原位标注）**：本节「无独占杀伤面/纵深防御」归因**已撤回**，仅解释当时两例为何存活；真窗口（晚附 observe 未返回窗）与专杀证据见文末「fix7 勘正」节及 3b3-fix7/3b3-fix8 档（M-F7-WRAP 重演 KILLED）。
+
 - 目标：证明 Dual 层 wrapSinks 的 `ok()=！st.closed && st.sinks!==null && alive()` 转发门是必要防线。
 - 变异基线：apps/server/src/runtime/dual-history-source.ts sha256=892d3c1c2b696cfd43aadb3a79d6d67efb61237a476722206997521ecf1ae871。
 - diff（五方法转发去掉 ok() 前置）：
