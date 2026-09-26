@@ -407,3 +407,22 @@
   - ②：M1 分流前缀（M1 首版「journal 侧换键」变异体语义等价 SURVIVED——sourceIsPrefixOf 内部本就按源过滤，已披露；重设计 M1b=退回旧逐位比对）→2 挂 KILLED；M2 去 digest→2 挂；M3 续编序反→1 挂；M4 撕裂尾参与归因→1 挂；M5 合并序反→1 挂；M6 journal 不 fail-closed→1 挂；M7 归因键路径错（session 子源 journalFor 误用 opts.journalFor）→5 挂；M8 归因 reader 无注入返回空（丢归因）→1 挂。
   - ③：M-G1 syncIndex 前缀分支退回位置续编→D6 挂 KILLED。还原后 696+7 全绿。
   - 踩坑（流程）：syncIndex continueFrom 编辑未随 1855268 提交（提交在前编辑在后）→变异后 git checkout 还原到无修复 HEAD→D6 在旧代码上跑「假挂/假绿」——修复重应用+先提交基线再变异（M-240 同型：变异前必须有干净基线 commit）。
+
+## 3b2c-fix1 修复轮（GPT 72→修复；基线 9d7e378；721+7+tsc0+lint0）
+
+| 断言面 | 测试锚点 | 状态 |
+|---|---|---|
+| F1-01 session 缺失等待窗内 journal 合法追加→降级出口也复核：返回吸收增长的 cur=[J1,J2]（不透旧快照 [J1]→假 4409+J2 丢）；session-missing 审计；合法增长不触发 load-revalidate | dual 3b2c-fix1 F1-01 | 🟢 |
+| F1-02 late-attach 引用 credit：attach 消耗 B 的 session 装载引用记账（credits=1）；B release 走 release-session-credit 跳过 session 侧一次（不双扣→无 carry 误关新 watcher）；C 装载+观察后 session 事件仍直达；收尾双源句柄全关+无 released-unobserved-carry 审计 | dual 3b2c-fix1 F1-02 | 🟢 |
+| F1-04 同一 sinks 对象重绑：包装身份隔离（FH sinks 集按 wrap 对象增删，共享 watcher 引用计数下 1 句柄 2 ref）；旧 stop 迟到只收口旧状态（句柄仍活，新绑定续收追加）；全解绑后需新装载引用再绑（引用纪律） | dual 3b2c-fix1 F1-04 | 🟢 |
+| R1 耗尽：三窗口全换代（每轮窗口内换代+重绑当前活跃代+通知失效）→有界重试耗尽→load=null+load-revalidate-exhausted 审计 | dual 3b2c-fix1 R1-耗尽 | 🟢 |
+| F1-05 完整行含**合法** U+FFFD 字符（EF BF BD）→可读不拒（字节级判据只拒非法编码，不误杀合法字符值→不 4402 整文件） | history-source RealReader 3b2c-F1-05 | 🟢 |
+| F1-03 网关：journal 空文件（H=0）A 先订阅（barrier=0）；session 出现后 B 装载→空索引分支也分发既有引擎→A 恰一次收到首批行；B 走快照；无 4404/4409 | ws-gateway D8 | 🟢 |
+| §8-D9 恢复后新追加（notice 路径 u3 恰一次 seq 不重）+全退再开（B 退订重订快照 barrier=4 全量、A 不变）+重复装载（第二次订阅前缀成立不换流无重复） | ws-gateway D9 | 🟢 |
+| Y2 归因匹配域=进入和解的意图：abort/takeover 合法行不消费 ordinal（rejected=0 但不入 enqueues）；端到端 user 仍归因真 prompt 意图 | session-projection 3b2c-Y2 | 🟢 |
+| Y3 SHA-256 golden 入仓：NIST 三向量+前 12hex；边界长度 0..72+119/120/1000 与 node:crypto 对拍；多字节 UTF-8；64KiB 块循环 | sha256.test.ts ×4 | 🟢 |
+| Y5 drain 批量上限测试改条件等待（有截止），不再固定 5ms 定时假设 | ws-support drain 批量上限 | 🟢 |
+| Y1 obs Map 状态壳不滞留：stop 后身份门摘除（功能面=解绑后可再绑、句柄零残留） | dual 3b2c-fix1 F1-04 内 | 🟢 |
+
+- 变异七杀（基线 9d7e378；/tmp/mut-3b2c-fix1.py python 锚点+count 断言+git checkout 还原）：M-F1-01 降级出口退返旧快照 jrows→1 挂；M-F1-02 credit 恒 0（release 双扣）→1 挂；M-F1-03 空索引分发块禁用→1 挂（D8）；M-F1-04 包装退直传 sinks→1 挂；M-F1-05 去 fatal 解码→5 挂（含既有非法字节组）；M-Y2 kind 过滤禁用→1 挂；M-R1 复核门禁用→2 挂。还原后 721+7 全绿。
+- 措辞勘正（Y4）：上轮 M-R1 变异实际由 R1b（换代丢代）路径挂——「R1a 返旧快照」当时无独立杀伤（本轮 F1-01 补上：M-F1-01 专杀降级出口返旧快照）；M-R5 的「U+FFFD fail-closed」措辞收窄为「完整行非法 UTF-8 字节 fail-closed」（合法 U+FFFD 字符放行是 F1-05 语义）。
