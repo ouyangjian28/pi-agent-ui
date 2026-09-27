@@ -289,7 +289,7 @@ interface RecoveryIntentRow { readonly intentId: string; readonly verdict: "sett
 
 ```ts
 type ClientFrame =
-  | { t: "hello"; protocolVersion: 1; token: string }
+  | { t: "hello"; protocolVersion: 1; token?: string } // v1.1（N4-v2）：token 可选——免令牌通道（连接升级面登录会话 cookie 已验，§5.5）；呈令牌时语义不变
   | { t: "list-sessions"; requestId: string; offset?: number; limit?: number }
   | { t: "subscribe"; /* §3.6 三分支互斥 */ }
   | { t: "unsubscribe"; requestId: string; subscriptionId: SubscriptionId }
@@ -369,6 +369,7 @@ type ServerFrame =
 - **per-IP 认证失败限速+退避（R6/3b-1；B1/B2=3b1c 勘定）**：键=传输层派生的有效 clientIp（无 trustProxy 时=socket 对端）；滑窗内认证失败达限（默认 10 次/60s）→封锁该 IP 的后续 hello（4401+close 1008）。**封锁期内拒绝不记账不延长**（正确/错误令牌同口径——fails/strikes/blockedUntil 均不变；到期自然恢复）；封锁时长指数退避（60s 起、封顶 10min）；认证成功即清户。**防护表硬上界 1024 条**：满表新观测先淘汰最旧非封锁项（丢失败史，活动封锁不丢）；全表封锁时按最早到期封锁项显式淘汰+审计（不静默丢也不无界增长）。正常客户端无感知。
 - **代理头信任边界（部署约束）**：仅在 remoteAddress ∈ trustedProxies 时采信 X-Forwarded-For 最左段/X-Forwarded-Proto；**可信代理必须在转发时覆盖/清洗 XFF/XFP**（用户可控左端追加链不得当身份），多级代理须逐跳配置信任边界；proxied=true 时 tls 以 XFP 严格判定（socket TLS 与 XFP 混合回程不折衷）。缺头回退分立：缺 XFF → clientIp=socket 对端地址；可信代理缺 XFP → tls=false（**不回退 socket TLS**——代理已存在即外部协议事实未知，宁可保守降级）。
 - 授权域=双根目录；file 命名域+O_NOFOLLOW 等价校验；Origin 白名单（配置）；缺失 Origin=拒绝（非浏览器客户端显式配置放行列表）；非 loopback 必须 TLS；连接 16/服务、握手 10/min；token 不入日志/URL/前端持久化。
+- **登录会话面（v1.1/N4-v2，2026-10-05 拍板；仅 staticDir 浏览器部署）**：同端口 HTTP 叠加 `POST /login`（JSON `{token}`）与 `POST /logout`。登录成功→`Set-Cookie: pi-agent-ui-session=<sid>; Path=/; HttpOnly; SameSite=Strict[; Secure]`（Secure 按 TLS 事实）；sid=HMAC-SHA256(per-boot 32B secret, tokenDigestHex)——**cookie 不含令牌原文；服务重启（新 secret）全会话失效（fail-closed）**；令牌热轮换后旧 sid 自动失效（同基派生）。登出=Max-Age=0 清除。登录面 per-IP 失败滑窗限速（默认 10 次/60s→429；成功即清户；封锁期正确令牌同拒——与 §5.5 R6 同口径）。WS 升级面携带该 cookie 且有效→`meta.sessionAuthed=true`→**hello 免令牌通道**：免 token 的 hello 放行（多值 Cookie 头=歧义拒）；**呈令牌则令牌必真（错令牌不静默降级 cookie 通道）**。会话通道审计标记 tokenDigest="session-cookie"（不存 sid 原文）。残余风险披露：cookie 存活期本站内 XSS 可借手连接（HttpOnly 保证偷不走、SameSite=Strict 拦他站捎带）；服务端会话撤销表=后续增强（首版登出仅清浏览器侧，sid 失效由重启/轮换统治）。非浏览器客户端与无 staticDir 部署=令牌通道不变（双通道并存）。
 
 ### 5.6 背压与资源预算（C3-R08/R10 修订：连接级统一+计算并发）
 

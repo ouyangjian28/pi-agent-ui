@@ -765,3 +765,12 @@
 - 变异：M1 NOSNAPSHOT（`Object.freeze([...opts.allowedOrigins])`→直绑调用方数组）→定向 1 failed（首败 :252 expected false to be true，热插端被放行）；还原 RESTORE_OK（hash 复核）；还绿 103/103+全仓 1159 passed。档=mutation-records/n6-gateway-origin-snapshot.md+run-records 同名 log。
 - 诚实披露：只去 freeze 不去复制=无行为差异不可观测，单变异单杀面；history-source.test.ts 偶发首败（21 轮审⑦）与本档无关（两轮复跑全绿）。
 - N6 自此销案；「写侧收线批」其余=⑤D 前端联调（等 A1c 重写）。
+
+### N4-v2 登录面批（2026-10-05 用户拍板 HttpOnly cookie；基线 dde79f6）
+
+- 需求：刷新/重开标签免重输令牌+XSS 偷不走（REQ 2026-10-05 N4 v2；v1 sessionStorage 拍板作废）。
+- 面与链路：`POST /login`（JSON {token}→TokenAuthority 恒定时间校验）→`Set-Cookie: pi-agent-ui-session=<sid>`（HttpOnly; SameSite=Strict; Path=/; [Secure 按 TLS 事实]）；sid=HMAC-SHA256(per-boot 32B random secret, tokenDigestHex)——cookie 无令牌原文、服务重启全会话失效（fail-closed）、令牌热轮换旧 sid 自动失效（同基派生）。`POST /logout`=Max-Age=0。登录面 per-IP 失败滑窗限速（默认 10 失败/60s→429；成功清户；封锁期正确令牌同拒=与 R6 同口径）。WS 升级面带有效 cookie→meta.sessionAuthed→hello 免令牌通道（v1.1 token 可选；**呈令牌必真——错令牌不静默降级**；tokenDigest="session-cookie" 审计标记）。仅 staticDir 部署叠加；非浏览器/纯 WS 部署令牌通道不变。
+- 文件：apps/server/src/http/login-route.ts（新）+ws-transport.ts（sessionCookie 注入+meta.sessionAuthed+parseSessionCookie）+ws-gateway.ts（hello 双通道）+token-auth.ts（currentDigests 只读访问器）+packages/protocol/src/contracts.ts（hello.token 可选）+composition.ts（staticDir 模式叠加登录面）+docs/ws-ui-contracts-v1.md §5.1/§5.5。
+- 测试：login-route.test.ts 11 例（L1 旗标逐项/L2 Secure 事实/L3 限速滑窗+窗口滑过恢复/L4 登出/L5 非面让路/L6 坏体/L7 篡改+形态+轮换失效/L8 异钥隔离/L9 弱钥拒启/L10 解析器/L11 审计零令牌原文）；ws-gateway S1-S3（会话 hello/错令牌不降级/无会话拒）；login-e2e E1-E4（真 HTTP 登录→真 WS 免令牌 welcome/反例矩阵 4 路/登出/静态共存）。
+- 运行证据：全仓 62 文件 passed+2 skipped=**1177 passed**+15 skipped；tsc 三包 0 错；eslint 0。变异五连全杀（M1 旗标剥除/M2 会话通道忽略/M3 限速失效/M4 升级面校验短路/M5 sid 形态门拆除——各自对应测试变红，还原后 121 例复绿+树净）。
+- 残余披露：①服务端会话撤销表未做（首版登出=清浏览器侧 cookie；sid 失效统治=重启/令牌轮换；撤销表挂后续增强）；②Secure 旗标在无 TLS 部署（http loopback）不置——契约语义即如此，反代 TLS 场景由部署方保证 XFP 采信；③前端登录框+自动重连（Kimi 线 A 系接线批）未落——服务端面已可独立验证；④登录面无 CSRF token（POST only+SameSite=Strict+JSON 体=现实防护面；非浏览器 CORS 由 Origin 白名单统治）。
