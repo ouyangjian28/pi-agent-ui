@@ -1,0 +1,21 @@
+diff --git a/apps/server/src/runtime/recovery-evidence-source.ts b/apps/server/src/runtime/recovery-evidence-source.ts
+index 8c05cbf..a2f8155 100644
+--- a/apps/server/src/runtime/recovery-evidence-source.ts
++++ b/apps/server/src/runtime/recovery-evidence-source.ts
+@@ -313,13 +313,15 @@ export function createRecoveryEvidenceProvider(
+           return unavailable("concurrent-modification"); // 锚点损坏=篡改面（原子写防撕裂；坏=外部干预）
+         }
+         // B13-2 seen 恒读（有锚也读）：仓损坏/不可读=read-failed fail-closed（不静默放行）。
+-        let seen: ReadonlySet<string>;
++        let seen: ReadonlySet<string> = new Set<string>(); // MUTATION M-F13-SEENALWAYS: 有锚跳过 seen 读
++        if (anchor === null) {
+         try {
+           seen = await loadSeen(seenPath(evidenceDir));
+         } catch {
+           audit(`recovery-evidence-store-failed file=${file} detail=seen-load`);
+           return unavailable("read-failed");
+         }
++        }
+         // B12-1 冷启动权威门（Q02/Q03）：锚点缺失时当前盘面不自行成为权威。已登记 file 锚点丢失
+         // =证据丢失→concurrent-modification（bless 不可越）；未登记 file 默认 no-evidence-snapshot，
+         // 仅宿主显式 trustFirstCapture=true（迁移/可信新建声明）才建立首锚。

@@ -606,6 +606,15 @@
   LRU/BLESSWIRE 全杀（R20/R22/R23+R24/R25/R26/R27/R4b+T6/I1+I4+I5）。
 - run-record：run-records/3b4-fix12-vitest.json（886/879/7/0）。
 
+## 3b-4 fix13（GPT 第 13 轮 B13-1/B13-2：仓级串行+登记不变量；2026-10-03）
+
+- 源：recovery-evidence-source.ts v4——①serialize 仓级单链（同实例全 file 串行，seen 读改写事务化，跨 file 并行首捕不丢登记；O(1) 单链尾，Q14 随之消解）②seen 恒读（有锚也读；损坏/不可读→read-failed fail-closed）③登记不变量：成功返回快照前 seen 登记已建立——有锚未登记（B13-2 残局/fix11 旧锚迁移）验证纯追加后补登记再返回 ④tmp 名加 randomBytes(6) 独占量。
+- 测试：R28（双首捕并发→登记并集+丢锚拒）/R29（残局补登记全链+占位目录 fail-closed+零 tmp 残留）/R30（损坏仓恒读拒）/R31（bless 抛错→read-failed+锚/登记零落盘）；composition 轮询×预算笛卡尔（tokenPollMs 省略/0/50 × 非法七态拒/合法三态收——B13-3① 补 0 与 1）；T5c（迟到成功快照：零帧+死连接 recoveryPages 空+槽归零）/T4b（公开关闭入口 r.dispose 也触发 abort，dispose 幂等）/T6 补帧增量断言（e9 续页=第二帧）。
+- 变异三连（3b4-fix13.md+patches/3b4-fix13/）：SERIAL→R28 / BACKFILL→R21+R22+R28 / SEENALWAYS→R29+R30；还原 sha b5304a6324e6c245；tmp 独占名无变异（如实记卫生面观察）。
+- 披露就地收口（B13-4）：集成文件头 4402 勘正/3b4-fix11.md「三态矩阵既有例」勘正/TEST-MAP fix11 节 sha 字段名+退出码口径勘正/T5、T5b 标题限定（成功面=T5c）/3b4-fix12.md LRU 首败顺序勘正/provider 头 v4 部署前提（evidenceDir 可信目录+Q12 提交时点）。
+- 终态：tsc 0/lint 0/vitest 47 files 885 passed+7 skipped=892（基线 886，+6）。
+
+
 ## 3b-4 fix11（GPT 第 11 轮五阻断修复：安全读 v2+证据链；2026-10-03）
 - **v2 重构**：recovery-evidence-source.ts 接缝改 openLike（OpenLike=(abs)=>{size,read(maxBytes),close}；默认=safe-open 真路径：openSafeFile=O_NOFOLLOW|O_NONBLOCK+同 fd fstat isFile；readBounded=64KB 流式循环，n===0 EOF 止、累计超限即抛 too-large）——journal+session 双源全走安全打开。旧 statLike/readLike 删除。
 - **证据链 sidecar（B11-2）**：evidenceDir 锚点 <encodeURIComponent(file)>.evidence.json={version:1,file,len,sha256}；纯追加扩展才过（新 raw 前 len 字节 sha 相符+新长≥旧长）；缩/重写→unavailable(concurrent-modification)；锚点损坏→concurrent-modification；锚点不可写→read-failed；同 file 捕获 serialize 串行化；原子 tmp+rename 写穿。跨实例（重启/驱逐）续链。

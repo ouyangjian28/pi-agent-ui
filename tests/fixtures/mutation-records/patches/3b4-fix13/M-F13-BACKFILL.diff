@@ -1,0 +1,13 @@
+diff --git a/apps/server/src/runtime/recovery-evidence-source.ts b/apps/server/src/runtime/recovery-evidence-source.ts
+index 8c05cbf..97f5e7f 100644
+--- a/apps/server/src/runtime/recovery-evidence-source.ts
++++ b/apps/server/src/runtime/recovery-evidence-source.ts
+@@ -364,7 +364,7 @@ export function createRecoveryEvidenceProvider(
+         // B13-2 登记不变量：成功返回快照前 seen 登记已建立。未登记而至此=首捕（bless 已过）或
+         // B13-2 残局（锚写成+seen 写败）或 fix11 旧锚迁移——一律补登记再返回（失败=fail-closed：
+         // 仓登记不落盘不得发结论，杜绝重试绕登记直通快照）。Q03 防锚点丢失洗白同源。
+-        if (!seen.has(file)) {
++        if (false && !seen.has(file)) { // MUTATION M-F13-BACKFILL: 补登记不变量移除
+           try {
+             const nextSeen = { version: 1, files: [...new Set([...seen, file])].sort() } satisfies EvidenceSeen;
+             const stmp = `${seenPath(evidenceDir)}.tmp-${process.pid}-${now().toString(36)}-${randomBytes(6).toString("hex")}`;

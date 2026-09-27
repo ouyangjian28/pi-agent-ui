@@ -1,0 +1,20 @@
+diff --git a/apps/server/src/runtime/recovery-evidence-source.ts b/apps/server/src/runtime/recovery-evidence-source.ts
+index 8c05cbf..0052575 100644
+--- a/apps/server/src/runtime/recovery-evidence-source.ts
++++ b/apps/server/src/runtime/recovery-evidence-source.ts
+@@ -186,11 +186,11 @@ export function createRecoveryEvidenceProvider(
+   // B13-1 仓级单链：同实例内所有 file 的捕获串行（seen 读改写整体事务化——跨 file 并行首捕
+   // 不再各自 loadSeen 旧集后整体覆盖写丢登记）。O(1) 单链尾，无 Map 无所有权清理（Q14 随之消解）。
+   // 跨实例无锁（Q16 部署前提：禁重叠写者）。
+-  let chain: Promise<unknown> = Promise.resolve();
++  const inflight = new Map<string, Promise<unknown>>(); // MUTATION M-F13-SERIAL: 退回 per-file 串行
+   const serialize = <T>(file: string, body: () => Promise<T>): Promise<T> => {
+-    void file; // 串行域=仓级（evidenceDir），file 仅入 body 闭包
+-    const next = chain.then(body, body);
+-    chain = next.then(() => undefined, () => undefined);
++    const prev = inflight.get(file) ?? Promise.resolve();
++    const next = prev.then(body, body);
++    inflight.set(file, next.then(() => undefined, () => undefined));
+     return next;
+   };
+   const unavailable = (reason: "read-failed" | "concurrent-modification" | "oversized" | "no-evidence-snapshot") =>
