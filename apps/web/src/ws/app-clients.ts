@@ -14,11 +14,21 @@ export interface WsUrlLocationLike {
 /**
  * WS URL 推导（纯函数，独立可测）：
  * - 默认同源：ws(s)://location.host（https 页面→wss，http→ws）；服务端在同端口静态托管+任意路径 upgrade。
- * - dev 覆盖：?server=ws://host:port（或 wss://…，可带路径）；仅接受 ws:/wss: scheme，
- *   畸形值/其余 scheme 一律忽略回退默认（受控降级，不把任意字符串送进 WebSocket）。
+ * - dev 覆盖：?server=ws(s)://…（可带路径）——仅当 dev 为真（缺省=import.meta.env.DEV）时生效；
+ *   生产模式下任何 ?server= 一律忽略、回退同源。
+ *   注意：这不是通用参数校验，而是【凭据目的地绑定】（GPT 审 B1）——hello 帧携带访问令牌，
+ *   绝不允许页面 URL 在生产环境把凭据接收方改指向任意主机（已存令牌会被自动外带）。
+ * - 覆盖值仅接受 ws:/wss: scheme 且无 fragment（WebSocket 构造器语义不含 #；
+ *   畸形值/带 fragment/其余 scheme 一律忽略回退默认，不把任意字符串送进 WebSocket）。
  */
-export function resolveWsUrl(location: WsUrlLocationLike, search: string): string {
-  const override = new URLSearchParams(search).get("server");
+export interface ResolveWsUrlOptions {
+  /** 注入桩：缺省=import.meta.env.DEV；测试生产语义显式传 { dev: false }。 */
+  readonly dev?: boolean;
+}
+
+export function resolveWsUrl(location: WsUrlLocationLike, search: string, options?: ResolveWsUrlOptions): string {
+  const dev = options?.dev ?? import.meta.env.DEV;
+  const override = dev ? new URLSearchParams(search).get("server") : null;
   if (override !== null && override !== "") {
     let parsed: URL | null = null;
     try {
@@ -26,11 +36,29 @@ export function resolveWsUrl(location: WsUrlLocationLike, search: string): strin
     } catch {
       parsed = null; // 畸形值：回退默认
     }
-    if (parsed !== null && (parsed.protocol === "ws:" || parsed.protocol === "wss:")) {
+    // N2：带 fragment 的 ws(s) URL 按畸形处理（hash 非空即回退），不进 WebSocket 构造器
+    if (parsed !== null && (parsed.protocol === "ws:" || parsed.protocol === "wss:") && parsed.hash === "") {
       return parsed.toString();
     }
   }
   return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/`;
+}
+
+/**
+ * 凭据目的地绑定判据（GPT 审 B1）：hello 是否允许携带（已存/手输）令牌的唯一判据。
+ * 同源 = 协议映射一致（https 页面只认 wss://——顺带杜绝 https 页面被 ?server= 降级为明文 ws://）
+ * 且 host:port 全等（不同端口即跨源）。任一不同=未受信目的地：调用方必须零携密
+ *（令牌置空串发 hello，由服务端按未认证 4401 拒绝），已存令牌绝不出本源。
+ */
+export function isSameOriginWsTarget(location: WsUrlLocationLike, url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false; // 不可解析一律视为未受信
+  }
+  const expectedProtocol = location.protocol === "https:" ? "wss:" : "ws:";
+  return parsed.protocol === expectedProtocol && parsed.host === location.host;
 }
 
 /** 真模式三件套：列表/订阅/写三面客户端 + 统一释放。 */
@@ -44,6 +72,7 @@ export interface AppClients {
 
 export interface CreateAppClientsOptions {
   readonly url: string;
+  /** hello 携带的令牌；跨源目的地由组合根置空串（零携密 hello，服务端按未认证拒）。 */
   readonly token: string;
   /** 测试注入假 socket；缺省=浏览器全局 WebSocket（各客户端 defaultFactory）。 */
   readonly createSocket?: WebSocketFactory | undefined;

@@ -7,26 +7,41 @@ import React, { useState } from "react";
 export const TOKEN_STORAGE_KEY = "pi-agent-ui.token";
 
 export interface UrlTokenRead {
+  /** 有效 token：首个非空 token 值；全部为空/不存在时为 null。 */
   readonly token: string | null;
-  /** 清除 token 后的 search（其余参数保留；空串=无参数）。 */
+  /** 清除全部 token 键后的 search（其余参数含重复键保留；空串=无参数）。 */
   readonly cleanedSearch: string;
+  /** search 中是否出现过 token 键（含空值/重复键）——为真即应 replaceState 清参。 */
+  readonly hadTokenParam: boolean;
 }
 
-/** 从 search 读 token（纯函数）：返回 token 与剔除 token 后的 search。空 token（?token=）视为缺省。 */
+/**
+ * 从 search 读 token（纯函数）。N1 修复：「读有效 token」与「删全部 token 参数」分离——
+ * 有效 token=首个非空值（`?token=&token=x` 取 x）；cleanedSearch 一律剔除全部 token 键
+ *（含空值/重复键，URLSearchParams.delete 语义），其余参数（含重复 x=1&x=2）原序保留。
+ */
 export function readUrlToken(search: string): UrlTokenRead {
   const params = new URLSearchParams(search);
-  const token = params.get("token");
-  if (token === null || token === "") {
-    return { token: null, cleanedSearch: search };
+  const hadTokenParam = params.has("token");
+  if (!hadTokenParam) {
+    return { token: null, cleanedSearch: search, hadTokenParam: false };
   }
-  params.delete("token");
+  const token = params.getAll("token").find((v) => v !== "") ?? null;
+  params.delete("token"); // 删全部 token 键（含空值与重复键）
   const rest = params.toString();
-  return { token, cleanedSearch: rest === "" ? "" : `?${rest}` };
+  return { token, cleanedSearch: rest === "" ? "" : `?${rest}`, hadTokenParam: true };
 }
 
-/** 把剔除 token 后的 search 写回地址栏（history.replaceState：不留历史、不回退可达）。 */
+/**
+ * 把剔除 token 后的 search 写回地址栏（history.replaceState：不留历史、不回退可达）。
+ * N1 修复：保留 hash 与 history.state（旧实现拼 pathname+search 会把二者丢成空/null）。
+ */
 export function clearUrlToken(cleanedSearch: string): void {
-  window.history.replaceState(null, "", window.location.pathname + cleanedSearch);
+  window.history.replaceState(
+    window.history.state,
+    "",
+    window.location.pathname + cleanedSearch + window.location.hash,
+  );
 }
 
 function safeStorage(): Storage | null {

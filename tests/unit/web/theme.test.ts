@@ -140,6 +140,10 @@ describe("令牌静态面（styles.css 与 theme.ts 令牌常量同源断言）"
     expect(body).toContain(".session-detail");
     expect(body).toContain(".write-actions button");
     expect(body).toContain(".write-composer textarea");
+    // B2：必须与启用侧同状态同优先级（级联取胜），仅低优先级宿主选择器会被压过；
+    // 静态断言只是回归下限，有效性上限=reduced-motion.browser.test.ts 真实 Chromium 计算样式
+    expect(body).toContain(".session-list button[aria-current]");
+    expect(body).toContain(".write-composer:focus-within textarea");
   });
 
   it("会话正文走 --font-mono（消息/事件列表/写输入）", () => {

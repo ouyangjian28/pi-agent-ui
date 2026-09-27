@@ -539,15 +539,21 @@ hr {
   }
 }
 
-/* 无障碍门：系统减动效偏好下四类动效全部关停（不可绕过） */
+/* 无障碍门：系统减动效偏好下四类动效全部关停（不可绕过）。
+ * B2 修复：关停选择器必须与启用侧【同状态同优先级】并靠后（级联取胜）——启用动画的是
+ * .session-list button[aria-current](0,2,1) 与 .write-composer:focus-within textarea(0,2,1)，
+ * 仅写 .session-list button/.write-composer textarea(0,1,1) 会被压过（GPT 审 B2 Chromium 实测反例）；
+ * 这里逐项对齐启用侧完整选择器，不用 !important（同优先级+源码序已足够，可避免 !important 军备）。 */
 @media (prefers-reduced-motion: reduce) {
   .session-list button,
+  .session-list button[aria-current],
   .session-detail .empty,
   .session-detail header,
   .session-detail .history-list,
   .conversation .welcome,
   .write-actions button,
-  .write-composer textarea {
+  .write-composer textarea,
+  .write-composer:focus-within textarea {
     animation: none;
     transition: none;
   }

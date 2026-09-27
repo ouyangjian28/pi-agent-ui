@@ -14,7 +14,7 @@ import {
   readUrlToken,
   storeToken,
 } from "./components/token-gate";
-import { createAppClients, resolveWsUrl } from "./ws/app-clients";
+import { createAppClients, isSameOriginWsTarget, resolveWsUrl } from "./ws/app-clients";
 import type { AppClients } from "./ws/app-clients";
 import type { WebSocketFactory } from "./ws/ws-client";
 
@@ -39,12 +39,15 @@ export function RealApp({ createSocket }: RealAppProps) {
   const [retryNonce, setRetryNonce] = useState(0);
   // 选中会话留在 RealApp：重连（重建三件套）后选择不丢
   const [file, setFile] = useState<string | null>(null);
+  // B1：当前连接目标为跨源（dev 覆盖）时为真——connbar 提示「跨源目标不携带本机凭据」
+  const [untrustedTarget, setUntrustedTarget] = useState(false);
 
   // 挂载时一次性解析 token：URL ?token=（读取后清参数+存 localStorage）→localStorage→输入面。
   useEffect(() => {
     const fromUrl = readUrlToken(window.location.search);
+    // N1：只要出现过 token 键（含空值/重复键）就清参；有效 token 为空时继续走 localStorage
+    if (fromUrl.hadTokenParam) clearUrlToken(fromUrl.cleanedSearch);
     if (fromUrl.token !== null) {
-      clearUrlToken(fromUrl.cleanedSearch);
       storeToken(fromUrl.token);
       setToken(fromUrl.token);
       return;
@@ -57,7 +60,11 @@ export function RealApp({ createSocket }: RealAppProps) {
   useEffect(() => {
     if (token === null) return;
     const url = resolveWsUrl(window.location, window.location.search);
-    const created = createAppClients({ url, token, createSocket });
+    // B1 凭据目的地绑定：跨源目的地（仅 dev ?server= 可达；生产覆盖已被 resolveWsUrl 忽略）
+    // 零携密——hello 令牌置空串，由服务端按未认证拒绝，已存令牌绝不出本源。
+    const trusted = isSameOriginWsTarget(window.location, url);
+    const created = createAppClients({ url, token: trusted ? token : "", createSocket });
+    setUntrustedTarget(!trusted);
     setClients(created);
     return () => {
       setClients(null);
@@ -88,6 +95,7 @@ export function RealApp({ createSocket }: RealAppProps) {
     <ConnectedApp
       clients={clients}
       file={file}
+      untrustedTarget={untrustedTarget}
       onSelectFile={setFile}
       onRetry={() => setRetryNonce((n) => n + 1)}
       onClearToken={() => {
@@ -101,12 +109,14 @@ export function RealApp({ createSocket }: RealAppProps) {
 function ConnectedApp({
   clients,
   file,
+  untrustedTarget,
   onSelectFile,
   onRetry,
   onClearToken,
 }: {
   clients: AppClients;
   file: string | null;
+  untrustedTarget: boolean;
   onSelectFile: (file: string) => void;
   onRetry: () => void;
   onClearToken: () => void;
@@ -149,6 +159,7 @@ function ConnectedApp({
         <span>列表：{CONN_LABEL[wsSnap.state]}</span>
         <span>订阅：{CONN_LABEL[subSnap.connState]}</span>
         <span>写：{CONN_LABEL[writeSnap.connState]}</span>
+        {untrustedTarget && <span>跨源目标不支持凭据：未携带本机令牌，服务端将按未认证拒绝</span>}
         {anyDown && (
           <button type="button" onClick={onRetry}>
             重新连接

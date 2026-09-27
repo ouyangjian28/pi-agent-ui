@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-// A1d app-clients 测试：resolveWsUrl 纯函数推导（同源默认/?server=覆盖/受控降级）+
-// createAppClients 三件套组装（三面独立连接、hello 带 token）与统一 dispose（幂等）。
+// A1d app-clients 测试：resolveWsUrl 纯函数推导（同源默认/?server=覆盖（仅 dev）/受控降级）+
+// B1 凭据目的地绑定（生产忽略 ?server=/isSameOriginWsTarget 同源判据/跨源零携密 hello）+
+// N2 fragment 拒绝 + createAppClients 三件套组装（三面独立连接、hello 带 token）与统一 dispose（幂等）。
 // 注入式假 socket，不起真网络；本文件不触 DOM。
 import { describe, expect, it } from "vitest";
-import { createAppClients, resolveWsUrl } from "../../../apps/web/src/ws/app-clients";
+import { createAppClients, isSameOriginWsTarget, resolveWsUrl } from "../../../apps/web/src/ws/app-clients";
 import type { WebSocketLike } from "../../../apps/web/src/ws/ws-client";
 
 class FakeWebSocket implements WebSocketLike {
@@ -46,24 +47,77 @@ describe("resolveWsUrl", () => {
     expect(resolveWsUrl({ protocol: "https:", host: "ui.example.com" }, "")).toBe("wss://ui.example.com/");
   });
   it("?server=ws://host:port 覆盖默认（dev）", () => {
-    expect(resolveWsUrl({ protocol: "http:", host: "localhost:3000" }, "?server=ws://127.0.0.1:9001")).toBe(
-      "ws://127.0.0.1:9001/",
-    );
+    expect(
+      resolveWsUrl({ protocol: "http:", host: "localhost:3000" }, "?server=ws://127.0.0.1:9001", { dev: true }),
+    ).toBe("ws://127.0.0.1:9001/");
   });
-  it("?server=wss://…带路径时保留路径", () => {
-    expect(resolveWsUrl({ protocol: "https:", host: "ui.example.com" }, "?server=wss://dev.example.com:8443/ws")).toBe(
-      "wss://dev.example.com:8443/ws",
-    );
+  it("?server=wss://…带路径时保留路径（dev）", () => {
+    expect(
+      resolveWsUrl({ protocol: "https:", host: "ui.example.com" }, "?server=wss://dev.example.com:8443/ws", {
+        dev: true,
+      }),
+    ).toBe("wss://dev.example.com:8443/ws");
   });
-  it("非 ws(s) scheme 的 server 值被忽略，回退同源默认", () => {
-    expect(resolveWsUrl({ protocol: "https:", host: "ui.example.com" }, "?server=http://evil.example")).toBe(
-      "wss://ui.example.com/",
-    );
-  });
-  it("畸形 server 值被忽略，回退同源默认", () => {
-    expect(resolveWsUrl({ protocol: "http:", host: "localhost:3000" }, "?server=not a url")).toBe(
+  it("B1：生产模式（dev=false）?server= 一律忽略，回退同源——凭据目的地绑定，不容 URL 改指向", () => {
+    // 跨源覆盖被忽略
+    expect(
+      resolveWsUrl({ protocol: "https:", host: "ui.example.com" }, "?server=wss://collector.example.invalid/ws", {
+        dev: false,
+      }),
+    ).toBe("wss://ui.example.com/");
+    // 即便覆盖值恰好同源也同样忽略（生产无 ?server= 语义）
+    expect(
+      resolveWsUrl({ protocol: "https:", host: "ui.example.com" }, "?server=wss://ui.example.com/ws", {
+        dev: false,
+      }),
+    ).toBe("wss://ui.example.com/");
+    expect(resolveWsUrl({ protocol: "http:", host: "localhost:3000" }, "?server=ws://127.0.0.1:9001", { dev: false })).toBe(
       "ws://localhost:3000/",
     );
+  });
+  it("N2：带 fragment 的 ws(s) URL 按畸形处理，回退同源", () => {
+    expect(
+      resolveWsUrl({ protocol: "https:", host: "ui.example.com" }, "?server=wss://dev.example.com/ws%23frag", {
+        dev: true,
+      }),
+    ).toBe("wss://ui.example.com/");
+    expect(
+      resolveWsUrl({ protocol: "http:", host: "localhost:3000" }, "?server=ws://127.0.0.1:9001/ws#frag", { dev: true }),
+    ).toBe("ws://localhost:3000/");
+  });
+  it("非 ws(s) scheme 的 server 值被忽略，回退同源默认", () => {
+    expect(
+      resolveWsUrl({ protocol: "https:", host: "ui.example.com" }, "?server=http://evil.example", { dev: true }),
+    ).toBe("wss://ui.example.com/");
+  });
+  it("畸形 server 值被忽略，回退同源默认", () => {
+    expect(resolveWsUrl({ protocol: "http:", host: "localhost:3000" }, "?server=not a url", { dev: true })).toBe(
+      "ws://localhost:3000/",
+    );
+  });
+});
+
+describe("isSameOriginWsTarget（B1 凭据目的地绑定判据）", () => {
+  it("http 页面 + ws://同 host:port = 同源（可信）", () => {
+    expect(isSameOriginWsTarget({ protocol: "http:", host: "localhost:3000" }, "ws://localhost:3000/")).toBe(true);
+    expect(isSameOriginWsTarget({ protocol: "http:", host: "localhost:3000" }, "ws://localhost:3000/ws")).toBe(true);
+  });
+  it("https 页面 + wss://同 host:port = 同源（可信）", () => {
+    expect(isSameOriginWsTarget({ protocol: "https:", host: "ui.example.com" }, "wss://ui.example.com/")).toBe(true);
+  });
+  it("不同端口=跨源（不可信）", () => {
+    expect(isSameOriginWsTarget({ protocol: "http:", host: "localhost:3000" }, "ws://localhost:9001/")).toBe(false);
+  });
+  it("不同 host=跨源（不可信）", () => {
+    expect(isSameOriginWsTarget({ protocol: "https:", host: "ui.example.com" }, "wss://collector.example.invalid/ws")).toBe(
+      false,
+    );
+  });
+  it("https 页面 + ws:// = 明文降级，跨源（不可信）", () => {
+    expect(isSameOriginWsTarget({ protocol: "https:", host: "ui.example.com" }, "ws://ui.example.com/")).toBe(false);
+  });
+  it("不可解析 URL 一律不可信", () => {
+    expect(isSameOriginWsTarget({ protocol: "http:", host: "localhost:3000" }, "not a url")).toBe(false);
   });
 });
 
@@ -92,6 +146,20 @@ describe("createAppClients", () => {
       expect(ws.sent).toHaveLength(0); // open 前零帧
       ws.open();
       expect(ws.sentFrames()).toEqual([{ t: "hello", protocolVersion: 1, token: "secret-token" }]);
+    }
+    clients.dispose();
+  });
+
+  it("B1：token 置空串时 hello 零携密（跨源目的地由组合根如此调用，服务端按未认证拒）", () => {
+    FakeWebSocket.reset();
+    const clients = createAppClients({
+      url: "wss://collector.example.invalid/ws",
+      token: "",
+      createSocket: (url) => new FakeWebSocket(url),
+    });
+    for (const ws of FakeWebSocket.instances) {
+      ws.open();
+      expect(ws.sentFrames()).toEqual([{ t: "hello", protocolVersion: 1, token: "" }]);
     }
     clients.dispose();
   });
