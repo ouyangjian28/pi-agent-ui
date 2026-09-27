@@ -424,3 +424,9 @@ type ServerFrame =
 3. sanitize 向量集（36+ 例人工期望）逐条审定。
 4. 13 时序可执行断言覆盖是否充分。
 5. 其余黄项（次键/listReliability 双级/32MB 预算/终局预览措辞/Y01/Y04）是否残留。
+
+## §10 3c-1 写侧扩展指针（增补：2026-10-03，正文 v1 冻结不改写）
+
+- v1 只读契约（本文 §1-§9）**逐字冻结不变**：写类 t 仍一律 4405+close 1008（第 4 级冻结门），`writeHost` 未接线时网关行为字节级不变（W1 回归案锁定）。
+- 写侧扩展（开放面=prompt/stop 两 t；帧形/DTO/在途门/64KiB 上限）权威定义=packages/protocol/src/contracts.ts 写侧段+TECH.md B16 节；测试矩阵=tests/unit/server/ws-gateway-write.test.ts（W1-W12）；变异档=tests/fixtures/mutation-records/3c1.md。
+- 本节仅作指针，冲突时以 contracts.ts 源码为准。

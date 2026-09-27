@@ -1,0 +1,3 @@
+packages/protocol TSC_EXIT=0
+apps/server TSC_EXIT=0
+apps/web TSC_EXIT=0

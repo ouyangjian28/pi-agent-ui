@@ -1,0 +1,15 @@
+diff --git a/apps/server/src/ws/ws-gateway.ts b/apps/server/src/ws/ws-gateway.ts
+index b0b8838..7ec7293 100644
+--- a/apps/server/src/ws/ws-gateway.ts
++++ b/apps/server/src/ws/ws-gateway.ts
+@@ -350,9 +350,7 @@ export class WsGateway {
+       }
+       const wf = wc.frame;
+       const rid = wf.requestId;
+-      if (st.inflight.has(rid)) { this.errFrame(st, 4404, "requestId 在途重复", rid); return; }
+-      if (st.inflight.size >= LIMITS.inFlightRequestsPerConn) { this.errFrame(st, 4404, "在途请求超限", rid); return; }
+-      st.inflight.add(rid);
++      st.inflight.add(rid); // MUTATION INFLIGHT
+       if (wf.t === "prompt") void this.handleWritePrompt(st, wf);
+       else void this.handleWriteStop(st, wf);
+       return;

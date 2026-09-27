@@ -645,6 +645,8 @@
 - 变异三连（3c1.md+patches/3c1/，基线先提交=6a3a124 后变异；完整输出 run-records/3c1-mut{1,2,3}-*.log）：WRITEBRANCH（写分支恒 false）→8 败首败=W2（write-ack undefined）；INFLIGHT（写在途门删）→1 败=W8；ABSRESOLVE（越根门+解析删，宿主收裸名）→1 败=W2（host 收 s1.jsonl 而非 abs）。还原=git hash-object 复核 HEAD tree（RESTORE_OK×3）。
 - **诚实披露**：filePattern 限裸名（^[\w.-]{1,114}\.jsonl$）⇒裸名必在任一根内解析成功⇒handleWrite* 的"file 越界"分支在当前契约下不可达=纵深防御（防未来 filePattern 放宽）；W4 的 4404 实由 validateWriteFrame 格式层出（"/etc/passwd" 不过裸名正则）——越界门无独立杀面，非缺口而是死分支披露。
 - 证据：run-records/3c1-full-vitest.log=907 passed+7 skipped（902+12 新增）；tsc/lint 裸码 0（当轮终端实录）；基线提交 6a3a124。
+- **首跑时间线（第 18 轮披露补档）**：W 矩阵首跑 12 案 5 败（W2/W3/W8/W9/W11=全部合法派发案；错误路径 7 案全过）——根因=测试发绝对路径 file 违反 filePattern 裸名契约（LIMITS.filePattern 拒收→4404"file 非法"）；修正=宿主收解析后绝对路径+ack 回显裸名（生产语义不变），测试改发裸名后 12/12 绿。非生产码缺陷，生产分支逻辑首跑即正确。
+- tsc/lint 可复现实录（第 18 轮补档）：run-records/3c1-tsc.log、run-records/3c1-lint.log（三包/两文件裸码退出码 0）。
 
 ## 3b5-2（第16轮 92/100 GO 尾项：R36 独立首杀+seen 门残留面+R37/R38 加固；2026-10-03）
 - 测试 R39-R40（40 例文件）：R39 锚首写仅一次失败（后续原语健康）→read-failed+writes==1+seenPersists==0+零落盘——吞锚错变异独占首杀面（3b5-2 实证 R39 杀）；R40 seen 门 rename+清理 rm 双拒（锚已提交）→read-failed（detail=seen-store）+残留=seen tmp（锚在场区别于 R35 锚门残留）+默认重试收敛。

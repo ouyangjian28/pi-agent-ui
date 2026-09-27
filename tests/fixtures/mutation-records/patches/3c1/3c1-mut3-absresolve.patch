@@ -1,0 +1,15 @@
+diff --git a/apps/server/src/ws/ws-gateway.ts b/apps/server/src/ws/ws-gateway.ts
+index b0b8838..b25f7b9 100644
+--- a/apps/server/src/ws/ws-gateway.ts
++++ b/apps/server/src/ws/ws-gateway.ts
+@@ -392,9 +392,7 @@ export class WsGateway {
+     const rid = frame.requestId;
+     const file = frame.file;
+     try {
+-      const abs = resolveWithinRoots(file, this.opts.roots);
+-      if (abs === null) { this.errFrame(st, 4404, "file 越界", rid); return; }
+-      const outcome = await this.opts.writeHost!.sendPrompt(abs, frame.text);
++      const outcome = await this.opts.writeHost!.sendPrompt(file, frame.text); // MUTATION ABSRESOLVE
+       this.audit(`write-frame conn=${st.id} t=prompt file=${file} outcome=${outcome.kind}`);
+       this.enqueue(st, { t: "write-ack", requestId: rid, file, outcome });
+     } catch (e: unknown) {

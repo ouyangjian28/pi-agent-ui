@@ -1,0 +1,13 @@
+diff --git a/apps/server/src/ws/ws-gateway.ts b/apps/server/src/ws/ws-gateway.ts
+index b0b8838..f1e757c 100644
+--- a/apps/server/src/ws/ws-gateway.ts
++++ b/apps/server/src/ws/ws-gateway.ts
+@@ -338,7 +338,7 @@ export class WsGateway {
+     if (!st.authed && t !== "hello") { this.rejectAuth(st, "未认证"); return; }
+     // 写类层（3c-1）：t∈冻结写集且宿主已接线→写校验+派发；未接线→落入下方 v1 冻结校验器（4405 不变）。
+     // 认证优先级①在前：未认证写帧→4401（与读帧同口径）。
+-    if (WRITE_FRAME_TYPES.includes(t) && this.opts.writeHost !== undefined) {
++    if (false && WRITE_FRAME_TYPES.includes(t) && this.opts.writeHost !== undefined) { // MUTATION WRITEBRANCH
+       const wc = validateWriteFrame(msg);
+       if (!wc.ok) {
+         const wrid = typeof msg === "object" && msg !== null && "requestId" in msg
