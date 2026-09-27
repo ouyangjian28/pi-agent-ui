@@ -408,7 +408,9 @@ export class SubscriptionEngine {
     this.recentPages.length = 0;
     this.expectNext = null;
     if (emitError) {
-      const frame: ServerFrame = { t: "error", code, message, retryable: false, requestId: "" };
+      // K3-B1（r21 后端批）：终局通知必须携带结构化身份 subscriptionId（客户端可路由到具体流）；
+      // requestId 恒空——终局是【流】的事件，不得冒充任何在途请求的失败（前端会把关联 requestId 的 error 当请求失败）。
+      const frame: ServerFrame = { t: "error", code, message, retryable: false, requestId: "", subscriptionId: this.subscriptionId };
       const est = (this.d.estimateFrame ?? estimateFrameBytes)(frame);
       this.outbox.push({ kind: "frame", frame, est });
       this.backlogBytes = est; // 清零后唯一待发帧（出队即扣回 0）

@@ -378,6 +378,9 @@ describe("订阅引擎 13 时序", () => {
     expect(eng.state.phase).toBe("closed"); // 第 1025 项触发（count>max）
     const out = eng.drain(16);
     expect(out[out.length - 1]).toMatchObject({ t: "error", code: 4431 });
+    // K3-B1：引擎终局帧也带结构化身份（客户端可路由到具体流，不靠 message 文本解析）
+    expect((out[out.length - 1] as { subscriptionId?: string }).subscriptionId).toBe(eng.subscriptionId);
+    expect((out[out.length - 1] as { requestId?: string }).requestId).toBe("");
   });
 
   it("㉑C5-04：paging 期编入序——历史追加/status/历史追加按到达序回放（跨队列不乱序）", () => {

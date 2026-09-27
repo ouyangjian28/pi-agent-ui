@@ -644,6 +644,9 @@ describe("ws-gateway w1：C 订阅接线（W1-04/05）", () => {
       await c.say({ t: "subscribe", requestId: "s4", file: "a.jsonl" });
       const rep = errFrames(c).find((f) => f.code === 4409);
       expect(String(rep?.message)).toContain(subId1); // W1-05：通知关联旧订阅
+      // K3-B1：终局帧结构化身份——旧流指认+不冒充在途请求（旧实现误携新 requestId）
+      expect(rep?.requestId).toBe("");
+      expect(rep?.subscriptionId).toBe(subId1);
       const snap2 = c.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
       expect(snap2.subscriptionId).not.toBe(subId1);
     } finally {
@@ -1017,6 +1020,11 @@ describe("ws-gateway w1b：B 系阻断回归", () => {
       r.history.append("ov.jsonl", rowAt(6));
       await until(() => errFrames(c).some((f) => f.code === 4402), 1000);
       expect(r.history.sinks.has("ov.jsonl")).toBe(false); // 观察已停
+      // K3-B1：流终局型 4402（closeSubscriptionsFor）带结构化身份+不冒充在途请求
+      const snapT = c.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
+      const term2 = errFrames(c).find((f) => f.code === 4402) as Record<string, unknown>;
+      expect(term2.subscriptionId).toBe(snapT.subscriptionId);
+      expect(term2.requestId).toBe("");
       // 订阅已清+R3 统一容量出口：合法游标重订阅→4402（旧断言用 snapshotId 非法形态被校验器先拒=假绿）
       const snap1 = c.frames().find((f) => f.t === "snapshot") as Record<string, unknown>;
       c.sent.length = 0;

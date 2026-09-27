@@ -643,9 +643,13 @@ export class WsGateway {
       // 成功：退旧（通知关联旧 subscriptionId+撤未发旧帧）再装新（退的是【当前】旧订阅，非 await 前快照）
       if (current !== undefined) {
         const oldId = current.engine.subscriptionId;
-        this.enqueue(st, { t: "error", code: 4409, message: `stream-replaced:${oldId}`, retryable: true, requestId });
+        // K3-B1：退旧通知=流终局——带 subscriptionId 指认所停旧流，requestId 空（旧实现误携新 requestId，
+        // 前端把关联请求的 error 当失败→随后合法新 snapshot 反被丢弃；终局不冒充在途请求）。
+        // K3-B1②：cancel-then-notify——connection-queue.cancelBySubscription 对队列项做文本标记扫描，
+        // 先发后撤会把刚入队的终局帧一并撤走（自杀）；同一同步 tick 内无 flush，先撤后发客户端不可见。
         current.engine.close(4431, "stream-replaced", false);
         st.queue.cancelBySubscription(oldId);
+        this.enqueue(st, { t: "error", code: 4409, message: `stream-replaced:${oldId}`, retryable: true, requestId: "", subscriptionId: oldId });
         st.subs.delete(file);
         // F5-1（fix5，GPT fix4 P3/P4）：退旧入队/撤帧是同步宿主回调点——队列溢出拒绝会同步
         // closeConn（st.closed=true+subs 清空+conns 删除），撤帧审计可被宿主回调重入关连接；
@@ -690,9 +694,11 @@ export class WsGateway {
       this.audit(`observe-missed conn=${st.id} file=${file}`);
       const sub = st.subs.get(file);
       if (sub !== undefined) {
-        this.enqueue(st, { t: "error", code: 4409, message: `stream-replaced:${sub.engine.subscriptionId}`, retryable: true, requestId: "" });
+        // K3-B1：同退旧语义——终局带结构化身份+cancel-then-notify（见 :650 注）
+        const oldId = sub.engine.subscriptionId;
         sub.engine.close(4431, "observe-missed", false);
-        st.queue.cancelBySubscription(sub.engine.subscriptionId);
+        st.queue.cancelBySubscription(oldId);
+        this.enqueue(st, { t: "error", code: 4409, message: `stream-replaced:${oldId}`, retryable: true, requestId: "", subscriptionId: oldId });
         st.subs.delete(file);
       }
       this.releaseWatcher(st, file);
@@ -806,9 +812,11 @@ export class WsGateway {
       if (sub === undefined) continue;
       if (keepStreamId !== null && sub.engine.streamId === keepStreamId) continue;
       const oldId = sub.engine.subscriptionId;
-      this.enqueue(c, { t: "error", code: 4409, message: `stream-replaced:${oldId}`, retryable: true, requestId: "" });
+      // K3-B1：同上——磁盘换流终局带结构化身份（旧实现 id 只埋 message 文本，客户端不可靠解析）；
+      // K3-B1②：cancel-then-notify（同 :650 注——先发后撤会自撤终局帧）
       sub.engine.close(4431, `stream-replaced-${reason}`, false);
       c.queue.cancelBySubscription(oldId);
+      this.enqueue(c, { t: "error", code: 4409, message: `stream-replaced:${oldId}`, retryable: true, requestId: "", subscriptionId: oldId });
       c.subs.delete(file);
       this.releaseWatcher(c, file);
       retired += 1;
@@ -918,9 +926,11 @@ export class WsGateway {
     for (const c of [...w.refs]) {
       const sub = c.subs.get(file);
       if (sub === undefined) continue;
-      this.enqueueIfOpen(c, { t: "error", code: 4402, message, retryable: true, requestId: "" });
+      // K3-B1：订阅终局（超预算关流）同样带结构化身份+cancel-then-notify（见 :650 注）
+      const oldId = sub.engine.subscriptionId;
       sub.engine.close(4431, reason, false);
-      c.queue.cancelBySubscription(sub.engine.subscriptionId);
+      c.queue.cancelBySubscription(oldId);
+      this.enqueueIfOpen(c, { t: "error", code: 4402, message, retryable: true, requestId: "", subscriptionId: oldId });
       c.subs.delete(file);
       this.releaseWatcher(c, file);
     }
