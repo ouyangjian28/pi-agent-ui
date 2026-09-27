@@ -3081,14 +3081,41 @@ describe("ws-gateway 3b-4：typed recovery 结果映射+连接级取消", () => 
     }
   });
 
-  it("T2 typed file-unreadable→帧 reason=read-failed（契约冻结集归并；typed 区分入审计 path/detail）", async () => {
-    const r = await makeRig({ recoveryEvidence: async () => ({ kind: "file-unreadable", path: "/j/f.jsonl", detail: "ENOENT" }) });
+  it("T2 typed file-unreadable→error 4402 retryable=true（契约 §5.2/§5.3/3b-0 §4F：请求级错误帧；typed 区分入审计 file/detail）", async () => {
+    const r = await makeRig({ recoveryEvidence: async () => ({ kind: "file-unreadable", path: "f.jsonl", detail: "symlink" }) });
     try {
       const c = await authed(r);
       await c.say({ t: "get-recovery", requestId: "u1", file: "f.jsonl", offset: 0 });
-      const f = c.frames().find((x) => x.t === "recovery") as Record<string, unknown>;
-      expect(f).toMatchObject({ availability: "unavailable", reason: "read-failed" });
-      expect(r.audits.some((l) => l.includes("recovery-unreadable") && l.includes("/j/f.jsonl"))).toBe(true);
+      const f = c.frames().find((x) => x.t === "error") as Record<string, unknown>;
+      expect(f).toMatchObject({ t: "error", code: 4402, requestId: "u1", retryable: true });
+      expect(c.frames().some((x) => x.t === "recovery")).toBe(false); // 不再归并入 recovery 帧
+      expect(r.audits.some((l) => l.includes("recovery-unreadable") && l.includes("file=f.jsonl") && l.includes("detail=symlink"))).toBe(true);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("T5 迟到交付：连接关后 provider 才 resolve→零帧+不回填缓存（二次请求重调不命中旧快照）", async () => {
+    let resolveP: ((v: { kind: "unavailable"; reason: "oversized" }) => void) | null = null;
+    const calls: string[] = [];
+    const r = await makeRig({
+      recoveryEvidence: (file) => { calls.push(file); return new Promise((res) => { resolveP = res; }); },
+    });
+    try {
+      const c = await authed(r);
+      void c.say({ t: "get-recovery", requestId: "l1", file: "f.jsonl", offset: 0 });
+      await tick();
+      const before = c.frames().length; // 基线（认证期可能已有帧）
+      c.closedByTransport(); // 结果未回前连接代次终结
+      resolveP!({ kind: "unavailable", reason: "oversized" });
+      await tick(); await tick();
+      expect(c.frames().length).toBe(before); // 迟到结果不发帧
+      expect(calls).toEqual(["f.jsonl"]); // 第一次确实调过
+      // 二次请求：不命中迟到结果缓存（无 hash 回执面）→重调 provider
+      const c2 = await authed(r);
+      await c2.say({ t: "get-recovery", requestId: "l2", file: "f.jsonl", offset: 0 });
+      await tick();
+      expect(calls).toEqual(["f.jsonl", "f.jsonl"]); // 迟到结果未回填缓存→真重调
     } finally {
       await r.dispose();
     }

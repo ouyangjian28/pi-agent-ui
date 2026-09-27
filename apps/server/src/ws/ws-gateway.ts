@@ -1124,8 +1124,10 @@ export class WsGateway {
             this.enqueueIfOpen(st, { t: "recovery", requestId, file, availability: "unavailable", reason: snap.reason });
             return;
           }
-          this.audit(`recovery-unreadable file=${file} path=${snap.path} detail=${snap.detail ?? ""}`);
-          this.enqueueIfOpen(st, { t: "recovery", requestId, file, availability: "unavailable", reason: "read-failed" });
+          // B11-5/契约 §5.2/§5.3/3b-0 §4F：file-unreadable→请求级 4402 retryable=true（原归
+          // recovery/unavailable/read-failed 违契约；typed 区分只进审计，path=逻辑 file 已脱敏）
+          this.audit(`recovery-unreadable file=${file} detail=${snap.detail ?? ""}`);
+          this.enqueueIfOpen(st, { t: "error", code: 4402, message: "恢复读取失败", retryable: true, requestId });
           return;
         }
         const hash = snapshotEvidenceHash(snap);

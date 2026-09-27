@@ -1,18 +1,27 @@
-// 3b-4 恢复真读源：RecoveryEvidenceProvider 生产实现（typed 结果+合计 8MiB 入口预算+取消语义）。
-// 冻结依据：3b-0 对齐报告（audits/gpt-adapter-3b0-align-2026-09-26.md §5 3b-4 四条+接口裁定「补 typed
-// 失败结果（snapshot|unavailable{reason}|file-unreadable）+读中 8MiB 计量+取消语义」）与
-// docs/ws-ui-contracts-v1.md §5.6「恢复投影单次读取 ≤8MB（journal+session 合计）→超=unavailable:oversized」。
-//
-// 预算语义（3b-0 修正项）：8MiB = **journal+session 输入合计字节数**（stat 字节口径，UTF-8 多字节字符
-// 按实际字节数计入），不是响应帧大小也不是堆内存。单文件未超但两文件合计超→oversized。
-// 「检查后增长」：预算门过后、读完成前输入变大→拒（有界读读 allowed+1 字节，超出即拒——两段闸口
-// 间的追加不会溜进结论）。安全 open 失败（缺失/权限等一切读前置错误）→file-unreadable（typed）。
-// 快照链纪律（c5 B03）不变：本 provider 只做「首次捕获」的合法入口；恢复结论仍只对快照负责。
-import { open } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+// 3b-4 恢复真读源 v2（fix11：GPT 3b4 复审 69/100 B11-1..B11-5 重构）。
+// 冻结依据不变：3b-0 对齐 §5 3b-4 四条+docs/ws-ui-contracts-v1.md §5.6 合计 8MiB 门。
+// v2 五改（对应 B11-1..B11-5）：
+//  B11-1 安全打开：journal/session 打开一律走 ws/safe-open（O_NOFOLLOW|O_NONBLOCK+同 fd fstat 常规验证），
+//    根外 symlink/FIFO/设备不再可达或永挂；openLike 接缝保留可测性。
+//  B11-2 权威证据链：evidenceDir sidecar 锚点（len+sha256(raw)）。已见证据只许纯追加扩展
+//    （新 raw 前 len 字节 sha==锚 sha 且新长≥旧长）；缩/重写/替换→unavailable:concurrent-modification
+//    （fail-closed：修复截尾后 bad 消失不得洗白成干净快照）；sidecar 损坏=篡改面→同拒；
+//    sidecar 不可写→read-failed（证据锚点不落盘不得发结论）。驱逐/重启后锚点仍在（持久化）。
+//  B11-3 读窗完整性：读侧=有界流式循环（EOF 才止+读中超限即败）+读后字节复核+读后 session 复核
+//    （读窗内 session 增长→合计再验 fail-closed；session 缩/消失=已披露残余窗口，不回退结论）。
+//  B11-4 工厂自防御：maxCombinedBytes 非有限正整数/超 1GiB→工厂即抛（composition 校验之外的纵深）。
+//  B11-5 file-unreadable→网关 4402 retryable=true（契约 §5.2/§5.3/3b-0 §4F）；path 字段=逻辑 file
+//    （绝对路径不出 provider——审计面不泄盘面布局，GPT P12）。
+// 取消语义（披露）：signal=各步骤间观察点+读后复核；当前挂起 I/O 本身不消费 signal（safe-open 读窗
+// 有界+快，取消语义=迟到结果被网关连接态丢弃——st.closed 不入帧不回填缓存）。
+import { createHash } from "node:crypto";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { isAbsolute, join } from "node:path";
 import { parseJournalText } from "./recover.ts";
 import type { RecoveryEvidenceSnapshot } from "./recover.ts";
 import type { SessionId } from "@pi-agent-ui/protocol";
+import { openSafeFile, readBounded, resolveWithinRoots } from "../ws/safe-open.ts";
+import { SafeOpenError } from "../ws/safe-open.ts";
 
 /** typed 失败/成功结果（3b-0 冻结三形；reason 枚举=契约 §4 unavailable reason 冻结集）。 */
 export type RecoveryEvidenceResult =
@@ -28,131 +37,246 @@ export function isRecoverySnapshot(x: RecoveryEvidenceResult | null | undefined)
 /** 合计入口预算默认值（契约 §5.6：8MB=8*1024*1024）。 */
 export const DEFAULT_RECOVERY_COMBINED_BYTES = 8 * 1024 * 1024;
 
-/** stat 接缝（测试可注入增长竞态；默认=node fs）。 */
-export interface StatLike { stat(path: string): Promise<{ size: number }>; }
-/** 有界读接缝：读至多 maxBytes+1 字节；返回 null=超限（超过 maxBytes——含检查后增长场景）。 */
-export interface BoundedReadLike { readBounded(path: string, maxBytes: number): Promise<string | null>; }
+/** 安全句柄接缝：size=open 后同句柄 fstat 尺寸；read 可返回超 maxBytes 的 Buffer（provider 复核
+ *  ——seam 测试注入增长竞态的合法形态）；close 幂等。默认实现=safe-open readBounded（读中超限即抛）。 */
+export interface SafeHandleLike {
+  readonly size: number;
+  read(maxBytes: number): Promise<Buffer>;
+  close(): Promise<void>;
+}
+export type OpenLike = (abs: string) => Promise<SafeHandleLike>;
 
-/** 默认 stat（node:fs/promises）。 */
-import { stat as fsStat } from "node:fs/promises";
-const defaultStat: StatLike = { stat: (p) => fsStat(p) };
-
-/** 默认有界读：open→fstat（open 后权威尺寸）→按 maxBytes+1 读；>maxBytes→null（预算门/增长门同判）。 */
-const defaultBoundedRead: BoundedReadLike = {
-  async readBounded(path, maxBytes) {
-    const fh = await open(path, "r");
-    try {
-      const sizeNow = (await fh.stat()).size; // open 后尺寸（比预检 stat 更接近读时刻）
-      const want = Math.min(sizeNow, maxBytes + 1);
-      const buf = Buffer.alloc(want);
-      const { bytesRead } = await fh.read(buf, 0, want, 0);
-      if (bytesRead > maxBytes) return null; // 超预算（含检查后增长：预检 ≤、读时 >）
-      return buf.subarray(0, bytesRead).toString("utf8");
-    } finally {
-      await fh.close();
-    }
-  },
+/** 默认安全打开：O_NOFOLLOW|O_NONBLOCK+fd fstat；read=有界流式循环（too-large 抛 SafeOpenError）。 */
+const defaultOpenLike: OpenLike = async (abs) => {
+  const { fh, size } = await openSafeFile(abs);
+  return {
+    size,
+    read: (maxBytes: number) => readBounded(fh, maxBytes, abs),
+    close: () => fh.close(),
+  };
 };
 
 export interface RecoveryEvidenceSourceOptions {
-  /** journal 授权根（与网关 roots 同源口径）。 */
+  /** journal 授权根（与网关 roots 同源口径；必须绝对路径——composition 校验）。 */
   readonly roots: readonly string[];
   /** session 根（默认=roots）。 */
   readonly sessionRoots?: readonly string[];
-  /** 逻辑 file→session 路径映射（未提供=journal-only，预算=journal 单文件）。 */
+  /** 逻辑 file→session 路径映射。返回值必须=可解析进 sessionRoots 的相对名（嵌套子目录合法；
+   * 绝对路径/越界=配置错→file-unreadable 响亮失败，不静默 journal-only——GPT P10）。 */
   readonly sessionFor?: (file: string) => string;
-  /** journal+session 合计入口预算（默认 8MiB）。 */
+  /** 证据链 sidecar 目录（必须绝对路径；锚点文件=<encodeURIComponent(file)>.evidence.json）。 */
+  readonly evidenceDir: string;
+  /** journal+session 合计入口预算（默认 8MiB；工厂自验：有限正整数≤1GiB）。 */
   readonly maxCombinedBytes?: number;
   /** 快照 sessionId 派生（默认=去 .jsonl 后缀）。 */
   readonly sessionIdFor?: (file: string) => SessionId;
   readonly now?: () => number;
   readonly audit?: (line: string) => void;
-  /** 测试接缝。 */
-  readonly statLike?: StatLike;
-  readonly readLike?: BoundedReadLike;
+  /** 测试接缝：安全句柄注入（默认=safe-open 真路径）。 */
+  readonly openLike?: OpenLike;
+}
+
+/** sidecar 锚点（权威证据链：已见证据的字节长度+sha256；只许纯追加扩展）。 */
+interface EvidenceAnchor {
+  readonly version: 1;
+  readonly file: string;
+  readonly len: number;
+  readonly sha: string; // hex
+}
+
+function sha256Hex(buf: Buffer): string {
+  return createHash("sha256").update(buf).digest("hex");
+}
+
+function anchorPath(evidenceDir: string, file: string): string {
+  return join(evidenceDir, `${encodeURIComponent(file)}.evidence.json`);
 }
 
 function errName(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+function isIoErrno(e: unknown, code: string): boolean {
+  return typeof e === "object" && e !== null && (e as { code?: string }).code === code;
+}
+
+/** safe-open 错误→typed file-unreadable（detail=kind，不带绝对路径——P12 审计面脱敏）。 */
+function toUnreadable(file: string, e: unknown): { kind: "file-unreadable"; path: string; detail?: string } {
+  if (e instanceof SafeOpenError) return { kind: "file-unreadable", path: file, detail: e.kind };
+  return { kind: "file-unreadable", path: file, detail: errName(e).slice(0, 120) };
+}
+
 /**
- * 生产 provider 工厂。file=网关已授权的逻辑 file 名（越界判定在网关；本层再 resolve 一次取绝对路径）。
- * 取消语义：signal.aborted 时各步骤间早退（返回 unavailable/read-failed 由网关按连接态丢弃——
- * 已断连接的帧不入队；未断而 abort 的场景不存在，abort 恒绑定连接关闭）。
+ * 生产 provider 工厂。file=网关已授权的逻辑 file 名。同 file 并发捕获串行化（sidecar 锚点写竞争归一）。
+ * 返回值：snapshot=新权威快照；unavailable/ file-unreadable 见类型注释（网关映射见 ws-gateway）。
  */
 export function createRecoveryEvidenceProvider(
   opts: RecoveryEvidenceSourceOptions,
 ): (file: string, signal?: AbortSignal) => Promise<RecoveryEvidenceResult> {
   const maxBytes = opts.maxCombinedBytes ?? DEFAULT_RECOVERY_COMBINED_BYTES;
+  if (!Number.isFinite(maxBytes) || !Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > 1024 * 1024 * 1024) {
+    throw new Error(`maxCombinedBytes 非法（须有限正整数≤1GiB）：${String(maxBytes)}——拒绝创建 provider（B11-4 纵深）`);
+  }
+  if (!isAbsolute(opts.evidenceDir)) throw new Error("evidenceDir 非法（须绝对路径）——拒绝创建 provider");
+  if (!opts.roots.every(isAbsolute)) throw new Error("roots 非法（须绝对路径）——拒绝创建 provider");
   const sessionIdFor = opts.sessionIdFor ?? ((f: string) => f.replace(/\.jsonl$/, ""));
-  const statLike = opts.statLike ?? defaultStat;
-  const readLike = opts.readLike ?? defaultBoundedRead;
+  const openLike = opts.openLike ?? defaultOpenLike;
   const now = opts.now ?? (() => Date.now());
   const audit = opts.audit ?? (() => {});
   const sessionRoots = opts.sessionRoots ?? opts.roots;
-  return async (file, signal): Promise<RecoveryEvidenceResult> => {
-    if (signal?.aborted) return { kind: "unavailable", reason: "read-failed" };
-    // journal 绝对路径：roots 内解析（与网关授权同源；不可解析=配置面错位→file-unreadable 如实上报）
-    const jAbs = resolveWithin(file, opts.roots);
-    if (jAbs === null) return { kind: "file-unreadable", path: file, detail: "journal 不在授权根内" };
-    // session 路径：sessionFor 相对名→sessionRoots 内解析；绝对路径照用；无映射=journal-only
-    let sAbs: string | null = null;
-    if (opts.sessionFor !== undefined) {
-      const s = opts.sessionFor(file);
-      sAbs = isAbsolute(s) ? s : resolveWithin(s, sessionRoots);
-    }
-    if (signal?.aborted) return { kind: "unavailable", reason: "read-failed" };
-    // 预检（合计字节门）：journal 必在；session ENOENT=合法降级（journal-only），其余 stat 错=file-unreadable
-    let jSize: number;
-    try {
-      jSize = (await statLike.stat(jAbs)).size;
-    } catch (e) {
-      return { kind: "file-unreadable", path: jAbs, detail: errName(e) };
-    }
-    let sSize = 0;
-    if (sAbs !== null) {
-      try {
-        sSize = (await statLike.stat(sAbs)).size;
-      } catch (e) {
-        if (!isEnoent(e)) return { kind: "file-unreadable", path: sAbs, detail: errName(e) };
-        sSize = 0; // session 缺失=journal-only 降级（与 DualHistorySource 同口径）
-        sAbs = null;
-      }
-    }
-    if (signal?.aborted) return { kind: "unavailable", reason: "read-failed" };
-    if (jSize + sSize > maxBytes) {
-      audit(`recovery-oversized file=${file} journal=${jSize} session=${sSize} budget=${maxBytes}`);
-      return { kind: "unavailable", reason: "oversized" };
-    }
-    // 有界读（allowed=预算−session 占用；读 allowed+1 字节探增长）
-    let raw: string | null;
-    try {
-      raw = await readLike.readBounded(jAbs, maxBytes - sSize);
-    } catch (e) {
-      return { kind: "file-unreadable", path: jAbs, detail: errName(e) };
-    }
-    if (signal?.aborted) return { kind: "unavailable", reason: "read-failed" };
-    if (raw === null || Buffer.byteLength(raw) > maxBytes - sSize) {
-      // 纵深复核：seam 契约约定超限返 null，但对返回体再验字节长（注入/演进防护——超限串不得漏进结论）
-      audit(`recovery-oversized-grew file=${file} journal=${jSize} session=${sSize} budget=${maxBytes}`);
-      return { kind: "unavailable", reason: "oversized" }; // 检查后增长（或读窗内超限）→拒
-    }
-    const { lines, bad } = parseJournalText(raw);
-    return { version: 1, file, sessionId: sessionIdFor(file), lines, bad, attributedFragments: [], repaired: false, createdAt: now() };
+  const evidenceDir = opts.evidenceDir;
+  let dirReady: Promise<void> | null = null; // 目录准备惰性一次
+  const ensureDir = (): Promise<void> => {
+    if (dirReady === null) dirReady = mkdir(evidenceDir, { recursive: true }).then(() => undefined, (e) => { dirReady = null; throw e; });
+    return dirReady;
   };
-}
+  // 同 file 捕获串行化（锚点读写竞争归一；不同 file 并行不受影响）
+  const inflight = new Map<string, Promise<unknown>>();
+  const serialize = <T>(file: string, body: () => Promise<T>): Promise<T> => {
+    const prev = inflight.get(file) ?? Promise.resolve();
+    const next = prev.then(body, body);
+    inflight.set(file, next.then(() => undefined, () => undefined));
+    return next;
+  };
+  const unavailable = (reason: "read-failed" | "concurrent-modification" | "oversized") =>
+    ({ kind: "unavailable" as const, reason });
 
-function isEnoent(e: unknown): boolean {
-  return typeof e === "object" && e !== null && (e as { code?: string }).code === "ENOENT";
-}
-
-/** roots 内解析（与 ws-gateway resolveWithinRoots 同语义的最小实现：首命中根+防 .. 逃逸）。 */
-function resolveWithin(file: string, roots: readonly string[]): string | null {
-  if (file.length === 0 || file.includes("/") || file.includes("\\") || file === "." || file === "..") return null;
-  for (const root of roots) {
-    const abs = resolve(root, file);
-    if (abs === resolve(root, abs)) return abs; // resolve 幂等=未逃逸（file 无分隔符时恒真，双保险）
-  }
-  return null;
+  return (file: string, signal?: AbortSignal): Promise<RecoveryEvidenceResult> =>
+    serialize(file, async () => {
+      if (signal?.aborted) return unavailable("read-failed");
+      // journal 解析（safe-open 口径：双根授权+目录分隔边界）
+      const jAbs = resolveWithinRoots(file, opts.roots);
+      if (jAbs === null) return { kind: "file-unreadable", path: file, detail: "journal 不在授权根内" };
+      // session 映射（P10）：嵌套相对名合法；绝对路径/越界=响亮失败（禁静默 journal-only/禁绝对直通）
+      let sAbs: string | null = null;
+      if (opts.sessionFor !== undefined) {
+        const s = opts.sessionFor(file);
+        if (isAbsolute(s)) {
+          audit(`recovery-session-map-invalid file=${file} detail=absolute-path`);
+          return { kind: "file-unreadable", path: file, detail: "session 映射非法（绝对路径）" };
+        }
+        sAbs = resolveWithinRoots(s, sessionRoots);
+        if (sAbs === null) {
+          audit(`recovery-session-map-invalid file=${file} detail=outside-session-roots`);
+          return { kind: "file-unreadable", path: file, detail: "session 映射越界" };
+        }
+      }
+      // journal 安全打开（B11-1：symlink/FIFO/设备在此拒，同 fd fstat 取权威尺寸）
+      let jh: SafeHandleLike;
+      try {
+        jh = await openLike(jAbs);
+      } catch (e) {
+        audit(`recovery-unreadable file=${file} detail=${e instanceof SafeOpenError ? e.kind : "open-failed"}`);
+        return toUnreadable(file, e);
+      }
+      try {
+        // session 安全打开（仅取尺寸；missing→journal-only 降级，其余→file-unreadable）
+        let s1 = 0;
+        if (sAbs !== null) {
+          try {
+            const sh = await openLike(sAbs);
+            try { s1 = sh.size; } finally { await sh.close().catch(() => {}); }
+          } catch (e) {
+            if (e instanceof SafeOpenError && e.kind === "missing") { s1 = 0; sAbs = null; }
+            else {
+              audit(`recovery-unreadable file=${file} detail=${e instanceof SafeOpenError ? e.kind : "session-stat-failed"}`);
+              return toUnreadable(file, e);
+            }
+          }
+        }
+        if (signal?.aborted) return unavailable("read-failed");
+        // 合计预算门（stat 层早拒=零读——R2 读计数断言的独占面）
+        if (jh.size + s1 > maxBytes) {
+          audit(`recovery-oversized file=${file} journal=${jh.size} session=${s1} budget=${maxBytes}`);
+          return unavailable("oversized");
+        }
+        const allowed = maxBytes - s1;
+        // journal 有界读（B11-3：默认=流式循环 EOF 止+读中超限即败；seam 可注入增长）
+        let raw: Buffer;
+        try {
+          raw = await jh.read(allowed);
+        } catch (e) {
+          if (e instanceof SafeOpenError && e.kind === "too-large") {
+            audit(`recovery-oversized-grew file=${file} journal=${jh.size} session=${s1} budget=${maxBytes}`);
+            return unavailable("oversized");
+          }
+          audit(`recovery-unreadable file=${file} detail=read-failed`);
+          return toUnreadable(file, e);
+        }
+        if (signal?.aborted) return unavailable("read-failed");
+        // 读后字节复核（seam 违约/增长纵深——P04/P05：短读已由 EOF 循环闭合，超读在此必拒）
+        if (raw.byteLength > allowed) {
+          audit(`recovery-oversized-grew file=${file} journal=${jh.size} session=${s1} budget=${maxBytes} read=${raw.byteLength}`);
+          return unavailable("oversized");
+        }
+        // session 读后复核（P07：读窗内增长→合计再验 fail-closed；缩/消失=已披露残余，不回退）
+        if (sAbs !== null) {
+          try {
+            const sh2 = await openLike(sAbs);
+            try {
+              const s2 = sh2.size;
+              if (raw.byteLength + s2 > maxBytes) {
+                audit(`recovery-oversized-grew file=${file} journal=${jh.size} session=${s2} budget=${maxBytes}`);
+                return unavailable("oversized");
+              }
+            } finally { await sh2.close().catch(() => {}); }
+          } catch (e) {
+            if (!(e instanceof SafeOpenError && e.kind === "missing")) {
+              audit(`recovery-unreadable file=${file} detail=recheck-session-failed`);
+              return toUnreadable(file, e);
+            }
+          }
+        }
+        // 权威证据链（B11-2）：锚点在→只许纯追加扩展；否则=已见证据被改写→concurrent-modification
+        const apath = anchorPath(evidenceDir, file);
+        let anchor: EvidenceAnchor | null = null;
+        let anchorCorrupt = false;
+        try {
+          await ensureDir();
+          const txt = await readFile(apath, "utf8");
+          try {
+            const parsed = JSON.parse(txt) as Partial<EvidenceAnchor>;
+            if (parsed && parsed.version === 1 && typeof parsed.file === "string" && parsed.file === file &&
+                typeof parsed.len === "number" && Number.isInteger(parsed.len) && parsed.len >= 0 &&
+                typeof parsed.sha === "string" && /^[0-9a-f]{64}$/.test(parsed.sha)) {
+              anchor = { version: 1, file, len: parsed.len, sha: parsed.sha };
+            } else anchorCorrupt = true; // 形状非法
+          } catch {
+            anchorCorrupt = true; // 非法 JSON
+          }
+        } catch (e) {
+          if (!isIoErrno(e, "ENOENT")) {
+            audit(`recovery-evidence-store-failed file=${file} detail=load`);
+            return unavailable("read-failed"); // 锚点不可读=证据完整性存疑→fail-closed（不静默当首捕）
+          }
+          // ENOENT=首次捕获（合法冷启动：尚无已见证据，当前盘面即首捕权威）
+        }
+        if (anchorCorrupt) {
+          audit(`recovery-evidence-corrupt file=${file}`);
+          return unavailable("concurrent-modification"); // 锚点损坏=篡改面（原子写防撕裂；坏=外部干预）
+        }
+        const sha = sha256Hex(raw);
+        if (anchor !== null) {
+          const pureExtension = raw.byteLength >= anchor.len &&
+            (anchor.len === 0 || sha256Hex(raw.subarray(0, anchor.len)) === anchor.sha);
+          if (!pureExtension) {
+            audit(`recovery-evidence-rewritten file=${file} oldLen=${anchor.len} newLen=${raw.byteLength}`);
+            return unavailable("concurrent-modification"); // 已见证据被缩/重写/替换——修复残片消失≠干净
+          }
+        }
+        // 锚点写穿（原子 tmp+rename；失败=证据不落盘不得发结论→read-failed）
+        try {
+          const tmp = `${apath}.tmp-${process.pid}-${now().toString(36)}`;
+          await writeFile(tmp, JSON.stringify({ version: 1, file, len: raw.byteLength, sha } satisfies EvidenceAnchor), "utf8");
+          await rename(tmp, apath);
+        } catch {
+          audit(`recovery-evidence-store-failed file=${file} detail=store`);
+          return unavailable("read-failed");
+        }
+        const { lines, bad } = parseJournalText(raw.toString("utf8"));
+        return { version: 1, file, sessionId: sessionIdFor(file), lines, bad, attributedFragments: [], repaired: false, createdAt: now() };
+      } finally {
+        await jh.close().catch(() => {});
+      }
+    });
 }

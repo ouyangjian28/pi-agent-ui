@@ -38,6 +38,7 @@ class WsClient {
     await until(() => this.frames.some((f) => f.t === "welcome"));
   }
   recovery(): Array<Record<string, unknown>> { return this.frames.filter((f) => f.t === "recovery"); }
+  errors(): Array<Record<string, unknown>> { return this.frames.filter((f) => f.t === "error"); }
   dispose(): void { this.ws.terminate(); }
 }
 
@@ -131,17 +132,17 @@ describe("3b-4 恢复真读源集成（真 WS+真文件）", () => {
     }
   });
 
-  it("I3 journal 缺失→file-unreadable→帧 read-failed（typed 归并；审计带路径）", async () => {
+  it("I3 journal 缺失→file-unreadable→error 4402 retryable=true（契约映射；审计带逻辑文件）", async () => {
     const r = await makeRig();
     const c = new WsClient(r.url, "http://localhost:5173");
     try {
       await writeFile(r.sp, ""); // session 在场，journal 不存在
       await c.hello();
       await c.say({ t: "get-recovery", requestId: "g1", file: "q.jsonl", offset: 0 });
-      await until(() => c.recovery().length > 0);
-      const f = c.recovery().at(-1) as Record<string, unknown>;
-      expect(f).toMatchObject({ availability: "unavailable", reason: "read-failed" });
-      expect(r.audits.some((l) => l.includes("recovery-unreadable") && l.includes("q.jsonl"))).toBe(true);
+      await until(() => c.errors().length > 0);
+      const f = c.errors().at(-1) as Record<string, unknown>;
+      expect(f).toMatchObject({ t: "error", code: 4402, retryable: true });
+      expect(r.audits.some((l) => l.includes("recovery-unreadable") && l.includes("file=q.jsonl"))).toBe(true);
     } finally {
       c.dispose();
       await rigDispose(r);
