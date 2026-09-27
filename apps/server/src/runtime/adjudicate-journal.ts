@@ -1,21 +1,26 @@
-// P0-1b 裁决持久化写工具 v2（GPT r1 B1-B5 修复批）
+// P0-1b 裁决持久化写工具 v2（GPT r1 B1-B5 + r2 B2/B4/L1/L4 修复批）
 //
 // 职责：宿主人工裁决（resend/abandon）以 adjudicate 行追加进 journal（与 repair 行同机制），
-// 重启后可重读配对解锁。四道门（任一拒=零改盘）：
+// 重启后可重读配对解锁。五道门（任一拒=零改盘）：
 //   ①实根包含门（r1 B4）：词法落根不够——稳定祖先 symlink 可把实文件引到根外；realpath 全链
-//     解析后实路径包含判定（与 repair-tail 同界）。越界=aborted path-escape。
-//   ②盘面门（r1 B2）：裁决追加的前提=盘面已愈且无在途修复事务——bad 行（含撕裂尾）非空=
+//     解析后实路径包含判定（与 repair-tail 同界）。越界=aborted（reason=file-absent，detail=path-escape）。
+//   ②盘面门（r1 B2 + r2 B2）：裁决追加的前提=盘面已愈且无在途修复事务——bad 行（含撕裂尾）非空=
 //     aborted bad-tail（追加补换行会把撕裂尾变中间断行，repair-tail 只修尾→永久阻断）；repair-pending
-//     marker 在场=aborted repair-pending（repair 行已落+marker 未清的残局：事务未完，追加裁决
-//     会让 marker 补完路径 marker-conflict 死）。
+//     marker 在场=aborted repair-pending；marker 读错误（非 ENOENT）=aborted marker-unreadable
+//     （r2 B2：仅 ENOENT 视为缺失——权限/IO 故障时「无在途事务」没有证据，保守拒）。
 //   ③身份门（r1 B1/B3/B5）：subject（fragment/repair）=修复事务四元组，须与恰一条 repair 行
-//     唯一匹配（多条同四元组=歧义拒）；fragment 另验 intentId∈重放 enqueue 集。raw 全文不入
-//     subject——原字节证据由 repair 行 removedSha256 持有（撕裂字节重编码 SHA 不可复原）。
-//   ④幂等/冲突终局：同四元组（fragment 须同 intentId）同 verdict=idempotent 返回原时点；
-//     换 verdict 或 fragment 换归因目标=conflicting-verdict（终局不可翻转、目标不可静默更换）。
+//     唯一匹配（多条同四元组=歧义拒）；fragment 另验 intentId∈重放 enqueue∪sending 集。raw 全文
+//     不入 subject（r2 B4：写面构造最小 subject 白名单拷贝，不透传额外属性；schema 拒 raw 的运行时
+//     兑底在 protocol 层）。
+//   ④幂等/冲突终局（r1 B3 + r2 B3）：同四元组已有任一裁决→收集全部裁决集检测：同 verdict 且
+//     （fragment）同归因目标=idempotent 返回原时点；多 verdict/多目标/kind 混合（含手写盘面冲突
+//     组）=conflicting-verdict（矛盾证据不追加新裁决，不信任首行）。
+//   ⑤锚预检门（r2 L4）：锚损坏/不可读=aborted anchor-corrupt 写前拒（证据链已坏，追加裁决不
+//     修复证据链，需人工）。前缀漂移不拒（修复流程截尾使 byteLength<anchor.len 是常态），落盘后
+//     跳过转移留审计，待 recapture/人工核验（不承诺自动收敛）。
 // 落盘：append+sync（失败=write-failed，提交结果不确定——append 已完成的形裁决已在盘，
-// 幂等重试收敛，非「零裁决」）；锚点转移（前缀复验→len/sha 前移）失败不回滚不阻断——
-// provider 验锚只查旧前缀不变（纯扩展允许），下轮捕获自动写新锚收敛，无死锁（r1 P1 正例）。
+// 幂等重试收敛，非「零裁决」）；锚点转移失败不回滚不阻断。句柄全程 try/finally 确定性 close
+// （r2 L1，不依赖 GC）。
 //
 // 信任域：宿主侧受信动作（操作者记名）；evidenceDir（锚+marker）为宿主专属，journal 写者无权触。
 // 披露：前缀复验基于初读缓冲（串行前提内的追加窗校验，非并发检测）；marker/锚 tmp+rename
@@ -58,7 +63,7 @@ export interface AdjudicateOptions {
 export type AdjudicateResult =
   | { kind: "adjudicated"; at: string; anchorMoved: boolean }
   | { kind: "idempotent"; at: string }
-  | { kind: "aborted"; reason: "file-absent" | "path-escape" | "repair-pending" | "bad-tail" | "subject-absent" | "conflicting-verdict" | "write-failed"; detail?: string };
+  | { kind: "aborted"; reason: "file-absent" | "path-escape" | "repair-pending" | "marker-unreadable" | "bad-tail" | "anchor-corrupt" | "subject-absent" | "conflicting-verdict" | "write-failed"; detail?: string };
 
 interface AnchorFile {
   readonly version: 1;
@@ -75,12 +80,12 @@ function markerPath(evidenceDir: string, file: string): string {
   return `${evidenceDir}/${encodeURIComponent(file)}.repair-pending.json`;
 }
 
-async function loadAnchor(evidenceDir: string, file: string): Promise<AnchorFile | null | "corrupt"> {
+async function loadAnchor(evidenceDir: string, file: string): Promise<AnchorFile | null | "corrupt" | "unreadable"> {
   let txt: string;
   try {
     txt = await readFile(anchorPath(evidenceDir, file), "utf8");
-  } catch {
-    return null;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "ENOENT" ? null : "unreadable";
   }
   try {
     const a = JSON.parse(txt) as AnchorFile;
@@ -165,18 +170,37 @@ export async function adjudicateJournal(opts: AdjudicateOptions): Promise<Adjudi
     audit(`adjudicate-aborted file=${opts.file} reason=file-absent`);
     return { kind: "aborted", reason: "file-absent", detail: "open-or-read-failed" };
   }
+  // r2 L1：句柄确定性关闭——获得句柄后所有路径（含 return/throw）统一 finally close，不依赖 GC。
+  try {
+    return await adjudicateWithHandle(opts, audit, fh, rawBuf);
+  } finally {
+    await fh.close().catch((e) => audit(`adjudicate-fh-close-failed file=${opts.file} detail=${String(e)}`));
+  }
+}
 
+async function adjudicateWithHandle(
+  opts: AdjudicateOptions,
+  audit: (msg: string) => void,
+  fh: FileHandle,
+  rawBuf: Buffer,
+): Promise<AdjudicateResult> {
   const text = rawBuf.toString("utf8");
   const { lines, bad } = parseJournalText(text);
 
-  // ②盘面门（r1 B2）：marker 在场=修复事务未完→拒；bad 非空（含撕裂尾）=盘面未愈→拒。
-  // 两个都是零改盘（不补换行不 append）。
+  // ②盘面门（r1 B2 + r2 B2）：marker 在场=修复事务未完→拒；bad 非空（含撕裂尾）=盘面未愈→拒。
+  // r2 B2：仅 ENOENT 视为 marker 缺失——其他读错误（EACCES/EISDIR/EIO…）=「无在途事务」没有
+  // 证据，保守拒（零改盘）；与 recovery-evidence-source 仅放过 ENOENT 同界。
   const readMarker = opts.readMarker ?? ((p: string) => readFile(p, "utf8"));
-  let markerPresent = false;
+  let markerPresent: boolean;
   try {
     await readMarker(markerPath(opts.evidenceDir, opts.file));
     markerPresent = true;
-  } catch {
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      audit(`adjudicate-aborted file=${opts.file} reason=marker-unreadable detail=${code ?? "unknown"}`);
+      return { kind: "aborted", reason: "marker-unreadable", detail: `marker 读失败（${code ?? "unknown-error"}），在场性无证据→保守拒` };
+    }
     markerPresent = false;
   }
   if (markerPresent) {
@@ -188,8 +212,16 @@ export async function adjudicateJournal(opts: AdjudicateOptions): Promise<Adjudi
     return { kind: "aborted", reason: "bad-tail", detail: "盘面存在坏行/撕裂尾（未愈），修复完成后再裁决" };
   }
 
+  // ⑤锚预检门（r2 L4）：锚损坏/不可读=证据链已坏→写前拒（零改盘；追加裁决不修复证据链，需人工）。
+  // 前缀漂移不在此拒（修复流程截尾使 byteLength<anchor.len 是常态），落盘后跳过转移。
+  const anchor = await loadAnchor(opts.evidenceDir, opts.file);
+  if (anchor === "corrupt" || anchor === "unreadable") {
+    audit(`adjudicate-aborted file=${opts.file} reason=anchor-corrupt detail=${anchor}`);
+    return { kind: "aborted", reason: "anchor-corrupt", detail: `锚证据链损坏（${anchor}），裁决不能替代人工处置` };
+  }
+
   // ③身份门（r1 B1/B3/B5）：四元组与 repair 行唯一匹配；fragment 另验归因目标在重放范围。
-  const subject = opts.subject;
+  const subject = minimalSubject(opts.subject);
   const repairRows = lines.filter((l): l is Extract<JournalLine, { t: "repair" }> => l.t === "repair");
   const wantKey = repairKey(subject);
   const matches = repairRows.filter((l) => repairKey(l) === wantKey);
@@ -197,29 +229,38 @@ export async function adjudicateJournal(opts: AdjudicateOptions): Promise<Adjudi
     return { kind: "aborted", reason: "subject-absent", detail: matches.length === 0 ? "四元组无匹配 repair 行" : "四元组匹配多条 repair 行（歧义拒）" };
   }
   if (subject.kind === "fragment" && !knownIntentIds(lines).has(subject.intentId)) {
-    return { kind: "aborted", reason: "subject-absent", detail: "归因目标不在重放范围（enqueue 集）" };
+    return { kind: "aborted", reason: "subject-absent", detail: "归因目标不在重放范围（enqueue∪sending 集）" };
   }
 
-  // ④幂等/冲突终局（r1 B3）：同 kind 同四元组已裁决→同 verdict 且同归因目标=幂等；
-  // 反 verdict（终局不可翻转）或 fragment 换归因目标（不可静默更换）均=conflicting-verdict。
+  // ④幂等/冲突终局（r1 B3 + r2 B3）：收集该四元组全部既有裁决（两 kind），矛盾集检测——
+  // 手写盘面/崩溃残局可产生多 verdict/多目标，矛盾在场即拒（不信任 find 首行）。
   const existing = lines.filter((l): l is JournalLine & { t: "adjudicate" } => l.t === "adjudicate");
-  const prior = existing.find((a) => a.subject.kind === subject.kind && repairKey(a.subject) === wantKey);
-  if (prior) {
-    if (prior.verdict === opts.verdict && (prior.subject.kind !== "fragment" || subject.kind !== "fragment" || prior.subject.intentId === subject.intentId)) {
-      return { kind: "idempotent", at: prior.at };
+  const priors = existing.filter((a) => repairKey(a.subject) === wantKey);
+  if (priors.length > 0) {
+    const verdicts = new Set(priors.map((a) => a.verdict));
+    if (verdicts.size > 1) {
+      return { kind: "aborted", reason: "conflicting-verdict", detail: `该修复事务已有矛盾裁决集（${[...verdicts].join("/")}），矛盾证据不追加新裁决` };
     }
-    const swappedTarget = prior.subject.kind === "fragment" && subject.kind === "fragment" && prior.subject.intentId !== subject.intentId;
-    return {
-      kind: "aborted",
-      reason: "conflicting-verdict",
-      detail: swappedTarget ? `该修复事务已绑定归因目标 ${prior.subject.intentId}（终局不可静默更换）` : `已裁决 ${prior.verdict}，终局不可翻转`,
-    };
+    const targets = [...new Set(priors.map((a) => (a.subject.kind === "fragment" ? a.subject.intentId : null)).filter((t): t is IntentId => t !== null))];
+    if (subject.kind === "fragment" && targets.length > 1) {
+      return { kind: "aborted", reason: "conflicting-verdict", detail: `该修复事务已绑定多个归因目标（${targets.join("/")}），矛盾证据不追加` };
+    }
+    const first = priors[0];
+    const onlyTarget = targets.length === 1 ? targets[0] : undefined;
+    if (first === undefined) return { kind: "aborted", reason: "conflicting-verdict", detail: "既有裁决集不可读（矛盾证据拒）" };
+    if (first.verdict === opts.verdict && priors.every((a) => a.subject.kind === subject.kind) && (subject.kind !== "fragment" || (onlyTarget !== undefined && onlyTarget === subject.intentId))) {
+      return { kind: "idempotent", at: first.at };
+    }
+    if (subject.kind === "fragment" && onlyTarget !== undefined && onlyTarget !== subject.intentId) {
+      return { kind: "aborted", reason: "conflicting-verdict", detail: `该修复事务已绑定归因目标 ${onlyTarget}（终局不可静默更换）` };
+    }
+    return { kind: "aborted", reason: "conflicting-verdict", detail: `已裁决 ${first.verdict}，终局不可翻转` };
   }
 
   // 落盘：盘面门保证无撕裂尾（sep 逻辑保留作防御）；append+sync。
   const line: AdjudicateLine = {
     t: "adjudicate",
-    subject: opts.subject,
+    subject,
     verdict: opts.verdict,
     operator: opts.operator,
     buildId: opts.buildId,
@@ -241,13 +282,13 @@ export async function adjudicateJournal(opts: AdjudicateOptions): Promise<Adjudi
   }
 
   // 锚点转移：前缀复验（初读缓冲内的追加窗校验，串行前提；非并发检测）→len/sha 前移。
-  // 失败不回滚不阻断（r1 P1：provider 验锚只查旧前缀，纯扩展允许，下轮捕获自动收敛）。
+  // 锚已在⑤门预检（corrupt/unreadable 已写前拒，此处必为合法锚或缺失）；漂移/转移失败不回滚
+  // 不阻断——锚已过期待宿主 recapture 或人工核验（provider 对漂移锚保守拒，不承诺自动收敛）。
   let anchorMoved = false;
-  const anchor = await loadAnchor(opts.evidenceDir, opts.file);
-  if (anchor !== "corrupt" && anchor !== null) {
+  if (anchor !== null) {
     const prefixOk = rawBuf.byteLength >= anchor.len && sha256HexBuf(rawBuf.subarray(0, anchor.len)) === anchor.sha;
     if (!prefixOk) {
-      audit(`adjudicate-anchor-stale file=${opts.file}（锚前缀漂移，跳过转移；下轮捕获收敛）`);
+      audit(`adjudicate-anchor-stale file=${opts.file}（锚前缀漂移，跳过转移；锚已过期，待 recapture/人工核验）`);
     } else {
       const next: AnchorFile = { version: 1, file: opts.file, len: rawBuf.byteLength + appended.byteLength, sha: sha256HexBuf(Buffer.concat([rawBuf, appended])), capturedAt: line.at };
       const writeAnchorImpl = opts.writeAnchorImpl ?? (async (p: string, b: string) => {
@@ -259,9 +300,17 @@ export async function adjudicateJournal(opts: AdjudicateOptions): Promise<Adjudi
         await writeAnchorImpl(anchorPath(opts.evidenceDir, opts.file), JSON.stringify(next));
         anchorMoved = true;
       } catch (e) {
-        audit(`adjudicate-anchor-transfer-failed file=${opts.file} detail=${String(e)}（裁决已落盘；下轮捕获自动收敛）`);
+        audit(`adjudicate-anchor-transfer-failed file=${opts.file} detail=${String(e)}（裁决已落盘；锚待 recapture/人工核验）`);
       }
     }
   }
   return { kind: "adjudicated", at: line.at, anchorMoved };
+}
+
+// r2 B4：最小 subject 构造——白名单字段拷贝，不透传 opts.subject 引用（额外属性如 raw 不落盘；
+// 运行时兑底=protocol schema 拒 raw，此为写面第二道）。
+function minimalSubject(s: AdjudicateSubject): AdjudicateSubject {
+  return s.kind === "fragment"
+    ? { kind: "fragment", removedSha256: s.removedSha256, byteStart: s.byteStart, byteEnd: s.byteEnd, at: s.at, intentId: s.intentId }
+    : { kind: "repair", removedSha256: s.removedSha256, byteStart: s.byteStart, byteEnd: s.byteEnd, at: s.at };
 }

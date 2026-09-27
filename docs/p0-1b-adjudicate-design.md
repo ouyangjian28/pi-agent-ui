@@ -1,5 +1,8 @@
 # P0-1b 裁决持久化设计（v1；GLM 面，2026-10-06）
 
+> **版本提示（r2/r3 批）：§1-§6 为 v1 历史语义，身份/解锁/门序权威=§7（r2 重构）与 §8（r3 作用域化）；
+> 与 §7/§8 冲突处以 §7/§8 为准，§1-§6 保留作决策留痕，不复制旧结论。**
+
 依据：PROJECT.md P0 冻结序②；GPT r6 排序建议（裁决=可重启耐久事实，绑定文件/会话+证据身份；失败次序；崩溃矩阵先行）；P0-1a 收口低项同批吸收。
 
 ## 0. 现状缺口（勘察 2026-10-06，repo 3619b53 基线）
@@ -70,3 +73,15 @@ r1 实现的裁决身份（fragment=raw 内容匹配/repair=四元组+词法落�
 5. **读面**：有效裁决=四元组在场当前 repairLog（stale 淘汰）；同四元组多目标=冲突组整组无效（阴影保留）；journal 派生裁决效果走 abandonedIds/resendIds 通道，不进 G2 raw 匹配；呈现面=新报告字段 derivedAdjudications。
 
 崩溃矩阵同步扩为 R1a/R1b/R2/R3/R4/R5/R6/R7/R8/R9/R10/R11（TEST-MAP r2 节权威）。
+
+## 8. r3 授权作用域化+四门补强（GPT r2 审 77 NO-GO 修复批；2026-10-07）
+
+r2 被审出四必修（授权串扰/marker 误放/冲突组可解锁/schema 未拒 raw）。本节为**权威补丁**，覆盖 §7 第 3/5 条的相应语义：
+
+1. **授权作用域（B1）**：resend/abandon 裁决携带授权来源（其四元组），不再折成裸 intentId 集。覆盖判定（resendCovers/abandonExcludes）：intentId 的每一条 unknown 来源残片（sha），其内容可能归属的**全部同 sha 事务**都须有该 intentId 的同向 fragment 裁决才生效——同 sha 双事务只裁其一→旧授权不越事务覆盖新残片 unknown（R12 主负例）；无残片源（终裁 unknown 行/G2 消耗）resend 不可覆盖（裁决只能授权其证据链内残片）；abandon 无源时=终局放弃（R9 杀点对照）。G2 快照人工归因维持 raw 全等匹配（新 raw 同 intentId 不消耗，阻断保留）。
+2. **marker 读错误保守拒（B2）**：仅 ENOENT 视为缺失；其他读错误（EACCES/EISDIR/EIO…）=`marker-unreadable` 零改盘拒——在场性无证据时不得追加（与 recovery-evidence-source 同界）。
+3. **冲突组整组失效（B3）**：冲突事务的 repair 裁决同样不可消阴影；conflictKeys 非空本身入修复阴影（两顺序混合 kind 同拒）；derivedAdjudications 只呈现有效集。写面收集同四元组全部既有裁决做矛盾集检测（多 verdict/多目标/kind 混合均 conflicting-verdict，不信任首行）。
+4. **raw 运行时禁入（B4）**：schema 显式拒 subject.raw 与顶层 raw（手写盘面带 raw 不成为合法行）；写面 minimalSubject 白名单拷贝，不透传 opts.subject 额外属性（双道防线）。
+5. **低项**：句柄全程 try/finally 确定性 close（L1）；锚损坏/不可读=anchor-corrupt 写前拒（证据链已坏需人工），前缀漂移不拒但跳过转移不承诺自动收敛（L4，provider 对漂移锚保守拒 concurrent-modification）；R1b 改真「append 落+sync 抛」形/R9 补无残片源正反对照/R11 改目录链 symlink（O_NOFOLLOW 不挡目录链，realpath 门独立杀点）（L2）；注释/文档收敛到 v2+r3 语义，设计稿 §1-§6 标历史（L3）。
+
+崩溃矩阵扩为 R1a/R1b/R2-R16（TEST-MAP r3 节权威）。

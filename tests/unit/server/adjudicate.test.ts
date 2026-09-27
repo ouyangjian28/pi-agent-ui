@@ -71,13 +71,11 @@ async function crashAppend(abs: string): Promise<{ fh: FileHandle; size: number 
   (fh as any).appendFile = async () => { throw new Error("crash-before-append"); };
   return { fh, size: real.size };
 }
-/** crash 句柄：append 真写、sync 抛（写后失败形——提交结果不确定）。 */
+/** crash 句柄：append 正常真写、sync 抛（r2 L2 修正——旧形 appendFile 内抛使 sync 永不可达，
+ *  无法区分「写前失败」与「写后失败」；本形 append 已落盘+sync 崩=提交结果不确定真形）。 */
 async function crashSync(abs: string): Promise<{ fh: FileHandle; size: number }> {
   const real = await (await import("../../../apps/server/src/ws/safe-open.ts")).openSafeReadWrite(abs);
   const fh = real.fh as unknown as FileHandle;
-  const realAppend = fh.appendFile.bind(fh);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (fh as any).appendFile = async (data: unknown) => { await realAppend(data as never); throw new Error("crash-after-append"); };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (fh as any).sync = async () => { throw new Error("crash-sync"); };
   return { fh, size: real.size };
@@ -261,7 +259,7 @@ describe("P0-1b 裁决持久化 v2（崩溃/重启矩阵 R1-R10）", () => {
     await cleanup(e);
   });
 
-  it("R9 abandon 终局：解锁修复阴影但 resumable 排除该意图（残片归因 unknown 真源）", async () => {
+  it("R9 abandon 终局：解锁修复阴影但 resumable 排除该意图（残片归因 unknown 真源+无残片源正反对照杀点 r2 L2）", async () => {
     const torn = '{"t":"sending","intentId":"i1"';
     const e = await env([jl("i1"), repairRow(30, 66, sha(torn))]);
     await seedAnchor(e);
@@ -272,21 +270,26 @@ describe("P0-1b 裁决持久化 v2（崩溃/重启矩阵 R1-R10）", () => {
     expect(report.unknownEffect).toContain("i1");
     expect(report.resumeBlocked).toBe(false); // 阴影解除（授权面通）
     expect(report.resumable).not.toContain("i1"); // abandon 终局放弃不重发（R9）
+    // 杀点对照（r2 L2）：无残片源（无 unknown）时 abandon 排除是唯一阻力——门失效则 i1 可重发
+    const plain = buildRecoverReport(lines, "q", { fragments: [], blocked: false });
+    expect(plain.unknownEffect).toEqual([]);
+    expect(plain.resumable).not.toContain("i1"); // enqueue 完整+无 sending+无 unknown：若 abandon 门失效即含 i1
     await cleanup(e);
   });
 
-  it("R11 祖先 symlink 越界（B4/P11 杀点）：实路径越出全部授权根=path-escape 拒零改盘；真实根内正常通过", async () => {
+  it("R11 目录链 symlink 越界（B4/P11 杀点，r2 L2 修正——文件级 symlink 被 O_NOFOLLOW 兼底掩盖 realpath 门的独立效果）：目录链 symlink 引出根外=path-escape 拒零改盘；真实根内正常通过", async () => {
     const torn = '{"t":"sending","intentId":"i1"';
     const e = await env([jl("i1"), repairRow(30, 66, sha(torn))]);
     await seedAnchor(e);
-    // 攻击面：授权根=普通目录，journal 通过祖先 symlink 引到根外真实位置
+    // 攻击面：授权根=真实目录，根内子目录是 symlink→根外真实位置（最终文件非 symlink：
+    // O_NOFOLLOW 不挡目录链，只有 realpath 门能拦——本杀点独立于 O_NOFOLLOW）
     const outside = await mkdtemp(join(tmpdir(), "adj-out-"));
     const realJournal = join(outside, e.file);
     await writeFile(realJournal, await readFile(e.abs));
     const gate = await mkdtemp(join(tmpdir(), "adj-gate-")); // 授权根（词法内）
     const { symlink } = await import("node:fs/promises");
-    await symlink(realJournal, join(gate, e.file));
-    const r = await adjudicateJournal({ file: e.file, roots: [gate], evidenceDir: e.evidenceDir, subject: repairSubject(sha(torn), 30, 66), verdict: "resend", operator: "host", buildId: "b1" });
+    await symlink(outside, join(gate, "sub")); // 目录链 symlink：gate/sub → outside
+    const r = await adjudicateJournal({ file: "sub/q.jsonl", roots: [gate], evidenceDir: e.evidenceDir, subject: repairSubject(sha(torn), 30, 66), verdict: "resend", operator: "host", buildId: "b1" });
     expect(r).toMatchObject({ kind: "aborted", reason: "file-absent", detail: "path-escape" }); // 词法在根内、实路径在根外→拒
     expect(await readFile(realJournal, "utf8")).not.toContain('"t":"adjudicate"'); // 真实文件零改盘
     // 对照组：真实根（无 symlink）正常通过
@@ -326,5 +329,146 @@ describe("P0-1b 裁决持久化 v2（崩溃/重启矩阵 R1-R10）", () => {
     expect(conflictCase.resumable).toEqual([]);
     expect(conflictCase.derivedAdjudications).toEqual([]);
     await cleanup(e);
+  });
+
+  it("R12 授权作用域（r2 B1）：同 sha 双事务只裁其一→旧 resend 不越事务授权新残片 unknown；全部事务同向裁决才覆盖；G2 新 raw 同 intentId 不消耗", async () => {
+    const torn = '{"t":"sending","intentId":"i1"';
+    const X = sha(torn);
+    const at1 = "2026-10-05T00:00:00.000Z";
+    const at2 = "2026-10-05T01:00:00.000Z";
+    // 主负例：tx1 fragment resend i1 + tx2 仅 repair 裁决（解锁阴影不解效果）→新残片 unknown 不被旧授权覆盖
+    // （sending 证据只来自残片——不落完整 sending 行，避免在途排除污染杀点）
+    const rows = [jl("i1"), repairRow(30, 66, X, at1), repairRow(30, 66, X, at2),
+      adjFrag(X, 30, 66, at1, "i1", "resend"), adjRepair(X, 30, 66, at2)];
+    const { lines } = parseJournalText(`${rows.join("\n")}\n`);
+    const report = buildRecoverReport(lines, "q", { fragments: [{ raw: torn, error: "撕裂尾", partialTail: true }], blocked: false });
+    expect(report.resumeBlocked).toBe(false); // 阴影全解（两事务均有裁决）+残片归因成功
+    expect(report.unknownEffect).toContain("i1");
+    expect(report.resumable).not.toContain("i1"); // 旧裁决授权锢在 tx1 证据链——tx2 新证据未获同向裁决
+    // 对照组：tx2 也 fragment resend i1（全部同 sha 事务同向裁决）→覆盖成立
+    const rowsAll = [jl("i1"), repairRow(30, 66, X, at1), repairRow(30, 66, X, at2),
+      adjFrag(X, 30, 66, at1, "i1", "resend"), adjFrag(X, 30, 66, at2, "i1", "resend")];
+    const all = buildRecoverReport(parseJournalText(`${rowsAll.join("\n")}\n`).lines, "q", { fragments: [{ raw: torn, error: "撕裂尾", partialTail: true }], blocked: false });
+    expect(all.resumeBlocked).toBe(false);
+    expect(all.resumable).toContain("i1"); // 全事务同向→新残片证据链内授权成立
+    // G2 负例（r2 B1 第二段）：快照人工归因 raw=OLD，盘面新残片 raw=torn（不同内容）→不消耗→阻断保留
+    const g2 = buildRecoverReport(parseJournalText(`${[jl("i1"), repairRow(30, 66, X, at1)].join("\n")}\n`).lines, "q", {
+      fragments: [{ raw: torn, error: "撕裂尾", partialTail: true }], blocked: false, attributedFragments: [{ raw: "OLD-FRAGMENT-CONTENT", intentId: "i1" }],
+    });
+    expect(g2.resumeBlocked).toBe(true); // 旧 raw 裁决匹配不到新残片→不消耗→unattributable 阻断
+  });
+
+  it("R13 marker 读错误非 ENOENT=marker-unreadable 保守拒零改盘（r2 B2）：真 EISDIR+注入 EACCES 两形；ENOENT 仍正常通过", async () => {
+    const torn = '{"t":"sending","intentId":"i1"';
+    const e = await env([jl("i1"), repairRow(30, 66, sha(torn))]);
+    await seedAnchor(e);
+    const subj = repairSubject(sha(torn), 30, 66);
+    // 形一：真实 EISDIR——marker 路径是个目录
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(join(e.evidenceDir, `${encodeURIComponent(e.file)}.repair-pending.json`));
+    const before = await readFile(e.abs);
+    const r1 = await adjudicateJournal(opts(e, subj, "resend"));
+    expect(r1).toMatchObject({ kind: "aborted", reason: "marker-unreadable" });
+    expect((await readFile(e.abs)).equals(before)).toBe(true); // 零改盘
+    // 形二：注入 EACCES（权限故障无在场证据）
+    const { rm } = await import("node:fs/promises");
+    await rm(join(e.evidenceDir, `${encodeURIComponent(e.file)}.repair-pending.json`), { recursive: true });
+    const r2 = await adjudicateJournal({ ...opts(e, subj, "resend"), readMarker: async () => { const err = new Error("denied") as NodeJS.ErrnoException; err.code = "EACCES"; throw err; } });
+    expect(r2).toMatchObject({ kind: "aborted", reason: "marker-unreadable" });
+    // 对照：ENOENT（真缺失）正常通过
+    const r3 = await adjudicateJournal({ ...opts(e, subj, "resend"), readMarker: async () => { const err = new Error("noent") as NodeJS.ErrnoException; err.code = "ENOENT"; throw err; } });
+    expect(r3.kind).toBe("adjudicated");
+    await cleanup(e);
+  });
+
+  it("R14 冲突组整组失效（r2 B3）：repair 裁决不可解除冲突阴影（两顺序）；写面矛盾裁决集拒（不信任首行）", async () => {
+    const s2 = sha("s2");
+    const mk = (order: "frag-first" | "repair-first") =>
+      parseJournalText(`${[jl("i1"), jl("i2"), repairRow(22, 50, s2),
+        ...(order === "frag-first"
+          ? [adjFrag(s2, 22, 50, "2026-10-05T00:00:00.000Z", "i1", "resend"), adjFrag(s2, 22, 50, "2026-10-05T00:00:00.000Z", "i2", "resend"), adjRepair(s2, 22, 50)]
+          : [adjRepair(s2, 22, 50), adjFrag(s2, 22, 50, "2026-10-05T00:00:00.000Z", "i1", "resend"), adjFrag(s2, 22, 50, "2026-10-05T00:00:00.000Z", "i2", "resend")])].join("\n")}\n`).lines;
+    for (const order of ["frag-first", "repair-first"] as const) {
+      const report = buildRecoverReport(mk(order), "q", { fragments: [], blocked: false });
+      expect(report.resumeBlocked).toBe(true); // 冲突组非空→阴影恒在（repair 裁决也解不了）
+      expect(report.resumable).toEqual([]);
+      expect(report.derivedAdjudications).toEqual([]); // 矛盾证据不呈现
+    }
+    // 写面：既有矛盾集（同四元组双 verdict，手写盘面）→再裁决=conflicting-verdict 拒零落行
+    const e = await env([jl("i1"), repairRow(30, 66, sha("s3")),
+      adjRepair(sha("s3"), 30, 66, "2026-10-05T00:00:00.000Z", "resend"),
+      adjRepair(sha("s3"), 30, 66, "2026-10-05T00:00:00.000Z", "abandon")]);
+    await seedAnchor(e);
+    const before = await readFile(e.abs);
+    const r = await adjudicateJournal(opts(e, repairSubject(sha("s3"), 30, 66), "resend"));
+    expect(r).toMatchObject({ kind: "aborted", reason: "conflicting-verdict" });
+    expect((await readFile(e.abs)).equals(before)).toBe(true); // 矛盾集不追加
+    await cleanup(e);
+  });
+
+  it("R15 raw 禁入运行时兑底（r2 B4）：schema 拒 subject.raw 与顶层 raw；写面 minimalSubject 白名单不透传额外属性", async () => {
+    const { journalLineSchemaError } = await import("@pi-agent-ui/protocol");
+    // 手写完整行带 subject.raw→schema 拒（手写盘面不得成为合法行）
+    const withSubjRaw = JSON.parse(adjRepair(sha("s4"), 22, 50)) as Record<string, unknown>;
+    (withSubjRaw.subject as Record<string, unknown>).raw = "泄露全文";
+    expect(journalLineSchemaError(withSubjRaw)).toContain("raw");
+    // 手写顶层 raw→同拒
+    const withTopRaw = JSON.parse(adjRepair(sha("s4"), 22, 50)) as Record<string, unknown>;
+    withTopRaw.raw = "泄露全文";
+    expect(journalLineSchemaError(withTopRaw)).toContain("raw");
+    // 工具面：opts.subject 夹带 raw（类型外属性）→落盘行无 raw（白名单拷贝）
+    const torn = '{"t":"sending","intentId":"i1"';
+    const e = await env([jl("i1"), repairRow(30, 66, sha(torn))]);
+    await seedAnchor(e);
+    const dirty = { ...repairSubject(sha(torn), 30, 66), raw: "泄露全文" } as unknown as AdjudicateSubject;
+    expect((await adjudicateJournal(opts(e, dirty, "resend"))).kind).toBe("adjudicated");
+    const after = await readFile(e.abs, "utf8");
+    expect(after).not.toContain("泄露全文"); // 白名单拷贝——额外属性不落盘
+    const { lines, bad } = parseJournalText(after);
+    expect(bad).toEqual([]);
+    const adj = lines.find((l) => l.t === "adjudicate");
+    expect(adj).toBeDefined();
+    expect(JSON.stringify(adj)).not.toContain('"raw"');
+    await cleanup(e);
+  });
+
+  it("R16 锚预检+句柄确定性关闭（r2 L4/L1）：锚损坏=anchor-corrupt 写前拒零改盘；漂移锚不拒但不转移不承诺收敛；各路径句柄恰一次 close", async () => {
+    const torn = '{"t":"sending","intentId":"i1"';
+    // L4 形一：锚非法 JSON→写前拒
+    const e = await env([jl("i1"), repairRow(30, 66, sha(torn))]);
+    const { writeFile: wf } = await import("node:fs/promises");
+    await wf(join(e.evidenceDir, `${encodeURIComponent(e.file)}.evidence.json`), "{not-json", "utf8");
+    const before = await readFile(e.abs);
+    const r1 = await adjudicateJournal(opts(e, repairSubject(sha(torn), 30, 66), "resend"));
+    expect(r1).toMatchObject({ kind: "aborted", reason: "anchor-corrupt" });
+    expect((await readFile(e.abs)).equals(before)).toBe(true); // 写前拒零改盘
+    await cleanup(e);
+    // L4 形二：漂移锚（len 超盘面）→裁决落盘+跳过转移（不承诺自动收敛）
+    const e2 = await env([jl("i1"), repairRow(30, 66, sha(torn))]);
+    await wf(join(e2.evidenceDir, `${encodeURIComponent(e2.file)}.evidence.json`), JSON.stringify({ version: 1, file: e2.file, len: 999999, sha: sha("x"), capturedAt: "2026-10-05T00:00:00.000Z" }), "utf8");
+    const r2 = await adjudicateJournal(opts(e2, repairSubject(sha(torn), 30, 66), "resend"));
+    expect(r2).toMatchObject({ kind: "adjudicated", anchorMoved: false });
+    await cleanup(e2);
+    // L1：四路径（成功/幂等/盘面拒/写失败）各跑一次，句柄 close 恰各一次
+    const e3 = await env([jl("i1"), repairRow(30, 66, sha(torn))]);
+    await seedAnchor(e3);
+    const counter = { opened: 0, closed: 0 };
+    const openCounting = async (abs: string): Promise<{ fh: FileHandle; size: number }> => {
+      counter.opened += 1;
+      const real = await (await import("../../../apps/server/src/ws/safe-open.ts")).openSafeReadWrite(abs);
+      const fh = real.fh as unknown as FileHandle;
+      const realClose = fh.close.bind(fh);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (fh as any).close = async () => { counter.closed += 1; await realClose(); };
+      return { fh, size: real.size };
+    };
+    const subj = repairSubject(sha(torn), 30, 66);
+    expect((await adjudicateJournal({ ...opts(e3, subj, "resend"), openHandle: openCounting })).kind).toBe("adjudicated");
+    expect((await adjudicateJournal({ ...opts(e3, subj, "resend"), openHandle: openCounting })).kind).toBe("idempotent");
+    expect((await adjudicateJournal({ ...opts(e3, subj, "abandon"), openHandle: openCounting })).kind).toBe("aborted"); // conflicting
+    expect((await adjudicateJournal({ ...opts(e3, { ...subj, at: "1999-01-01T00:00:00.000Z" }, "resend"), openHandle: openCounting })).kind).toBe("aborted"); // subject-absent
+    expect((await adjudicateJournal({ ...opts(e3, { ...subj, at: "1999-01-01T00:00:00.000Z" }, "resend"), openHandle: crashAppend })).kind).toBe("aborted"); // write-failed（不同句柄面）
+    expect(counter.closed).toBe(counter.opened); // 计数面：每开必关，无泄漏
+    await cleanup(e3);
   });
 });

@@ -69,11 +69,11 @@ export interface RepairLine {
 }
 
 /** P0-1b 裁决留痕行（P0 冻结序②）：宿主人工裁决的持久记录——重启不重问。
- *  两种裁决对象：fragment=残片归因（raw 全等身份+归因意图）；repair=修复事务裁决
- *  （四元组身份与 RepairFact 同构：removedSha256+byteStart+byteEnd+at——旧裁决不作用于新证据）。
- *  verdict=resend（归因后允许重发）/abandon（终局放弃，不重发）；对 repair 事务两者
- *  均视为「已裁决」（解锁阻断线只看配对存在；verdict 记录宿主决定本身）。
- *  幂等：同 subject+verdict 重复落行由读面配对去重（R3）。 */
+ *  两种裁决对象均锢在修复事务四元组（与 RepairFact 同构：removedSha256+byteStart+byteEnd+at
+ *  ——旧裁决不作用于新事务；v2 身份模型）。fragment=四元组+归因目标 intentId（归因终局：
+ *  abandon 排除重发/resend 授权重发——授权作用域锢在其四元组证据链，见读面 resendCovers）；
+ *  repair=四元组本身（解锁阻断线只看配对存在；verdict 记录宿主决定本身）。
+ *  verdict=resend/abandon；幂等：同 subject+verdict 重复落行由读面配对去重（R3）。 */
 export interface AdjudicateLine {
   readonly t: "adjudicate";
   // v2 身份模型（GPT r1 B1/B3/B5）：两种 subject 都锢在修复事务四元组（与 repair 行同构）。

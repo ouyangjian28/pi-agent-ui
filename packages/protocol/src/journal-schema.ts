@@ -111,6 +111,10 @@ export function journalLineSchemaError(obj: UnknownRecord): string | null {
       const subj = obj["subject"];
       if (subj === null || typeof subj !== "object" || Array.isArray(subj)) return "嵌套非法 subject";
       const sr = subj as UnknownRecord;
+      // r2 B4：raw 禁入的运行时兑底——subject.raw 与顶层 raw 均显式拒（手写盘面带 raw 不得
+      // 成为合法行；大 raw 不落盘的运行时保证，写面 minimalSubject 是第二道）。
+      if (sr["raw"] !== undefined) return "非法 subject.raw（raw 禁入裁决行）";
+      if (obj["raw"] !== undefined) return "非法顶层 raw（raw 禁入裁决行）";
       if (sr["kind"] === "fragment" || sr["kind"] === "repair") {
         for (const k of ["byteStart", "byteEnd"] as const) {
           const v = sr[k];
