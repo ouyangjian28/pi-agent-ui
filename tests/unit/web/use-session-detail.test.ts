@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-// A1b 详情 hook+组件测试：视图派生（sessionDetailViewOf 纯函数）+SessionDetail 四空态（loading/empty/
-// error/auth-failed）+流态渲染（历史分页提示/直播追加 aria-live/4431 终局横幅保内容/4409 续读按钮）+
-// hook 生命周期（挂载即订阅、卸载即退订、file 变更即换订）+真实链（SubscribeClient→DOM：受控文案不泄漏
-// token、直播帧去重不重复渲染、用户点击「继续读取」才发续读帧——无自动重发）。存根=StubClient；
-// 真实链=注入式假 socket，不起真网络。
+// A1b 详情 hook+组件测试（归属整改重写：Kimi 亲手重写；覆盖=旧版 25 例全部语义面+新增，断言等价或更强）。
+// 模式：StubClient（快照由测试推进）测纯派生与组件渲染；真实链=SubscribeClient+注入式假 socket（无真网络），
+// act 驱动。覆盖：sessionDetailViewOf 派生全相（连接级优先/相位映射/C4 终局/B3 身份门）；组件空态族+流态渲染；
+// hook 生命周期（挂载订阅/卸载退订/换 file 退旧订新）；真实链（受控文案不泄漏 token/幂等不重复渲染/
+// 续读仅用户点击触发）；B3 提交期身份门时序（layout effect 记录每次提交）。
 import React from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -90,7 +90,17 @@ function detailSnap(patch: Partial<SessionDetailSnapshot>): SessionDetailSnapsho
 }
 
 function msg(seq: number, text = `消息 ${seq}`): HistoryEvent {
-  return { seq, ts: null, generation: null, intentId: null, kind: "message", entryId: `e-${seq}`, role: "user", final: true, textPreview: { text, truncated: false } };
+  return {
+    seq,
+    ts: null,
+    generation: null,
+    intentId: null,
+    kind: "message",
+    entryId: `e-${seq}`,
+    role: "user",
+    final: true,
+    textPreview: { text, truncated: false },
+  };
 }
 
 const progress: LiveEvent = { kind: "pi-progress", piType: "message_update", note: "thinking" };
@@ -101,7 +111,16 @@ const STATUS = {
   turn: { state: "idle" as const },
   backgroundTasks: { availability: "known" as const, activeCount: null },
   reap: { eligible: false, idleElapsedMs: null, idleRemainingMs: null, idleMs: 0 },
-  recovery: { availability: "available" as const, resumeBlocked: null, diskBlocked: null, unknownEffectCount: null, unattributableFragments: null, intentsCount: null, settledCount: null, evidenceHash: null },
+  recovery: {
+    availability: "available" as const,
+    resumeBlocked: null,
+    diskBlocked: null,
+    unknownEffectCount: null,
+    unattributableFragments: null,
+    intentsCount: null,
+    settledCount: null,
+    evidenceHash: null,
+  },
   statusVersion: 3,
   serverTimeMs: 1_730_000_000_000,
 };
@@ -114,9 +133,15 @@ afterEach(cleanup);
 describe("sessionDetailViewOf 派生（纯函数）", () => {
   it("连接级优先：connecting/authenticating→loading；closed→closed；error 细分 auth-failed/error", () => {
     expect(sessionDetailViewOf(detailSnap({ connState: "connecting", phase: "idle" })).status).toBe("loading");
-    expect(sessionDetailViewOf(detailSnap({ connState: "authenticating", phase: "subscribing" })).status).toBe("loading");
-    expect(sessionDetailViewOf(detailSnap({ connState: "closed", phase: "live", events: [msg(1)] })).status).toBe("closed");
-    expect(sessionDetailViewOf(detailSnap({ connState: "error", errorKind: "auth-failed" })).status).toBe("auth-failed");
+    expect(sessionDetailViewOf(detailSnap({ connState: "authenticating", phase: "subscribing" })).status).toBe(
+      "loading",
+    );
+    expect(sessionDetailViewOf(detailSnap({ connState: "closed", phase: "live", events: [msg(1)] })).status).toBe(
+      "closed",
+    );
+    expect(sessionDetailViewOf(detailSnap({ connState: "error", errorKind: "auth-failed" })).status).toBe(
+      "auth-failed",
+    );
     expect(sessionDetailViewOf(detailSnap({ connState: "error", errorKind: "transport" })).status).toBe("error");
   });
 
@@ -127,7 +152,9 @@ describe("sessionDetailViewOf 派生（纯函数）", () => {
     expect(sessionDetailViewOf(detailSnap({ phase: "paging", events: [msg(1)] })).status).toBe("streaming");
     expect(sessionDetailViewOf(detailSnap({ phase: "live", events: [] })).status).toBe("empty");
     expect(sessionDetailViewOf(detailSnap({ phase: "live", events: [msg(1)] })).status).toBe("streaming");
-    const resync = sessionDetailViewOf(detailSnap({ phase: "resync-needed", events: [msg(1)], cursor: { streamId: "s", seq: 2 } }));
+    const resync = sessionDetailViewOf(
+      detailSnap({ phase: "resync-needed", events: [msg(1)], cursor: { streamId: "s", seq: 2 } }),
+    );
     expect(resync.status).toBe("resync-needed");
     expect(resync.canResync).toBe(true);
     expect(resync.paging).toBe(false);
@@ -135,13 +162,37 @@ describe("sessionDetailViewOf 派生（纯函数）", () => {
 
   it("4431 终局（stream-terminal）：有内容→stopped（冻结流）+横幅受控文案；无内容→error；事件数组引用透传（身份比较）", () => {
     const events = [msg(1)] as const;
-    const withContent = sessionDetailViewOf(detailSnap({ phase: "closed", errorKind: "stream-terminal", errorMessage: "服务端出帧预算超限（4431）", events }));
+    const withContent = sessionDetailViewOf(
+      detailSnap({ phase: "closed", errorKind: "stream-terminal", errorMessage: "服务端出帧预算超限（4431）", events }),
+    );
     expect(withContent.status).toBe("stopped");
     expect(withContent.banner).toContain("4431");
     expect(withContent.events).toBe(events); // 引用透传，不复制
-    const noContent = sessionDetailViewOf(detailSnap({ phase: "closed", errorKind: "stream-terminal", errorMessage: "服务端出帧预算超限（4431）", events: [] }));
+    const noContent = sessionDetailViewOf(
+      detailSnap({
+        phase: "closed",
+        errorKind: "stream-terminal",
+        errorMessage: "服务端出帧预算超限（4431）",
+        events: [],
+      }),
+    );
     expect(noContent.status).toBe("error");
     expect(noContent.banner).toBeNull();
+  });
+
+  it("C4 终局受控提示：closed 有内容+streamNote→stopped，横幅=streamNote（不覆盖 errorMessage 优先级=streamNote 优先）；closed 无内容→error，errorMessage 回退 streamNote", () => {
+    const view = sessionDetailViewOf(
+      detailSnap({ phase: "closed", streamNote: "订阅已被新订阅替换，旧流已停止", events: [msg(1)] }),
+    );
+    expect(view.status).toBe("stopped");
+    expect(view.banner).toContain("旧流已停止");
+    expect(view.canResync).toBe(false);
+    const empty = sessionDetailViewOf(
+      detailSnap({ phase: "closed", streamNote: "订阅已被新订阅替换，旧流已停止", events: [], liveEvents: [] }),
+    );
+    expect(empty.status).toBe("error");
+    expect(empty.errorMessage).toContain("旧流已停止"); // 受控提示不丢
+    expect(empty.banner).toBeNull();
   });
 
   it("status 摘要派生：process/turn 文案化；paging 提示位", () => {
@@ -149,14 +200,53 @@ describe("sessionDetailViewOf 派生（纯函数）", () => {
     expect(view.statusSummary).toEqual({ process: "进程运行中·就绪", turn: "空闲" });
     expect(view.paging).toBe(true);
   });
+
+  it("B3 身份门（纯函数面）：targetFile≠快照 file→内容不透出；连接级状态如实呈现（error/closed 不降级为 loading）；targetFile=null=未选择", () => {
+    const stale = detailSnap({ file: "a.jsonl", phase: "live", events: [msg(1)], status: STATUS });
+    const gated = sessionDetailViewOf(stale, "b.jsonl");
+    expect(gated.status).toBe("loading");
+    expect(gated.events).toHaveLength(0);
+    expect(gated.statusSummary).toBeNull();
+    expect(gated.file).toBe("b.jsonl");
+    expect(gated.canResync).toBe(false);
+    // 连接级如实呈现
+    expect(
+      sessionDetailViewOf(
+        detailSnap({ file: "a.jsonl", connState: "error", errorKind: "auth-failed", errorMessage: "认证失败（4401）" }),
+        "b.jsonl",
+      ).status,
+    ).toBe("auth-failed");
+    expect(sessionDetailViewOf(detailSnap({ file: "a.jsonl", connState: "closed" }), "b.jsonl").status).toBe("closed");
+    const noTarget = sessionDetailViewOf(stale, null);
+    expect(noTarget.status).toBe("loading");
+    expect(noTarget.file).toBeNull();
+    expect(noTarget.events).toHaveLength(0);
+  });
+
+  it("resync-needed 无 cursor→canResync=false（无游标不可续读）", () => {
+    const view = sessionDetailViewOf(
+      detailSnap({
+        phase: "resync-needed",
+        events: [msg(1)],
+        cursor: null,
+        streamNote: "请求游标或状态已过期（4409）",
+      }),
+    );
+    expect(view.status).toBe("resync-needed");
+    expect(view.canResync).toBe(false);
+    expect(view.banner).toContain("4409");
+  });
 });
 
-describe("SessionDetail 四空态（StubClient 推进快照）", () => {
-  it("loading：连接/首订阅在途→加载态（role=status + aria-busy）", () => {
+describe("SessionDetail 空态族（StubClient 推进快照）", () => {
+  it("loading：连接/首订阅在途→加载态（role=status + aria-busy）；file=null→「尚未选择会话」", () => {
     mount(new StubClient(detailSnap({ connState: "connecting", phase: "idle" })));
     const status = screen.getByRole("status");
     expect(status.getAttribute("aria-busy")).toBe("true");
     expect(status.textContent).toContain("正在加载会话详情");
+    cleanup();
+    mount(new StubClient(detailSnap({ connState: "connecting", phase: "idle", file: null })), null);
+    expect(screen.getByRole("status").textContent).toContain("尚未选择会话");
   });
 
   it("empty：订阅成功但空会话文件（live 相位无内容）→空态提示", () => {
@@ -166,17 +256,52 @@ describe("SessionDetail 四空态（StubClient 推进快照）", () => {
   });
 
   it("error：订阅失败→受控文案（role=alert）；connState error 非 auth 细分同走错误面", () => {
-    mount(new StubClient(detailSnap({ connState: "error", errorKind: "subscribe-failed", phase: "closed", errorMessage: "会话不存在或不可读（4402）" })));
+    mount(
+      new StubClient(
+        detailSnap({
+          connState: "error",
+          errorKind: "subscribe-failed",
+          phase: "closed",
+          errorMessage: "会话不存在或不可读（4402）",
+        }),
+      ),
+    );
     const alert = screen.getByRole("alert");
     expect(alert.textContent).toContain("会话详情加载失败");
     expect(alert.textContent).toContain("4402");
-    mount(new StubClient(detailSnap({ connState: "error", errorKind: "transport", phase: "idle", errorMessage: "连接创建失败：无法建立 WebSocket 连接" })));
-    expect(screen.getAllByRole("alert").length).toBeGreaterThan(0); // 同走错误面
+    cleanup();
+    mount(
+      new StubClient(
+        detailSnap({
+          connState: "error",
+          errorKind: "transport",
+          phase: "idle",
+          errorMessage: "连接创建失败：无法建立 WebSocket 连接",
+        }),
+      ),
+    );
+    expect(screen.getByRole("alert").textContent).toContain("连接创建失败");
   });
 
   it("auth-failed：认证失败固定提示（role=alert）", () => {
-    mount(new StubClient(detailSnap({ connState: "error", errorKind: "auth-failed", errorMessage: "认证失败：令牌无效或未认证（4401）" })));
+    mount(
+      new StubClient(
+        detailSnap({
+          connState: "error",
+          errorKind: "auth-failed",
+          errorMessage: "认证失败：令牌无效或未认证（4401）",
+        }),
+      ),
+    );
     expect(screen.getByRole("alert").textContent).toContain("认证失败");
+  });
+
+  it("closed/unsubscribed：连接关闭与未订阅各有独立提示面", () => {
+    mount(new StubClient(detailSnap({ connState: "closed", phase: "live", events: [msg(1)] })));
+    expect(screen.getByRole("alert").textContent).toContain("连接已关闭");
+    cleanup();
+    mount(new StubClient(detailSnap({ phase: "idle", file: "a.jsonl" })));
+    expect(screen.getByRole("heading", { name: "未订阅会话" })).toBeTruthy();
   });
 
   it("快照推进驱动重渲染（loading→streaming）：历史条目+分页提示出现", () => {
@@ -199,11 +324,39 @@ describe("SessionDetail 流态渲染（StubClient）", () => {
     expect(screen.getByText(/进程运行中·就绪 · 空闲/)).toBeTruthy();
   });
 
-  it("4431 终局：内容保留+横幅（含码）且无「继续读取」按钮（终局不可续）", () => {
-    mount(new StubClient(detailSnap({ phase: "closed", errorKind: "stream-terminal", errorMessage: "服务端出帧预算超限（4431）", events: [msg(1)] })));
+  it("4431 终局：内容保留+横幅（含码）且无「继续读取」按钮（终局不可续）；诚实标注恢复入口=重选文件", () => {
+    mount(
+      new StubClient(
+        detailSnap({
+          phase: "closed",
+          errorKind: "stream-terminal",
+          errorMessage: "服务端出帧预算超限（4431）",
+          events: [msg(1)],
+        }),
+      ),
+    );
     expect(screen.getByText(/#1 消息/)).toBeTruthy(); // 内容保留
-    expect(screen.getByRole("status").textContent).toContain("4431");
+    const banner = screen.getByRole("status");
+    expect(banner.textContent).toContain("4431");
+    expect(banner.textContent).toContain("重新选择会话文件"); // C4 诚实标注
     expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("resync-needed：横幅+「继续读取」按钮；点击调 client.resyncFromCursor（仅用户触发）", () => {
+    const client = new StubClient(
+      detailSnap({
+        phase: "resync-needed",
+        events: [msg(1)],
+        cursor: { streamId: "s", seq: 2 },
+        streamNote: "检测到服务端事件缺口，需要重新同步后继续",
+      }),
+    );
+    mount(client);
+    const banner = screen.getByRole("status");
+    expect(banner.textContent).toContain("重新同步");
+    expect(client.calls.filter((c) => c === "resync")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "继续读取" }));
+    expect(client.calls).toContain("resync");
   });
 });
 
@@ -217,9 +370,17 @@ describe("useSessionDetail 生命周期（StubClient 记录动作）", () => {
     view.unmount();
     expect(client.calls).toEqual(["subscribe:a.jsonl", "unsubscribe", "subscribe:b.jsonl", "unsubscribe"]);
   });
+
+  it("file=null：不发起订阅；卸载也无退订动作", () => {
+    const client = new StubClient(detailSnap({ connState: "ready", phase: "idle", file: null }));
+    const view = mount(client, null);
+    expect(client.calls).toHaveLength(0);
+    view.unmount();
+    expect(client.calls).toHaveLength(0);
+  });
 });
 
-describe("真实链：SubscribeClient→SessionDetail DOM", () => {
+describe("真实链：SubscribeClient→SessionDetail DOM（假 socket 注入，无真网络）", () => {
   const SENTINEL = "review-token-sentinel";
   const WELCOME = { t: "welcome", serverBootId: "boot-1", serverBuildId: "build-test", protocolVersion: 1 } as const;
 
@@ -273,10 +434,9 @@ describe("真实链：SubscribeClient→SessionDetail DOM", () => {
     return { client, ws, subscriptionId: "sub-1" };
   }
 
-  it("全链：loading→分页（加载提示）→末页直播追加→重复直播帧不重复渲染→历史与直播并列呈现", () => {
+  it("全链：loading→分页（加载提示）→末页直播追加→重复直播帧不重复渲染→历史幂等去重→历史与直播并列呈现", () => {
     const { ws, subscriptionId } = liveReal();
-    // 末页后 live：分页提示消失
-    expect(screen.queryByText("正在加载更多历史…")).toBeNull();
+    expect(screen.queryByText("正在加载更多历史…")).toBeNull(); // 末页后分页提示消失
     expect(screen.getByText(/#1 消息/)).toBeTruthy();
     expect(screen.getByText(/#3 消息/)).toBeTruthy();
     act(() => {
@@ -287,12 +447,12 @@ describe("真实链：SubscribeClient→SessionDetail DOM", () => {
     act(() => {
       ws.receive({ t: "events", subscriptionId, origin: "live", liveSeq: 1, refSeq: null, events: [progress] }); // 重复帧号
     });
-    expect(screen.getByLabelText("直播事件").children.length).toBe(liBefore); // 去重：不重复渲染
+    expect(screen.getByLabelText("直播事件").children.length).toBe(liBefore);
     act(() => {
       ws.receive({ t: "events", subscriptionId, origin: "history", refSeq: 4, events: [msg(4), msg(4)] }); // 帧内重复 seq
     });
     expect(screen.getByText(/#4 消息/)).toBeTruthy();
-    expect(screen.getByLabelText("历史事件").children.length).toBe(4); // 1+2+3+4（重复吸收）
+    expect(screen.getByLabelText("历史事件").children.length).toBe(4);
   });
 
   it("空会话文件链：H=0 末页（page=[] + liveFrom）→空态", () => {
@@ -351,10 +511,17 @@ describe("真实链：SubscribeClient→SessionDetail DOM", () => {
     expect(document.body.textContent ?? "").not.toContain(SENTINEL);
   });
 
-  it("4431 终局链：直播中收到 4431→内容保留+横幅受控文案（无续读按钮）", () => {
+  it("4431 终局链：直播中收到 4431（drain 出口形态信封 subscriptionId+requestId 空串）→内容保留+横幅受控文案（无续读按钮）", () => {
     const { ws, subscriptionId } = liveReal();
     act(() => {
-      ws.receive({ t: "error", code: 4431, subscriptionId, message: `budget ${SENTINEL}`, retryable: false });
+      ws.receive({
+        t: "error",
+        code: 4431,
+        subscriptionId,
+        requestId: "",
+        message: `budget ${SENTINEL}`,
+        retryable: false,
+      });
     });
     expect(screen.getByText(/#3 消息/)).toBeTruthy();
     const banner = screen.getByRole("status");
@@ -371,7 +538,7 @@ describe("真实链：SubscribeClient→SessionDetail DOM", () => {
     });
     expect(ws.sentFrames().length).toBe(sentBefore); // 无自动重发
     expect(screen.getByRole("status").textContent).toContain("重新同步");
-    expect(screen.getByText(/#3 消息/)).toBeTruthy(); // 内容保留
+    expect(screen.getByText(/#3 消息/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "继续读取" }));
     expect(ws.sentFrames().at(-1)).toEqual({
       t: "subscribe",
@@ -390,7 +557,7 @@ describe("真实链：SubscribeClient→SessionDetail DOM", () => {
     expect(ws.sentFrames().at(-1)).toEqual({ t: "unsubscribe", requestId: expect.any(String), subscriptionId });
   });
 
-  it("C4 真实链：直播中 stream-replaced→视图相位=stopped（非 streaming），DOM 横幅含受控提示+恢复入口=重选文件（无重建按钮、无分页提示）", () => {
+  it("C4 真实链：直播中 stream-replaced→视图=stopped（非 streaming），横幅含受控提示+恢复入口=重选文件（无重建按钮、无分页提示）", () => {
     const { ws, subscriptionId } = liveReal();
     act(() => {
       ws.receive({ t: "resync-required", subscriptionId, reason: "stream-replaced" });
@@ -398,13 +565,23 @@ describe("真实链：SubscribeClient→SessionDetail DOM", () => {
     expect(screen.getByText(/#3 消息/)).toBeTruthy(); // 内容保留（冻结）
     const banner = screen.getByRole("status");
     expect(banner.textContent).toContain("旧流已停止");
-    expect(banner.textContent).toContain("重新选择会话文件"); // 恢复入口诚实标注
-    expect(screen.queryByRole("button")).toBeNull(); // 无重建/续读按钮
-    expect(screen.queryByText("正在加载更多历史…")).toBeNull(); // 终局非分页中
+    expect(banner.textContent).toContain("重新选择会话文件");
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByText("正在加载更多历史…")).toBeNull();
+  });
+
+  it("连接级终局链：live 中服务端断开（onclose 1006）→closed 视图（无自动重连、无续读按钮）", () => {
+    const { ws } = liveReal();
+    act(() => {
+      ws.readyState = 3;
+      ws.onclose?.({ code: 1006 });
+    });
+    expect(screen.getByRole("alert").textContent).toContain("连接已关闭");
+    expect(screen.queryByRole("button", { name: "继续读取" })).toBeNull();
   });
 });
 
-describe("B3 提交阶段身份门（useLayoutEffect 记录每次提交的派生视图）", () => {
+describe("K3-C B3 提交期身份门（useLayoutEffect 记录每次提交的派生视图）", () => {
   /** 每次提交记录 `propFile|status|事件序号`：模拟派生层直接驱动的首帧渲染（layout effect 先于被动 effect）。 */
   function CommitLog(props: { client: SubscribeClientSurface; file: string | null; log: string[] }): null {
     const view = useSessionDetail(props.client, props.file);
@@ -414,7 +591,7 @@ describe("B3 提交阶段身份门（useLayoutEffect 记录每次提交的派生
     return null;
   }
 
-  it("A→B 切换：首次提交即无旧文件内容（loading、零事件）——快照仍挂旧 file 时门持续生效；B 首页落地后呈现 B 内容（对照审报 P9 曾提交 viewFile=a.jsonl,seqs=[1]）", () => {
+  it("A→B 切换：首次提交即无旧文件内容（loading、零事件）——快照仍挂旧 file 时门持续生效；B 首页落地后呈现 B 内容", () => {
     const client = new StubClient(detailSnap({ file: "a.jsonl", phase: "live", events: [msg(1)] }));
     const log: string[] = [];
     const view = render(React.createElement(CommitLog, { client, file: "a.jsonl", log }));
@@ -445,25 +622,7 @@ describe("B3 提交阶段身份门（useLayoutEffect 记录每次提交的派生
     const view = render(React.createElement(CommitLog, { client: clientA, file: "a.jsonl", log }));
     expect(log.at(-1)).toBe("a.jsonl|streaming|1");
     view.rerender(React.createElement(CommitLog, { client: clientB, file: "b.jsonl", log }));
-    // 首次提交即新实例视图：b.jsonl 内容，无 a.jsonl 残留
-    expect(log.at(-1)).toBe("b.jsonl|streaming|7");
-    // 旧实例的被动 effect 清理链照常（退订旧订阅）
-    expect(clientA.calls).toEqual(["subscribe:a.jsonl", "unsubscribe"]);
-  });
-});
-
-describe("C4 终局受控提示（stopped）", () => {
-  it("纯函数：closed 有内容+streamNote→stopped，横幅=streamNote（已停止/被替换受控文案）；errorMessage 不覆盖 streamNote", () => {
-    const view = sessionDetailViewOf(detailSnap({ phase: "closed", streamNote: "订阅已被新订阅替换，旧流已停止", events: [msg(1)] }));
-    expect(view.status).toBe("stopped");
-    expect(view.banner).toContain("旧流已停止");
-    expect(view.canResync).toBe(false);
-  });
-
-  it("纯函数：closed 无内容+streamNote→error 态，errorMessage 回退 streamNote（受控提示不丢）；横幅空", () => {
-    const view = sessionDetailViewOf(detailSnap({ phase: "closed", streamNote: "订阅已被新订阅替换，旧流已停止", events: [], liveEvents: [] }));
-    expect(view.status).toBe("error");
-    expect(view.errorMessage).toContain("旧流已停止");
-    expect(view.banner).toBeNull();
+    expect(log.at(-1)).toBe("b.jsonl|streaming|7"); // 首次提交即新实例视图，无 a.jsonl 残留
+    expect(clientA.calls).toEqual(["subscribe:a.jsonl", "unsubscribe"]); // 旧实例清理链照常
   });
 });

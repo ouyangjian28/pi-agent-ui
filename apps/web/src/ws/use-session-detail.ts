@@ -1,15 +1,17 @@
-// A1b：useSyncExternalStore 订阅 SubscribeClient 会话详情快照——原生 React 手段，不引状态库。
-// 快照→视图是纯派生（sessionDetailViewOf），组件四空态（loading/empty/error/auth-failed）+
-// 流态（streaming/resync-needed/unsubscribed/stopped/closed）的判别唯一来源。
-// B3 提交阶段身份门：sessionDetailViewOf(snap, targetFile) 在快照 file≠目标 file 时返回不含旧内容的
-// loading/连接级视图（file prop 已切换而被动 effect 尚未重订、或 client 实例替换时，首次提交不泄漏旧文件事件）。
-// C4：终局 closed 相位有内容→status="stopped"（冻结内容+受控横幅，绝不伪装 streaming）；恢复入口=上层
-// 重选文件（当前版本无重建按钮，组件内如实标注）。
-// 订阅生命周期：file 变更即订阅（挂载=用户打开详情的显式动作）、卸载/换目标即退订；
-// 4409 续读终局不做自动重发——续读（resyncFromCursor）只由组件上的用户操作触发。
+// A1b 详情订阅 hook（归属整改重写：Kimi 亲手重写，语义对照契约与 K3 审报逐项保真）。
+// 结构：useSyncExternalStore 订阅 SubscribeClient 快照（原生 React 手段，不引状态库）→纯派生
+// sessionDetailViewOf(snap, targetFile) 是唯一视图判别来源（组件空态族+流态全靠它）。
+// 保真锚点：
+// ①连接级优先于订阅相位（connecting/authenticating→loading；closed→closed；error 按 errorKind 细分）；
+// ②K3-C 提交期身份门（B3）：快照 file≠目标 file 时，门控视图返回不含旧内容的 loading/连接级视图——
+//   file prop 切换、client 实例替换的首次提交不泄漏旧文件事件（不依赖被动 effect 事后清理）；
+// ③C4 终局诚实：closed 相位有内容→stopped（冻结内容+受控横幅，绝不伪装 streaming）；
+//   无内容→error（errorMessage 缺失时回退 streamNote，受控提示不丢）；
+// ④续读无自动重发：resync-needed 只呈现入口（canResync），resyncFromCursor 由组件用户操作触发；
+// ⑤订阅生命周期：file 变更即（重新）订阅（挂载=用户打开详情的显式动作），卸载/换目标即退订。
 
 import { useEffect, useSyncExternalStore } from "react";
-import type { HistoryEvent, LiveEvent, TurnState } from "@pi-agent-ui/protocol/src/contracts"; // 同 ws-client：绕开 barrel
+import type { HistoryEvent, LiveEvent, TurnState } from "@pi-agent-ui/protocol/src/contracts"; // 绕开 barrel（同 subscribe-client）
 import type { SessionDetailSnapshot, SubscribeClientSurface } from "./subscribe-client";
 
 export type DetailViewStatus =
@@ -44,7 +46,7 @@ export interface SessionDetailView {
   readonly canResync: boolean;
 }
 
-function turnStateText(turn: TurnState): string {
+function turnText(turn: TurnState): string {
   switch (turn.state) {
     case "idle": return "空闲";
     case "dispatching": return "派发中";
@@ -54,22 +56,26 @@ function turnStateText(turn: TurnState): string {
   }
 }
 
-function processText(phase: "idle" | "running" | "stopping", ready: boolean): string {
+function processSummaryText(phase: "idle" | "running" | "stopping", ready: boolean): string {
   const label = phase === "idle" ? "进程空闲" : phase === "running" ? "进程运行中" : "进程停止中";
   return ready ? `${label}·就绪` : label;
 }
 
-/** 快照→视图派生（纯函数）：连接级优先于订阅相位；有内容终局保留内容+横幅（stopped，不伪装 streaming）。
- * targetFile（可选）：目标 file 身份门（B3）——快照 file≠目标（file prop 已切换/client 替换/已退订残留）时，
- * 连接级状态如实呈现而内容一律不透出；file=null 视为未选择（组件呈现「尚未选择会话」）。 */
+/** 连接级状态→视图态（身份门内外共用；error 按 errorKind 细分 auth-failed）。 */
+function connLevelStatus(snap: SessionDetailSnapshot): DetailViewStatus {
+  if (snap.connState === "error") return snap.errorKind === "auth-failed" ? "auth-failed" : "error";
+  if (snap.connState === "closed") return "closed";
+  return "loading"; // connecting/authenticating/ready 但目标订阅未建立——加载空视图
+}
+
+/** 快照→视图派生（纯函数）。连接级优先于订阅相位；有内容终局保留内容+横幅（stopped，不伪装 streaming）。
+ * targetFile（可选，保真②身份门）：快照 file≠目标（file prop 已切换/client 替换/已退订残留）时，
+ * 连接级状态如实呈现而内容一律不透出；targetFile=null 视为未选择（组件呈现「尚未选择会话」）。 */
 export function sessionDetailViewOf(snap: SessionDetailSnapshot, targetFile?: string | null): SessionDetailView {
   if (targetFile !== undefined && snap.file !== targetFile) {
-    let gated: DetailViewStatus;
-    if (snap.connState === "error") gated = snap.errorKind === "auth-failed" ? "auth-failed" : "error";
-    else if (snap.connState === "closed") gated = "closed";
-    else gated = "loading"; // 含 ready：目标订阅尚未建立/在途——加载空视图（不依赖 effect 事后清理）
+    const status = connLevelStatus(snap); // 含 ready：目标订阅尚未建立/在途——loading
     return {
-      status: gated,
+      status,
       file: targetFile,
       events: [],
       liveEvents: [],
@@ -81,12 +87,8 @@ export function sessionDetailViewOf(snap: SessionDetailSnapshot, targetFile?: st
     };
   }
   let status: DetailViewStatus;
-  if (snap.connState === "error") {
-    status = snap.errorKind === "auth-failed" ? "auth-failed" : "error";
-  } else if (snap.connState === "closed") {
-    status = "closed";
-  } else if (snap.connState !== "ready") {
-    status = "loading";
+  if (snap.connState !== "ready") {
+    status = connLevelStatus(snap); // 连接级优先（含 error/closed）
   } else if (snap.errorKind === "subscribe-failed") {
     status = "error";
   } else {
@@ -101,8 +103,9 @@ export function sessionDetailViewOf(snap: SessionDetailSnapshot, targetFile?: st
     }
   }
   let banner: string | null = null;
-  if (snap.phase === "resync-needed") banner = snap.streamNote;
-  else if (snap.phase === "closed" && snap.connState === "ready" && (snap.events.length > 0 || snap.liveEvents.length > 0)) {
+  if (snap.phase === "resync-needed") {
+    banner = snap.streamNote;
+  } else if (snap.phase === "closed" && snap.connState === "ready" && (snap.events.length > 0 || snap.liveEvents.length > 0)) {
     banner = snap.streamNote ?? snap.errorMessage ?? "订阅已停止"; // C4：终局有内容→已停止/被替换受控横幅（4431/替换终局）
   }
   return {
@@ -112,8 +115,8 @@ export function sessionDetailViewOf(snap: SessionDetailSnapshot, targetFile?: st
     liveEvents: snap.liveEvents,
     paging: snap.connState === "ready" && snap.phase === "paging",
     statusSummary: snap.status === null ? null : {
-      process: processText(snap.status.process.phase, snap.status.process.ready),
-      turn: turnStateText(snap.status.turn),
+      process: processSummaryText(snap.status.process.phase, snap.status.process.ready),
+      turn: turnText(snap.status.turn),
     },
     // 空内容终局且无错误文案时（如被替换前无任何内容）：streamNote 受控提示走错误文案，不静默
     errorMessage: status === "error" && snap.phase === "closed" && snap.errorMessage === null ? snap.streamNote : snap.errorMessage,
@@ -122,7 +125,7 @@ export function sessionDetailViewOf(snap: SessionDetailSnapshot, targetFile?: st
   };
 }
 
-/** 订阅单文件会话详情：file 变更即（重新）订阅，卸载/换目标即退订；视图由快照纯派生。 */
+/** 订阅单文件会话详情：file 变更即（重新）订阅，卸载/换目标即退订；视图由快照纯派生（保真②⑤）。 */
 export function useSessionDetail(client: SubscribeClientSurface, file: string | null): SessionDetailView {
   const snap = useSyncExternalStore(client.subscribe, client.getSnapshot);
   useEffect(() => {
@@ -130,6 +133,6 @@ export function useSessionDetail(client: SubscribeClientSurface, file: string | 
     client.subscribeSession(file);
     return () => client.unsubscribeSession();
   }, [client, file]);
-  // B3：以目标 file 做提交阶段身份门——file prop 切换后的首次提交即无旧文件内容（不依赖 effect 事后清理）
+  // 身份门以目标 file 在提交阶段复核——file prop 切换后的首次提交即无旧文件内容（不依赖 effect 事后清理）
   return sessionDetailViewOf(snap, file);
 }

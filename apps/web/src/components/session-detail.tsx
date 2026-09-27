@@ -1,11 +1,14 @@
-// A1b 会话详情组件：只读流消费面——历史分页加载+直播追加+四空态（loading/empty/error/auth-failed）
-// + 流终局态（resync-needed/unsubscribed/stopped/closed）。纯文本渲染：textPreview.text 只作 React 文本节点，
-// 无 innerHTML/dangerouslySetInnerHTML。只读流本身无写操作（订阅面 subscribe 家族读帧）；A1c 起可选挂
-// 写输入面（writeClient 注入即启用，独立写连接，不侵入订阅面）：空会话与内容视图均可发送 prompt/stop。
-// B2 稳定挂载：根元素恒为 section.session-detail（根类型不随视图切换变化），composer 恒挂根下固定槽位
-//   （末子节点）——空态↔内容态切换不再卸载重建编辑器（草稿/在途/错误/结果态全部保留）；空态视图作为
-//   div.empty 子节点呈现（role/aria 语义不变）。composer 以 key=file 挂载：换会话=新草稿（属预期重置），
-//   同一会话内的视图切换不再丢草稿。loading/认证失败/错误/关闭/未订阅视图依旧不展示 composer（既有行为）。
+// A1b 会话详情组件（归属整改重写：Kimi 亲手重写，DOM 结构/视觉令牌类名/文案与视觉基建批 475e071
+// 之后的状态逐项保真——重写非返工）。
+// 只读渲染面：历史分页加载+直播追加+空态族（loading/empty/error/auth-failed/closed/unsubscribed）
+// +流终局态（resync-needed/stopped）。纯文本渲染：textPreview.text 只作 React 文本节点，
+// 无 innerHTML/dangerouslySetInnerHTML。
+// 结构保真（K5-B2 稳定挂载）：根元素恒为 section.session-detail（根类型不随视图切换变化）；
+// 根下槽位 0=视图体（空态族=div.empty，内容族=Fragment 包裹的 header/banner/history/paging/live），
+// 槽位 1 恒为 composer（WriteComposer key=file）——空态↔内容态切换不卸载重建编辑器（草稿/在途保留）；
+// 换会话=新 composer 实例（key=file，旧草稿不泄入新会话，属预期重置）。
+// composer 展示面：注入 writeClient 且 file 非空且视图∈{empty, streaming, resync-needed, stopped}；
+// loading/auth-failed/error/closed/unsubscribed 不展示（既有行为）。
 // C4：stopped 终局诚实标注恢复入口=上层重选文件（当前版本无重建按钮，不做自动重发/自动重订）。
 
 import React from "react";
@@ -40,8 +43,8 @@ const ROLE_LABELS: Readonly<Record<string, string>> = {
   system: "系统",
 };
 
-function HistoryItem({ event }: { event: HistoryEvent }) {
-  const extra =
+function HistoryRow({ event }: { event: HistoryEvent }) {
+  const detail =
     event.kind === "message"
       ? `${ROLE_LABELS[event.role] ?? event.role}${event.final ? "·完结" : ""}${event.textPreview ? `：${event.textPreview.text}${event.textPreview.truncated ? "…" : ""}` : ""}`
       : event.kind === "turn-enqueued"
@@ -52,12 +55,12 @@ function HistoryItem({ event }: { event: HistoryEvent }) {
       <span className="row-title">
         #{event.seq} {KIND_LABELS[event.kind]}
       </span>
-      {extra ? <small> {extra}</small> : null}
+      {detail ? <small> {detail}</small> : null}
     </li>
   );
 }
 
-function liveText(event: LiveEvent): string {
+function liveEventText(event: LiveEvent): string {
   switch (event.kind) {
     case "pi-progress": return `进度 ${event.piType}（${event.note}）`;
     case "turn-state": return `回合状态：${event.turn.state}`;
@@ -76,14 +79,13 @@ export function SessionDetail({
   writeClient?: WriteClientSurface | null;
 }) {
   const view = useSessionDetail(client, file);
-  // B2：key=file——稳定挂载下同一位置换会话时强制新实例（旧会话草稿不泄入新会话）；
-  // 同一会话内空态↔内容态切换时实例保留。仅空态（empty）与内容态（streaming/resync-needed/stopped）
-  // 展示，与既有行为一致。
-  const showComposer = writeClient !== null && file !== null && (view.status === "empty" || view.status === "streaming" || view.status === "resync-needed" || view.status === "stopped");
-  const composer = showComposer ? <WriteComposer key={file} client={writeClient} file={file} /> : null;
+  // 槽位 1（稳定挂载）：key=file——同一位置换会话强制新实例；同一会话内视图切换实例保留。
+  const composerVisible =
+    writeClient !== null && file !== null &&
+    (view.status === "empty" || view.status === "streaming" || view.status === "resync-needed" || view.status === "stopped");
+  const composer = composerVisible ? <WriteComposer key={file} client={writeClient} file={file} /> : null;
 
-  // 视图体（根下槽位 0）：空态族=div.empty（role/aria 语义保留）；内容族=Fragment 包裹的既有结构。
-  // 槽位 1 恒为 composer——两槽位元素类型各自稳定，React 按槽位协调不重建 composer。
+  // 槽位 0（视图体）：空态族=div.empty（role/aria 语义保留）；内容族=Fragment 包裹的既有结构。
   let body: React.ReactNode;
   if (view.status === "loading") {
     body = (
@@ -158,7 +160,7 @@ export function SessionDetail({
         ) : null}
         <ol className="history-list" aria-label="历史事件">
           {view.events.map((event) => (
-            <HistoryItem key={event.seq} event={event} />
+            <HistoryRow key={event.seq} event={event} />
           ))}
         </ol>
         {view.paging ? (
@@ -169,7 +171,7 @@ export function SessionDetail({
         {view.liveEvents.length > 0 ? (
           <ul className="live-list" aria-live="polite" aria-label="直播事件">
             {view.liveEvents.map((event, index) => (
-              <li key={index}>{liveText(event)}</li>
+              <li key={index}>{liveEventText(event)}</li>
             ))}
           </ul>
         ) : null}
