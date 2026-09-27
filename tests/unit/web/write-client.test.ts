@@ -200,7 +200,12 @@ describe("G1 requestId 关联", () => {
     ws.receive({ t: "write-stop-ack", requestId: "wr-s-2", file: "a.jsonl", outcome: STOP_CONFIRMED });
     await expect(stopPromise).resolves.toEqual(STOP_CONFIRMED);
     expect(client.getSnapshot().inflight).toEqual([{ file: "a.jsonl", kind: "prompt" }]); // prompt 仍在途
-    ws.receive({ t: "write-ack", requestId: "wr-p-1", file: "a.jsonl", outcome: { kind: "invalidated", stage: "sending" } });
+    ws.receive({
+      t: "write-ack",
+      requestId: "wr-p-1",
+      file: "a.jsonl",
+      outcome: { kind: "invalidated", stage: "sending" },
+    });
     await expect(promptPromise).resolves.toEqual({ kind: "invalidated", stage: "sending" });
   });
 
@@ -229,10 +234,40 @@ describe("G1 requestId 关联", () => {
   it("requestId 匹配但 kind 错配（stop-ack 冒名 prompt 请求）=零消费", async () => {
     const { client, ws } = ready();
     const promise = client.sendPrompt("a.jsonl", "hi");
-    ws.receive({ t: "write-stop-ack", requestId: sentRequestId(ws, 1), file: "a.jsonl", outcome: { kind: "no-process" } });
+    ws.receive({
+      t: "write-stop-ack",
+      requestId: sentRequestId(ws, 1),
+      file: "a.jsonl",
+      outcome: { kind: "no-process" },
+    });
     expect(client.getSnapshot().inflight).toEqual([{ file: "a.jsonl", kind: "prompt" }]); // 不被错 kind 消费
     ws.receive({ t: "write-ack", requestId: sentRequestId(ws, 1), file: "a.jsonl", outcome: LAUNCHED });
     await expect(promise).resolves.toEqual(LAUNCHED);
+  });
+
+  // A1c-r1-B1 修复：恢复旧基线「合法 write-stop-ack outcome no-process 正向结算」防线——
+  // 重写后 no-process 仅出现在错 kind 负例中（解析器拒绝也能过），M4 变异（isStopOutcome 判
+  // no-process 非法）实证 42 例全绿=正例缺失；本例以 stop 自身 requestId 合法结算补齐，
+  // 与上方错 kind 负例分例保留（不合并为会提前抛断言的单一路径）。
+  it("合法 write-stop-ack no-process 正向结算：stop 以自身 requestId 结算，prompt 在途零误伤", async () => {
+    const { client, ws } = ready();
+    const promptPromise = client.sendPrompt("a.jsonl", "hi");
+    const stopPromise = client.sendStop("a.jsonl");
+    expect(ws.frames()[1]).toMatchObject({ t: "prompt", requestId: "wr-p-1" });
+    expect(ws.frames()[2]).toMatchObject({ t: "stop", requestId: "wr-s-2", file: "a.jsonl" });
+    // no-process=服务端无在跑进程可停，是 stop 的合法 outcome（非错误路径，须正常 resolve）
+    ws.receive({ t: "write-stop-ack", requestId: "wr-s-2", file: "a.jsonl", outcome: { kind: "no-process" } });
+    await expect(stopPromise).resolves.toEqual({ kind: "no-process" });
+    expect(client.getSnapshot().inflight).toEqual([{ file: "a.jsonl", kind: "prompt" }]); // stop 出账，prompt 仍在途
+    expect(client.getSnapshot().lastResult).toEqual({
+      ok: true,
+      kind: "stop",
+      file: "a.jsonl",
+      outcome: { kind: "no-process" },
+    });
+    ws.receive({ t: "write-ack", requestId: "wr-p-1", file: "a.jsonl", outcome: LAUNCHED }); // 结算 prompt，避免悬挂
+    await expect(promptPromise).resolves.toEqual(LAUNCHED);
+    expect(client.getSnapshot().inflight).toEqual([]);
   });
 
   it("error 带 requestId 只结算该请求：其余在途存活，连接保持 ready", async () => {
@@ -364,7 +399,13 @@ describe("G3 受控文案与错误路由", () => {
   it("4402 带 requestId：kind=server+code 附带，文案受控（服务端 message 回显不透传），retryable=true 不自动重发", async () => {
     const { client, ws } = ready();
     const promise = client.sendPrompt("a.jsonl", "secret-text");
-    ws.receive({ t: "error", code: 4402, message: "host exploded echoing secret-text", retryable: true, requestId: sentRequestId(ws, 1) });
+    ws.receive({
+      t: "error",
+      code: 4402,
+      message: "host exploded echoing secret-text",
+      retryable: true,
+      requestId: sentRequestId(ws, 1),
+    });
     const error = await expectWriteError(promise);
     expect(error.kind).toBe("server");
     expect(error.code).toBe(4402);
@@ -417,7 +458,7 @@ describe("G3 受控文案与错误路由", () => {
     expect(c2.getSnapshot().errorKind).toBe("transport");
   });
 
-  it("4432 心跳终局 requestId:\"\"（现役网关空串信封惯例）→连接级失败+在途全拒+受控文案", async () => {
+  it('4432 心跳终局 requestId:""（现役网关空串信封惯例）→连接级失败+在途全拒+受控文案', async () => {
     const { client, ws } = ready();
     const promise = client.sendPrompt("a.jsonl", "hi");
     ws.receive({ t: "error", code: 4432, message: "heartbeat deadline", retryable: false, requestId: "" });
@@ -457,7 +498,12 @@ describe("G3 受控文案与错误路由", () => {
     ws.receiveRaw("not-json{");
     ws.receiveRaw(42);
     ws.receive({ t: "sessions", sessions: [] }); // 订阅面帧非本面
-    ws.receive({ t: "write-ack", requestId: rid, file: "a.jsonl", outcome: { kind: "launched", intentId: 7, commandId: 1 } }); // outcome 越域（intentId 非 string）
+    ws.receive({
+      t: "write-ack",
+      requestId: rid,
+      file: "a.jsonl",
+      outcome: { kind: "launched", intentId: 7, commandId: 1 },
+    }); // outcome 越域（intentId 非 string）
     ws.receive({ t: "write-ack", requestId: 1234, file: "a.jsonl", outcome: LAUNCHED }); // requestId 非法类型
     expect(client.getSnapshot().inflight).toEqual([{ file: "a.jsonl", kind: "prompt" }]); // 零消费
     ws.receive({ t: "write-ack", requestId: rid, file: "a.jsonl", outcome: LAUNCHED });
@@ -467,7 +513,12 @@ describe("G3 受控文案与错误路由", () => {
   it("outcome DTO 形状门：stop-ack 的 confirmed.exit 越域=零消费；合法 outcome 照常结算", async () => {
     const { client, ws } = ready();
     const promise = client.sendStop("a.jsonl");
-    ws.receive({ t: "write-stop-ack", requestId: sentRequestId(ws, 1), file: "a.jsonl", outcome: { kind: "confirmed", exit: { code: -1, signal: null } } }); // code 负数越域
+    ws.receive({
+      t: "write-stop-ack",
+      requestId: sentRequestId(ws, 1),
+      file: "a.jsonl",
+      outcome: { kind: "confirmed", exit: { code: -1, signal: null } },
+    }); // code 负数越域
     expect(client.getSnapshot().inflight).toEqual([{ file: "a.jsonl", kind: "stop" }]);
     ws.receive({ t: "write-stop-ack", requestId: sentRequestId(ws, 1), file: "a.jsonl", outcome: STOP_CONFIRMED });
     await expect(promise).resolves.toEqual(STOP_CONFIRMED);
@@ -598,7 +649,11 @@ describe("G5 派生视图与 file 身份门", () => {
     const p = client.sendPrompt("a.jsonl", "hi");
     const s = client.sendStop("a.jsonl");
     // prompt×stop 并行：stop 为后发动作优先呈现
-    expect(writeViewOf(client.getSnapshot(), "a.jsonl", null)).toMatchObject({ phase: "stopping", sending: true, stopping: true });
+    expect(writeViewOf(client.getSnapshot(), "a.jsonl", null)).toMatchObject({
+      phase: "stopping",
+      sending: true,
+      stopping: true,
+    });
     // 在途优先于瞬态错误
     expect(writeViewOf(client.getSnapshot(), "a.jsonl", "旧错误").phase).toBe("stopping");
     // 连接级错误优先于一切
@@ -627,13 +682,21 @@ describe("G6 composer 写挂面（真实链）", () => {
     expect((screen.getByRole("button", { name: "发送" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "停止" }) as HTMLButtonElement).disabled).toBe(false); // 发送后立即停止合法流
     expect(textarea.value).toBe("你好写宿主");
-    expect(screen.getAllByRole("status").map((n) => n.textContent).join()).toContain("发送中…");
+    expect(
+      screen
+        .getAllByRole("status")
+        .map((n) => n.textContent)
+        .join(),
+    ).toContain("发送中…");
     await act(async () => {
       ws.receive({ t: "write-ack", requestId: "wr-p-1", file: "a.jsonl", outcome: LAUNCHED });
     });
     expect((screen.getByRole("button", { name: "发送" }) as HTMLButtonElement).disabled).toBe(true); // 草稿已清空→空文本禁用
     expect(textarea.value).toBe(""); // ack 后清空（B1：无在途编辑）
-    const statuses = screen.getAllByRole("status").map((n) => n.textContent).join();
+    const statuses = screen
+      .getAllByRole("status")
+      .map((n) => n.textContent)
+      .join();
     expect(statuses).toContain("可发送");
     expect(statuses).toContain("已入队（intentId=i-1）");
   });
@@ -644,12 +707,27 @@ describe("G6 composer 写挂面（真实链）", () => {
     fireEvent.click(screen.getByRole("button", { name: "停止" }));
     expect(ws.frames()[1]).toEqual({ t: "stop", requestId: "wr-s-1", file: "a.jsonl" });
     expect((screen.getByRole("button", { name: "停止" }) as HTMLButtonElement).disabled).toBe(true); // 停止在途
-    expect(screen.getAllByRole("status").map((n) => n.textContent).join()).toContain("停止中…");
+    expect(
+      screen
+        .getAllByRole("status")
+        .map((n) => n.textContent)
+        .join(),
+    ).toContain("停止中…");
     await act(async () => {
-      ws.receive({ t: "write-stop-ack", requestId: "wr-s-1", file: "a.jsonl", outcome: { kind: "confirmed", exit: { code: 1, signal: "SIGTERM" } } });
+      ws.receive({
+        t: "write-stop-ack",
+        requestId: "wr-s-1",
+        file: "a.jsonl",
+        outcome: { kind: "confirmed", exit: { code: 1, signal: "SIGTERM" } },
+      });
     });
     expect((screen.getByRole("button", { name: "停止" }) as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.getAllByRole("status").map((n) => n.textContent).join()).toContain("已停止");
+    expect(
+      screen
+        .getAllByRole("status")
+        .map((n) => n.textContent)
+        .join(),
+    ).toContain("已停止");
   });
 
   it("连接级失败：写面硬错误横幅 role=alert（受控文案）+发送入口关闭", async () => {
