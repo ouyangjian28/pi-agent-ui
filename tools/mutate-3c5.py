@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""3c-5 ⑤B 变异七连（r1 版）：S1 DOTSEG-GATE-OFF / S2 DOTFILE-GATE-OFF / S3 STATIC-GUARD-OFF /
-S4 CLI-PORT-GATE-OFF / S5 CLOSEALL-OFF / S6 REALPATH-GATE-OFF / S7 ORIGIN-SNAPSHOT-OFF。
+"""3c-5 ⑤B 变异六连（r1 版）：S1 DOT-GATES-OFF（点段+点文件两门同拔——"."/".." 均以 "." 开头，
+点文件门单独吸收点段逃逸→单拔其一结构性不可杀，两门同拔才是有效探针）/
+S3 STATIC-GUARD-OFF / S4 CLI-PORT-GATE-OFF / S5 CLOSEALL-OFF / S6 REALPATH-GATE-OFF / S7 ORIGIN-SNAPSHOT-OFF。
 纪律承 3c3：apply→定向跑→(永远)restore→验哈希→树净断言；杀点判据=exit≠0 且 n_fail>0（GPT r1 清理项）；
 日志含命令头/exit 码/stderr 并入/FAIL 块；HEAD 取实时 git rev-parse；基线已先提交（M-240/M-245）。"""
 import subprocess, sys, hashlib, datetime
@@ -10,15 +11,10 @@ ENV = {"PATH": "/home/yyj/.nvm/versions/node/v24.18.0/bin:/usr/bin:/bin", "HOME"
 TESTS = "tests/unit/server/static-serve.test.ts"
 
 MUTS = {
-  "S1-DOTSEG-GATE-OFF": [
+  "S1-DOT-GATES-OFF": [
     ("apps/server/src/ws/static-serve.ts",
-     '    if (seg === "" || seg === "." || seg === "..") return null; // 空段（含 //）/点段=拒',
-     '    if (seg === "") return null; // MUT-S1 点段门关闭（仅留空段拒）'),
-  ],
-  "S2-DOTFILE-GATE-OFF": [
-    ("apps/server/src/ws/static-serve.ts",
-     '    if (seg.startsWith(".")) return null; // 点文件=拒',
-     '    // MUT-S2 点文件门关闭'),
+     '    if (seg === "" || seg === "." || seg === "..") return null; // 空段（含 //）/点段=拒\n    if (seg.startsWith(".")) return null; // 点文件=拒',
+     '    if (seg === "") return null; // MUT-S1 点段+点文件两门同拔（单拔其一不可杀）'),
   ],
   "S3-STATIC-GUARD-OFF": [
     ("apps/server/src/composition.ts",
@@ -93,4 +89,4 @@ for name, pairs in MUTS.items():
 
 if fails:
     print("\n".join(["未杀变异:"] + fails)); sys.exit(1)
-print(f"七变异全杀+全还原（树净；repo@{head}）")
+print(f"六变异全杀+全还原（树净；repo@{head}）")
