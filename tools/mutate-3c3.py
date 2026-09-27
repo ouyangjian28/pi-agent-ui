@@ -56,7 +56,7 @@ for name, (path, old, new) in MUTS.items():
         log.append(f"# restore 后 sha256[:16]={after}  与基线一致={'OK' if after == base else 'MISMATCH!'}")
         git = run("git status --porcelain --untracked-files=no")
         assert git.stdout.strip() == "", f"{name}: restore 后树不净\n{git.stdout}"
-    open(f"{REPO}/run-records/3c3-mut-{name}.log", "w").write("\n".join(log))
+    open(f"{REPO}/tests/fixtures/run-records/3c3-mut-{name}.log", "w").write("\n".join(log))
     print(f"{name}: exit见档 restore={'OK' if after == base else 'MISMATCH'}")
 
 if fails:
