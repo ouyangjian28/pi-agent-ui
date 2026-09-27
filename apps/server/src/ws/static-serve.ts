@@ -52,7 +52,8 @@ function reply(res: ServerResponse, code: number, body: string, extra: Record<st
  * 本函数只做字面层校验；symlink 真实边界由 handler 的 realpath 包含门负责（两层分离）。
  */
 export function resolveStaticPath(rootDir: string, rawTarget: string): string | null {
-  // request-target（origin-form）分手 query：只取首个 ? 之前；# 不该出现在行内，出现即拒
+  // request-target（origin-form）分手 query：只取首个 ? 之前；裸 # 仅在路径部分拒绝
+  // （query 内 # 不拒=有意语义：query 不参与磁盘解析；N1 口径 2026-10-05 GPT r2 拍板收窄）
   const q = rawTarget.indexOf("?");
   const pathOnly = q === -1 ? rawTarget : rawTarget.slice(0, q);
   if (pathOnly.includes("#")) return null;

@@ -173,6 +173,8 @@ describe("⑤B SS：createStaticHandler（真 http server）", () => {
     ]) {
       expect((await rawReq(server, t)).status, `target=${t}`).toBe(404);
     }
+    // N1 口径锁定（GPT r2）：裸 # 仅拒路径部分；query 内 # 不拒（query 不参与磁盘解析）
+    expect((await rawReq(server, "/package.json?x=#fragment")).status).toBe(200);
   });
 
   it("SS9 symlink 真实边界（B1）：根内链接指向根外文件/目录 → 404；根自身为 symlink → 口径一致可服务", async () => {
@@ -313,16 +315,20 @@ describe("⑤B ST：composition staticDir 集成（同端口 HTTP+WS）", () => 
     } as unknown as Parameters<typeof startServer>[0]);
     CLEANUP_SERVERS.push(s);
     const sock = connect(port, "127.0.0.1");
+    sock.on("error", () => {}); // 服务端 RST 属预期（closeAllConnections 直接 destroy）；不让未监听 error 崩测试
     await once(sock, "connect");
     sock.write("GET / HTTP/1.1\r\nHost: localhost\r\n"); // 只发部分请求头——不进 handler，不受 Connection:close 保护
     await new Promise((r) => setImmediate(r));
-    const closed = once(sock, "close");
+    const closed = once(sock, "close"); // 先挂监听再 dispose；顺序=服务端终结在先、客户端清理在 finally（N2 纠偏）
     const t0 = Date.now();
-    await s.dispose();
-    const elapsed = Date.now() - t0;
-    expect(elapsed).toBeLessThan(4_500); // 基线≈即时；拔 closeAllConnections 变异→落 5s 守卫=本断言杀点
-    sock.destroy();
-    await closed; // 连接被真正终结（closeAllConnections 兜底面）
+    try {
+      await s.dispose();
+      const elapsed = Date.now() - t0;
+      expect(elapsed).toBeLessThan(4_500); // 基线≈即时；拔 closeAllConnections 变异→落 5s 守卫=本断言杀点
+    } finally {
+      sock.destroy(); // 客户端兜底清理（无论断言成败不遗留连接）
+    }
+    await Promise.race([closed, new Promise((r) => setTimeout(r, 1_000))]); // 服务端 closeAllConnections 终结连接（1s 兜底防挂）
   });
 });
 
