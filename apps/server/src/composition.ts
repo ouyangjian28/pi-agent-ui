@@ -222,7 +222,13 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
   // N4-v2：浏览器部署（staticDir）同端口叠加 /login+/logout（HttpOnly 会话 cookie）+升级面 sid 校验；
   // 非 staticDir（纯 WS 部署）无 HTTP 面=无登录面，令牌通道不变。
   const login = config.staticDir !== undefined
-    ? createLoginRoute({ authority: tokens, sessionSecret: newSessionSecret(), audit })
+    ? createLoginRoute({
+      authority: tokens,
+      sessionSecret: newSessionSecret(),
+      audit,
+      allowedOrigins: config.allowedOrigins, // r1-B5：与 WS 升级面同表（HTTP 面来源门）
+      ...(config.trustedProxies !== undefined ? { trustedProxies: config.trustedProxies } : {}), // r1-B1：同一可信代理派生
+    })
     : null;
   const staticHandler = config.staticDir !== undefined ? createStaticHandler(config.staticDir, audit) : null;
   const httpServer: HttpServer | null = staticHandler !== null
@@ -235,7 +241,7 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     allowedOrigins: config.allowedOrigins,
     ...(config.requireTlsOffLoopback !== undefined ? { requireTlsOffLoopback: config.requireTlsOffLoopback } : {}),
     ...(config.trustedProxies !== undefined ? { trustedProxies: config.trustedProxies } : {}),
-    ...(login !== null ? { sessionCookie: { name: "pi-agent-ui-session", validate: login.validateSid } } : {}),
+    ...(login !== null ? { sessionCookie: { name: "pi-agent-ui-session", validate: login.sessionIdentityOf } } : {}), // r1-B2：身份非布尔
     ...(httpServer !== null ? { server: httpServer } : {}),
     audit,
   });

@@ -17,6 +17,7 @@ import type { RecoveryEvidenceSnapshot, BadJournalEntry } from "../../../apps/se
 import type { JournalLine } from "../../../packages/protocol/src/journal.ts"; // fix14/Y14-2：fixture 类型直约束
 import type { ScanRow, SessionStatus } from "@pi-agent-ui/protocol";
 import { fnv1a64Hex, matchKeyOf, validateClientFrame } from "@pi-agent-ui/protocol";
+import { createHash } from "node:crypto";
 
 const tick = (): Promise<void> => new Promise((res) => setImmediate(() => res()));
 async function until(cond: () => boolean, ms = 2000): Promise<void> {
@@ -200,11 +201,12 @@ async function authed(r: Rig, token = "tok-ok"): Promise<FakeConn> {
 const errFrames = (c: FakeConn): Array<Record<string, unknown>> => c.frames().filter((f) => f.t === "error");
 const lastClose = (c: FakeConn): [number | undefined, string | undefined] | undefined => c.closes[c.closes.length - 1];
 
-describe("ws-gateway N4-v2（v1.1）：登录会话 cookie 免令牌通道", () => {
-  it("S1 sessionAuthed 连接：免令牌 hello→welcome；审计标记 session-cookie", async () => {
+describe("ws-gateway N4-v2（v1.1）：登录会话 cookie 免令票通道（r1-B2 身份贯通）", () => {
+  const okDigest = createHash("sha256").update("tok-ok", "utf8").digest("hex");
+  it("S1 sessionAuthed+身份连接：免令牌 hello→welcome（身份复核过）；无新增敏感审计", async () => {
     const r = await makeRig();
     try {
-      const { c } = r.conn({ sessionAuthed: true });
+      const { c } = r.conn({ sessionAuthed: true, sessionDigest: okDigest });
       await c.say({ t: "hello", protocolVersion: 1 });
       expect(c.frames().some((f) => f.t === "welcome")).toBe(true);
       expect(r.audits.some((l) => l.includes("hello-auth") || l.includes("welcome"))).toBe(false); // 无新增敏感审计
@@ -215,7 +217,7 @@ describe("ws-gateway N4-v2（v1.1）：登录会话 cookie 免令牌通道", () 
   it("S2 sessionAuthed 连接：呈错令牌→仍 4401（不静默降级 cookie 通道）", async () => {
     const r = await makeRig();
     try {
-      const { c } = r.conn({ sessionAuthed: true });
+      const { c } = r.conn({ sessionAuthed: true, sessionDigest: okDigest });
       await c.say({ t: "hello", protocolVersion: 1, token: "bad" });
       expect(c.frames().some((f) => f.code === 4401)).toBe(true);
       expect(lastClose(c)?.[0]).toBe(1008);
@@ -233,6 +235,61 @@ describe("ws-gateway N4-v2（v1.1）：登录会话 cookie 免令牌通道", () 
       const { c: c2 } = r.conn();
       await c2.say({ t: "hello", protocolVersion: 1, token: "tok-ok" });
       expect(c2.frames().some((f) => f.t === "welcome")).toBe(true);
+    } finally {
+      await r.dispose();
+    }
+  });
+  it("S4 r1-B2 竞态闭合：升级面身份在轮换后失活→hello 复核拒 4401（upgrade→reload→hello 窗口闭合）", async () => {
+    let tokens = ["tok-old", "tok-ok"];
+    const readFile = async (): Promise<Buffer> => Buffer.from(JSON.stringify({ version: 1, tokens }));
+    const authority = await TokenAuthority.fromFile("/virtual/tokens.json", { readFile });
+    const r = await makeRig({ tokens: authority });
+    try {
+      const staleDigest = createHash("sha256").update("tok-old", "utf8").digest("hex");
+      const { c } = r.conn({ sessionAuthed: true, sessionDigest: staleDigest }); // 升级面验过（当时 tok-old 有效）
+      tokens = ["tok-ok"]; // 轮换：tok-old 被撤
+      await authority.reload(); // 触发 reload（不关连接——未 hello）
+      await c.say({ t: "hello", protocolVersion: 1 }); // hello 复核身份→失活→拒
+      expect(c.frames().some((f) => f.code === 4401)).toBe(true);
+      expect(r.audits.some((l) => l.includes("hello-session-missing"))).toBe(true);
+    } finally {
+      await r.dispose();
+    }
+  });
+  it("S5 r1-B2 撤销贯通：cookie 通道认证后轮换→applyTokenReload 关闭该连接（4401+close 1008）", async () => {
+    let tokens = ["tok-old", "tok-ok"];
+    const readFile = async (): Promise<Buffer> => Buffer.from(JSON.stringify({ version: 1, tokens }));
+    const authority = await TokenAuthority.fromFile("/virtual/tokens.json", { readFile });
+    const r = await makeRig({ tokens: authority });
+    try {
+      const oldDigest = createHash("sha256").update("tok-old", "utf8").digest("hex");
+      const { c } = r.conn({ sessionAuthed: true, sessionDigest: oldDigest });
+      await c.say({ t: "hello", protocolVersion: 1 }); // 认证时 tok-old 仍有效→welcome
+      expect(c.frames().some((f) => f.t === "welcome")).toBe(true);
+      tokens = ["tok-ok"];
+      await r.gw.applyTokenReload();
+      await until(() => c.closes.length > 0 || c.frames().some((f) => f.code === 4401), 1000);
+      expect(c.frames().some((f) => f.code === 4401)).toBe(true); // 旧：tokenDigest="session-cookie" 永不入撤销集→不关
+      expect(lastClose(c)?.[0]).toBe(1008);
+    } finally {
+      await r.dispose();
+    }
+  });
+  it("S6 r1-B2 不误杀：未撤销令牌的 cookie 连接在轮换后存活", async () => {
+    let tokens = ["tok-old", "tok-ok"];
+    const readFile = async (): Promise<Buffer> => Buffer.from(JSON.stringify({ version: 1, tokens }));
+    const authority = await TokenAuthority.fromFile("/virtual/tokens.json", { readFile });
+    const r = await makeRig({ tokens: authority });
+    try {
+      const keepDigest = createHash("sha256").update("tok-ok", "utf8").digest("hex");
+      const { c } = r.conn({ sessionAuthed: true, sessionDigest: keepDigest });
+      await c.say({ t: "hello", protocolVersion: 1 });
+      expect(c.frames().some((f) => f.t === "welcome")).toBe(true);
+      tokens = ["tok-ok"]; // 只撤 tok-old
+      await r.gw.applyTokenReload();
+      await new Promise((res) => setTimeout(res, 50));
+      expect(c.closes.length).toBe(0); // 存活（不被误杀）
+      expect(c.frames().some((f) => f.code === 4401)).toBe(false);
     } finally {
       await r.dispose();
     }

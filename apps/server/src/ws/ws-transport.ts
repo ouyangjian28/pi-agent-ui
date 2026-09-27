@@ -49,7 +49,8 @@ export interface WsTransportPort {
 }
 
 /** 安全元数据（真请求派生）：origin 精确白名单输入；loopback=有效客户端地址判定；tls=有效协议判定（可信代理下按转发头）；
- * sessionAuthed=N4-v2：升级请求携带有效登录会话 cookie（composition 注入校验器；无注入恒 false）。 */
+ * sessionAuthed=N4-v2：升级请求携带有效登录会话 cookie（composition 注入校验器；无注入恒 false）；
+ * sessionDigest=r1-B2：被认证身份（token 摘要 hex）——hello 复核+轮换撤销链复用（不存 sid/token 原文）。 */
 export interface TransportConnMeta {
   readonly origin: string | null; // null=缺失/多值/非法（upgrade 前即拒）
   readonly loopback: boolean;
@@ -58,6 +59,7 @@ export interface TransportConnMeta {
   readonly remoteAddress: string; // socket 对端（代理审计分立）
   readonly proxied: boolean;
   readonly sessionAuthed: boolean; // 登录会话 cookie 有效（WS hello 免令牌通道）
+  readonly sessionDigest: string | null; // B2：会话身份（token 摘要 hex；无效/歧义/未注入=null）
 }
 
 export interface WsServerAdapterOpts {
@@ -72,9 +74,9 @@ export interface WsServerAdapterOpts {
   readonly host?: string;
   /** 可信代理精确来源（IP 列表）；非空才采信 X-Forwarded-For/Proto（默认 []=不采信任何转发头）。 */
   readonly trustedProxies?: readonly string[];
-  /** N4-v2：登录会话 cookie 校验器（注入后升级请求携带有效 sid→meta.sessionAuthed=true，
-   * WS hello 走免令牌通道；未注入=恒 false，令牌通道不变）。 */
-  readonly sessionCookie?: { readonly name: string; readonly validate: (sid: string | null) => boolean };
+  /** N4-v2：登录会话 cookie 校验器（注入后升级请求携带有效 sid→meta.sessionAuthed=true+sessionDigest=身份，
+   * WS hello 走免令牌通道；未注入=恒 null，令牌通道不变）。r1-B2：validate 返回被认证身份（token 摘要 hex）或 null。 */
+  readonly sessionCookie?: { readonly name: string; readonly validate: (sid: string | null) => string | null };
   readonly closeHandshakeMs?: number; // close 握手截止（默认 5000；超时 terminate；同时作为 ws closeTimeout）
   readonly disposeWaitMs?: number; // dispose 存量收口等待（默认 5000）
   readonly audit?: (line: string) => void;
@@ -105,14 +107,15 @@ function byteTruncate(text: string, maxBytes: number): string {
 }
 
 /** 从真实请求派生安全元数据（§IV.B：Origin/远端地址/TLS 都来自请求事实；代理头仅在可信来源时生效）。 */
-export function deriveConnMeta(req: IncomingMessage, socket: Duplex, trustedProxies: readonly string[] = [], sessionAuthed: boolean = false): TransportConnMeta {
+export function deriveConnMeta(req: IncomingMessage, socket: Duplex, trustedProxies: readonly string[] = [], sessionDigest: string | null = null): TransportConnMeta {
   const rawOrigin = headerSingle(req.headers.origin);
   const origin = rawOrigin !== null && rawOrigin.toLowerCase() !== "null" ? rawOrigin : null;
   const remote = (socket as Socket).remoteAddress ?? "unknown";
   const sockTls = socket instanceof TLSSocket && socket.encrypted === true;
   const trusted = trustedProxies.length > 0 && trustedProxies.includes(remote);
+  const sessionAuthed = sessionDigest !== null;
   if (!trusted) {
-    return { origin, loopback: isLoopbackIp(remote), tls: sockTls, clientIp: remote, remoteAddress: remote, proxied: false, sessionAuthed };
+    return { origin, loopback: isLoopbackIp(remote), tls: sockTls, clientIp: remote, remoteAddress: remote, proxied: false, sessionAuthed, sessionDigest };
   }
   // 可信代理：XFF 左端=有效客户端；XFP 决定有效协议（回程 TLS 与外部协议分立：proxied=true 时 tls=XFP 事实，头缺失保守 false 不回退 socket TLS）
   // 部署约束（契约 §5.5 代理头信任边界）：可信代理必须在转发时覆盖/清洗 XFF/XFP（用户可控追加链不得当身份）；多级代理逐跳配置信任边界
@@ -120,15 +123,15 @@ export function deriveConnMeta(req: IncomingMessage, socket: Duplex, trustedProx
   const clientIp = xff !== null ? (xff.split(",")[0] ?? "").trim() : remote;
   const effectiveIp = clientIp.length > 0 ? clientIp : remote;
   const xfp = headerSingle(req.headers["x-forwarded-proto"]);
-  return { origin, loopback: isLoopbackIp(effectiveIp), tls: xfp?.toLowerCase() === "https", clientIp: effectiveIp, remoteAddress: remote, proxied: true, sessionAuthed };
+  return { origin, loopback: isLoopbackIp(effectiveIp), tls: xfp?.toLowerCase() === "https", clientIp: effectiveIp, remoteAddress: remote, proxied: true, sessionAuthed, sessionDigest };
 }
 
 /** 3b-2：传输元数据→网关连接元数据（clientIp 真接线——R6 per-IP 限流键不退 "unknown"）。
  * 供组装层（3b-3）在 onConnection 里调用；这是传输层与网关层之间的唯一映射点。 */
 export function gatewayMetaFrom(meta: TransportConnMeta): ConnMeta {
   return meta.origin !== null
-    ? { origin: meta.origin, loopback: meta.loopback, tls: meta.tls, clientIp: meta.clientIp, sessionAuthed: meta.sessionAuthed }
-    : { loopback: meta.loopback, tls: meta.tls, clientIp: meta.clientIp, sessionAuthed: meta.sessionAuthed };
+    ? { origin: meta.origin, loopback: meta.loopback, tls: meta.tls, clientIp: meta.clientIp, sessionAuthed: meta.sessionAuthed, sessionDigest: meta.sessionDigest }
+    : { loopback: meta.loopback, tls: meta.tls, clientIp: meta.clientIp, sessionAuthed: meta.sessionAuthed, sessionDigest: meta.sessionDigest };
 }
 
 /** 单连接适配：ws.WebSocket → WsConnectionPort（生命周期错误吸收；释放恰一次）。 */
@@ -403,10 +406,21 @@ export class WsServerAdapter implements WsTransportPort {
       this.audit(`ws-transport upgrade-socket-error name=${err.name} remote=${socketRef.remoteAddress ?? "unknown"}`);
     });
     if (this.disposed) { this.rejectHttp(socket, 503, "shutting-down"); return; }
-    const meta = deriveConnMeta(req, socket, this.trustedProxies,
-      this.opts.sessionCookie !== undefined
-        ? this.opts.sessionCookie.validate(parseSessionCookie(req.headers.cookie, this.opts.sessionCookie.name))
-        : false);
+    // r1-B3：原始 Cookie 头计数——Node 会把多条 Cookie 头合并为单字符串，headers 面看不出重复；
+    // 歧义（多头）一律无会话（fail-closed）+审计。r1-B2：validate 返回身份（token 摘要 hex）供 hello 复核+撤销链。
+    let sessionDigest: string | null = null;
+    if (this.opts.sessionCookie !== undefined) {
+      let cookieHeaderCount = 0;
+      for (let i = 0; i + 1 < req.rawHeaders.length; i += 2) {
+        if (req.rawHeaders[i]!.toLowerCase() === "cookie") cookieHeaderCount += 1;
+      }
+      const sid = cookieHeaderCount === 1 ? parseSessionCookie(req.headers.cookie, this.opts.sessionCookie.name) : null;
+      sessionDigest = cookieHeaderCount > 1 ? null : (sid !== null ? this.opts.sessionCookie.validate(sid) : null);
+      if (cookieHeaderCount > 1) {
+        this.audit(`upgrade-cookie-ambiguous count=${cookieHeaderCount} remote=${socketRef.remoteAddress ?? "unknown"}`);
+      }
+    }
+    const meta = deriveConnMeta(req, socket, this.trustedProxies, sessionDigest);
     // upgrade 前安全门（§IV.B）：拒绝=HTTP 403，无 WS close 无应用帧
     if (meta.origin === null || !this.originSnapshot.includes(meta.origin)) {
       this.audit(`upgrade-rejected origin=${meta.origin ?? "<missing>"} remote=${meta.remoteAddress} clientIp=${meta.clientIp} rule=origin`);

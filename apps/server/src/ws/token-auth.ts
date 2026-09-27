@@ -101,9 +101,17 @@ export class TokenAuthority {
     return false;
   }
 
-  /** N4-v2 登录面：当前已知 token 摘要集（只读快照引用；轮换后下次调用自动生效——登录 sid 与升级面校验同基）。 */
+  /** r1-B2：摘要身份复核（hello 会话通道用）——呈递 token 摘要 hex 是否仍在当前集合。 */
+  hasDigestHex(hex: string): boolean {
+    if (!/^[0-9a-f]{64}$/.test(hex)) return false; // 形态门先行
+    const d = Buffer.from(hex, "hex");
+    for (const b of this.digestBufs) if (timingSafeEqual(d, b)) return true;
+    return false;
+  }
+
+  /** N4-v2 登录面：当前已知 token 摘要集。r1-C1：返回副本（不暴露内部可变 Buffer）。 */
   currentDigests(): readonly Buffer[] {
-    return this.digestBufs;
+    return this.digestBufs.map((b) => Buffer.from(b));
   }
 
   /** 运行期热轮换：失败沿用旧基准（审计，无秘密泄漏）；成功返回 revoked 供连接撤销。 */

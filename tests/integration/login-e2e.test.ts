@@ -19,7 +19,7 @@ interface Rig {
   dispose(): Promise<void>;
 }
 
-async function makeRig(): Promise<Rig> {
+async function makeRig(over: { trustedProxies?: string[] } = {}): Promise<Rig> {
   const d = await mkdtemp(join(tmpdir(), "login-e2e-"));
   const jr = join(d, "journals");
   const staticDir = join(d, "web");
@@ -39,6 +39,7 @@ async function makeRig(): Promise<Rig> {
     port: 47_879, // staticDir 模式须固定 port（同源 origin 预知）
     staticDir,
     tokenPollMs: 0,
+    ...(over.trustedProxies !== undefined ? { trustedProxies: over.trustedProxies } : {}),
     audit: (l) => { audits.push(l); },
   });
   const base = `http://127.0.0.1:${srv.port}`;
@@ -122,7 +123,7 @@ describe("N4-v2 登录面 E2E（真 HTTP+真 WS）", () => {
     }
   });
 
-  it("E3 登出：logout 后旧 sid 升级面失效（sid 本身未变，但通道语义以服务端登出为准——首版：logout 只清浏览器侧）", async () => {
+  it("E3 登出路由：200+Max-Age=0 清 cookie（r1-C4 改题：仅断言路由行为；服务端撤销表=披露的后续增强）", async () => {
     // 注：首版 logout=清 cookie（浏览器侧）；sid 有效性由 per-boot secret+令牌轮换统治。
     // 服务端会话撤销表=后续增强（记 TEST-MAP）。此例验证 logout 路由本身：200+Max-Age=0。
     const r = await makeRig();
@@ -135,14 +136,59 @@ describe("N4-v2 登录面 E2E（真 HTTP+真 WS）", () => {
     }
   });
 
-  it("E4 静态面共存：GET / 返回静态文件；GET /login 不接管（404/静态兜底）", async () => {
+  it("E4 静态面共存：GET / 返回静态主页 200；GET /login 不接管（404/静态兜底）", async () => {
     const r = await makeRig();
     try {
       const home = await fetch(r.base + "/", { headers: { Origin: "http://localhost:4173" } });
-      expect([200, 404]).toContain(home.status); // 目录存在与否皆可——只验证不炸
+      expect(home.status).toBe(200); // index.html 已建（r1-C4：标题不超断言）
+      expect(await home.text()).toContain("ok");
       const gl = await fetch(r.base + "/login", { headers: { Origin: "http://localhost:4173" } });
       expect(gl.status).toBe(404); // GET /login 非登录面（静态兜底 404）
       await tick();
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("E5 r1-B1 组合根真例：可信代理（127.0.0.1）+XFF 外部+XFP=https → 200+Secure（有效 TLS 派生）", async () => {
+    const r = await makeRig({ trustedProxies: ["127.0.0.1"] });
+    try {
+      const res = await fetch(`${r.base}/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: "http://localhost:4173", "X-Forwarded-For": "203.0.113.9", "X-Forwarded-Proto": "https" },
+        body: JSON.stringify({ token: TOKEN }),
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("set-cookie") ?? "").toContain("Secure");
+      expect(r.audits.join("\n")).toContain("clientIp=203.0.113.9"); // 有效 IP 派生真接线
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("E6 r1-B5 组合根真例：异源 login→403；text/plain→415；异源 logout→403", async () => {
+    const r = await makeRig();
+    try {
+      const cross = await fetch(`${r.base}/login`, { method: "POST", headers: { "Content-Type": "application/json", Origin: "https://evil.invalid" }, body: JSON.stringify({ token: TOKEN }) });
+      expect(cross.status).toBe(403);
+      const plain = await fetch(`${r.base}/login`, { method: "POST", headers: { "Content-Type": "text/plain", Origin: "http://localhost:4173" }, body: JSON.stringify({ token: TOKEN }) });
+      expect(plain.status).toBe(415);
+      const crossOut = await fetch(`${r.base}/logout`, { method: "POST", headers: { Origin: "https://evil.invalid" } });
+      expect(crossOut.status).toBe(403);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("E7 r1-B3 组合根真例：单头内同名重复 cookie→会话无效→免令牌 hello 4401；真 sid+无关 cookie 仍 welcome", async () => {
+    const r = await makeRig();
+    try {
+      const login = await fetch(`${r.base}/login`, { method: "POST", headers: { "Content-Type": "application/json", Origin: "http://localhost:4173" }, body: JSON.stringify({ token: TOKEN }) });
+      const sid = (login.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+      const dup = await wsHelloP(r.base, `${sid}; ${sid}`, { t: "hello", protocolVersion: 1 }); // 同名同值重复=歧义
+      expect(dup.frames.some((f) => f.code === 4401)).toBe(true);
+      const ok = await wsHelloP(r.base, `other=1; ${sid}`, { t: "hello", protocolVersion: 1 }); // 无关 cookie+恰一次
+      expect(ok.frames.some((f) => f.t === "welcome")).toBe(true);
     } finally {
       await r.dispose();
     }

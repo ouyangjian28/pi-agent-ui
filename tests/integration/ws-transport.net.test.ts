@@ -18,6 +18,7 @@ import { WsServerAdapter, deriveConnMeta, type WsConnectionPort } from "../../ap
 import { WsGateway } from "../../apps/server/src/ws/ws-gateway.js";
 import { TokenAuthority } from "../../apps/server/src/ws/token-auth.js";
 import { LIMITS } from "@pi-agent-ui/protocol";
+import { createHash } from "node:crypto";
 
 const ORIGIN = "http://localhost:3000";
 const TOKEN = "test-token-a";
@@ -44,7 +45,7 @@ const harnesses: Array<() => Promise<void>> = [];
 const tmpDirs: string[] = [];
 
 /** 组装真适配器+真网关（默认 ws://127.0.0.1 随机端口）。 */
-async function makeHarness(opts?: { allowedOrigins?: string[]; token?: string; requireTlsOffLoopback?: boolean; trustedProxies?: string[]; authRate?: { limit?: number; windowMs?: number; baseBlockMs?: number; maxBlockMs?: number }; closeHandshakeMs?: number; disposeWaitMs?: number }): Promise<Harness> {
+async function makeHarness(opts?: { allowedOrigins?: string[]; token?: string; requireTlsOffLoopback?: boolean; trustedProxies?: string[]; authRate?: { limit?: number; windowMs?: number; baseBlockMs?: number; maxBlockMs?: number }; closeHandshakeMs?: number; disposeWaitMs?: number; sessionSid?: string; sessionDigest?: string }): Promise<Harness> {
   const audits: string[] = [];
   const tokens = TokenAuthority.fromTokens([opts?.token ?? TOKEN]);
   const gateway = new WsGateway({
@@ -61,6 +62,7 @@ async function makeHarness(opts?: { allowedOrigins?: string[]; token?: string; r
     trustedProxies: opts?.trustedProxies ?? [],
     closeHandshakeMs: opts?.closeHandshakeMs,
     disposeWaitMs: opts?.disposeWaitMs,
+    ...(opts?.sessionSid !== undefined ? { sessionCookie: { name: "pi-agent-ui-session", validate: (sid: string | null) => sid === opts.sessionSid ? (opts.sessionDigest as string) : null } } : {}),
     audit: (l) => audits.push(l),
   });
   adapter.onConnection((conn, meta) => {
@@ -69,7 +71,7 @@ async function makeHarness(opts?: { allowedOrigins?: string[]; token?: string; r
       onClose: (cb) => conn.onClose(cb),
       onPong: (cb) => conn.onPong(cb),
       ping: () => conn.ping(),
-    }, { origin: meta.origin ?? undefined, loopback: meta.loopback, tls: meta.tls, clientIp: meta.clientIp });
+    }, { origin: meta.origin ?? undefined, loopback: meta.loopback, tls: meta.tls, clientIp: meta.clientIp, sessionAuthed: meta.sessionAuthed, sessionDigest: meta.sessionDigest });
   });
   const { port } = await adapter.listen(0, "127.0.0.1");
   const dispose = async (): Promise<void> => {
@@ -138,14 +140,14 @@ async function until(cond: () => boolean, ms = 5_000): Promise<void> {
 }
 
 /** 裸 101 握手：读响应头（证明服务端对压缩提议的协商结果；R05/3b-1）。 */
-function raw101Headers(port: number, origin: string, headers: Record<string, string> = {}): Promise<string> {
+function raw101Headers(port: number, origin: string, headers: Record<string, string> = {}, extraRawLines: string[] = []): Promise<string> {
   return new Promise((resolve, reject) => {
     const s = new Socket();
     const to = setTimeout(() => { s.destroy(); reject(new Error("raw101 超时")); }, 5_000);
     to.unref?.();
     s.connect(port, "127.0.0.1", () => {
       const lines = ["GET /ws HTTP/1.1", `Host: 127.0.0.1:${port}`, "Upgrade: websocket", "Connection: Upgrade",
-        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Version: 13", `Origin: ${origin}`, ...Object.entries(headers).map(([k, v]) => `${k}: ${v}`)];
+        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Version: 13", `Origin: ${origin}`, ...Object.entries(headers).map(([k, v]) => `${k}: ${v}`), ...extraRawLines];
       s.write(lines.join("\r\n") + "\r\n\r\n");
     });
     s.once("error", (e) => { clearTimeout(to); reject(e); });
@@ -735,5 +737,50 @@ describe("3b-1 真网络：⑦关闭竞态+无句柄悬挂", () => {
     await c.opened;
     c.ws.close();
     await c.closed;
+  });
+});
+
+describe("r1-B3 真网络：原始 Cookie 头歧义拒", () => {
+  const SID = "3f".repeat(32);
+  const DIGEST = createHash("sha256").update(TOKEN, "utf8").digest("hex"); // 会话身份=harness 令牌集内真摘要
+  it("两条原始 Cookie 头（同名）→ upgrade 仍 101 但会话作废：审计 upgrade-cookie-ambiguous+hello 4401（失败快照）", async () => {
+    const h = await makeHarness({ sessionSid: SID, sessionDigest: DIGEST });
+    try {
+      const head = await raw101Headers(h.port, ORIGIN, {}, [`Cookie: pi-agent-ui-session=${SID}`, "Cookie: pi-agent-ui-session=evil-dup"]);
+      expect(head).toContain("101"); // 升级面本身不因 cookie 歧义拒（会话作废即可）
+      await until(() => h.audits.some((l) => l.includes("upgrade-cookie-ambiguous")), 2000);
+      expect(h.audits.some((l) => l.includes("upgrade-cookie-ambiguous") && l.includes("count=2"))).toBe(true);
+    } finally {
+      await h.dispose();
+    }
+  });
+  it("单头同名重复（含有效值）→ 会话作废（parseSessionCookie 歧义拒）", async () => {
+    const h = await makeHarness({ sessionSid: SID, sessionDigest: DIGEST });
+    try {
+      const head = await raw101Headers(h.port, ORIGIN, { Cookie: `pi-agent-ui-session=${SID}; pi-agent-ui-session=${SID}` });
+      expect(head).toContain("101");
+      // 歧义=无会话：走真 WS 客户端 hello 验证 4401
+      const c = connect(h.url(), { headers: { Origin: ORIGIN, Cookie: `pi-agent-ui-session=${SID}; pi-agent-ui-session=${SID}` } });
+      await c.opened;
+      c.ws.send(JSON.stringify({ t: "hello", protocolVersion: 1 }));
+      await until(() => c.frames.length > 0, 3000);
+      expect((c.frames[0] as { code?: number }).code).toBe(4401);
+      c.ws.close();
+    } finally {
+      await h.dispose();
+    }
+  });
+  it("恰一次有效 sid → 会话通道 welcome（正例不误杀）", async () => {
+    const h = await makeHarness({ sessionSid: SID, sessionDigest: DIGEST });
+    try {
+      const c = connect(h.url(), { headers: { Origin: ORIGIN, Cookie: `other=1; pi-agent-ui-session=${SID}` } });
+      await c.opened;
+      c.ws.send(JSON.stringify({ t: "hello", protocolVersion: 1 }));
+      await until(() => c.frames.length > 0, 3000);
+      expect((c.frames[0] as { t?: string }).t).toBe("welcome");
+      c.ws.close();
+    } finally {
+      await h.dispose();
+    }
   });
 });
