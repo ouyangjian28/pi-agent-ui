@@ -713,3 +713,10 @@
 - **4402 映射（B11-5）**：ws-gateway file-unreadable→{t:error,code:4402,message:恢复读取失败,retryable:true,requestId}；审计带逻辑 file/detail 不带绝对 path（P12）。T2 改标；I3 真集成同断。
 - 测试面：R1-R19（18→19 it）+T1-T5+I1-I4；变异五连（3b4-fix11.md+patches/3b4-fix11/）：ANCHOR→R11+R12 / SESRECHECK→R19 / SAFEFLAGS→R5+R16 / FACTORY→R18 / 4402→T2，退出码=1（fix13 勘正披露口径：当时的管道捕获曾混入 grep 码，事后 ANCHOR 裸跑实证 VITEST_EXIT=1；fix14 勘正：仅 ANCHOR 裸码实证，其余四例=约定推断非逐例实录）+首败断言+还原 sha 27632e0d…（fix13 勘正：字段名实为 sha，原记 sha256）。
 - 终态：46 files **861 passed+7 skipped**（JSON=tests/fixtures/run-records/3b4-fix11-vitest.json）+tsc0+lint0（fix14 勘正：本轮 tsc/lint 为摘要口径无原始输出附件，fix13 已实证管线吞码一例；fix14b 起一律裸跑+原始输出入 run-records）；基线提交 132ee3f。
+
+## 3c-4 B1 后端批（K3-B1 信封修正：流终局帧结构化身份+cancel-then-notify；2026-10-04）
+- **信封规则**（契约档 §3.6「错误帧路由语义（K3-B1 修订）」=权威）：流终局通知帧——4409 stream-replaced（同连接退旧 ws-gateway.ts:650/observe-missed:697/磁盘换流 retireEnginesForFile:814）、4431 订阅积压超限（subscription-engine close emitError）、4402 流终局容量出口（closeSubscriptionsFor:926）——统一带 `subscriptionId`=所停旧流+`requestId` 恒空串；请求级错误照旧只带 requestId。旧实现两病灶：同 file 退旧误携新 requestId（前端把流终局当新请求失败→合法新 snapshot 被丢，K3 P1）；磁盘换流 id 只埋 message 文本不可靠解析。
+- **cancel-then-notify（次序不变量）**：connection-queue.cancelBySubscription 对队列项做 `"subscriptionId":"<id>"` 文本标记扫描撤帧——终局帧自带该标记→「先 enqueue 后 cancel」会把刚入队的终局帧一并撤走（自杀，C16 实证 4409 消失）。四处发帧点统一先 close→cancel→再 enqueue 终局帧；同一同步 tick 无 flush，先后对客户端不可见。
+- 测试面：C16 补结构化身份断言（4409: requestId==""+subscriptionId==subId1）；B4 补流终局型 4402 断言（subscriptionId==snap.subscriptionId+requestId==""）；引擎⑳补 4431 断言（subscriptionId==eng.subscriptionId+requestId==""）。
+- 变异三连（手动 python 替换+git checkout 还原，树净核验）：MB1 引擎终局帧去 subscriptionId→引擎⑳杀（断言 382 失败）；MB2 退旧帧回误携新 requestId+无身份→C16 杀；MB3 退旧恢复先发后撤自杀序→C16+B3a 双杀（B3a 同 file 并发双 init 同面）。
+- 终态：1010 passed+11 skipped（55 文件）+tsc 0+eslint 0；基线/交付提交 df0e576（含契约档增补）。
