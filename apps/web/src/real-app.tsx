@@ -5,6 +5,7 @@
 import React, { useEffect, useState, useSyncExternalStore } from "react";
 import { SessionDetail } from "./components/session-detail";
 import { SessionList } from "./components/session-list";
+import { ThemeToggle } from "./components/theme-toggle";
 import {
   TokenGate,
   clearStoredToken,
@@ -142,6 +143,7 @@ function ConnectedApp({
         <strong>
           <span className="brand">π</span> pi 工作台
         </strong>
+        <ThemeToggle />
       </header>
       <div className="connbar" role="status" aria-live="polite">
         <span>列表：{CONN_LABEL[wsSnap.state]}</span>

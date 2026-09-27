@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { ThemeToggle } from "./components/theme-toggle";
 import {
   attentionLabels,
   fixtureAdapter,
@@ -128,6 +129,7 @@ export function App({
             <option value="offline">连接异常</option>
           </select>
         </label>
+        <ThemeToggle />
       </header>
       {state === "offline" && (
         <div className="connection" role="alert">
