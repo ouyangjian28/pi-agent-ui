@@ -1,0 +1,16 @@
+diff --git a/apps/server/src/runtime/recovery-evidence-source.ts b/apps/server/src/runtime/recovery-evidence-source.ts
+index f3619fe..274bad3 100644
+--- a/apps/server/src/runtime/recovery-evidence-source.ts
++++ b/apps/server/src/runtime/recovery-evidence-source.ts
+@@ -158,9 +158,9 @@ export function createRecoveryEvidenceProvider(
+     throw new Error(`maxCombinedBytes 非法（须有限正整数≤1GiB）：${String(maxBytes)}——拒绝创建 provider（B11-4 纵深）`);
+   }
+   if (!isAbsolute(opts.evidenceDir)) throw new Error("evidenceDir 非法（须绝对路径）——拒绝创建 provider");
+-  if (opts.roots.length === 0) throw new Error("roots 非法（不得为空）——拒绝创建 provider");
++  if (false && opts.roots.length === 0) throw new Error("roots 非法（不得为空）——拒绝创建 provider"); // MUTATION
+   if (!opts.roots.every(isAbsolute)) throw new Error("roots 非法（须绝对路径）——拒绝创建 provider");
+-  if (opts.sessionRoots !== undefined && !opts.sessionRoots.every(isAbsolute)) {
++  if (false && opts.sessionRoots !== undefined && !opts.sessionRoots.every(isAbsolute)) { // MUTATION
+     throw new Error("sessionRoots 非法（须绝对路径）——拒绝创建 provider");
+   }
+   const sessionIdFor = opts.sessionIdFor ?? ((f: string) => f.replace(/\.jsonl$/, ""));

@@ -577,6 +577,35 @@
 - 变异（3b4.md+patches/3b4/）：M-3B4-BUDGET（stat 层删→R2 审计断言杀；结果断言不杀=读窗纵深兜底，独占面=早拒审计行）/M-3B4-GREW（复核删→R4 注入杀）/M-3B4-ABORT（读后取消删→R10 读中取消杀；R6 读前取消只命中入口检查，初跑 SURVIVED→补 R10 转杀）。全部真实 diff+退出码+首败断言+还原哈希同值。
 - 终态：46 files **851 passed+7 skipped**（JSON=tests/fixtures/run-records/3b4-vitest.json）+tsc0（根）+lint0。
 
+## 3b-4 fix12（GPT 第 12 轮三阻断修复：冷启动权威门 v3；2026-10-03）
+
+- 源码面（recovery-evidence-source.ts v3 / composition.ts / ws-gateway.ts 注释勘正）：
+  - B12-1/Q02/Q03：锚点缺失≠首捕授权。seen.json 登记仓（{version:1,files:[]}，损坏/不可读=
+    read-failed fail-closed）；已登记 file 锚丢失→concurrent-modification（bless 不可越，审计
+    recovery-evidence-lost）；未登记默认 no-evidence-snapshot（审计 recovery-no-first-authority）；
+    仅宿主 trustFirstCapture（composition 配置 trustFirstRecoveryCapture，默认关）建首锚。
+  - B12-2/Q05：session 首开 missing 保留映射（s1=0），读后二开复核新建尺寸；仍 missing=journal-only。
+  - Q17：零长锚也验 sha==H(empty)（去 len===0 直通特判，64×0 伪锚必拒）。
+  - Q20：toUnreadable 非 SafeOpenError→detail=errno code/构造名（不透传 message，防绝对路径入审计）。
+  - Q14：serialize 链尾所有权条件清理（Map 不永久留键）。
+  - 工厂补面：roots 空/相对 sessionRoots 拒（纵深于 composition 三态矩阵之外）。
+  - readBounded 接缝化：BoundedReadHandle 结构接口（内层单测可注入）。
+- 测试面（基线 886=879 passed+7 skipped，fix11 基线 868 之上 +18）：
+  - R20-R27（recovery-evidence-source.test.ts）：默认拒/bless 正例+锚形状+seen/锚丢失不可越/
+    missing→新建复核（sessionOpens==2）/持续 missing=journal-only/零长伪锚+合法空首捕/工厂补面
+    （含 1GiB 放 1GiB+1 拒）/detail 脱敏。
+  - S1-S5（safe-open.test.ts 新档）：readBounded 分次循环/EOF/读中硬限/恰等上限/异常归类。
+  - T5b+T6（ws-gateway.test.ts）：迟到 resolve+reject 双面零帧+信号量归零；LRU 驱逐实证
+    （9 条驱逐最旧→旧 hash 续页=miss 重调 4409；幸存条目零重调）。
+  - composition.test.ts：maxRecoveryCombinedBytes 三态矩阵（非法五态拒/省略+1GiB+有限值接受）+
+    trustFirstRecoveryCapture boolean 接受。
+  - I5（recovery-real.test.ts）：真实 sessionFor→session 文件计入合计预算（超→oversized
+    session=400；宽→available）。
+  - T2 补锁 message 字面量「恢复读取失败」。
+- 变异八连（patches/3b4-fix12/）：NOAUTHORITY/SEENLOST/MISSINGRECHECK/ZEROLEN/FACTORY2/DETAIL/
+  LRU/BLESSWIRE 全杀（R20/R22/R23+R24/R25/R26/R27/R4b+T6/I1+I4+I5）。
+- run-record：run-records/3b4-fix12-vitest.json（886/879/7/0）。
+
 ## 3b-4 fix11（GPT 第 11 轮五阻断修复：安全读 v2+证据链；2026-10-03）
 - **v2 重构**：recovery-evidence-source.ts 接缝改 openLike（OpenLike=(abs)=>{size,read(maxBytes),close}；默认=safe-open 真路径：openSafeFile=O_NOFOLLOW|O_NONBLOCK+同 fd fstat isFile；readBounded=64KB 流式循环，n===0 EOF 止、累计超限即抛 too-large）——journal+session 双源全走安全打开。旧 statLike/readLike 删除。
 - **证据链 sidecar（B11-2）**：evidenceDir 锚点 <encodeURIComponent(file)>.evidence.json={version:1,file,len,sha256}；纯追加扩展才过（新 raw 前 len 字节 sha 相符+新长≥旧长）；缩/重写→unavailable(concurrent-modification)；锚点损坏→concurrent-modification；锚点不可写→read-failed；同 file 捕获 serialize 串行化；原子 tmp+rename 写穿。跨实例（重启/驱逐）续链。

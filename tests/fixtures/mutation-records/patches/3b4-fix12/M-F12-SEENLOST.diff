@@ -1,0 +1,13 @@
+diff --git a/apps/server/src/runtime/recovery-evidence-source.ts b/apps/server/src/runtime/recovery-evidence-source.ts
+index f3619fe..88d3691 100644
+--- a/apps/server/src/runtime/recovery-evidence-source.ts
++++ b/apps/server/src/runtime/recovery-evidence-source.ts
+@@ -317,7 +317,7 @@ export function createRecoveryEvidenceProvider(
+             audit(`recovery-evidence-store-failed file=${file} detail=seen-load`);
+             return unavailable("read-failed");
+           }
+-          if (seen.has(file)) {
++          if (false && seen.has(file)) { // MUTATION: 证据丢失拒（守卫移除）
+             audit(`recovery-evidence-lost file=${file}`);
+             return unavailable("concurrent-modification"); // Q03：已初始化仓丢条目≠可信新生
+           }

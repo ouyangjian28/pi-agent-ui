@@ -1,0 +1,15 @@
+diff --git a/apps/server/src/runtime/recovery-evidence-source.ts b/apps/server/src/runtime/recovery-evidence-source.ts
+index f3619fe..f9df4a2 100644
+--- a/apps/server/src/runtime/recovery-evidence-source.ts
++++ b/apps/server/src/runtime/recovery-evidence-source.ts
+@@ -321,8 +321,8 @@ export function createRecoveryEvidenceProvider(
+             audit(`recovery-evidence-lost file=${file}`);
+             return unavailable("concurrent-modification"); // Q03：已初始化仓丢条目≠可信新生
+           }
+-          let trusted = false;
+-          if (opts.trustFirstCapture !== undefined) {
++          let trusted = true; // MUTATION: 默认授权（守卫移除）
++          if (false && opts.trustFirstCapture !== undefined) {
+             try {
+               trusted = await opts.trustFirstCapture(file);
+             } catch {

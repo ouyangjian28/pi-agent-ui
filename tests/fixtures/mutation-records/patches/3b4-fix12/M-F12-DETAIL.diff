@@ -1,0 +1,16 @@
+diff --git a/apps/server/src/runtime/recovery-evidence-source.ts b/apps/server/src/runtime/recovery-evidence-source.ts
+index f3619fe..f5b5d94 100644
+--- a/apps/server/src/runtime/recovery-evidence-source.ts
++++ b/apps/server/src/runtime/recovery-evidence-source.ts
+@@ -141,9 +141,8 @@ function toUnreadable(file: string, e: unknown): { kind: "file-unreadable"; path
+   if (e instanceof SafeOpenError) return { kind: "file-unreadable", path: file, detail: e.kind };
+   // fix12：非 SafeOpenError 曾透传原始 message（扩展 openLike 抛带绝对路径的 Error 会泄入审计）——
+   // 归受控分类（errno code / 构造名），不透传任意 message（GPT 第12轮 §七）。
+-  const code = typeof (e as { code?: unknown } | null)?.code === "string" ? (e as { code: string }).code : undefined;
+-  const detail = code ?? (e instanceof Error ? e.constructor.name : typeof e);
+-  return { kind: "file-unreadable", path: file, detail };
++  const detail = e instanceof Error ? e.message : String(e); // MUTATION: 透传回退
++  return { kind: "file-unreadable", path: file, detail: detail.slice(0, 120) };
+ }
+ 
+ /**

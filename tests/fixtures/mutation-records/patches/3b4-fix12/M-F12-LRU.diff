@@ -1,0 +1,13 @@
+diff --git a/apps/server/src/ws/ws-gateway.ts b/apps/server/src/ws/ws-gateway.ts
+index bb8eb5b..7b15cbf 100644
+--- a/apps/server/src/ws/ws-gateway.ts
++++ b/apps/server/src/ws/ws-gateway.ts
+@@ -1141,7 +1141,7 @@ export class WsGateway {
+         // B8：首响应冻结——缓存投影（同 hash 续页确定性拼回；≥501 意图跨页不依赖盘面不变）。
+         // R4：无 hash「读当前」也走此 set——覆盖旧缓存上下文（证据已前进的旧投影不再续用）。
+         st.recoveryPages.set(cacheKey, { hash, adapted });
+-        while (st.recoveryPages.size > RECOVERY_PAGE_CACHE_MAX) {
++        while (false && st.recoveryPages.size > RECOVERY_PAGE_CACHE_MAX) { // MUTATION: 驱逐移除
+           const oldest = st.recoveryPages.keys().next().value;
+           if (oldest === undefined) break;
+           st.recoveryPages.delete(oldest);

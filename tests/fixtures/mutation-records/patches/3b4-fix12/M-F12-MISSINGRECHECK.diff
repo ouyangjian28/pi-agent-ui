@@ -1,0 +1,13 @@
+diff --git a/apps/server/src/runtime/recovery-evidence-source.ts b/apps/server/src/runtime/recovery-evidence-source.ts
+index f3619fe..42af974 100644
+--- a/apps/server/src/runtime/recovery-evidence-source.ts
++++ b/apps/server/src/runtime/recovery-evidence-source.ts
+@@ -226,7 +226,7 @@ export function createRecoveryEvidenceProvider(
+             try { s1 = sh.size; } finally { await sh.close().catch(() => {}); }
+           } catch (e) {
+             if (e instanceof SafeOpenError && e.kind === "missing") {
+-              s1 = 0; // B12-2/Q05：保留 sAbs——读后二开复核新建尺寸；仍 missing=journal-only 降级
++              s1 = 0; sAbs = null; // MUTATION: B12-2 复核移除（回退 fix11 形态）
+             }
+             else {
+               audit(`recovery-unreadable file=${file} detail=${e instanceof SafeOpenError ? e.kind : "session-stat-failed"}`);

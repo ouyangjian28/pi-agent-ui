@@ -1,0 +1,13 @@
+diff --git a/apps/server/src/composition.ts b/apps/server/src/composition.ts
+index 1286ff6..14625a2 100644
+--- a/apps/server/src/composition.ts
++++ b/apps/server/src/composition.ts
+@@ -132,7 +132,7 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
+     ...(config.sessionFor !== undefined ? { sessionFor: config.sessionFor } : {}),
+     evidenceDir: recoveryEvidenceDir,
+     ...(config.maxRecoveryCombinedBytes !== undefined ? { maxCombinedBytes: config.maxRecoveryCombinedBytes } : {}),
+-    ...(config.trustFirstRecoveryCapture === true ? { trustFirstCapture: () => true } : {}),
++    ...(false && config.trustFirstRecoveryCapture === true ? { trustFirstCapture: () => true } : {}), // MUTATION: 接线删
+     audit,
+   });
+   const gateway = new WsGateway({
