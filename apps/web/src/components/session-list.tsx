@@ -6,7 +6,16 @@ import React from "react";
 import { useSessions } from "../ws/use-sessions";
 import type { WsClient } from "../ws/ws-client";
 
-export function SessionList({ client }: { client: Pick<WsClient, "subscribe" | "getSnapshot"> }) {
+export function SessionList({
+  client,
+  selectedFile = null,
+  onSelect,
+}: {
+  client: Pick<WsClient, "subscribe" | "getSnapshot">;
+  /** A1d 组合根选择面：提供 onSelect 即把条目渲染为按钮（aria-current 标记选中）；缺省=纯展示（既有行为零改动）。 */
+  selectedFile?: string | null;
+  onSelect?: (file: string) => void;
+}) {
   const view = useSessions(client);
   if (view.status === "loading") {
     return (
@@ -50,17 +59,34 @@ export function SessionList({ client }: { client: Pick<WsClient, "subscribe" | "
   }
   return (
     <ul className="session-list" aria-label="会话列表">
-      {view.sessions.map((session) => (
-        <li key={session.file}>
-          <span className="row-title">
-            {session.title.text}
-            {session.title.truncated ? "…" : ""}
-          </span>
-          <small>
-            {session.file} · {session.entryCount} 条
-          </small>
-        </li>
-      ))}
+      {view.sessions.map((session) => {
+        const title = (
+          <>
+            <span className="row-title">
+              {session.title.text}
+              {session.title.truncated ? "…" : ""}
+            </span>
+            <small>
+              {session.file} · {session.entryCount} 条
+            </small>
+          </>
+        );
+        return (
+          <li key={session.file}>
+            {onSelect ? (
+              <button
+                type="button"
+                aria-current={selectedFile === session.file ? "page" : undefined}
+                onClick={() => onSelect(session.file)}
+              >
+                {title}
+              </button>
+            ) : (
+              title
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }

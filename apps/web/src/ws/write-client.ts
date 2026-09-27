@@ -1,22 +1,31 @@
-// A1c 写面 WS 客户端：hello 握手→welcome 后受理 prompt/stop 发送，按 requestId 关联 write-ack/
-// write-stop-ack 与 error 帧，promise 化返回 outcome DTO。连接面复刻 ws-client.ts 惯例（每面一连接：
-// 会话列表/详情/写三面各持独立连接，服务端网关同连接混受理读写帧——本面不侵入订阅面 socket，订阅面行为零改动）。
-// 红线（复刻 ws-client 两铁律+写面特化）：
-// ①只发 hello/prompt/stop——OutgoingWriteFrame 类型层封闭（WriteClientFrame 仅 prompt/stop 两枝，
-//   其余写类 t 无从构造；服务端未开放写 t 一律 4405）；
-// ②实际消费的帧（welcome/write-ack/write-stop-ack/error 及 outcome DTO 全域）先过文件内私有运行时形状
-//   校验（asXxxFrame 系列）；坏帧=零副作用：不消费在途请求、不改快照，后续合法帧照常受理（在途 promise
-//   只由合法 ack/匹配 error/连接终局三途结算——宁可等待也不被畸形帧强制定局）；
-// ③错误文案受控（writeFaceErrorText 按 code 映射）——远端 error.message 可能回显敏感输入，永不进入
-//   promise 错误与 DOM；本地预校验（file 域/text 非空/text ≤ WRITE_TEXT_MAX_BYTES）零帧成本本地拒绝；
-// ④在途跟踪按（file×kind）：同 file 同 kind 重复=本地拒（不等服务端 4404 在途门）；prompt 与 stop 可并行
+// A1c 写面 WebSocket 客户端（归属整改重写：本文件由 Kimi 亲手重写，语义对照契约
+// docs/ws-ui-contracts-v1.md 写侧段与 K5 修复批（da23cce）逐项保真——重写非返工，
+// 已修复的阻断语义一律不回退）。
+// 职责：独立第三连接（每面一连接：列表/详情/写三面各持一 socket，服务端网关同连接混受理读写帧——
+// 本面不侵入订阅面 socket）。hello 握手→welcome 后受理 prompt/stop 发送，按 requestId 关联
+// write-ack/write-stop-ack/error 帧并把每次请求 promise 化（resolve=outcome DTO / reject=WriteSendError）。
+//
+// 保真清单（重写锚点，对应派单六条）：
+// ①出帧类型层封闭：OutgoingFrame 联合型只含 hello/prompt/stop——未开放的写类 t 在类型层即无从构造
+//   （服务端侧一律 4405）；
+// ②requestId 关联定账：ack/stop-ack/error 只结算 requestId 匹配的在途请求；ack 另做 kind×file 回显
+//   交叉验证（回显不符=畸形关联，零消费）；错配帧（无关联/迟到/已结算）一律零副作用——在途请求只由
+//   合法 ack、匹配 error、连接终局三途结算，宁可等待也不被畸形帧强制定局；
+// ③消费帧先过运行时形状门（parse* 系列，文件内私有纯函数）：welcome/write-ack/write-stop-ack/error
+//   及 outcome DTO 全域校验；坏帧=零副作用（不消费在途、不改快照），后续合法帧照常受理；
+// ④本地预校验零帧成本：file 过 LIMITS.filePattern、text 非空、UTF-8 字节数 ≤ WRITE_TEXT_MAX_BYTES
+//   （64KiB；TextEncoder 真实编码口径——孤立代理项按 U+FFFD 落 3 字节，与线上发送字节数一致）；
+//   同 file 同 kind 在途重复=本地拒（不等服务端 4404 在途门）；prompt 与 stop 同 file 可并行
 //   （「发送后立即停止」合法流，服务端按 requestId 分账）；
-// ⑤连接断开/终局（onclose、close()、连接级 error）时在途 promise 统一 reject（transport/closed 受控文案）；
-// ⑥无自动重试/自动重发：4402 retryable=true 只是服务端的可重试性声明，不授权客户端重发（19d 裁决）；
-// ⑦close()=不可逆停止屏障（任何状态可关、迟到回调零副作用、幂等）；closed=终态，无自动重连；
-// ⑧write-ack 的 file 回显必须与在途请求一致（requestId 唯一定账，file 不符=畸形帧忽略）。
+// ⑤错误文案受控：writeFaceErrorText 按 code 映射本文件文案——远端 error.message 可能回显敏感输入，
+//   永不进 promise 拒绝值与 DOM；4402 retryable=true 只是服务端可重试性声明，不授权自动重发
+//   （19d 裁决）；连接断开/终局（onclose、close()、连接级 error）在途 promise 统一 reject（受控文案）；
+// ⑥close()=不可逆停止屏障：任何状态可关、在途全拒（closed 文案）、迟到回调零副作用、重复调用幂等、
+//   此后 connect() 永久拒绝；closed=终态，无自动重连。
+// 另：socket.send 同步抛错（K5-C2 传输层损坏面）→受控结算：在途表与快照两份账同步清理
+//   （同 file 后续发送不被在途重复门卡死），promise 以受控 transport 错误拒绝。
 
-// 同 ws-client：绕开 barrel 直引自包含 contracts 模块（浏览器安全、零 Node 依赖）。
+// 同仓惯例：绕开 barrel 直引自包含 contracts 模块（浏览器安全、零 Node 依赖）。
 // LIMITS/WRITE_TEXT_MAX_BYTES 为值导入（filePattern/字节上限冻结源，避免本地复制漂移）。
 import { LIMITS, WRITE_TEXT_MAX_BYTES } from "@pi-agent-ui/protocol/src/contracts";
 import type {
@@ -29,15 +38,16 @@ import type {
 } from "@pi-agent-ui/protocol/src/contracts";
 
 /** 本客户端允许发送的帧（握手 hello+写面两帧；其余客户端帧类型层不可达）。 */
-type OutgoingWriteFrame = Extract<ClientFrame, { readonly t: "hello" }> | WriteClientFrame;
+type OutgoingFrame = Extract<ClientFrame, { readonly t: "hello" }> | WriteClientFrame;
 
-/** 连接级五态（同 ws-client）：connecting→authenticating→ready；任一前置态可落 closed/error。 */
+/** 连接级五态（同 ws-client 惯例）：connecting→authenticating→ready；任一前置态可落 closed/error。 */
 export type WriteConnState = "connecting" | "authenticating" | "ready" | "closed" | "error";
 
 /**
- * 受控失败成因（promise reject 的结构化身份；message 恒为受控文案，不含远端自由文本）：
- * not-ready=连接未就绪即发送；local-invalid=本地预校验拒绝（file/text 域）；in-flight=同 file 同 kind 在途重复；
- * server=error 帧按 requestId 匹配（code 携带服务端码）；transport=连接断开/连接级错误；closed=本端 close()。
+ * 受控失败成因（promise 拒绝值的结构化身份；message 恒为受控文案，不含远端自由文本）：
+ * not-ready=连接未就绪即发送；local-invalid=本地预校验拒绝（file/text 域）；in-flight=同 file 同 kind
+ * 在途重复；server=error 帧按 requestId 匹配（code 携带服务端码）；transport=连接断开/连接级错误；
+ * closed=本端 close()。
  */
 export type WriteSendErrorKind = "not-ready" | "local-invalid" | "in-flight" | "server" | "transport" | "closed";
 
@@ -53,33 +63,33 @@ export class WriteSendError extends Error {
   }
 }
 
-/** 在途请求（视图面）：file×kind 唯一性由 inFlightEntries 保证。 */
+/** 在途请求（快照视图面）：（file×kind）唯一性由在途表保证。 */
 export interface WriteInflightEntry {
   readonly file: string;
   readonly kind: "prompt" | "stop";
 }
 
-/** 最近一次已终结请求（视图面）：ack 成功携 outcome；失败携受控文案（code 内嵌于文案）。 */
+/** 最近一次已终结请求（快照视图面）：ack 成功携 outcome；失败携受控文案（code 内嵌于文案）。 */
 export type WriteLastResult =
   | { readonly ok: true; readonly kind: "prompt"; readonly file: string; readonly outcome: WriteSendOutcomeDTO }
   | { readonly ok: true; readonly kind: "stop"; readonly file: string; readonly outcome: WriteStopOutcomeDTO }
   | { readonly ok: false; readonly kind: "prompt" | "stop"; readonly file: string; readonly message: string };
 
 /**
- * 写面快照（不可变；每次变更整体替换——useSyncExternalStore getSnapshot 缓存语义）。
- * inflight/lastResult 驱动 hook 状态机与结果展示；errorMessage 只承载受控文案。
+ * 写面快照（不可变；每次变更整体替换——useSyncExternalStore getSnapshot 缓存语义，未变即引用相等）。
+ * inflight/lastResult 驱动 hook 态机与结果展示；errorMessage 只承载受控文案。
  */
 export interface WriteSnapshot {
   readonly connState: WriteConnState;
   readonly errorKind: "auth-failed" | "transport" | null;
   readonly errorMessage: string | null;
-  /** 在途（file×kind）视图集合；卸载不清（服务端状态由用户显式 stop/close 收口）。 */
+  /** 在途（file×kind）视图集合；组件卸载不清（服务端状态由用户显式 stop/close 收口）。 */
   readonly inflight: readonly WriteInflightEntry[];
   /** 最近一次已终结请求（null=尚无）。 */
   readonly lastResult: WriteLastResult | null;
 }
 
-/** 可注入的 WebSocket 最小面（与 ws-client/subscribe-client 同形；测试用 FakeWebSocket 顶替）。 */
+/** 可注入的 WebSocket 最小面（与 ws-client/subscribe-client 同形；测试用假 socket 顶替）。 */
 export interface WebSocketLike {
   readonly readyState: number;
   send(data: string): void;
@@ -100,7 +110,7 @@ const defaultFactory: WebSocketFactory = (url) => {
   return new Ctor(url);
 };
 
-const INITIAL: WriteSnapshot = {
+const INITIAL_SNAPSHOT: WriteSnapshot = {
   connState: "connecting",
   errorKind: null,
   errorMessage: null,
@@ -109,15 +119,12 @@ const INITIAL: WriteSnapshot = {
 };
 
 // ---------------------------------------------------------------------------
-// R1：消费帧运行时形状校验（纯函数、文件内私有、零依赖；权威=contracts.ts 写侧段/组5）。
+// 消费帧运行时形状门（纯函数、文件内私有、零依赖；权威=contracts.ts 写侧段/组5）。
+// 畸形=返回 null，调用方整帧忽略（锚点③）。
 // ---------------------------------------------------------------------------
 
 /** §5.3 错误码全集（运行时镜像；未登记码=未知帧保守拒绝）。 */
 const ERROR_CODES: ReadonlySet<number> = new Set([4401, 4402, 4403, 4404, 4405, 4409, 4413, 4429, 4431, 4432]);
-
-function isErrorCode(v: unknown): v is ErrorCode {
-  return typeof v === "number" && ERROR_CODES.has(v);
-}
 
 type WelcomeFrame = Extract<ServerFrame, { readonly t: "welcome" }>;
 type ErrorFrame = Extract<ServerFrame, { readonly t: "error" }>;
@@ -133,8 +140,11 @@ function isString(v: unknown): v is string {
 function isBoolean(v: unknown): v is boolean {
   return typeof v === "boolean";
 }
-function isNonNegativeInteger(v: unknown): v is number {
+function isNonNegativeInt(v: unknown): v is number {
   return typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+}
+function isErrorCode(v: unknown): v is ErrorCode {
+  return typeof v === "number" && ERROR_CODES.has(v);
 }
 
 /** WriteSendOutcomeDTO（3c-2 收窄版）全域判别校验。 */
@@ -142,7 +152,7 @@ function isSendOutcome(v: unknown): v is WriteSendOutcomeDTO {
   if (!isPlainObject(v)) return false;
   switch (v["kind"]) {
     case "launched":
-      return isString(v["intentId"]) && isNonNegativeInteger(v["commandId"]);
+      return isString(v["intentId"]) && isNonNegativeInt(v["commandId"]);
     case "busy":
     case "no-process":
       return true;
@@ -170,21 +180,21 @@ function isStopOutcome(v: unknown): v is WriteStopOutcomeDTO {
     case "confirmed": {
       const exit = v["exit"];
       if (!isPlainObject(exit)) return false;
-      return (exit["code"] === null || isNonNegativeInteger(exit["code"])) && (exit["signal"] === null || isString(exit["signal"]));
+      return (exit["code"] === null || isNonNegativeInt(exit["code"])) && (exit["signal"] === null || isString(exit["signal"]));
     }
     default:
       return false;
   }
 }
 
-/** welcome：同 ws-client（serverBootId/serverBuildId 必须 string，protocolVersion 字面量 1）。 */
-function asWelcomeFrame(v: Record<string, unknown>): WelcomeFrame | null {
+/** welcome 形状门（同 ws-client）：serverBootId/serverBuildId 必须 string，protocolVersion 字面量 1。 */
+function parseWelcome(v: Record<string, unknown>): WelcomeFrame | null {
   if (!isString(v.serverBootId) || !isString(v.serverBuildId) || v.protocolVersion !== 1) return null;
   return { t: "welcome", serverBootId: v.serverBootId, serverBuildId: v.serverBuildId, protocolVersion: 1 };
 }
 
-/** error：code∈锚定码表、message 必须 string（即使不展示也验形）、retryable 必须 boolean。 */
-function asErrorFrame(v: Record<string, unknown>): ErrorFrame | null {
+/** error 形状门：code∈锚定码表、message 必须 string（即使不展示也验形）、retryable 必须 boolean。 */
+function parseError(v: Record<string, unknown>): ErrorFrame | null {
   if (!isErrorCode(v.code)) return null;
   if (!isString(v.message) || !isBoolean(v.retryable)) return null;
   if (v.requestId !== undefined && !isString(v.requestId)) return null;
@@ -197,22 +207,22 @@ function asErrorFrame(v: Record<string, unknown>): ErrorFrame | null {
   };
 }
 
-/** write-ack：requestId/file 必须 string，outcome 全域校验（畸形→调用方按未知帧忽略）。 */
-function asWriteAckFrame(v: Record<string, unknown>): WriteAckFrame | null {
+/** write-ack 形状门：requestId/file 必须 string，outcome 全域校验。 */
+function parseWriteAck(v: Record<string, unknown>): WriteAckFrame | null {
   if (!isString(v.requestId) || !isString(v.file)) return null;
   if (!isSendOutcome(v.outcome)) return null;
   return { t: "write-ack", requestId: v.requestId, file: v.file, outcome: v.outcome };
 }
 
-/** write-stop-ack：同 write-ack（outcome 换 stop 判别联合）。 */
-function asWriteStopAckFrame(v: Record<string, unknown>): WriteStopAckFrame | null {
+/** write-stop-ack 形状门：同 write-ack（outcome 换 stop 判别联合）。 */
+function parseWriteStopAck(v: Record<string, unknown>): WriteStopAckFrame | null {
   if (!isString(v.requestId) || !isString(v.file)) return null;
   if (!isStopOutcome(v.outcome)) return null;
   return { t: "write-stop-ack", requestId: v.requestId, file: v.file, outcome: v.outcome };
 }
 
 // ---------------------------------------------------------------------------
-// R2：错误文案受控映射（写面口径；code 域封闭=内嵌安全，message 仅服务端审计用，前端不留存）。
+// 错误文案受控映射（锚点⑤）：code 域封闭=内嵌安全；远端 message 仅服务端审计用，前端不留存。
 // 与 ws-client/subscribe-client 同惯例，4402/4404 措辞按写面语义调整（写宿主/在途重复）。
 // ---------------------------------------------------------------------------
 
@@ -233,7 +243,7 @@ function writeFaceErrorText(code: number): string {
 }
 
 /** 在途记账（内部）：requestId→结算回调+file/kind。 */
-interface InflightRecord {
+interface PendingWrite {
   readonly file: string;
   readonly kind: "prompt" | "stop";
   readonly resolve: (outcome: never) => void; // 泛型在 Map 存储处擦除；结算入口按 kind 分派强类型
@@ -242,12 +252,12 @@ interface InflightRecord {
 
 export class WriteClient {
   private socket: WebSocketLike | null = null;
-  private snapshot: WriteSnapshot = INITIAL;
+  private snapshot: WriteSnapshot = INITIAL_SNAPSHOT;
   private readonly listeners = new Set<() => void>();
-  /** R3 不可逆停止位：close() 置位后一切回调零副作用、connect() 永久拒绝、重复 close 幂等。 */
+  /** 不可逆停止位（锚点⑥）：close() 置位后一切回调零副作用、connect() 永久拒绝、重复 close 幂等。 */
   private stopped = false;
-  private reqCounter = 0;
-  private readonly inflight = new Map<string, InflightRecord>();
+  private reqSeq = 0;
+  private readonly pending = new Map<string, PendingWrite>();
 
   constructor(
     private readonly url: string,
@@ -263,20 +273,20 @@ export class WriteClient {
       socket = this.createSocket(this.url);
     } catch {
       this.stopped = true;
-      this.failConn("transport", "连接创建失败：无法建立 WebSocket 连接");
+      this.failConnection("transport", "连接创建失败：无法建立 WebSocket 连接");
       return;
     }
     this.socket = socket;
     socket.onopen = () => {
       if (this.stopped || this.snapshot.connState !== "connecting") return; // 迟到/重复 open 不复活状态、不重发 hello
-      this.sendFrame({ t: "hello", protocolVersion: 1, token: this.token });
-      this.transition({ connState: "authenticating" });
+      this.emit({ t: "hello", protocolVersion: 1, token: this.token });
+      this.publish({ connState: "authenticating" });
     };
-    socket.onmessage = (event) => this.onMessage(event.data);
+    socket.onmessage = (event) => this.handleMessage(event.data);
     socket.onerror = () => {
-      if (this.stopped) return; // ws 语义：error 事件后必跟 close；状态迁移归 onClose 统一出口
+      if (this.stopped) return; // ws 语义：error 事件后必跟 close；状态迁移归 onclose 统一出口
     };
-    socket.onclose = (event) => this.onClose(event.code);
+    socket.onclose = (event) => this.handleClose(event.code);
   }
 
   /**
@@ -286,24 +296,24 @@ export class WriteClient {
    * 不排队：未就绪/预校验失败即受控拒绝，由用户显式重发（无自动重发）。
    */
   sendPrompt(file: string, text: string): Promise<WriteSendOutcomeDTO> {
-    return this.dispatch("prompt", file, text) as Promise<WriteSendOutcomeDTO>;
+    return this.launch("prompt", file, text) as Promise<WriteSendOutcomeDTO>;
   }
 
   /** 发送 stop（§B16：stop{requestId,file}→write-stop-ack{outcome}）。与同 file 在途 prompt 可并行。 */
   sendStop(file: string): Promise<WriteStopOutcomeDTO> {
-    return this.dispatch("stop", file) as Promise<WriteStopOutcomeDTO>;
+    return this.launch("stop", file) as Promise<WriteStopOutcomeDTO>;
   }
 
   /**
-   * 主动关闭：立即置不可逆停止位并物理释放 socket（未 connect/connecting/error 均可关）。
+   * 主动关闭（锚点⑥）：立即置不可逆停止位并物理释放 socket（未 connect/connecting/error 均可关）。
    * 在途请求统一以 closed 受控文案拒绝（服务端连接同断，无迟到结算窗口）；error 态保留错误文案。
    */
   close(): void {
     if (this.stopped) return;
     this.stopped = true;
-    this.settleAllInflight(new WriteSendError("closed", "写连接已关闭，请求未完成"));
+    this.rejectAllPending(new WriteSendError("closed", "写连接已关闭，请求未完成"));
     if (this.snapshot.connState !== "closed" && this.snapshot.connState !== "error") {
-      this.transition({ connState: "closed" });
+      this.publish({ connState: "closed" });
     }
     this.socket?.close();
   }
@@ -319,23 +329,24 @@ export class WriteClient {
   readonly getSnapshot = (): WriteSnapshot => this.snapshot;
 
   // -------------------------------------------------------------------------
-  // 内部：发送与在途记账
+  // 内部：派发与在途记账
   // -------------------------------------------------------------------------
 
-  private newRequestId(kind: "prompt" | "stop"): string {
-    this.reqCounter += 1;
-    return `wr-${kind === "prompt" ? "p" : "s"}-${this.reqCounter}`; // §5.7 requestIdPattern=/^[\w-]{1,64}$/
+  private nextRequestId(kind: "prompt" | "stop"): string {
+    this.reqSeq += 1;
+    return `wr-${kind === "prompt" ? "p" : "s"}-${this.reqSeq}`; // §5.7 requestIdPattern=/^[\w-]{1,64}$/
   }
 
-  private sendFrame(frame: OutgoingWriteFrame): void {
+  /** 出帧（停止屏障后/无连接/非 OPEN 一律静默不发——调帧处已先行本地拒绝，此处为迟到防御）。 */
+  private emit(frame: OutgoingFrame): void {
     if (this.stopped) return;
     const socket = this.socket;
     if (!socket || socket.readyState !== OPEN) return;
     socket.send(JSON.stringify(frame));
   }
 
-  /** prompt/stop 共用派发：本地预校验→占位→发帧；resolve/reject 经在途表按 requestId 结算。 */
-  private dispatch(kind: "prompt" | "stop", file: string, text?: string): Promise<unknown> {
+  /** prompt/stop 共用派发：本地预校验（锚点④）→占位→发帧；resolve/reject 经在途表按 requestId 结算。 */
+  private launch(kind: "prompt" | "stop", file: string, text?: string): Promise<unknown> {
     if (this.stopped) {
       return Promise.reject(new WriteSendError("closed", "写连接已关闭，请求未完成"));
     }
@@ -353,29 +364,29 @@ export class WriteClient {
         return Promise.reject(new WriteSendError("local-invalid", `消息超出 ${WRITE_TEXT_MAX_BYTES / 1024}KiB 字节上限，未发送`));
       }
     }
-    const dup = this.snapshot.inflight.some((e) => e.file === file && e.kind === kind);
-    if (dup) {
+    const duplicate = this.snapshot.inflight.some((e) => e.file === file && e.kind === kind);
+    if (duplicate) {
       const message = kind === "prompt" ? "该会话已有发送中的消息，请等待结果" : "停止请求已在途，请等待结果";
       return Promise.reject(new WriteSendError("in-flight", message));
     }
-    const requestId = this.newRequestId(kind);
+    const requestId = this.nextRequestId(kind);
     return new Promise<unknown>((resolve, reject) => {
-      // 占位先于发帧（同步占位防同刻重入漏判在途重复）；快照 inflight 视图随 transition 通知
-      this.inflight.set(requestId, { file, kind, resolve: resolve as (outcome: never) => void, reject });
-      this.transition({ inflight: [...this.snapshot.inflight, { file, kind }] });
+      // 占位先于发帧（同步占位防同刻重入漏判在途重复）；快照 inflight 视图随 publish 通知
+      this.pending.set(requestId, { file, kind, resolve: resolve as (outcome: never) => void, reject });
+      this.publish({ inflight: [...this.snapshot.inflight, { file, kind }] });
       try {
         if (kind === "prompt") {
-          this.sendFrame({ t: "prompt", requestId, file, text: text as string });
+          this.emit({ t: "prompt", requestId, file, text: text as string });
         } else {
-          this.sendFrame({ t: "stop", requestId, file });
+          this.emit({ t: "stop", requestId, file });
         }
       } catch {
-        // C2：socket.send 同步抛错（传输层损坏/注入面异常）→受控结算：出表+快照 inflight/lastResult
+        // K5-C2：socket.send 同步抛错（传输层损坏/注入面异常）→受控结算：出表+快照 inflight/lastResult
         // 同步清理（两份账一致，同 file 后续发送不被在途重复门卡死），promise 以受控 transport 错误拒绝
-        //（不让 Promise executor 的裸异常成为未受控 reject 值）。
-        this.inflight.delete(requestId);
+        //（不让 Promise executor 的裸异常成为未受控拒绝值）。
+        this.pending.delete(requestId);
         const error = new WriteSendError("transport", "发送失败：连接传输异常");
-        this.transition({
+        this.publish({
           inflight: this.snapshot.inflight.filter((e) => !(e.file === file && e.kind === kind)),
           lastResult: { ok: false, kind, file, message: error.message },
         });
@@ -384,36 +395,37 @@ export class WriteClient {
     });
   }
 
-  /** 定位并出表匹配的在途请求（requestId 唯一定账+kind/file 三重交叉验证）；不匹配=零副作用返回 null
-   * （在途表与快照均不动——畸形关联帧不消费在途，等合法 ack/匹配 error/连接终局结算）。
-   * 不做快照变更：调用方把 inflightView 并入同一次 transition（一次结算=一次通知）。 */
-  private takeInflight(requestId: string, kind: "prompt" | "stop", file: string): { record: InflightRecord; inflightView: readonly WriteInflightEntry[] } | null {
-    const record = this.inflight.get(requestId);
-    if (record === undefined) return null;
-    if (record.kind !== kind || record.file !== file) return null; // ⑧ file/kind 回显不一致=畸形关联，零消费
-    this.inflight.delete(requestId);
+  /** 定位并出表匹配的在途请求（锚点②：requestId 唯一定账+kind/file 三重交叉验证）；不匹配=零副作用
+   * 返回 null（在途表与快照均不动——畸形关联帧不消费在途，等合法 ack/匹配 error/连接终局结算）。
+   * 不做快照变更：调用方把 inflightView 并入同一次 publish（一次结算=一次通知）。 */
+  private takePending(requestId: string, kind: "prompt" | "stop", file: string): { entry: PendingWrite; inflightView: readonly WriteInflightEntry[] } | null {
+    const entry = this.pending.get(requestId);
+    if (entry === undefined) return null;
+    if (entry.kind !== kind || entry.file !== file) return null; // ② kind/file 回显不一致=畸形关联，零消费
+    this.pending.delete(requestId);
     const inflightView = this.snapshot.inflight.filter((e) => !(e.file === file && e.kind === kind));
-    return { record, inflightView };
+    return { entry, inflightView };
   }
 
-  /** 全量结算（连接终局）：出表+快照先行，回调最后（拒绝回调内不重入读写面状态）；结算顺序=Map 插入序。 */
-  private settleAllInflight(error: WriteSendError): void {
-    if (this.inflight.size === 0) return;
-    const records = [...this.inflight.values()];
-    this.inflight.clear();
+  /** 全量结算（连接终局，锚点⑤）：出表+快照先行，回调最后（拒绝回调内不重入读写面状态）；
+   * 结算顺序=Map 插入序。 */
+  private rejectAllPending(error: WriteSendError): void {
+    if (this.pending.size === 0) return;
+    const entries = [...this.pending.values()];
+    this.pending.clear();
     let lastResult: WriteLastResult | null = this.snapshot.lastResult;
-    for (const record of records) {
-      lastResult = { ok: false, kind: record.kind, file: record.file, message: error.message };
+    for (const entry of entries) {
+      lastResult = { ok: false, kind: entry.kind, file: entry.file, message: error.message };
     }
-    this.transition({ inflight: [], lastResult });
-    for (const record of records) record.reject(error);
+    this.publish({ inflight: [], lastResult });
+    for (const entry of entries) entry.reject(error);
   }
 
   // -------------------------------------------------------------------------
-  // 内部：消费帧处理
+  // 内部：消费帧处理（锚点②③⑤）
   // -------------------------------------------------------------------------
 
-  private onMessage(data: unknown): void {
+  private handleMessage(data: unknown): void {
     const conn = this.snapshot.connState;
     if (this.stopped || conn === "closed" || conn === "error") return; // 停止屏障/连接终态后不再消费任何帧
     if (typeof data !== "string") return; // 二进制帧非本面
@@ -427,30 +439,30 @@ export class WriteClient {
     switch (parsed.t) {
       case "welcome": {
         if (conn !== "authenticating") return; // 重复 welcome 幂等忽略
-        if (asWelcomeFrame(parsed) === null) return; // R1：缺字段/版本不符=未知帧，不得算握手成功
-        this.transition({ connState: "ready" });
+        if (parseWelcome(parsed) === null) return; // ③ 缺字段/版本不符=未知帧，不得算握手成功
+        this.publish({ connState: "ready" });
         return;
       }
       case "write-ack": {
-        const frame = asWriteAckFrame(parsed);
-        if (frame === null) return; // R1：畸形整帧忽略（不消费在途；合法帧可恢复结算）
-        const taken = this.takeInflight(frame.requestId, "prompt", frame.file);
-        if (taken === null) return; // 无关联/迟到/回显不符：零消费（在途保留）
-        this.transition({ inflight: taken.inflightView, lastResult: { ok: true, kind: "prompt", file: frame.file, outcome: frame.outcome } });
-        (taken.record.resolve as (outcome: WriteSendOutcomeDTO) => void)(frame.outcome);
+        const frame = parseWriteAck(parsed);
+        if (frame === null) return; // ③ 畸形整帧忽略（不消费在途；合法帧可恢复结算）
+        const taken = this.takePending(frame.requestId, "prompt", frame.file);
+        if (taken === null) return; // ② 无关联/迟到/回显不符：零消费（在途保留）
+        this.publish({ inflight: taken.inflightView, lastResult: { ok: true, kind: "prompt", file: frame.file, outcome: frame.outcome } });
+        (taken.entry.resolve as (outcome: WriteSendOutcomeDTO) => void)(frame.outcome);
         return;
       }
       case "write-stop-ack": {
-        const frame = asWriteStopAckFrame(parsed);
+        const frame = parseWriteStopAck(parsed);
         if (frame === null) return;
-        const taken = this.takeInflight(frame.requestId, "stop", frame.file);
+        const taken = this.takePending(frame.requestId, "stop", frame.file);
         if (taken === null) return;
-        this.transition({ inflight: taken.inflightView, lastResult: { ok: true, kind: "stop", file: frame.file, outcome: frame.outcome } });
-        (taken.record.resolve as (outcome: WriteStopOutcomeDTO) => void)(frame.outcome);
+        this.publish({ inflight: taken.inflightView, lastResult: { ok: true, kind: "stop", file: frame.file, outcome: frame.outcome } });
+        (taken.entry.resolve as (outcome: WriteStopOutcomeDTO) => void)(frame.outcome);
         return;
       }
       case "error":
-        this.onError(parsed);
+        this.handleError(parsed);
         return;
       default:
         // 未知/暂不消费的帧（sessions/snapshot/events/status/recovery/resync-required/pong 及任何陌生 t）安全忽略
@@ -458,74 +470,74 @@ export class WriteClient {
     }
   }
 
-  private onError(v: Record<string, unknown>): void {
-    const frame = asErrorFrame(v);
-    if (frame === null) return; // R1：畸形 error 帧（未知码/message 缺失等）整帧忽略
+  private handleError(v: Record<string, unknown>): void {
+    const frame = parseError(v);
+    if (frame === null) return; // ③ 畸形 error 帧（未知码/message 缺失等）整帧忽略
     if (frame.code === 4401) {
-      // 连接级认证失败：整面终局（在途全部受控拒绝；随后 close 1008 由 onClose 收尾不降级）
-      this.failConn("auth-failed", writeFaceErrorText(4401));
+      // 连接级认证失败：整面终局（在途全部受控拒绝；随后 close 1008 由 handleClose 收尾不降级）
+      this.failConnection("auth-failed", writeFaceErrorText(4401));
       return;
     }
     const conn = this.snapshot.connState;
     if (conn === "connecting" || conn === "authenticating") {
-      this.failConn("transport", writeFaceErrorText(frame.code));
+      this.failConnection("transport", writeFaceErrorText(frame.code));
       return;
     }
-    // 请求级路由：requestId 匹配在途写请求→仅结算该请求（连接保持，其余请求/后续发送不受影响）。
+    // 请求级路由（锚点②）：requestId 匹配在途写请求→仅结算该请求（连接保持，其余请求/后续发送不受影响）。
     // 关联判定口径（对齐 K4 subscribe-client 已修语义）：undefined 或空串""均视为「不关联任何请求」——
     // 现役网关对连接级码（4403/4405/4432 心跳终局等）统一发 requestId:""（ws-gateway 心跳出口）；
     // 非空陌生 requestId（迟到/已结算/无关）仍不升格连接错误，落入末尾安全忽略。
     const connEnvelope = frame.requestId === undefined || frame.requestId === "";
     if (!connEnvelope) {
-      const record = this.inflight.get(frame.requestId);
-      if (record !== undefined) {
+      const entry = this.pending.get(frame.requestId);
+      if (entry !== undefined) {
         const message = writeFaceErrorText(frame.code);
-        this.inflight.delete(frame.requestId);
-        this.transition({
-          inflight: this.snapshot.inflight.filter((e) => !(e.file === record.file && e.kind === record.kind)),
-          lastResult: { ok: false, kind: record.kind, file: record.file, message },
+        this.pending.delete(frame.requestId);
+        this.publish({
+          inflight: this.snapshot.inflight.filter((e) => !(e.file === entry.file && e.kind === entry.kind)),
+          lastResult: { ok: false, kind: entry.kind, file: entry.file, message },
         });
-        record.reject(new WriteSendError("server", message, frame.code));
+        entry.reject(new WriteSendError("server", message, frame.code));
         return;
       }
       // requestId 无关联（迟到/已结算/陌生）→落入下方连接级判定或忽略
     }
     // C5 同口径：ready 后无 requestId 关联的连接级码（4403/4405/4432）→连接级失败（受控文案按 code）。
-    // 注：写面 4405（未开放写 t）服务端随后 close 1008——在途已由本分支或下一分支拒绝，onClose 只收尾连接态。
+    // 注：写面 4405（未开放写 t）服务端随后 close 1008——在途已由本分支或下一分支拒绝，handleClose 只收尾连接态。
     if (connEnvelope && (frame.code === 4403 || frame.code === 4405 || frame.code === 4432)) {
-      this.failConn("transport", writeFaceErrorText(frame.code));
+      this.failConnection("transport", writeFaceErrorText(frame.code));
       return;
     }
     // 其余无关联请求的 error 帧安全忽略
   }
 
-  private onClose(code: number): void {
+  private handleClose(code: number): void {
     if (this.stopped) return; // 停止屏障：close() 后迟到关闭事件零副作用
     const conn = this.snapshot.connState;
     if (conn === "closed" || conn === "error") return; // auth-failed/transport 不降级
     if (code === 1008 && (conn === "connecting" || conn === "authenticating")) {
-      this.failConn("auth-failed", "认证失败（连接被 1008 关闭）");
+      this.failConnection("auth-failed", "认证失败（连接被 1008 关闭）");
       return;
     }
-    // 连接终局：在途统一 transport 受控拒绝（服务端连接同断，无结算窗口）
-    this.settleAllInflight(new WriteSendError("transport", "连接已断开，请求未完成"));
-    this.transition({ connState: "closed" }); // 无自动重连
+    // 连接终局（锚点⑤）：在途统一 transport 受控拒绝（服务端连接同断，无结算窗口）
+    this.rejectAllPending(new WriteSendError("transport", "连接已断开，请求未完成"));
+    this.publish({ connState: "closed" }); // 无自动重连
   }
 
   /** 连接级错误出口：在途统一受控拒绝（WriteSendError.kind 恒 transport=连接级成因；4401 细分仅逃入
    * 快照 errorKind，供视图区分认证失败与传输失败）+终态文案进快照。 */
-  private failConn(errorKind: "auth-failed" | "transport", errorMessage: string): void {
-    this.settleAllInflight(new WriteSendError("transport", errorMessage));
-    this.transition({ connState: "error", errorKind, errorMessage });
+  private failConnection(errorKind: "auth-failed" | "transport", errorMessage: string): void {
+    this.rejectAllPending(new WriteSendError("transport", errorMessage));
+    this.publish({ connState: "error", errorKind, errorMessage });
   }
 
-  private transition(patch: Partial<WriteSnapshot>): void {
+  private publish(patch: Partial<WriteSnapshot>): void {
     this.snapshot = { ...this.snapshot, ...patch };
     for (const listener of this.listeners) listener();
   }
 }
 
-/** UTF-8 字节数（B4：标准 TextEncoder 计数）。WHATWG 编码流会把孤立代理项按 U+FFFD 落 3 字节，
+/** UTF-8 字节数（K5-B4：标准 TextEncoder 计数）。WHATWG 编码流会把孤立代理项按 U+FFFD 落 3 字节，
  * 与 TextEncoder.encode 的线上真实字节数一致；此前手写循环把一切高代理项当合法代理对计 4 字节并吞掉
  * 下一 code unit，超限文本可漏拒。与 contracts.ts byteLength 的旧快算法有意分歧：写面预校验以真实
  * 线上字节为准（协议侧同形算法不在本片回改范围）。 */

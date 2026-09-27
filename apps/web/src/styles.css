@@ -1,49 +1,110 @@
+/* ==========================================================================
+   视觉基建批（I8+I7）：design tokens + 明暗双主题 + Codex 风基调 + 动效基线。
+   设计意图：Codex 风=克制的中性灰阶承载 95% 界面；accent 单色（蓝）只落在三处——
+   品牌符、列表选中态、焦点环；语义色（ok/warn/err）只落在徽标与横幅，不做装饰。
+   会话正文走等宽栈（--font-mono），对齐 diff/日志/终端气质。
+   主题机制：亮色=默认 :root；暗色=html[data-theme="dark"] 显式值域；「跟随系统」=
+   不写 data-theme，由 prefers-color-scheme 媒体查询兜底（theme.ts 读写同源）。
+   红线：组件样式一律引用令牌变量，令牌块（:root 族）之外禁止硬编码色值。
+   ========================================================================== */
+
+/* ---- 令牌·亮色（默认） ---- */
 :root {
   color-scheme: light;
-  --bg: #f4f6f8;
-  --panel: #fff;
-  --text: #202b38;
-  --muted: #657386;
-  --line: #e0e6ed;
-  --accent: #245fc0;
-  --blue-bg: #e8f0ff;
-  --blue: #235cb0;
-  --yellow-bg: #fff2cc;
-  --yellow: #775400;
-  --green-bg: #e4f4e9;
-  --green: #27643a;
-  --neutral-bg: #edf0f3;
-  --neutral: #505d6a;
-  --shadow: 0 4px 20px #142a4410;
+  /* 色彩 */
+  --c-bg: #f5f6f8;
+  --c-panel: #ffffff;
+  --c-fg: #1f2329;
+  --c-muted: #5f6b77;
+  --c-accent: #2f5fd0;
+  --c-accent-bg: #e8eefc;
+  --c-border: #dde2e9;
+  --c-ok: #1a7f37;
+  --c-ok-bg: #e3f3e8;
+  --c-warn: #8a5a00;
+  --c-warn-bg: #fff1d6;
+  --c-err: #c92a2a;
+  --c-err-bg: #fdecec;
+  --c-neutral: #525d69;
+  --c-neutral-bg: #eceff3;
+  /* 圆角 */
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  /* 间距 */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  /* 阴影 */
+  --shadow-sm: 0 1px 2px rgb(20 32 50 / 0.06);
+  --shadow-md: 0 4px 20px rgb(20 32 50 / 0.08);
+  /* 动效时长与缓动 */
+  --t-fast: 120ms;
+  --t-base: 200ms;
+  --t-slow: 320ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  /* 字体 */
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   font-family: Inter, system-ui, sans-serif;
 }
+
+/* ---- 令牌·暗色（显式选择：html[data-theme="dark"]） ---- */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --c-bg: #0f1216;
+  --c-panel: #171c23;
+  --c-fg: #e2e8f0;
+  --c-muted: #97a3b2;
+  --c-accent: #7aa2f7;
+  --c-accent-bg: #22304a;
+  --c-border: #2c3540;
+  --c-ok: #4cc38a;
+  --c-ok-bg: #1d3128;
+  --c-warn: #e5b567;
+  --c-warn-bg: #3a2f18;
+  --c-err: #f27a7a;
+  --c-err-bg: #3d2222;
+  --c-neutral: #b8c2cd;
+  --c-neutral-bg: #262e38;
+  --shadow-sm: none;
+  --shadow-md: none;
+}
+
+/* ---- 令牌·暗色（跟随系统：未写 data-theme 时按系统偏好兜底） ---- */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #14191f;
-    --panel: #1c232b;
-    --text: #e0e7ef;
-    --muted: #a3b0c0;
-    --line: #35404c;
-    --accent: #8ebaff;
-    --blue-bg: #223957;
-    --blue: #a1c7ff;
-    --yellow-bg: #453a20;
-    --yellow: #f6d881;
-    --green-bg: #233e2f;
-    --green: #a0ddb3;
-    --neutral-bg: #303943;
-    --neutral: #c2ccd6;
-    --shadow: none;
+    --c-bg: #0f1216;
+    --c-panel: #171c23;
+    --c-fg: #e2e8f0;
+    --c-muted: #97a3b2;
+    --c-accent: #7aa2f7;
+    --c-accent-bg: #22304a;
+    --c-border: #2c3540;
+    --c-ok: #4cc38a;
+    --c-ok-bg: #1d3128;
+    --c-warn: #e5b567;
+    --c-warn-bg: #3a2f18;
+    --c-err: #f27a7a;
+    --c-err-bg: #3d2222;
+    --c-neutral: #b8c2cd;
+    --c-neutral-bg: #262e38;
+    --shadow-sm: none;
+    --shadow-md: none;
   }
 }
+
 * {
   box-sizing: border-box;
 }
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--text);
+  background: var(--c-bg);
+  color: var(--c-fg);
 }
 button,
 input,
@@ -56,15 +117,15 @@ select {
   cursor: pointer;
 }
 button {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  color: var(--text);
-  border-radius: 8px;
-  padding: 9px 12px;
+  background: var(--c-panel);
+  border: 1px solid var(--c-border);
+  color: var(--c-fg);
+  border-radius: var(--r-md);
+  padding: 9px var(--sp-3);
   min-height: 44px;
 }
 button:hover {
-  background: var(--neutral-bg);
+  background: var(--c-neutral-bg);
 }
 button:disabled,
 textarea:disabled {
@@ -72,7 +133,7 @@ textarea:disabled {
   opacity: 0.65;
 }
 :focus-visible {
-  outline: 3px solid var(--accent);
+  outline: 3px solid var(--c-accent);
   outline-offset: 3px;
 }
 h1,
@@ -91,7 +152,7 @@ h3 {
   font-size: 14px;
 }
 small {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
 }
 .app {
@@ -105,18 +166,18 @@ small {
   align-items: center;
   gap: 20px;
   min-height: 64px;
-  padding: 10px 24px;
-  border-bottom: 1px solid var(--line);
-  background: var(--panel);
+  padding: 10px var(--sp-5);
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-panel);
 }
 .brand {
   font-size: 28px;
-  color: var(--accent);
-  margin-right: 8px;
+  color: var(--c-accent);
+  margin-right: var(--sp-2);
 }
 .demo-label {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 .demo-picker {
   margin-left: auto;
@@ -124,12 +185,12 @@ small {
 }
 select,
 input {
-  background: var(--panel);
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  background: var(--c-panel);
+  color: var(--c-fg);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-sm);
   min-height: 44px;
-  padding: 8px;
+  padding: var(--sp-2);
   max-width: 100%;
 }
 .workspace {
@@ -139,21 +200,21 @@ input {
   min-height: 0;
 }
 .session-panel {
-  background: var(--panel);
-  border-right: 1px solid var(--line);
+  background: var(--c-panel);
+  border-right: 1px solid var(--c-border);
   overflow: auto;
 }
 .panel-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px 16px 12px;
+  padding: 20px var(--sp-4) var(--sp-3);
 }
 .attention-summary {
-  margin: 0 16px 16px;
-  padding: 12px;
-  background: var(--bg);
-  border-radius: 8px;
+  margin: 0 var(--sp-4) var(--sp-4);
+  padding: var(--sp-3);
+  background: var(--c-bg);
+  border-radius: var(--r-md);
   font-size: 13px;
 }
 .attention-summary small {
@@ -162,7 +223,7 @@ input {
 }
 .session-list {
   list-style: none;
-  padding: 0 8px;
+  padding: 0 var(--sp-2);
   margin: 0;
 }
 .session-list button {
@@ -170,16 +231,21 @@ input {
   text-align: left;
   padding: 15px 10px;
   border-color: transparent;
-  margin-bottom: 4px;
+  margin-bottom: var(--sp-1);
+  /* I7 动效①列表选中：色彩过渡 + 选中入场位移（reduced-motion 段统一关停） */
+  transition:
+    background-color var(--t-fast) var(--ease-out),
+    border-color var(--t-fast) var(--ease-out);
 }
 .session-list button[aria-current] {
-  background: var(--blue-bg);
-  border-color: var(--blue);
+  background: var(--c-accent-bg);
+  border-color: var(--c-accent);
+  animation: list-select-in var(--t-base) var(--ease-spring);
 }
 .row-title {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
   font-size: 14px;
   font-weight: 600;
@@ -190,33 +256,33 @@ input {
   font-size: 11px;
   line-height: 1.5;
   font-weight: 500;
-  border-radius: 5px;
+  border-radius: var(--r-sm);
   padding: 3px 7px;
-  background: var(--neutral-bg);
-  color: var(--neutral);
+  background: var(--c-neutral-bg);
+  color: var(--c-neutral);
 }
 .badge.running {
-  background: var(--blue-bg);
-  color: var(--blue);
+  background: var(--c-accent-bg);
+  color: var(--c-accent);
 }
 .badge.needs-input {
-  background: var(--yellow-bg);
-  color: var(--yellow);
+  background: var(--c-warn-bg);
+  color: var(--c-warn);
 }
 .badge.done {
-  background: var(--green-bg);
-  color: var(--green);
+  background: var(--c-ok-bg);
+  color: var(--c-ok);
 }
 .summary {
   display: block;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 13px;
   margin: 9px 0;
 }
 .key-hint {
   font-size: 11px;
-  color: var(--muted);
-  padding: 24px 18px;
+  color: var(--c-muted);
+  padding: var(--sp-5) 18px;
 }
 .conversation {
   min-width: 0;
@@ -228,104 +294,106 @@ input {
   display: flex;
   gap: 14px;
   align-items: center;
-  padding: 18px 24px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
+  padding: 18px var(--sp-5);
+  background: var(--c-panel);
+  border-bottom: 1px solid var(--c-border);
 }
 .conversation-heading h1 {
   overflow-wrap: anywhere;
 }
 .session-status {
   display: flex;
-  gap: 12px;
+  gap: var(--sp-3);
   align-items: center;
-  padding: 12px 24px;
+  padding: var(--sp-3) var(--sp-5);
   font-size: 12px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 .messages {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 16px 24px;
+  padding: var(--sp-4) var(--sp-5);
   overflow-wrap: anywhere;
 }
 .message {
   padding: 18px;
   margin-bottom: 18px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--panel);
-  box-shadow: var(--shadow);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  background: var(--c-panel);
+  box-shadow: var(--shadow-md);
 }
 .message.user {
   margin-left: 12%;
-  background: var(--blue-bg);
+  background: var(--c-accent-bg);
 }
+/* Codex 风：会话正文走等宽栈（消息正文/事件列表/写输入框），对齐 diff 与日志气质 */
 .message p {
+  font-family: var(--font-mono);
   font-size: 14px;
   line-height: 1.8;
-  margin-top: 8px;
+  margin-top: var(--sp-2);
   white-space: pre-wrap;
 }
 .composer {
-  padding: 16px 24px;
-  border-top: 1px solid var(--line);
-  background: var(--panel);
+  padding: var(--sp-4) var(--sp-5);
+  border-top: 1px solid var(--c-border);
+  background: var(--c-panel);
 }
 .composer label {
   display: block;
   font-size: 12px;
-  margin-bottom: 8px;
+  margin-bottom: var(--sp-2);
 }
 textarea {
   resize: none;
   width: 100%;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--bg);
-  color: var(--text);
+  padding: var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-bg);
+  color: var(--c-fg);
 }
 .inspector {
-  border-left: 1px solid var(--line);
-  background: var(--panel);
-  padding: 24px 18px;
+  border-left: 1px solid var(--c-border);
+  background: var(--c-panel);
+  padding: var(--sp-5) 18px;
   overflow: auto;
 }
 .inspector p {
   font-size: 13px;
-  color: var(--muted);
+  color: var(--c-muted);
   line-height: 1.9;
-  margin: 16px 0;
+  margin: var(--sp-4) 0;
 }
 hr {
   border: 0;
-  border-top: 1px solid var(--line);
-  margin: 24px 0;
+  border-top: 1px solid var(--c-border);
+  margin: var(--sp-5) 0;
 }
 .welcome {
   margin: auto;
-  padding: 32px;
+  padding: var(--sp-6);
   text-align: center;
 }
 .welcome-mark {
   font-size: 64px;
-  color: var(--accent);
+  color: var(--c-accent);
 }
 .welcome p {
   margin: 18px 0;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 14px;
 }
 .statusbar {
   display: flex;
   justify-content: space-between;
-  padding: 6px 16px;
+  padding: 6px var(--sp-4);
   font-size: 11px;
-  color: var(--muted);
-  border-top: 1px solid var(--line);
-  background: var(--panel);
+  color: var(--c-muted);
+  border-top: 1px solid var(--c-border);
+  background: var(--c-panel);
 }
 .empty {
   padding: 28px 20px;
@@ -333,23 +401,23 @@ hr {
 }
 .empty p {
   font-size: 13px;
-  color: var(--muted);
-  margin-top: 12px;
+  color: var(--c-muted);
+  margin-top: var(--sp-3);
 }
 .connection,
 .pending {
-  padding: 12px 24px;
-  background: var(--neutral-bg);
-  color: var(--neutral);
+  padding: var(--sp-3) var(--sp-5);
+  background: var(--c-neutral-bg);
+  color: var(--c-neutral);
   font-size: 13px;
   line-height: 1.7;
 }
 .connection button {
-  margin-left: 12px;
+  margin-left: var(--sp-3);
 }
 .pending {
-  background: var(--yellow-bg);
-  color: var(--yellow);
+  background: var(--c-warn-bg);
+  color: var(--c-warn);
 }
 .new-session {
   max-width: 520px;
@@ -357,19 +425,144 @@ hr {
 }
 .new-session label {
   display: grid;
-  gap: 8px;
-  margin: 24px 0;
+  gap: var(--sp-2);
+  margin: var(--sp-5) 0;
 }
 .new-session p {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 13px;
   line-height: 1.8;
   margin-bottom: 20px;
 }
+/* A1d 真模式：三客户端连接状态条（aria-live 受控文案；按钮=重建三件套重试） */
+.connbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-2) var(--sp-5);
+  background: var(--c-panel);
+  border-bottom: 1px solid var(--c-border);
+  color: var(--c-muted);
+  font-size: 12px;
+}
+.connbar button {
+  margin-left: auto;
+}
+/* A1d 真模式双栏（列表+详情，无 inspector） */
+.workspace.two-col {
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+}
+
+/* ---- 主题开关（ThemeToggle：亮/暗/跟随系统三段） ---- */
+.theme-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-bg);
+}
+.theme-toggle button {
+  min-height: 32px;
+  padding: var(--sp-1) var(--sp-3);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--c-muted);
+  font-size: 12px;
+}
+.theme-toggle button[aria-pressed="true"] {
+  background: var(--c-panel);
+  color: var(--c-fg);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---- I7 动效基线（四类；时长一律引用 --t-* 令牌） ---- */
+/* 动效②详情切换：内容族入场淡入上移（history-list/empty/header 重挂即触发；opacity 不影响测量） */
+.session-detail .empty,
+.session-detail header,
+.session-detail .history-list,
+.conversation .welcome {
+  animation: detail-enter var(--t-base) var(--ease-out);
+}
+/* 动效③发送按钮：按压回弹（spring）+ 悬停底色过渡 */
+.write-actions button {
+  transition:
+    transform var(--t-fast) var(--ease-spring),
+    background-color var(--t-fast) var(--ease-out);
+}
+.write-actions button:not(:disabled):active {
+  transform: scale(0.96);
+}
+/* 动效④composer 聚合：聚焦时边框/光晕过渡 + 光晕入场关键帧 */
+.write-composer textarea {
+  font-family: var(--font-mono);
+  transition:
+    border-color var(--t-fast) var(--ease-out),
+    box-shadow var(--t-fast) var(--ease-out);
+}
+.write-composer:focus-within textarea {
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 3px var(--c-accent-bg);
+  animation: composer-glow var(--t-fast) var(--ease-out);
+}
+/* 会话正文等宽：事件列表（历史/直播）同消息正文 */
+.session-detail .history-list,
+.session-detail .live-list {
+  font-family: var(--font-mono);
+}
+
+@keyframes list-select-in {
+  from {
+    transform: translateX(-4px);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+@keyframes detail-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes composer-glow {
+  from {
+    box-shadow: 0 0 0 0 var(--c-accent-bg);
+  }
+  to {
+    box-shadow: 0 0 0 3px var(--c-accent-bg);
+  }
+}
+
+/* 无障碍门：系统减动效偏好下四类动效全部关停（不可绕过）。
+ * B2 修复：关停选择器必须与启用侧【同状态同优先级】并靠后（级联取胜）——启用动画的是
+ * .session-list button[aria-current](0,2,1) 与 .write-composer:focus-within textarea(0,2,1)，
+ * 仅写 .session-list button/.write-composer textarea(0,1,1) 会被压过（GPT 审 B2 Chromium 实测反例）；
+ * 这里逐项对齐启用侧完整选择器，不用 !important（同优先级+源码序已足够，可避免 !important 军备）。 */
+@media (prefers-reduced-motion: reduce) {
+  .session-list button,
+  .session-list button[aria-current],
+  .session-detail .empty,
+  .session-detail header,
+  .session-detail .history-list,
+  .conversation .welcome,
+  .write-actions button,
+  .write-composer textarea,
+  .write-composer:focus-within textarea {
+    animation: none;
+    transition: none;
+  }
+}
+
 @media (max-width: 767px) {
   .topbar {
-    padding: 8px 16px;
-    gap: 8px;
+    padding: var(--sp-2) var(--sp-4);
+    gap: var(--sp-2);
     padding-top: max(8px, env(safe-area-inset-top));
   }
   .topbar strong {
@@ -391,8 +584,8 @@ hr {
     display: none;
   }
   .conversation-heading {
-    padding: 12px;
-    gap: 12px;
+    padding: var(--sp-3);
+    gap: var(--sp-3);
   }
   .conversation-heading h1 {
     font-size: 16px;
@@ -401,10 +594,10 @@ hr {
     flex-shrink: 0;
   }
   .messages {
-    padding: 12px 16px;
+    padding: var(--sp-3) var(--sp-4);
   }
   .composer {
-    padding: 12px 16px max(12px, env(safe-area-inset-bottom));
+    padding: var(--sp-3) var(--sp-4) max(12px, env(safe-area-inset-bottom));
   }
   .statusbar {
     display: none;
@@ -413,10 +606,10 @@ hr {
     padding-bottom: env(safe-area-inset-bottom);
   }
   .session-status {
-    padding: 12px 16px;
+    padding: var(--sp-3) var(--sp-4);
   }
   .connection {
-    padding: 12px 16px;
+    padding: var(--sp-3) var(--sp-4);
   }
   .key-hint {
     display: none;

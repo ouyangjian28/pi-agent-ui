@@ -863,3 +863,57 @@
 - 变异双连全杀：Mu-r4B1（无锚 pending 门删→RT43 红）+Mu-r4B6（byteStart 对齐删→RT42 红）；还原复绿。
 - 运行证据：三文件 117 绿（35+36+46）；全仓 1263 绿；tsc exit0；eslint 0。
 - 遗留挂账（沿承）：L1 信任域前提（resumeBlocked=授权门）/L5 marker 无独立认证+无真实断电实测/L7 repairUndecided 保守粘滞语义（P0-1b 统一术语）。
+## 视觉基建批（I8 明暗双主题+Codex 风基调 / I7 动效基线；纯视觉层零行为改动；分支 wt/kimi-web-1）
+- **范围**：design tokens 全量入 CSS custom properties（色彩 --c-bg/-panel/-fg/-muted/-accent/-accent-bg/-border/-ok/-warn/-err 及 -bg 变体+-neutral 族；--r-sm/md/lg；--sp-1..6；--shadow-sm/md；--t-fast/base/slow；--ease-out/--ease-spring；--font-mono），亮（:root 默认）/暗（:root[data-theme="dark"] + prefers-color-scheme 媒体查询兜底「跟随系统」）双值域；apps/web/src/theme.ts（ThemeName=light|dark|system 联合型+令牌常量族+读写面：html[data-theme]+localStorage 键 pi-agent-ui.theme，非法值回退 system）；ThemeToggle 组件（三段 segmented 开关：亮/暗/跟随系统，aria-pressed 标记，挂载即应用持久化选择）；五处组件面（token-gate/connbar/session-list/session-detail/write-composer）全量改用令牌变量，令牌块（:root 族）之外零硬编码色值；I7 四类动效（列表选中 transition+list-select-in 关键帧 / 详情切换 detail-enter 淡入 / 发送按钮按压 spring / composer 聚焦光晕 composer-glow），时长一律引用 --t-* 令牌，@media (prefers-reduced-motion: reduce) 段四类全关停；Codex 风基调=中性灰阶+accent 单色克制（仅品牌符/选中态/焦点环）+会话正文等宽栈（.message p/.history-list/.live-list/.write-composer textarea）。
+- **测试面**（tests/unit/web/theme.test.ts，18 例，jsdom）：①令牌静态面×8——CSS 经 node:fs 直读原文件（vitest 将 CSS 导入 stub 为空串、jsdom 下 import.meta.url 非 file scheme，两处坑已在头注标明），极简规则解析器（去注释+花括号配对+@规则递归展平）断言：亮/暗/系统兜底三值域色彩令牌齐全、:root 圆角/间距/动效/字体令牌齐全、令牌块外零十六进制色值、令牌块外零字面毫秒（时长全走 --t-*）、reduced-motion 段 animation/transition 双 none 且覆盖四类动效宿主选择器、会话正文三处 var(--font-mono)；②theme.ts 读写面×6——缺省/非法值回退 system、writeTheme→readTheme 三态 roundtrip、applyTheme dark/light 写属性、system 移除属性、setTheme 一步持久化+应用；③ThemeToggle×4——三选项渲染+默认 system pressed、点击暗色切换生效+持久化+pressed 翻转、亮→跟随系统属性移除、挂载即应用预置 dark 存储。
+- **终态**：tests/unit/web/ 208 passed（190 基线+18 新增，≥202 验收口径）；全仓 1180 passed+11 skipped；tsc -p apps/web --noEmit 净；eslint 净。
+- **自曝残余**：①动效断言为静态层（选择器+令牌引用+reduced-motion 段存在性），运行时帧级表现（spring 曲线体感、闪烁）未做浏览器实测，需人工过一遍亮/暗两主题目检；②detail-enter 挂在 .session-detail 的 empty/header/history-list 与 .conversation .welcome 上，靠元素重挂触发，同视图内数据追加不重放（符合预期但属设计取舍）；③阴影令牌暗色=none（暗主题无投影，Codex 风惯例），若后续要暗态投影需加值而非改结构；④App.tsx 两处虚拟化内联 style（高度/translateY）为 react-virtual 机制必需，非色值，不在本批剔除范围；⑤旧变量名（--bg/--panel/--accent 等）已全量删除无兼容别名，仓外若有引用旧变量的片段需同步迁移（仓内已 rg 核实零残留）。
+
+## A1d+视觉 r1 修复批（GPT 审 78 NO-GO 两阻断闭合：B1 认证目的地绑定+B2 减动效全关停，+N1/N2/N5；分支 wt/kimi-web-1）
+- **B1 根因**（审报三节）：`?server=` 覆盖无运行/构建层限制，已存 localStorage 令牌随三客户端 hello 自动外带至任意跨源目的地（GPT P1 假 socket 亲证 3/3 外送）。修法=双层：①`resolveWsUrl` 的 `?server=` 覆盖仅 `import.meta.env.DEV` 为真生效，生产一律忽略回退同源（凭据目的地绑定，非通用参数校验；dev 判定可注入桩 `{dev:false}` 测试生产语义）；②新增 `isSameOriginWsTarget`（https 页面只认 wss、host:port 全等才同源，不同端口即跨源），组合根 RealApp 对跨源目的地 hello 令牌置空串（零携密，服务端按未认证拒）+connbar 提示「跨源目标不支持凭据」。已存令牌绝不出本源。
+- **B2 根因**（审报三节优先级对照表）：启用侧 `.session-list button[aria-current]`(0,2,1)、`.write-composer:focus-within textarea`(0,2,1) 压过媒体查询内 `.session-list button`/`.write-composer textarea`(0,1,1)——媒体查询靠后不自动赢优先级；Chromium 实测 list-select-in/composer-glow 仍跑。修法=reduce 块逐项对齐启用侧完整状态选择器（同优先级+源码序级联取胜，不用 !important 避免军备）。
+- **N1**：`readUrlToken` 拆「读有效 token」（首个非空值）与「删全部 token 键」（含空值/重复键，URLSearchParams.delete 语义；新增 hadTokenParam 标记，空值键也触发清参）；`clearUrlToken` 保留 hash 与 history.state（旧实现二者皆丢，GPT P4/P5 反例）。
+- **N2**：`resolveWsUrl` 拒带 fragment 的 ws(s) URL（hash 非空=畸形回退同源）。
+- **N5 措辞收窄**：token-gate 测试注释/例名「全程 token 值不进 DOM」→「连接与错误面不回显令牌」（textContent 断言不支撑「DOM 任何位置」，手输期 password value 本就可被脚本读）；「全量令牌化」限定为本批迁移范围——styles.css 仍存 9px/18px/19px/20px 等固定尺寸（:124/:146/:167/:211/:280/:285/:297/:320 等），如实记录不扩称。
+- **测试面**（tests/unit/web/ 12 文件 230 例，+22）：app-clients.test.ts +8（生产 dev=false 忽略 ?server=×1 三断言/fragment 拒绝×2 值/isSameOriginWsTarget×6/空 token hello 零携密×1；既有 dev 覆盖例改显式 `{dev:true}`）；token-gate.test.ts +13（N1 纯面×6+RealApp 全链清参×2；B1 全链×4：a) 预存 token+跨源不同端口→三 socket 首帧 token=""且全文不含已存令牌+UI 提示，b) 同源覆盖正常携令牌无提示，c) 生产忽略语义接线说明例（dev 下生效+单元层锁定生产），d) 手输 token 同源不受影响）；theme.test.ts 静态断言补两状态选择器（回归下限）；reduced-motion.browser.test.ts 新增（+1，有效性上限）：真实 Chromium headless shell `--force-prefers-reduced-motion --dump-dom`，亮/暗两组×四元素（选中列表钮/聚焦 textarea/写按钮/详情 header）共 8 态断言 animationName=none+transitionDuration=0s，浏览器不存在 skipIf 优雅跳过。**变异实证**：临时还原 styles.css 修复（git stash），浏览器测试即红（selected animationName=list-select-in 复现 GPT 反例），恢复后绿。
+- **教训落档**（GPT N3）：静态字符串断言不足——CSS 级联/优先级只有真实引擎计算样式能证；静态断言保留为回归下限，浏览器实测为有效性上限。
+- **运行证据**（本机亲跑，cwd=仓根，PATH=node v24.18.0）：`npx vitest run tests/unit/web/`=12 files/230 passed；`npx tsc -p apps/web --noEmit`=exit 0；`npx eslint apps/web/src tests/unit/web`=exit 0 零输出；`npx vitest run` 全仓=64 files passed+1 skipped，1202 passed+11 skipped。
+- **自曝残余**：①B1 生产忽略语义只能在 resolveWsUrl 单元层（注入桩 dev=false）锁定——RealApp 走 import.meta.env.DEV，jsdom/vitest 下恒 true 无法翻转到生产构建值，接线正确性靠「组合根只经 resolveWsUrl 取 URL」代码事实+dev 下全链例；②跨源 dev 目标下用户手输令牌同样被绑定剥除（hello 恒空串）——即跨源开发服务器无法经本 UI 完成认证，这是「未受信目的地零携密」的刻意收紧，如需合法跨源开发须另设显式可信配置（本批未做）；③浏览器实测为最小 DOM 探针（非整页体感/逐帧验收），手机视口/键盘遍历/对比度仍属 N6 挂起面；④430px 以下等固定尺寸与 accent 族使用面（running badge/用户消息背景/welcome 标志）未在本批改动，N3 指出的机械断言面（rgb/hsl/命名色、秒单位）未升级为 CSS AST 检查。
+
+### r1 后拍板落地：跨源=不拨线+明白提示（选项 A；GLM 执行，2026-10-05 用户 ask_user_question 拍板）
+- **拍板**：开发模式遇跨源 `?server=` 目标时，上段「零携密 hello+connbar 提示」改为**选项 A：一根线都不接**（三件套不建、hello 永不发出），拒绝面 role=alert 明示「已拒绝连接：目标不是本站」+目标 URL+两出口：「改连本站默认」（清 ?server= 保留其余参数/hash/state 后重试同源建连）/「重新输入令牌」（清 localStorage 回输入面）。生产忽略 ?server= 与 isSameOriginWsTarget 判据不变。
+- **落点**：real-app.tsx（untrustedTarget/untrustedUrl 状态+拒绝面分支+connectDefaultTarget/restartWithFreshToken；ConnectedApp 去掉不可达的 untrustedTarget 提示行）；token-gate.test.ts B1 块改写：a) 零 socket+拒绝面+令牌零外带，a2) 改连本站默认（URL 清参+hash/state 保留+同源三件套+拒绝面退出），a3) 重新输入令牌（清存+回输入面+零 socket），c) dev 语义=拒绝面（生产语义仍在 app-clients 单元层锁定）；app-clients.test.ts 空 token 例改为「API 层防御能力」定位（组合根不再这样调用）。
+- **运行证据**（GLM 亲跑）：`npx vitest run tests/unit/web/`=12 files/232 passed；`npx tsc -p apps/web --noEmit`+eslint=exit 0；全仓 `npx vitest run`=1204 passed+11 skipped。提交在 afd18bd 之上（见 git log）。
+
+
+#### r2 后修复批（B3+N2/N7/N8，GLM）
+
+- **B3（中，GPT r2 抓出）**：`改连本站默认`在 URL 仅剩 server 一参时失效——旧实现 replaceState 传空串/纯 hash=相对引用，原样保留 query，server 清不掉、永远出不了拒绝面。修法=目标 URL 显式带 `window.location.pathname`（`real-app.tsx` connectDefaultTarget）。回归=token-gate `a2-matrix` 四例（仅 server/仅 server+hash/重复 server 无余参/重复非 server 参数保留）：server 键全清+path/hash/state 保留+同源三件套+3 hello 携令牌+拒绝面退出+按钮前零连接。
+- **N2 空串 fragment 补拒**：`resolveWsUrl` 判据从 `parsed.hash === ""` 改为原始字符串 `!override.includes("#")`（URL.hash 区分不了尾随空 `#`，真实 Chromium 会抛 SyntaxError）。回归=app-clients 空 fragment 两例。
+- **N7 暗主题夹具修正**：`reduced-motion.browser.test.ts` 重构——亮/暗分两份独立文档，data-theme 挂 `<html>`（与生产行为一致；旧版挂普通 div 从未激活级联），并断言根 `--c-bg` 双主题不同值防同色假覆盖。
+- **N8 注释同步**：app-clients.ts 两处「组合根置空串 hello」旧语义注释改为「选项 A 不拨线」。
+- 运行证据：web 237 passed（含真实 Chromium reduce 实测）/全仓 1209 passed+11 skipped/tsc+eslint 净。
+## A1b 复审修复批（GPT 复审 84/100 NO-GO 收口：B1/B2/B3+N1/N2；分支 wt/kimi-web-1，在 e27bac3 之上单提交、不 amend）
+
+### 前批节（A1b 重写批，提交 e27bac3；本节为修正后的映射，替换前批同名字段中被审报收窄的表述）
+
+- **范围**（六文件）：apps/web/src/ws/subscribe-client.ts+use-session-detail.ts+components/session-detail.tsx+tests/unit/web/subscribe-client.test.ts+use-session-detail.test.ts+本 MAP。禁改面零触碰（use-sessions/ws-client/write-*/app-clients/real-app/styles.css/契约文档/协议与 server 面/package.json/锁文件）；零新依赖；无 innerHTML。外部消费面签名不变（app-clients/real-app/use-write.test 零改动编译通过）。
+- **保真清单对照**（委托规格 1-7 逐条落点）：
+  1. **三分支流语义**：正常终局=快照末页（historyNext=null+liveFrom 转 live；本协议无 `t:"end"` 消费分支，前批「end 帧」表述收窄于此）/流错误=error 帧带 code/连接级=onerror+onclose：落 handleSnapshot/handleError（handleStreamTerminal+failSubscription）/handleClose；终局后旧流帧零受理=retiredSubs 退役集+activeSub 门+close() 停止屏障（已验面=本片枚举帧面；retiredSubs 为只增留痕集合非路由判据，未证明所有内存结构有上界）。测试：「分页聚合到末页」「onerror 后必跟 onclose」「4409/4431/4402 终局族」。
+  2. **终局信封结构化身份路由**（K3-B1/K4）：handleError 内 subscriptionId 在场即流终局路由（先于一切请求级匹配），不解析 message 文本；requestId 恒空串口径。测试：「K3 P1 回归」「message 文本不参与路由（诱饵）」「A→B→A 新信封换流」+12 组合矩阵新信封列。
+  3. **drain 出口 4431 带 subscriptionId**（K4 发现1，d0de86b）：客户端消费侧认结构化身份即覆盖；专测「K4 发现1 drain 出口形态（4431+subscriptionId+requestId 空串）」+真实链「4431 终局链（drain 出口形态信封）」（服务端侧 ⑲b=subscription-engine.test，不在本片）。
+  4. **空串 requestId 口径**（C5）：handleError 连接级码（4403/4405/4432）关联判定认 undefined|""；parseError 对 requestId 空串验形通过。测试：C5 块「空串口径」+「无 requestId」两例（注：空串专测直接覆盖 4403/4432；4405 仅有无关 requestId 忽略例，未有空串专测）。
+  5. **首包前/切换期泄漏防护**（K3-B2/B3）：cancelledBuilds 留痕（FIFO 32，既有有限留痕策略）+迟到首页只识别+补退订（绝不写快照/绝不清当前 file 订阅）；failSubscription 对活动订阅补发退订帧。测试：B2 块四例（首包前退订/A→B→A 往返/failSubscription 残留/畸形迟到首页不发退订）+K3-B1「B2 兼容」例。
+  6. **提交期身份门**（K3-C/B3）：sessionDetailViewOf(snap, targetFile) 在快照 file≠目标时返回零内容门控视图（连接级状态如实呈现）；hook 返回值经门复核。测试：纯函数「B3 身份门」例+CommitLog 三例（A→B 切换/file=null/client 实例替换，layout effect 记录每次提交）。
+  7. **详情组件**：session-detail.tsx 只读渲染；根恒 section.session-detail+两槽位稳定挂载（composer key=file）；视觉令牌类名与结构逐项保留；减动效行为归 styles.css（本批未触碰）。
+- **测试数对照**：subscribe-client.test 51→67（静态 55 it+12 组合矩阵循环展开）；use-session-detail.test 25→30；合计 76→97。本修复批 +2（观察者清理锁死×2）→ **99**；「12 组合等价或更强」表述收回——GPT 复审以窄变异证明父版 4404 隔离回归分支曾被删（B1），本批恢复前不构成等价。
+- **自曝残余**：①「12 组合」出处按「3 码×新/旧信封×活动/非活动」理解落成矩阵 describe。②快照续页 60s 宽限真实轨迹无前端公共入口可验（沿用旧口径）。③status 帧无 statusVersion 回退门（有序传输前提，沿用旧口径）。④形状门传输 ID 上限 128（与 LIMITS.idPattern 同源），契约 64 域收紧由服务端 4404 把关（沿用旧口径）。⑤组件 DOM/文案逐字保留。
+
+### 本批修复清单（对应审报 gpt-a1b-rewrite-review-2026-10-05.md 第五段）
+
+- **B1（阻断，覆盖缩水）**：恢复父版 :895–920 被删分支②——「同 file 重订阅时旧 init 的 4404（requestId=旧）不误伤新 init，新 snapshot 随后落地」，与①无关 requestId 忽略合并为 subscribe-client.test.ts「请求级 error（requestId 无 subscriptionId）」一例两段。变异自验（实现源码临时改 `frame.requestId === pending.requestId` → `pending 在场且 requestId 非空即命中`）：基线两目标文件 **99 绿**→变异后 **1 红 98 绿**（红例=B1 新例）→还原后 **99 绿**。实现源码 subscribe-client.ts 本批零改动（git diff 为证）。
+- **B2（阻断，文档越界）**：TEST-MAP 以父版 cdf3d94 全文逐字恢复为前缀（旧文零改动，diff 仅末尾追加；分隔换行单独处理），本节为唯一新节；未运行任何全文件格式化。
+- **B3（阻断，记录纠偏）**：前批验收补记「c2cc285 之后才写入最后三例（4431 终局/空串/K3 P1）并 amend 到 993761c」与 Git 证据矛盾，纠正为可证明事实——该三例在 c2cc285 原提交已完整存在（复审对 c2cc285→993761c 两版测试的 TypeScript AST 比对完全相同）；reflog 确认 c2cc285→993761c→e27bac3 两次 amend，收入的是测试/表格格式变化与补记追加。「提交后树何时非净、谁于何时执行检查」无独立时点记录→**未核实**。
+- **N1（建议转必做，观察者清理锁死）**：固化复审探针两例——subscribe-client.test.ts「观察者清理锁死」describe（退订闭包后状态推进零触达被移除者+在册者正对照）；use-session-detail.test.ts 真实链「观察者清理锁死」（hook 卸载即移除 store listener、卸载后推进零触达、重挂后一次推进恰一份通知）。两者均可被「删 `listeners.delete(listener)`」窄变异击红。
+- **N2（过称收窄五处）**：①工厂抛错例补 subscribe 拒绝断言（标题「connect/subscribe 全拒绝」现有据）；②live 追加例补「空帧后重发同号带事件仍吸收」+形状合法回退序号例（水位推进现有据，原 seq=0 形状门先挡例移除）；③12 矩阵「旧信封×无活动流」补已退订分支（标题「首包前/已退订」现双覆盖）；④C4 例补 streamNote 与 errorMessage 同场断言（优先级锁定现有据）；⑤全链例补中间态断言（subscribing→loading 面、页1 后分页提示在场），不再只在末页后断言。另收窄：两测试文件头注「断言等价或更强」删除、「正常终局=end 帧路径」标题改为快照末页口径。
+- **验证数字**（本机亲跑，cwd=仓根，PATH=node v24.18.0；vitest 均带 `--no-cache --configLoader runner`）：两目标文件 `npx vitest run tests/unit/web/subscribe-client.test.ts tests/unit/web/use-session-detail.test.ts`=**2 files/99 passed**；web 全集 `npx vitest run tests/unit/web`=**12 files/260 passed**；`npx tsc -p apps/web --noEmit`=exit 0；`npx eslint apps/web/src tests/unit/web`=exit 0 零输出。提交后 `git status` 净。
