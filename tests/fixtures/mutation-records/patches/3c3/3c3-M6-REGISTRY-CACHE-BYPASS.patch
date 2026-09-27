@@ -1,0 +1,13 @@
+diff --git a/apps/server/src/runtime/session-registry.ts b/apps/server/src/runtime/session-registry.ts
+index 616eac9..55c8d04 100644
+--- a/apps/server/src/runtime/session-registry.ts
++++ b/apps/server/src/runtime/session-registry.ts
+@@ -98,7 +98,7 @@ export function createSessionRegistry(opts: SessionRegistryOpts): SessionRegistr
+   return {
+     sessionFor(file: string): RpcSession {
+       if (disposed) throw new Error("session-registry: 已销毁，拒绝构造会话");
+-      const cached = sessions.get(file);
++      const cached = undefined as ReturnType<typeof sessions.get>;
+       if (cached !== undefined) return cached;
+       const sessionFile = mapped(file);
+       const s = new RpcSession({

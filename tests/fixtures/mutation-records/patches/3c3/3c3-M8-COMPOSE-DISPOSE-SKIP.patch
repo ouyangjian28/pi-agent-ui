@@ -1,0 +1,13 @@
+diff --git a/apps/server/src/composition.ts b/apps/server/src/composition.ts
+index 08dd7e9..8a8704f 100644
+--- a/apps/server/src/composition.ts
++++ b/apps/server/src/composition.ts
+@@ -249,7 +249,7 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
+         if (config.registerSighup === true) process.off("SIGHUP", onSighup);
+         gateway.dispose(); // 应用层告别（1000 server-shutdown）+观察器全解绑（DH 句柄归零）
+         await adapter.dispose(); // 传输层兜底（1001+关自建 server）
+-        if (registry !== null) await registry.dispose(); // 3c-3：写侧统一销毁（全量 stop+dispose；网关先告别再杀进程）
++        if (registry !== null) void registry; // MUT-M8 跳过销毁
+         tokens.dispose();
+         audit("composition disposed");
+       })();

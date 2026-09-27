@@ -1,0 +1,13 @@
+diff --git a/apps/server/src/runtime/session-registry.ts b/apps/server/src/runtime/session-registry.ts
+index 616eac9..9c21352 100644
+--- a/apps/server/src/runtime/session-registry.ts
++++ b/apps/server/src/runtime/session-registry.ts
+@@ -124,7 +124,7 @@ export function createSessionRegistry(opts: SessionRegistryOpts): SessionRegistr
+       return [...sessions.keys()].sort();
+     },
+     statusFor(file: string): SessionStatus {
+-      const s = sessions.get(file);
++      const s = undefined as ReturnType<typeof sessions.get>;
+       if (s === undefined) return baseStatus(file);
+       const st = s.getState();
+       const sup = st.supervisor as { phase: "idle" | "running" | "stopping"; generation: number | null };
