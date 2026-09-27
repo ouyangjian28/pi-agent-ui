@@ -1,0 +1,16 @@
+diff --git a/apps/server/src/runtime/recovery-evidence-source.ts b/apps/server/src/runtime/recovery-evidence-source.ts
+index 11fd3ae..23b1612 100644
+--- a/apps/server/src/runtime/recovery-evidence-source.ts
++++ b/apps/server/src/runtime/recovery-evidence-source.ts
+@@ -385,8 +385,9 @@ export function createRecoveryEvidenceProvider(
+         const sha = sha256Hex(raw);
+         if (anchor !== null) {
+           // fix12/Q17：去 len===0 直通特判——零长锚也须 sha==H(empty)（形似的 64 个 0 伪锚必拒）
+-          const pureExtension = raw.byteLength >= anchor.len &&
+-            sha256Hex(raw.subarray(0, anchor.len)) === anchor.sha;
++          const pureExtension = true; // MUTATION M-3B5-PUREAPPEND：纯追加前缀验删（恒过，保留变量防 tsc 未用报错）
++          // 变异前：const pureExtension = raw.byteLength >= anchor.len &&
++          //   sha256Hex(raw.subarray(0, anchor.len)) === anchor.sha;
+           if (!pureExtension) {
+             audit(`recovery-evidence-rewritten file=${file} oldLen=${anchor.len} newLen=${raw.byteLength}`);
+             return unavailable("concurrent-modification"); // 已见证据被缩/重写/替换——修复残片消失≠干净

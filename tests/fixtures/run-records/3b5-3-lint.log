@@ -1,0 +1,2 @@
+# cmd: npx eslint apps/server/src/runtime/evidence-migration.ts tests/unit/server/evidence-migration.test.ts --max-warnings=0
+# LINT_EXIT=0

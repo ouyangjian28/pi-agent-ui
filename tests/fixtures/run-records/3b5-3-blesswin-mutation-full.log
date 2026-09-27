@@ -1,0 +1,126 @@
+# 3b5-3 变异一 M-3B5-BLESSWIN（bless 窗口失效：trustFirstCapture 恒 false）
+# 变异点=apps/server/src/runtime/evidence-migration.ts trustFirstCapture 包装 return true→false（diff=patches/3b5-3/M-3B5-BLESSWIN.diff）
+# 定向命令：npx vitest run tests/unit/server/evidence-migration.test.ts（裸跑，末行直录退出码）
+# 杀灭：4 failed | 7 passed——首败 MG1（FAIL 块序=执行序）：expected { total: 1, migrated: +0, …(2) } to deeply equal { total: 1, migrated: 1, …(2) }
+#   （fresh 文件被恒拒授权→no-evidence-snapshot 拒，counts.migrated=0）；连杀 MG3/MG7/MG10（皆因 fresh 迁移被拒）
+#   MG2 仍绿=legacy-anchor 路径不询及 bless（B15④ 语义佐证：旧锚补登记不依赖 bless 窗口）
+# 还原后 sha256=evidence-migration.ts 73ef1cbf...（与 HEAD 提交版一致，见下方复核）
+
+ RUN  v5.0.1 /home/yyj/ai/repos/pi-agent-ui-mig
+
+ ❯ |unit| tests/unit/server/evidence-migration.test.ts (11 tests | 4 failed) 29ms
+   ❯ migrateLegacyEvidence（3b5-3 迁移执行面） (11)
+     × MG1 正常迁移：空仓先行 no 文件；随后 fresh 首锚+登记+验收记录整体面 10ms
+     × MG3 幂等重跑：已登记文件 no-op，seen.json 原字节不变（未发生登记提交） 2ms
+     × MG7 审计行逐条断言：混合四文件（fresh/legacy/截断/noop）计数+行归属+字典序 2ms
+     × MG10 嵌套目录枚举：相对名保留路径，锚名=encodeURIComponent(相对名) 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |unit| tests/unit/server/evidence-migration.test.ts > migrateLegacyEvidence（3b5-3 迁移执行面） > MG1 正常迁移：空仓先行 no 文件；随后 fresh 首锚+登记+验收记录整体面
+AssertionError: expected { total: 1, migrated: +0, …(2) } to deeply equal { total: 1, migrated: 1, …(2) }
+
+- Expected
++ Received
+
+  {
+-   "migrated": 1,
++   "migrated": 0,
+    "noop": 0,
+-   "rejected": 0,
++   "rejected": 1,
+    "total": 1,
+  }
+
+ ❯ tests/unit/server/evidence-migration.test.ts:74:26
+     72|       expect(rec.evidenceDir).toBe(rig.evDir);
+     73|       expect(rec.roots).toEqual([rig.jRoot]);
+     74|       expect(rec.counts).toEqual({ total: 1, migrated: 1, noop: 0, rej…
+       |                          ^
+     75|       const f = rec.files[0];
+     76|       expect(f?.file).toBe("a.jsonl");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  |unit| tests/unit/server/evidence-migration.test.ts > migrateLegacyEvidence（3b5-3 迁移执行面） > MG3 幂等重跑：已登记文件 no-op，seen.json 原字节不变（未发生登记提交）
+AssertionError: expected { total: 1, migrated: +0, …(2) } to deeply equal { total: 1, migrated: 1, …(2) }
+
+- Expected
++ Received
+
+  {
+-   "migrated": 1,
++   "migrated": 0,
+    "noop": 0,
+-   "rejected": 0,
++   "rejected": 1,
+    "total": 1,
+  }
+
+ ❯ tests/unit/server/evidence-migration.test.ts:122:28
+    120|       await writeFile(join(rig.jRoot, "a.jsonl"), `${jl("a")}\n`, "utf…
+    121|       const first = await migrateLegacyEvidence({ roots: [rig.jRoot], …
+    122|       expect(first.counts).toEqual({ total: 1, migrated: 1, noop: 0, r…
+       |                            ^
+    123|       const seenBefore = await readFile(join(rig.evDir, "seen.json"), …
+    124|       const anchorBefore = await readFile(anchorOf(rig.evDir, "a.jsonl…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  |unit| tests/unit/server/evidence-migration.test.ts > migrateLegacyEvidence（3b5-3 迁移执行面） > MG7 审计行逐条断言：混合四文件（fresh/legacy/截断/noop）计数+行归属+字典序
+AssertionError: expected { total: 1, migrated: +0, …(2) } to deeply equal { total: 1, migrated: 1, …(2) }
+
+- Expected
++ Received
+
+  {
+-   "migrated": 1,
++   "migrated": 0,
+    "noop": 0,
+-   "rejected": 0,
++   "rejected": 1,
+    "total": 1,
+  }
+
+ ❯ tests/unit/server/evidence-migration.test.ts:234:26
+    232|       await writeFile(join(rig.jRoot, "d.jsonl"), `${jl("d")}\n`, "utf…
+    233|       const pre = await migrateLegacyEvidence({ roots: [rig.jRoot], ev…
+    234|       expect(pre.counts).toEqual({ total: 1, migrated: 1, noop: 0, rej…
+       |                          ^
+    235|       // a=无锚 fresh；b=有锚未登记 legacy；c=锚存在但 journal 截断→拒；d=已登记 noop
+    236|       const aText = `${jl("a")}\n`;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  |unit| tests/unit/server/evidence-migration.test.ts > migrateLegacyEvidence（3b5-3 迁移执行面） > MG10 嵌套目录枚举：相对名保留路径，锚名=encodeURIComponent(相对名)
+AssertionError: expected { total: 1, migrated: +0, …(2) } to deeply equal { total: 1, migrated: 1, …(2) }
+
+- Expected
++ Received
+
+  {
+-   "migrated": 1,
++   "migrated": 0,
+    "noop": 0,
+-   "rejected": 0,
++   "rejected": 1,
+    "total": 1,
+  }
+
+ ❯ tests/unit/server/evidence-migration.test.ts:318:26
+    316|       await writeFile(join(rig.jRoot, "sub", "nested.jsonl"), `${jl("n…
+    317|       const rec = await migrateLegacyEvidence({ roots: [rig.jRoot], ev…
+    318|       expect(rec.counts).toEqual({ total: 1, migrated: 1, noop: 0, rej…
+       |                          ^
+    319|       const f = rec.files[0];
+    320|       expect(f?.file).toBe("sub/nested.jsonl");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 7 passed (11)
+   Start at  13:41:15
+   Duration  272ms (transform 66%, import 19%, tests 15%, worker 1%)
+
+BARE_EXIT=1

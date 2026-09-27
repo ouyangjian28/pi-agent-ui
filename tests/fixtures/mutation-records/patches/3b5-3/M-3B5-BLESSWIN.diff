@@ -1,0 +1,13 @@
+diff --git a/apps/server/src/runtime/evidence-migration.ts b/apps/server/src/runtime/evidence-migration.ts
+index e4e144a..259927e 100644
+--- a/apps/server/src/runtime/evidence-migration.ts
++++ b/apps/server/src/runtime/evidence-migration.ts
+@@ -174,7 +174,7 @@ export async function migrateLegacyEvidence(
+     fsLike: fsx,
+     trustFirstCapture: () => {
+       blessCalled = true;
+-      return true;
++      return false; // MUTATION M-3B5-BLESSWIN：bless 窗口失效（恒拒授权）
+     },
+   });
+   // 多 root 同名相对路径去重：字典序后串行逐文件（先根先读的顺序由 provider resolveWithinRoots 决定）。

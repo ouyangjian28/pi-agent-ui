@@ -1,0 +1,274 @@
+# 3b5-3 变异二 M-3B5-PUREAPPEND（纯追加前缀验删——临时未提交 patch，实跑后即还原）
+# 变异点=apps/server/src/runtime/recovery-evidence-source.ts:388 纯追加判定恒 true（diff=patches/3b5-3/M-3B5-PUREAPPEND.diff）
+# 变异态 tsc 通过（TSC_MUT_EXIT=0，见 3b5-3-pureappend-mutation-tsc.log）
+# 定向命令：npx vitest run tests/unit/server/evidence-migration.test.ts tests/unit/server/recovery-evidence-source.test.ts
+# 杀灭：7 failed | 45 passed——本工具首败 MG4（FAIL 块序=执行序）：
+#   expected { total: 1, migrated: 1, …(2) } to deeply equal { total: 1, migrated: +0, …(2) }
+#   （截断文件被放行且补登记 migrated=1——正是该变异代表的 fail-open）；连杀本工具 MG5/MG7
+#   +provider 侧 R11/R12/R25/R38（同一接缝双杀面：工具测试与 provider 测试都守住纯追加前缀验证）
+# 还原后 sha256=recovery-evidence-source.ts 7b36f23d...（与 HEAD 提交版一致，SHA_REVERT_OK）
+
+ RUN  v5.0.1 /home/yyj/ai/repos/pi-agent-ui-mig
+
+ ❯ |unit| tests/unit/server/evidence-migration.test.ts (11 tests | 3 failed) 40ms
+   ❯ migrateLegacyEvidence（3b5-3 迁移执行面） (11)
+     × MG4 截断拒：recovery-evidence-rewritten，锚与 seen 原字节不动、不补登记 8ms
+     × MG5 同长改写拒：oldLen==newLen 亦拒，锚与 seen 原字节不动 6ms
+     × MG7 审计行逐条断言：混合四文件（fresh/legacy/截断/noop）计数+行归属+字典序 6ms
+ ❯ |unit| tests/unit/server/recovery-evidence-source.test.ts (41 tests | 4 failed) 192ms
+   ❯ recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） (41)
+     × R11 证据链改写：首捕后截尾/重写→concurrent-modification（bad 消失不得洗白） 8ms
+     × R12 重启续链：新实例同 evidenceDir——纯追加过；重写拒（驱逐/重启不丢已见证据） 4ms
+     × R25/Q17 零长锚也验空摘要：伪锚 {len:0,sha:64×0}→concurrent-modification；合法空首捕→锚=H(empty) 且二次过 2ms
+     × R38/§六③ 有锚无登记+journal 非法前缀（截断/同长改写）→concurrent-modification 且不补登记、bless 不消耗、锚原文不动 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |unit| tests/unit/server/evidence-migration.test.ts > migrateLegacyEvidence（3b5-3 迁移执行面） > MG4 截断拒：recovery-evidence-rewritten，锚与 seen 原字节不动、不补登记
+AssertionError: expected { total: 1, migrated: 1, …(2) } to deeply equal { total: 1, migrated: +0, …(2) }
+
+- Expected
++ Received
+
+  {
+-   "migrated": 0,
++   "migrated": 1,
+    "noop": 0,
+-   "rejected": 1,
++   "rejected": 0,
+    "total": 1,
+  }
+
+ ❯ tests/unit/server/evidence-migration.test.ts:156:26
+    154|       await writeFile(join(rig.jRoot, "c.jsonl"), trunc, "utf8");
+    155|       const rec = await migrateLegacyEvidence({ roots: [rig.jRoot], ev…
+    156|       expect(rec.counts).toEqual({ total: 1, migrated: 0, noop: 0, rej…
+       |                          ^
+    157|       const f = rec.files[0];
+    158|       expect(f?.outcome).toBe("rejected");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  |unit| tests/unit/server/evidence-migration.test.ts > migrateLegacyEvidence（3b5-3 迁移执行面） > MG5 同长改写拒：oldLen==newLen 亦拒，锚与 seen 原字节不动
+AssertionError: expected { total: 1, migrated: 1, …(2) } to deeply equal { total: 1, migrated: +0, …(2) }
+
+- Expected
++ Received
+
+  {
+-   "migrated": 0,
++   "migrated": 1,
+    "noop": 0,
+-   "rejected": 1,
++   "rejected": 0,
+    "total": 1,
+  }
+
+ ❯ tests/unit/server/evidence-migration.test.ts:187:26
+    185|       await writeFile(join(rig.jRoot, "c.jsonl"), bytes, "utf8");
+    186|       const rec = await migrateLegacyEvidence({ roots: [rig.jRoot], ev…
+    187|       expect(rec.counts).toEqual({ total: 1, migrated: 0, noop: 0, rej…
+       |                          ^
+    188|       const f = rec.files[0];
+    189|       expect(f?.outcome).toBe("rejected");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  |unit| tests/unit/server/evidence-migration.test.ts > migrateLegacyEvidence（3b5-3 迁移执行面） > MG7 审计行逐条断言：混合四文件（fresh/legacy/截断/noop）计数+行归属+字典序
+AssertionError: expected { Object (total, migrated, ...) } to deeply equal { Object (total, migrated, ...) }
+
+- Expected
++ Received
+
+  {
+-   "migrated": 2,
++   "migrated": 3,
+    "noop": 1,
+-   "rejected": 1,
++   "rejected": 0,
+    "total": 4,
+  }
+
+ ❯ tests/unit/server/evidence-migration.test.ts:247:26
+    245|       const rec = await migrateLegacyEvidence({ roots: [rig.jRoot], ev…
+    246|       expect(rec.files.map((f) => f.file)).toEqual(["a.jsonl", "b.json…
+    247|       expect(rec.counts).toEqual({ total: 4, migrated: 2, noop: 1, rej…
+       |                          ^
+    248|       const [a, b, c, d] = rec.files;
+    249|       expect(a?.audit).toEqual([]); // 成功捕获无审计行
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R11 证据链改写：首捕后截尾/重写→concurrent-modification（bad 消失不得洗白）
+AssertionError: expected { version: 1, file: 'k.jsonl', …(6) } to deeply equal { kind: 'unavailable', …(1) }
+
+- Expected
++ Received
+
+  {
+-   "kind": "unavailable",
+-   "reason": "concurrent-modification",
++   "attributedFragments": [],
++   "bad": [],
++   "createdAt": 1790487699467,
++   "file": "k.jsonl",
++   "lines": [
++     {
++       "generation": 1,
++       "intentId": "i-1",
++       "leafId": "L",
++       "matchKey": {
++         "attachmentIdentity": "",
++         "ordinal": 1,
++         "textHash": "f10c3da3",
++       },
++       "payload": {
++         "attachments": [],
++         "kind": "prompt",
++         "rawText": "t",
++         "sentAt": "1",
++       },
++       "sessionId": "q",
++       "t": "enqueue",
++     },
++   ],
++   "repaired": false,
++   "sessionId": "k",
++   "version": 1,
+  }
+
+ ❯ tests/unit/server/recovery-evidence-source.test.ts:255:34
+    253|       // 「修复」：去掉撕裂尾→当前盘面干净——但已见证据被改写（缩+重写）→拒
+    254|       await writeFile(jp, jl("i-1") + "\n");
+    255|       expect(await p("k.jsonl")).toEqual({ kind: "unavailable", reason…
+       |                                  ^
+    256|       expect(audits.some((l) => l.includes("recovery-evidence-rewritte…
+    257|       // 锚点不被改写结果覆盖：仍=首捕长度
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R12 重启续链：新实例同 evidenceDir——纯追加过；重写拒（驱逐/重启不丢已见证据）
+AssertionError: expected { version: 1, file: 'l.jsonl', …(6) } to deeply equal { kind: 'unavailable', …(1) }
+
+- Expected
++ Received
+
+  {
+-   "kind": "unavailable",
+-   "reason": "concurrent-modification",
++   "attributedFragments": [],
++   "bad": [],
++   "createdAt": 1790487699476,
++   "file": "l.jsonl",
++   "lines": [
++     {
++       "generation": 1,
++       "intentId": "i-9",
++       "leafId": "L",
++       "matchKey": {
++         "attachmentIdentity": "",
++         "ordinal": 1,
++         "textHash": "f10c3da3",
++       },
++       "payload": {
++         "attachments": [],
++         "kind": "prompt",
++         "rawText": "t",
++         "sentAt": "1",
++       },
++       "sessionId": "q",
++       "t": "enqueue",
++     },
++   ],
++   "repaired": false,
++   "sessionId": "l",
++   "version": 1,
+  }
+
+ ❯ tests/unit/server/recovery-evidence-source.test.ts:276:35
+    274|       expect(grown.lines).toHaveLength(2);
+    275|       await writeFile(jp, jl("i-9") + "\n"); // 非前缀重写（缩）
+    276|       expect(await pB("l.jsonl")).toEqual({ kind: "unavailable", reaso…
+       |                                   ^
+    277|     } finally { await cleanup(); }
+    278|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+ FAIL  |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R25/Q17 零长锚也验空摘要：伪锚 {len:0,sha:64×0}→concurrent-modification；合法空首捕→锚=H(empty) 且二次过
+AssertionError: expected { version: 1, file: 'p.jsonl', …(6) } to deeply equal { kind: 'unavailable', …(1) }
+
+- Expected
++ Received
+
+  {
+-   "kind": "unavailable",
+-   "reason": "concurrent-modification",
++   "attributedFragments": [],
++   "bad": [
++     {
++       "error": "文件末段无换行（撕裂尾：写入中断，效果未知）",
++       "partialTail": true,
++       "raw": "x",
++     },
++   ],
++   "createdAt": 1790487699502,
++   "file": "p.jsonl",
++   "lines": [],
++   "repaired": false,
++   "sessionId": "p",
++   "version": 1,
+  }
+
+ ❯ tests/unit/server/recovery-evidence-source.test.ts:545:35
+    543|         JSON.stringify({ version: 1, file: "p.jsonl", len: 0, sha: "0"…
+    544|       const pa = createRecoveryEvidenceProvider({ roots: [jRoot], evid…
+    545|       expect(await pa("p.jsonl")).toEqual({ kind: "unavailable", reaso…
+       |                                   ^
+    546|       // (b) 合法空 journal 首捕（bless）→锚 {len:0, sha:H(empty)}；再读（无 bless）过
+    547|       await writeFile(join(jRoot, "e.jsonl"), "", "utf8");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯
+
+ FAIL  |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R38/§六③ 有锚无登记+journal 非法前缀（截断/同长改写）→concurrent-modification 且不补登记、bless 不消耗、锚原文不动
+AssertionError: expected { version: 1, file: 'c.jsonl', …(6) } to deeply equal { kind: 'unavailable', …(1) }
+
+- Expected
++ Received
+
+  {
+-   "kind": "unavailable",
+-   "reason": "concurrent-modification",
++   "attributedFragments": [],
++   "bad": [
++     {
++       "error": "文件末段无换行（撕裂尾：写入中断，效果未知）",
++       "partialTail": true,
++       "raw": "{\"t\":\"enqueue\",\"intentId\":\"c-1\",\"sessionId\":\"q\",\"generation\":1,\"leafId\":\"L\",\"matchKey\":{\"textHash\":\"f10c3da3\",\"attachmentIdentity\":\"\",\"ordinal\":1},\"payload\":{\"kind\":\"prompt\",\"rawText\":\"t\",\"attachments\":[],\"sentAt\":\"1\"",
++     },
++   ],
++   "createdAt": 1790487699529,
++   "file": "c.jsonl",
++   "lines": [],
++   "repaired": false,
++   "sessionId": "c",
++   "version": 1,
+  }
+
+ ❯ tests/unit/server/recovery-evidence-source.test.ts:858:18
+    856|       const trunc = full.subarray(0, full.byteLength - 3);
+    857|       const ra = await mk(trunc)("c.jsonl");
+    858|       expect(ra).toEqual({ kind: "unavailable", reason: "concurrent-mo…
+       |                  ^
+    859|       expect(audits.some((l) => l.includes("recovery-evidence-rewritte…
+    860|       expect(await bytesSame()).toBe(true); // 截断失败后 seen/锚逐字节未动
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  7 failed | 45 passed (52)
+   Start at  13:41:39
+   Duration  447ms (transform 48%, tests 39%, import 12%, worker 1%)
+
+BARE_EXIT=1

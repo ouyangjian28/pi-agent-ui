@@ -1,0 +1,98 @@
+# cmd: npx vitest run --reporter=json --reporter=default --outputFile=tests/fixtures/run-records/3b5-3-vitest.json
+# 全套受控（未设 PI_E2E）：913 总=906 通过+7 跳过，0 失败（基线 902=895+7，+11=MG1-MG11）
+
+ RUN  v5.0.1 /home/yyj/ai/repos/pi-agent-ui-mig
+
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts (37 tests) 16ms
+ ✓ |integration| tests/integration/pi-e2e.test.ts (11 tests | 7 skipped) 3ms
+ ✓ |unit| tests/unit/server/recover.test.ts (34 tests) 49ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts (43 tests) 198ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts (34 tests) 196ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts (30 tests) 22ms
+ ✓ |unit| tests/unit/server/evidence-migration.test.ts (11 tests) 64ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts (41 tests) 314ms
+ ✓ |unit| tests/unit/turn-gate.test.ts (28 tests) 11ms
+ ✓ |integration| tests/integration/recovery-real.test.ts (5 tests) 278ms
+ ✓ |unit| tests/unit/session-projection.test.ts (18 tests) 17ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts (31 tests) 142ms
+ ✓ |unit| tests/unit/history-projection.test.ts (20 tests) 12ms
+ ✓ |unit| tests/unit/server/idle-reaper.test.ts (11 tests) 11ms
+ ✓ |unit| tests/unit/command-channel.test.ts (12 tests) 7ms
+ ✓ |unit| tests/unit/server/process-host.test.ts (17 tests) 102ms
+ ✓ |unit| tests/unit/r3.regressions.test.ts (10 tests) 9ms
+ ✓ |unit| tests/unit/r4.regressions.test.ts (11 tests) 8ms
+ ✓ |unit| tests/unit/r2.regressions.test.ts (12 tests) 8ms
+ ✓ |unit| tests/unit/server/file-durability.test.ts (9 tests) 30ms
+ ✓ |unit| tests/unit/contracts-validate.test.ts (21 tests) 8ms
+ ✓ |unit| tests/unit/writer-authority.test.ts (11 tests) 6ms
+ ✓ |unit| tests/unit/projection-frames.test.ts (7 tests) 18ms
+ ✓ |unit| tests/unit/b-face.regressions.test.ts (8 tests) 6ms
+ ✓ |unit| tests/unit/read-index.test.ts (8 tests) 9ms
+ ✓ |unit| tests/unit/session-attribution.test.ts (10 tests) 5ms
+ ✓ |unit| tests/unit/recovery.two-pass.test.ts (7 tests) 7ms
+ ✓ |unit| tests/unit/identity-gate.test.ts (4 tests) 8ms
+ ✓ |unit| tests/unit/server/history-source.test.ts (75 tests) 884ms
+ ✓ |unit| tests/unit/server/session-list.test.ts (8 tests) 138ms
+ ✓ |unit| tests/unit/notification.monotonic.test.ts (7 tests) 6ms
+ ✓ |unit| tests/unit/n18b.evidence.test.ts (5 tests) 5ms
+ ✓ |unit| tests/unit/read-index-dual.test.ts (5 tests) 4ms
+ ✓ |unit| tests/unit/server/line-pump.test.ts (8 tests) 4ms
+ ✓ |unit| tests/unit/command-dedup.test.ts (6 tests) 5ms
+ ✓ |unit| tests/unit/server/safe-open.test.ts (5 tests) 6ms
+ ✓ |unit| tests/unit/server/pi-child-pumps.test.ts (2 tests) 4ms
+ ✓ |unit| tests/unit/sha256.test.ts (5 tests) 12ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts (67 tests) 218ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts (102 tests) 1055ms
+ ✓ |unit| tests/unit/web/app.test.ts (8 tests) 626ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts (38 tests) 2353ms
+ ✓ |unit| tests/unit/server/composition.test.ts (15 tests) 2184ms
+   ✓ 3b-3① composition (15)
+     ✓ R-03 生产流身份随机：两实例首流不同 id；跨实例 cursor → 4404 拒绝 1388ms
+     ✓ Y-05 tokenPollMs 轮询真实生效：无手动 reload，写新 token 文件后旧 token 自动失效 324ms
+     ✓ reloadTokens：写新 token 文件→轮换生效（旧 token 拒新 hello） 304ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts (30 tests) 3086ms
+   ✓ 3b-1 真网络：⑤真 send 回调+清理 (11)
+     ✓ 客户端暂停读 → done 不兑现（绑定真实 flush 非立即返回）；恢复读 → done 兑现 851ms
+   ✓ 3b-1 真网络：⑥token 三态（真 TokenAuthority 组合） (4)
+     ✓ R6/3b-1 per-IP 认证失败限速+退避（真网络）：达限→封锁内正确令牌也拒；过期→恢复 319ms
+   ✓ 3b-1 真网络：⑦关闭竞态+无句柄悬挂 (5)
+     ✓ R02/3b-1 普通 GET → 404 应答（自建 server 管未升级连接）；不读不关的裸 socket 不挂 dispose（整体有界） 302ms
+     ✓ R02/3b-1 接收器自启关闭同截止：真暂停读的客户端在 closeHandshakeMs 内被 terminate（服务端终局时延） 405ms
+ ✓ |integration| tests/integration/real-fs.test.ts (13 tests) 4977ms
+   ✓ 3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真 reader） (13)
+     ✓ RF1 双源同 tick 追加：journal+session 各恰一次到货，无错流无换流 307ms
+     ✓ RF2 撕裂尾跨写补全：半行不发布，补全+换行后恰一次发布（session 面） 574ms
+     ✓ RF3 rename-over 同字节：不换流（fingerprint 短路）+重挂后新追加仍达（watch 重建） 457ms
+     ✓ RF4 rename-over 改写：在订连接收 4409（invalid-stream 真路径）；重订得新 streamId 306ms
+     ✓ RF9 句柄票据收口：全退订后盘面追加静默（观察代理零泄漏）+再订可恢复 705ms
+     ✓ RF12 指纹字段与源字节对拍（Y-04）：装载/追加/换流三态下索引指纹=源文件 SHA-256 全 64hex 609ms
+     ✓ RF13 撕裂尾指纹语义（Y-04 钉死）：未成完整行不编入→索引指纹停旧值；补全后跟进到全量 SHA-256 707ms
+     ✓ RF14 非前缀重建路指纹字段（Y-04）：直驱 syncIndex 非前缀分支→重建后指纹=新源字节 SHA-256（真指纹三路统一之重建路） 303ms
+     ✓ RF11 3b3c：恢复期大批量续编（session 首装 1100 行）→既有 live 引擎同步排水不被积压门误杀 529ms
+ ✓ |integration| tests/integration/real-ws.test.ts (7 tests) 5465ms
+   ✓ 3b-3③ real-ws：真实传输+慢客户端矩阵 (7)
+     ✓ RW1 快/慢并存：慢客户端卡分页→订阅级 4431（retryable=false 只关订阅）；快客户端全量不受影响；慢客户端 cursor 续读恢复 1064ms
+     ✓ RW2 停读套接字同负载对照（R-01 修复后语义）：pause+1.2MB 突发→零误杀；resume→全量恰一次；连接存活 1750ms
+     ✓ RW6 快客户端单突发（R-01 反例 P-FAST 复现）：正常读+6750 行单突发→全量恰一次零错 847ms
+     ✓ RW7 恢复期大批量续编（真传输）：journal-only 订阅期 session 落盘 8000 行→B 订阅触发批量续编→A 全量恰一次（R-01 syncIndex 路） 973ms
+     ✓ RW5 断开竞态：A 硬断（不退订）→B 共享观察不受扰，续投恰一次；服务端连接清理有审计 787ms
+ ✓ |integration| tests/integration/pi-child.smoke.test.ts (1 test) 6596ms
+   ✓ pi 子进程事件泵（集成冒烟） (1)
+     ✓ spawn pi -p →stdout JSONL 事件流→退出 6595ms
+stdout | tests/integration/real-fs-budget.test.ts > 3b-3④ 预算容量（真盘体量；组合层无合计门——单文件/单流/流池三门） > BG5 内存峰值披露（口径=单 20k 事件流满载；非生产 RSS 断言）：heapUsed<384MiB 快照记录
+[BG5] heapUsed=49.8MiB rss=268.4MiB external=11.4MiB
+
+ ✓ |integration| tests/integration/real-fs-budget.test.ts (5 tests) 9423ms
+   ✓ 3b-3④ 预算容量（真盘体量；组合层无合计门——单文件/单流/流池三门） (5)
+     ✓ BG1 双源同池 20k 触顶状态机：journal 19,998+session 3=20,001 越界→订阅 4402；宽容换流后新流再触顶→仍 4402；额度已用第三订→registry 拒建（审计 index-over-budget-get） 4731ms
+     ✓ BG2 恰在预算内（20,000）不触顶：双源 19,997+3=20,000 恰好放行，快照正常 1484ms
+     ✓ BG4 流池 LRU 32：33 文件装载挤出最旧→旧文件重订=新 streamId（流身份丢失）；当前流数不超 32 1170ms
+     ✓ BG5 内存峰值披露（口径=单 20k 事件流满载；非生产 RSS 断言）：heapUsed<384MiB 快照记录 1816ms
+
+ Test Files  48 passed (48)
+      Tests  906 passed | 7 skipped (913)
+   Start at  13:42:56
+   Duration  10.09s (tests 82%, transform 13%, import 4%, environment 1%)
+
+JSON report written to /home/yyj/ai/repos/pi-agent-ui-mig/tests/fixtures/run-records/3b5-3-vitest.json
+BARE_EXIT=0
