@@ -34,7 +34,7 @@
 // 取消语义（披露）：signal=各步骤间观察点+读后复核；当前挂起 I/O 本身不消费 signal（safe-open 读窗
 // 有界+快，取消语义=迟到结果被网关连接态丢弃——st.closed 不入帧不回填缓存）。
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { parseJournalText } from "./recover.ts";
 import type { RecoveryEvidenceSnapshot } from "./recover.ts";
@@ -75,6 +75,20 @@ const defaultOpenLike: OpenLike = async (abs) => {
   };
 };
 
+export type PersistSeenLike = (evidenceDir: string, next: { version: 1; files: string[] }) => Promise<void>;
+
+// fix14/Y14-1：seen 落盘接缝（默认=tmp+rename 独占名+失败清 tmp；测试注入真实写故障）
+const defaultPersistSeenLike: PersistSeenLike = async (evidenceDir, next) => {
+  const stmp = `${seenPath(evidenceDir)}.tmp-${process.pid}-${Date.now().toString(36)}-${randomBytes(6).toString("hex")}`;
+  try {
+    await writeFile(stmp, JSON.stringify(next), "utf8");
+    await rename(stmp, seenPath(evidenceDir));
+  } catch (err) {
+    await rm(stmp, { force: true }).catch(() => {}); // fix14/Y14-1：失败 tmp 卫生（尽力而为，不掩盖原错）
+    throw err;
+  }
+};
+
 export interface RecoveryEvidenceSourceOptions {
   /** journal 授权根（与网关 roots 同源口径；必须绝对路径——composition 校验）。 */
   readonly roots: readonly string[];
@@ -93,6 +107,7 @@ export interface RecoveryEvidenceSourceOptions {
   readonly audit?: (line: string) => void;
   /** 测试接缝：安全句柄注入（默认=safe-open 真路径）。 */
   readonly openLike?: OpenLike;
+  readonly persistSeenLike?: PersistSeenLike;
   /** 首捕授权（B12-1/Q02）：锚点缺失且仓未登记该 file 时，默认 no-evidence-snapshot（fail-closed）。
    * 仅宿主显式初始化路径（迁移/可信新建声明）返回 true 才建首锚；已登记 file 的锚点丢失
    * →concurrent-modification，本回调不可越（Q03）。抛错=read-failed（宿主面故障≠拒绝授权）。 */
@@ -174,6 +189,7 @@ export function createRecoveryEvidenceProvider(
   }
   const sessionIdFor = opts.sessionIdFor ?? ((f: string) => f.replace(/\.jsonl$/, ""));
   const openLike = opts.openLike ?? defaultOpenLike;
+  const persistSeenLike = opts.persistSeenLike ?? defaultPersistSeenLike;
   const now = opts.now ?? (() => Date.now());
   const audit = opts.audit ?? (() => {});
   const sessionRoots = opts.sessionRoots ?? opts.roots;
@@ -353,11 +369,14 @@ export function createRecoveryEvidenceProvider(
           }
         }
         // 锚点写穿（原子 tmp+rename；失败=证据不落盘不得发结论→read-failed）
+        let anchorTmp: string | null = null;
         try {
-          const tmp = `${apath}.tmp-${process.pid}-${now().toString(36)}-${randomBytes(6).toString("hex")}`;
-          await writeFile(tmp, JSON.stringify({ version: 1, file, len: raw.byteLength, sha } satisfies EvidenceAnchor), "utf8");
-          await rename(tmp, apath);
+          anchorTmp = `${apath}.tmp-${process.pid}-${now().toString(36)}-${randomBytes(6).toString("hex")}`;
+          await writeFile(anchorTmp, JSON.stringify({ version: 1, file, len: raw.byteLength, sha } satisfies EvidenceAnchor), "utf8");
+          await rename(anchorTmp, apath);
+          anchorTmp = null; // 已 rename 归位，不再属清理责任
         } catch {
+          if (anchorTmp !== null) await rm(anchorTmp, { force: true }).catch(() => {}); // fix14/Y14-1：失败 tmp 卫生
           audit(`recovery-evidence-store-failed file=${file} detail=store`);
           return unavailable("read-failed");
         }
@@ -365,11 +384,10 @@ export function createRecoveryEvidenceProvider(
         // B13-2 残局（锚写成+seen 写败）或 fix11 旧锚迁移——一律补登记再返回（失败=fail-closed：
         // 仓登记不落盘不得发结论，杜绝重试绕登记直通快照）。Q03 防锚点丢失洗白同源。
         if (!seen.has(file)) {
+          // fix14/Y14-1：seen-store 走 persistSeenLike 接缝（默认真路径；测试可注入真实写故障→重试收敛）
           try {
             const nextSeen = { version: 1, files: [...new Set([...seen, file])].sort() } satisfies EvidenceSeen;
-            const stmp = `${seenPath(evidenceDir)}.tmp-${process.pid}-${now().toString(36)}-${randomBytes(6).toString("hex")}`;
-            await writeFile(stmp, JSON.stringify(nextSeen), "utf8");
-            await rename(stmp, seenPath(evidenceDir));
+            await persistSeenLike(evidenceDir, nextSeen);
           } catch {
             audit(`recovery-evidence-store-failed file=${file} detail=seen-store`);
             return unavailable("read-failed");

@@ -654,4 +654,37 @@ describe("recovery-evidence-source（fix13 v4：+仓级串行/登记不变量）
       expect(names.includes("seen.json")).toBe(false); // 登记未建
     } finally { await cleanup(); }
   });
+
+  it("R32/Y14-1 真实 seen-store 写故障：persistSeenLike 首调抛错→read-failed（detail=seen-store）+锚已留+登记缺；清障重试→补登记→快照（B13-2 残局收敛实录）", async () => {
+    const { jRoot, evDir, cleanup } = await mkRig("r32");
+    const audits: string[] = [];
+    const calls: number[] = [];
+    try {
+      await writeFile(join(jRoot, "s.jsonl"), jl("s-1") + "\n", "utf8");
+      let failFirst = true;
+      type Seam = (dir: string, next: { version: 1; files: string[] }) => Promise<void>;
+      const inject: Seam[] = [
+        async () => { calls.push(1); throw new Error("seen-store boom"); }, // 真实写故障注入（非占位目录时序）
+        async (dir: string, next) => { // 清障后真路径重放（同构默认实现）
+          calls.push(2);
+          await writeFile(join(dir, "seen.json"), JSON.stringify(next), "utf8");
+        },
+      ];
+      const mk = (seam: Seam) =>
+        createRecoveryEvidenceProvider({ trustFirstCapture: () => true, roots: [jRoot], evidenceDir: evDir, maxCombinedBytes: 100_000, audit: (l) => { audits.push(l); }, persistSeenLike: seam });
+      // 首捕：seen 写失败→read-failed，但锚已在（锚先于 seen 提交——时序实录）
+      const r1 = await mk(inject[0]!)("s.jsonl");
+      expect(r1).toEqual({ kind: "unavailable", reason: "read-failed" });
+      expect(audits.some((l) => l.includes("recovery-evidence-store-failed") && l.includes("detail=seen-store"))).toBe(true);
+      const names1 = await readdir(evDir);
+      expect(names1.some((n) => n === "s.jsonl.evidence.json")).toBe(true); // 锚留存
+      expect(names1.includes("seen.json")).toBe(false); // 登记缺失（残局成立）
+      // 重试：同仓有锚无登记→纯追加验证→补登记→快照（fail-closed 后收敛，非绕登记直通）
+      const r2 = await mk(inject[1]!)("s.jsonl");
+      expect(isRecoverySnapshot(r2)).toBe(true);
+      expect(calls).toEqual([1, 2]);
+      const seen = JSON.parse(await readFile(join(evDir, "seen.json"), "utf8")) as { files: string[] };
+      expect(seen.files).toContain("s.jsonl");
+    } finally { await cleanup(); }
+  });
 });

@@ -74,12 +74,14 @@ describe("3b-3① composition", () => {
       for (const poll of [undefined, 0, 50] as const) { // 轮询三态：省略（默认档）/0 禁用/普通正值
         for (const bad of bads) {
           const { cfg } = await mkCfg({ maxRecoveryCombinedBytes: bad });
-          if (poll === undefined) delete cfg.tokenPollMs; else cfg.tokenPollMs = poll;
+          const mcfg = cfg as unknown as { tokenPollMs?: number }; // fix14：readonly 面删除/赋值走可变别名（fix13 tsc0 断言不实勘正）
+          if (poll === undefined) delete mcfg.tokenPollMs; else mcfg.tokenPollMs = poll;
           await expect(startServer(cfg)).rejects.toThrow("maxRecoveryCombinedBytes 非法");
         }
         for (const good of goods) {
           const { cfg } = await mkCfg(good === undefined ? {} : { maxRecoveryCombinedBytes: good });
-          if (poll === undefined) delete cfg.tokenPollMs; else cfg.tokenPollMs = poll;
+          const mcfg = cfg as unknown as { tokenPollMs?: number }; // fix14：readonly 面删除/赋值走可变别名（fix13 tsc0 断言不实勘正）
+          if (poll === undefined) delete mcfg.tokenPollMs; else mcfg.tokenPollMs = poll;
           const sv = await start(cfg); await sv.dispose();
         }
       }

@@ -14,6 +14,7 @@ import { FileHistorySource, type HistoryReaderPort, type HistoryWatcherPort } fr
 import { DualHistorySource } from "../../../apps/server/src/runtime/dual-history-source.ts";
 import { ComputeSemaphore } from "../../../apps/server/src/ws/compute-semaphore.ts";
 import type { RecoveryEvidenceSnapshot, BadJournalEntry } from "../../../apps/server/src/runtime/recover.ts";
+import type { JournalLine } from "../../../packages/protocol/src/journal.ts"; // fix14/Y14-2：fixture 类型直约束
 import type { ScanRow, SessionStatus } from "@pi-agent-ui/protocol";
 import { fnv1a64Hex, matchKeyOf, validateClientFrame } from "@pi-agent-ui/protocol";
 
@@ -896,12 +897,12 @@ function snapOf(seed = 1): RecoveryEvidenceSnapshot {
     version: 1,
     file: "f.jsonl",
     sessionId: `sid-${seed}`,
-    lines: [{ raw: JSON.stringify({ t: "session", id: `sid-${seed}` }), parsed: null }],
+    lines: [{ t: "sending", intentId: `i-${seed}` }], // fix14/Y14-2：原 {raw,parsed} 假行被双重强转掩蔽，换真 JournalLine 字面量
     bad: [],
     attributedFragments: [],
-    repaired: [],
+    repaired: false, // fix14/Y14-2：repaired 实为 boolean
     createdAt: 1_000 + seed,
-  } as unknown as RecoveryEvidenceSnapshot;
+  };
 }
 
 // ==== w1b：B 系阻断回归（B1 已并入 C16/C17）====
@@ -1097,13 +1098,13 @@ describe("ws-gateway w1b：B 系阻断回归", () => {
     });
     try {
       const mkSnap = (salt: number): RecoveryEvidenceSnapshot => {
-        const lines = [];
+        const lines: JournalLine[] = [];
         for (let i = 1; i <= 501; i++) {
           lines.push({ t: "enqueue", intentId: `i-${i}`, sessionId: "sid-1", leafId: "leaf-1", generation: 1,
             matchKey: { textHash: `h-${i}-${salt}`, attachmentIdentity: "none", ordinal: 0 },
             payload: { kind: "prompt", rawText: `msg-${i}`, attachments: [], sentAt: "2026-09-28T00:00:00Z" } });
         }
-        return { version: 1, file: "rec.jsonl", sessionId: "sid-1", lines, bad: [], attributedFragments: [], repaired: [], createdAt: 2_000 } as unknown as RecoveryEvidenceSnapshot;
+        return { version: 1, file: "rec.jsonl", sessionId: "sid-1", lines, bad: [], attributedFragments: [], repaired: false, createdAt: 2_000 }; // fix14/Y14-2：repaired 实为 boolean，弃双重强转让类型直约束 fixture
       };
       snaps.set("rec.jsonl", mkSnap(1));
       const c = await authed(r);
@@ -1295,13 +1296,13 @@ describe("ws-gateway w1c：R 系阻断回归", () => {
     const r = await makeRig({ recoveryEvidence: (file) => { calls++; return snaps.get(file) ?? null; } });
     try {
       const mkSnap = (salt: number): RecoveryEvidenceSnapshot => {
-        const lines = [];
+        const lines: JournalLine[] = [];
         for (let i = 1; i <= 3; i++) {
           lines.push({ t: "enqueue", intentId: `i-${i}`, sessionId: "sid-1", leafId: "leaf-1", generation: 1,
             matchKey: { textHash: `h-${i}-${salt}`, attachmentIdentity: "none", ordinal: 0 },
             payload: { kind: "prompt", rawText: `msg-${i}`, attachments: [], sentAt: "2026-09-28T00:00:00Z" } });
         }
-        return { version: 1, file: "q.jsonl", sessionId: "sid-1", lines, bad: [], attributedFragments: [], repaired: [], createdAt: 2_000 } as unknown as RecoveryEvidenceSnapshot;
+        return { version: 1, file: "q.jsonl", sessionId: "sid-1", lines, bad: [], attributedFragments: [], repaired: false, createdAt: 2_000 }; // fix14/Y14-2：repaired 实为 boolean，弃双重强转让类型直约束 fixture
       };
       snaps.set("q.jsonl", mkSnap(1));
       const c = await authed(r);
@@ -1330,13 +1331,13 @@ describe("ws-gateway w1c：R 系阻断回归", () => {
     const r = await makeRig({ recoveryEvidence: (file) => { calls++; return snaps.get(file) ?? null; } });
     try {
       const mkSnap = (): RecoveryEvidenceSnapshot => {
-        const lines = [];
+        const lines: JournalLine[] = [];
         for (let i = 1; i <= 3; i++) {
           lines.push({ t: "enqueue", intentId: `i-${i}`, sessionId: "sid-1", leafId: "leaf-1", generation: 1,
             matchKey: { textHash: `h-${i}`, attachmentIdentity: "none", ordinal: 0 },
             payload: { kind: "prompt", rawText: `msg-${i}`, attachments: [], sentAt: "2026-09-28T00:00:00Z" } });
         }
-        return { version: 1, file: "ev.jsonl", sessionId: "sid-1", lines, bad: [], attributedFragments: [], repaired: [], createdAt: 2_000 } as unknown as RecoveryEvidenceSnapshot;
+        return { version: 1, file: "ev.jsonl", sessionId: "sid-1", lines, bad: [], attributedFragments: [], repaired: false, createdAt: 2_000 }; // fix14/Y14-2：repaired 实为 boolean，弃双重强转让类型直约束 fixture
       };
       snaps.set("ev.jsonl", mkSnap());
       const c = await authed(r);
@@ -3200,7 +3201,7 @@ describe("ws-gateway 3b-4：typed recovery 结果映射+连接级取消", () => 
 
   it("T5c/B13-3② 迟到成功快照：连接关后 provider 才 resolve 合法 snapshot→零帧+死连接 recoveryPages 仍空+信号量归零（成功面同样不回填）", async () => {
     const sem = new ComputeSemaphore();
-    const snap = { version: 1, file: "f.jsonl", sessionId: "s", lines: [], bad: [], attributedFragments: [], repaired: [], createdAt: 1 } as unknown as RecoveryEvidenceSnapshot;
+    const snap: RecoveryEvidenceSnapshot = { version: 1, file: "f.jsonl", sessionId: "s", lines: [], bad: [], attributedFragments: [], repaired: false, createdAt: 1 }; // fix14/Y14-2：类型直约束
     let resolveP: ((v: RecoveryEvidenceSnapshot) => void) | null = null;
     const r = await makeRig({ semaphore: sem, recoveryEvidence: () => new Promise((res) => { resolveP = res; }) });
     try {
@@ -3208,7 +3209,7 @@ describe("ws-gateway 3b-4：typed recovery 结果映射+连接级取消", () => 
       void c.say({ t: "get-recovery", requestId: "s1", file: "f.jsonl", offset: 0 });
       await tick();
       const conns = (r.gw as unknown as { conns: Map<string, { recoveryPages: Map<string, unknown> }> }).conns;
-      const st = [...conns.values()][0]; // 关闭前取死连接状态引用（conns 删除后仍可观测）
+      const st = [...conns.values()][0]!; // 关闭前取死连接状态引用（conns 删除后仍可观测）
       const before = c.frames().length;
       c.closedByTransport();
       resolveP!(snap); // 迟到的合法成功快照
@@ -3244,13 +3245,13 @@ describe("ws-gateway 3b-4：typed recovery 结果映射+连接级取消", () => 
     });
     try {
       const mkSnap = (salt: number): RecoveryEvidenceSnapshot => {
-        const lines = [];
+        const lines: JournalLine[] = [];
         for (let i = 1; i <= 501; i++) {
           lines.push({ t: "enqueue", intentId: `i-${i}`, sessionId: "sid-1", leafId: "leaf-1", generation: 1,
             matchKey: { textHash: `h-${i}-${salt}`, attachmentIdentity: "none", ordinal: 0 },
             payload: { kind: "prompt", rawText: `msg-${i}`, attachments: [], sentAt: "2026-09-28T00:00:00Z" } });
         }
-        return { version: 1, file: "ev.jsonl", sessionId: "sid-1", lines, bad: [], attributedFragments: [], repaired: [], createdAt: 2_000 } as unknown as RecoveryEvidenceSnapshot;
+        return { version: 1, file: "ev.jsonl", sessionId: "sid-1", lines, bad: [], attributedFragments: [], repaired: false, createdAt: 2_000 }; // fix14/Y14-2：repaired 实为 boolean，弃双重强转让类型直约束 fixture
       };
       snaps.set("ev.jsonl", mkSnap(1));
       const c = await authed(r);
