@@ -661,7 +661,6 @@ describe("recovery-evidence-source（fix13 v4：+仓级串行/登记不变量）
     const calls: number[] = [];
     try {
       await writeFile(join(jRoot, "s.jsonl"), jl("s-1") + "\n", "utf8");
-      let failFirst = true;
       type Seam = (dir: string, next: { version: 1; files: string[] }) => Promise<void>;
       const inject: Seam[] = [
         async () => { calls.push(1); throw new Error("seen-store boom"); }, // 真实写故障注入（非占位目录时序）
