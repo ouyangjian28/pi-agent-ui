@@ -12,6 +12,16 @@
 //  B11-4 工厂自防御：maxCombinedBytes 非有限正整数/超 1GiB→工厂即抛（composition 校验之外的纵深）。
 //  B11-5 file-unreadable→网关 4402 retryable=true（契约 §5.2/§5.3/3b-0 §4F）；path 字段=逻辑 file
 //    （绝对路径不出 provider——审计面不泄盘面布局，GPT P12）。
+// v3（fix12：GPT 第12轮 78/100 B12-1/2/3）：
+//  B12-1 冷启动权威门（Q02/Q03）：锚点缺失≠首捕授权——默认 no-evidence-snapshot（当前盘面不自行
+//    成为权威：修复发生在首捕前的反例不可证）；仅宿主显式 trustFirstCapture 授权才建首锚；证据仓
+//    seen 登记后锚点丢失→concurrent-modification（bless 不可越——已初始化仓丢条目≠可信新生）。
+//  B12-2 session 首开 missing 不再抹掉映射（Q05）：s1=0 但 sAbs 保留，读后二开复核新建尺寸
+//    （仍 missing=journal-only 降级不变）。
+//  小修：零长锚点也验空摘要（去 len===0 直通特判）；非 SafeOpenError 的 detail 归受控分类不透传
+//    message；同 file 串行 Map 所有权条件清理（Q14）；工厂补 roots 非空+sessionRoots 绝对校验。
+//  披露边界：serialize=单实例内串行（跨进程无锁，部署禁重叠写者——Q16）；锚点 tmp+rename 原子
+//    ≠掉电耐久（无 fsync——Q13）；读块固定 64KiB 探测（越限块不进结果但已读入临时 buffer）。
 // 取消语义（披露）：signal=各步骤间观察点+读后复核；当前挂起 I/O 本身不消费 signal（safe-open 读窗
 // 有界+快，取消语义=迟到结果被网关连接态丢弃——st.closed 不入帧不回填缓存）。
 import { createHash } from "node:crypto";
@@ -74,6 +84,10 @@ export interface RecoveryEvidenceSourceOptions {
   readonly audit?: (line: string) => void;
   /** 测试接缝：安全句柄注入（默认=safe-open 真路径）。 */
   readonly openLike?: OpenLike;
+  /** 首捕授权（B12-1/Q02）：锚点缺失且仓未登记该 file 时，默认 no-evidence-snapshot（fail-closed）。
+   * 仅宿主显式初始化路径（迁移/可信新建声明）返回 true 才建首锚；已登记 file 的锚点丢失
+   * →concurrent-modification，本回调不可越（Q03）。抛错=read-failed（宿主面故障≠拒绝授权）。 */
+  readonly trustFirstCapture?: (file: string) => boolean | Promise<boolean>;
 }
 
 /** sidecar 锚点（权威证据链：已见证据的字节长度+sha256；只许纯追加扩展）。 */
@@ -92,8 +106,30 @@ function anchorPath(evidenceDir: string, file: string): string {
   return join(evidenceDir, `${encodeURIComponent(file)}.evidence.json`);
 }
 
-function errName(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
+/** 证据仓登记（B12-1/Q03：曾建锚点的 file 集合——锚点丢失时区分「证据丢失」与「可信新生」）。 */
+interface EvidenceSeen {
+  readonly version: 1;
+  readonly files: readonly string[];
+}
+
+function seenPath(evidenceDir: string): string {
+  return join(evidenceDir, "seen.json");
+}
+
+/** 证据仓登记读取（B12-1/Q03）：ENOENT=空仓（可信新生候选）；损坏/不可读→抛（调用方 read-failed）。 */
+async function loadSeen(sp: string): Promise<ReadonlySet<string>> {
+  try {
+    const txt = await readFile(sp, "utf8");
+    const parsed = JSON.parse(txt) as Partial<EvidenceSeen>;
+    if (parsed !== null && typeof parsed === "object" && parsed.version === 1 &&
+        Array.isArray(parsed.files) && parsed.files.every((f) => typeof f === "string" && f.length > 0)) {
+      return new Set(parsed.files);
+    }
+    throw new Error("seen.json 形状非法");
+  } catch (e) {
+    if (isIoErrno(e, "ENOENT")) return new Set<string>();
+    throw e; // 损坏/不可读=fail-closed（不得把「仓状态未知」当空仓——防 Q03 洗白面）
+  }
 }
 
 function isIoErrno(e: unknown, code: string): boolean {
@@ -103,7 +139,11 @@ function isIoErrno(e: unknown, code: string): boolean {
 /** safe-open 错误→typed file-unreadable（detail=kind，不带绝对路径——P12 审计面脱敏）。 */
 function toUnreadable(file: string, e: unknown): { kind: "file-unreadable"; path: string; detail?: string } {
   if (e instanceof SafeOpenError) return { kind: "file-unreadable", path: file, detail: e.kind };
-  return { kind: "file-unreadable", path: file, detail: errName(e).slice(0, 120) };
+  // fix12：非 SafeOpenError 曾透传原始 message（扩展 openLike 抛带绝对路径的 Error 会泄入审计）——
+  // 归受控分类（errno code / 构造名），不透传任意 message（GPT 第12轮 §七）。
+  const code = typeof (e as { code?: unknown } | null)?.code === "string" ? (e as { code: string }).code : undefined;
+  const detail = code ?? (e instanceof Error ? e.constructor.name : typeof e);
+  return { kind: "file-unreadable", path: file, detail };
 }
 
 /**
@@ -118,7 +158,11 @@ export function createRecoveryEvidenceProvider(
     throw new Error(`maxCombinedBytes 非法（须有限正整数≤1GiB）：${String(maxBytes)}——拒绝创建 provider（B11-4 纵深）`);
   }
   if (!isAbsolute(opts.evidenceDir)) throw new Error("evidenceDir 非法（须绝对路径）——拒绝创建 provider");
+  if (opts.roots.length === 0) throw new Error("roots 非法（不得为空）——拒绝创建 provider");
   if (!opts.roots.every(isAbsolute)) throw new Error("roots 非法（须绝对路径）——拒绝创建 provider");
+  if (opts.sessionRoots !== undefined && !opts.sessionRoots.every(isAbsolute)) {
+    throw new Error("sessionRoots 非法（须绝对路径）——拒绝创建 provider");
+  }
   const sessionIdFor = opts.sessionIdFor ?? ((f: string) => f.replace(/\.jsonl$/, ""));
   const openLike = opts.openLike ?? defaultOpenLike;
   const now = opts.now ?? (() => Date.now());
@@ -135,10 +179,14 @@ export function createRecoveryEvidenceProvider(
   const serialize = <T>(file: string, body: () => Promise<T>): Promise<T> => {
     const prev = inflight.get(file) ?? Promise.resolve();
     const next = prev.then(body, body);
-    inflight.set(file, next.then(() => undefined, () => undefined));
+    const tail = next.then(() => undefined, () => undefined);
+    inflight.set(file, tail);
+    void tail.then(() => {
+      if (inflight.get(file) === tail) inflight.delete(file); // Q14：仅当仍是链尾（无后来者）才清
+    });
     return next;
   };
-  const unavailable = (reason: "read-failed" | "concurrent-modification" | "oversized") =>
+  const unavailable = (reason: "read-failed" | "concurrent-modification" | "oversized" | "no-evidence-snapshot") =>
     ({ kind: "unavailable" as const, reason });
 
   return (file: string, signal?: AbortSignal): Promise<RecoveryEvidenceResult> =>
@@ -177,7 +225,9 @@ export function createRecoveryEvidenceProvider(
             const sh = await openLike(sAbs);
             try { s1 = sh.size; } finally { await sh.close().catch(() => {}); }
           } catch (e) {
-            if (e instanceof SafeOpenError && e.kind === "missing") { s1 = 0; sAbs = null; }
+            if (e instanceof SafeOpenError && e.kind === "missing") {
+              s1 = 0; // B12-2/Q05：保留 sAbs——读后二开复核新建尺寸；仍 missing=journal-only 降级
+            }
             else {
               audit(`recovery-unreadable file=${file} detail=${e instanceof SafeOpenError ? e.kind : "session-stat-failed"}`);
               return toUnreadable(file, e);
@@ -249,16 +299,48 @@ export function createRecoveryEvidenceProvider(
             audit(`recovery-evidence-store-failed file=${file} detail=load`);
             return unavailable("read-failed"); // 锚点不可读=证据完整性存疑→fail-closed（不静默当首捕）
           }
-          // ENOENT=首次捕获（合法冷启动：尚无已见证据，当前盘面即首捕权威）
+          // ENOENT=锚点缺失（≠首捕授权——下方 B12-1 权威门处理）
         }
         if (anchorCorrupt) {
           audit(`recovery-evidence-corrupt file=${file}`);
           return unavailable("concurrent-modification"); // 锚点损坏=篡改面（原子写防撕裂；坏=外部干预）
         }
+        // B12-1 冷启动权威门（Q02/Q03）：锚点缺失时当前盘面不自行成为权威。已登记 file 锚点丢失
+        // =证据丢失→concurrent-modification（bless 不可越）；未登记 file 默认 no-evidence-snapshot，
+        // 仅宿主显式 trustFirstCapture=true（迁移/可信新建声明）才建立首锚。
+        let seenNow: ReadonlySet<string> | null = null;
+        if (anchor === null) {
+          let seen: ReadonlySet<string>;
+          try {
+            seen = await loadSeen(seenPath(evidenceDir));
+          } catch {
+            audit(`recovery-evidence-store-failed file=${file} detail=seen-load`);
+            return unavailable("read-failed");
+          }
+          if (seen.has(file)) {
+            audit(`recovery-evidence-lost file=${file}`);
+            return unavailable("concurrent-modification"); // Q03：已初始化仓丢条目≠可信新生
+          }
+          let trusted = false;
+          if (opts.trustFirstCapture !== undefined) {
+            try {
+              trusted = await opts.trustFirstCapture(file);
+            } catch {
+              audit(`recovery-evidence-store-failed file=${file} detail=bless`);
+              return unavailable("read-failed"); // 宿主面故障≠拒绝授权（与 false 区分）
+            }
+          }
+          if (!trusted) {
+            audit(`recovery-no-first-authority file=${file}`);
+            return unavailable("no-evidence-snapshot"); // Q02：默认 fail-closed
+          }
+          seenNow = seen;
+        }
         const sha = sha256Hex(raw);
         if (anchor !== null) {
+          // fix12/Q17：去 len===0 直通特判——零长锚也须 sha==H(empty)（形似的 64 个 0 伪锚必拒）
           const pureExtension = raw.byteLength >= anchor.len &&
-            (anchor.len === 0 || sha256Hex(raw.subarray(0, anchor.len)) === anchor.sha);
+            sha256Hex(raw.subarray(0, anchor.len)) === anchor.sha;
           if (!pureExtension) {
             audit(`recovery-evidence-rewritten file=${file} oldLen=${anchor.len} newLen=${raw.byteLength}`);
             return unavailable("concurrent-modification"); // 已见证据被缩/重写/替换——修复残片消失≠干净
@@ -272,6 +354,18 @@ export function createRecoveryEvidenceProvider(
         } catch {
           audit(`recovery-evidence-store-failed file=${file} detail=store`);
           return unavailable("read-failed");
+        }
+        // 首捕登记 seen（Q03 防锚点丢失洗白；失败=fail-closed——仓登记不落盘不得发结论）
+        if (seenNow !== null && !seenNow.has(file)) {
+          try {
+            const nextSeen = { version: 1, files: [...new Set([...seenNow, file])].sort() } satisfies EvidenceSeen;
+            const stmp = `${seenPath(evidenceDir)}.tmp-${process.pid}-${now().toString(36)}`;
+            await writeFile(stmp, JSON.stringify(nextSeen), "utf8");
+            await rename(stmp, seenPath(evidenceDir));
+          } catch {
+            audit(`recovery-evidence-store-failed file=${file} detail=seen-store`);
+            return unavailable("read-failed");
+          }
         }
         const { lines, bad } = parseJournalText(raw.toString("utf8"));
         return { version: 1, file, sessionId: sessionIdFor(file), lines, bad, attributedFragments: [], repaired: false, createdAt: now() };

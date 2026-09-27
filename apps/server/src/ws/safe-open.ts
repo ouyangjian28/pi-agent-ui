@@ -62,9 +62,14 @@ export async function openSafeFile(absPath: string): Promise<{ fh: import("node:
   }
 }
 
+/** readBounded 所需的最小文件句柄形状（结构化接缝——测试可注入脚本化分次 read；FileHandle 结构兼容）。 */
+export interface BoundedReadHandle {
+  read(buffer: Buffer, offset: number, length: number, position: number | null): Promise<{ bytesRead: number }>;
+}
+
 /** 有界流式读取（读中硬限：累计超过 maxBytes 即刻失败，不读完再检查）。 */
 export async function readBounded(
-  fh: import("node:fs/promises").FileHandle,
+  fh: BoundedReadHandle,
   maxBytes: number,
   file: string,
 ): Promise<Buffer> {

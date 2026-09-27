@@ -1118,7 +1118,7 @@ export class WsGateway {
           return;
         }
         if (!isRecoverySnapshot(snap)) {
-          // 3b-4 typed 结果映射：unavailable 携冻结 reason；file-unreadable 归 read-failed（typed 区分进审计）
+          // 3b-4 typed 结果映射：unavailable 携冻结 reason 原样入帧；file-unreadable→请求级 4402（B11-5）
           if (snap.kind === "unavailable") {
             this.audit(`recovery-unavailable file=${file} reason=${snap.reason}`);
             this.enqueueIfOpen(st, { t: "recovery", requestId, file, availability: "unavailable", reason: snap.reason });

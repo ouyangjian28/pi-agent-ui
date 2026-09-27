@@ -3087,7 +3087,7 @@ describe("ws-gateway 3b-4：typed recovery 结果映射+连接级取消", () => 
       const c = await authed(r);
       await c.say({ t: "get-recovery", requestId: "u1", file: "f.jsonl", offset: 0 });
       const f = c.frames().find((x) => x.t === "error") as Record<string, unknown>;
-      expect(f).toMatchObject({ t: "error", code: 4402, requestId: "u1", retryable: true });
+      expect(f).toMatchObject({ t: "error", code: 4402, requestId: "u1", retryable: true, message: "恢复读取失败" });
       expect(c.frames().some((x) => x.t === "recovery")).toBe(false); // 不再归并入 recovery 帧
       expect(r.audits.some((l) => l.includes("recovery-unreadable") && l.includes("file=f.jsonl") && l.includes("detail=symlink"))).toBe(true);
     } finally {
@@ -3154,6 +3154,89 @@ describe("ws-gateway 3b-4：typed recovery 结果映射+连接级取消", () => 
       (r.gw as unknown as { closeConn: (st: unknown, code: number, reason: string) => void }).closeConn(stObj, 1000, "test");
       await tick();
       expect((seen as AbortSignal | null)?.aborted).toBe(true);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("T5b 迟到交付资源回收：连接关后 resolve/reject 双面→零帧+信号量归零（inFlight==0）+重调不回填", async () => {
+    const sem = new ComputeSemaphore();
+    const calls: string[] = [];
+    let resolveP: ((v: { kind: "unavailable"; reason: "oversized" }) => void) | null = null;
+    let rejectP: ((e: Error) => void) | null = null;
+    let mode: "resolve" | "reject" = "resolve";
+    const r = await makeRig({
+      semaphore: sem,
+      recoveryEvidence: (file) => { calls.push(file); return new Promise((res, rej) => { if (mode === "resolve") resolveP = res; else rejectP = rej; }); },
+    });
+    try {
+      // (a) resolve 面
+      const c = await authed(r);
+      void c.say({ t: "get-recovery", requestId: "r1", file: "f.jsonl", offset: 0 });
+      await tick();
+      expect(sem.inFlight).toBe(1); // 槽已占
+      const before = c.frames().length;
+      c.closedByTransport();
+      resolveP!({ kind: "unavailable", reason: "oversized" });
+      await tick(); await tick();
+      expect(c.frames().length).toBe(before); // 迟到 resolve 不发帧
+      expect(sem.inFlight).toBe(0); // 槽已还
+      // (b) reject 面（新连接新请求）
+      mode = "reject";
+      const c2 = await authed(r);
+      void c2.say({ t: "get-recovery", requestId: "r2", file: "f.jsonl", offset: 0 });
+      await tick();
+      expect(sem.inFlight).toBe(1);
+      c2.closedByTransport();
+      rejectP!(new Error("late boom"));
+      await tick(); await tick();
+      expect(c2.frames().some((f) => f.t === "error" || f.t === "recovery")).toBe(false); // 迟到 reject 不发帧不崩
+      expect(sem.inFlight).toBe(0); // 槽已还（finally 配对）
+      expect(r.gw.connectionCount).toBe(0);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("T6/B12-3⑤ LRU 驱逐实证：9 个 requestId 同文件→首条驱逐→携旧 hash 续页=缓存 miss 重调（快照已变→4409）；幸存条目续页零重调", async () => {
+    const snaps = new Map<string, RecoveryEvidenceSnapshot | null>();
+    let calls = 0;
+    const r = await makeRig({
+      recoveryEvidence: (file) => { calls++; return snaps.get(file) ?? null; },
+    });
+    try {
+      const mkSnap = (salt: number): RecoveryEvidenceSnapshot => {
+        const lines = [];
+        for (let i = 1; i <= 501; i++) {
+          lines.push({ t: "enqueue", intentId: `i-${i}`, sessionId: "sid-1", leafId: "leaf-1", generation: 1,
+            matchKey: { textHash: `h-${i}-${salt}`, attachmentIdentity: "none", ordinal: 0 },
+            payload: { kind: "prompt", rawText: `msg-${i}`, attachments: [], sentAt: "2026-09-28T00:00:00Z" } });
+        }
+        return { version: 1, file: "ev.jsonl", sessionId: "sid-1", lines, bad: [], attributedFragments: [], repaired: [], createdAt: 2_000 } as unknown as RecoveryEvidenceSnapshot;
+      };
+      snaps.set("ev.jsonl", mkSnap(1));
+      const c = await authed(r);
+      const hashOf = new Map<string, string>();
+      for (let k = 1; k <= 9; k++) { // 9 条缓存>上限 8 → e1 驱逐
+        await c.say({ t: "get-recovery", requestId: `e${k}`, file: "ev.jsonl", offset: 0 });
+        const f = c.frames().filter((x) => x.t === "recovery" && (x as Record<string, unknown>).requestId === `e${k}`).pop() as Record<string, unknown>;
+        expect(f).toBeDefined();
+        hashOf.set(`e${k}`, f.evidenceHash as string);
+      }
+      expect(calls).toBe(9);
+      expect(hashOf.get("e1")).toBe(hashOf.get("e9")); // 同快照同 hash
+      // 证据真变（服务端视角：provider 新一代快照）
+      snaps.set("ev.jsonl", mkSnap(2));
+      // 驱逐条目续页（携驱逐前 hash）：缓存 miss→重调 provider→新 hash≠旧→4409
+      await c.say({ t: "get-recovery", requestId: "e1", file: "ev.jsonl", offset: 0, evidenceHash: hashOf.get("e1")! });
+      const errF = c.frames().filter((x) => x.t === "error" && (x as Record<string, unknown>).requestId === "e1").pop() as Record<string, unknown>;
+      expect(errF).toMatchObject({ code: 4409, requestId: "e1" });
+      expect(calls).toBe(10); // miss 后真重调
+      // 幸存条目（e9）续页：缓存命中零重调，页帧照发
+      await c.say({ t: "get-recovery", requestId: "e9", file: "ev.jsonl", offset: 0, evidenceHash: hashOf.get("e9")! });
+      const f9b = c.frames().filter((x) => x.t === "recovery" && (x as Record<string, unknown>).requestId === "e9").pop() as Record<string, unknown>;
+      expect(f9b).toBeDefined();
+      expect(calls).toBe(10); // 未重调
     } finally {
       await r.dispose();
     }

@@ -43,6 +43,9 @@ export interface ServerConfig {
   readonly maxScanBytes?: number;
   /** 恢复投影合计入口预算 journal+session（默认 8MiB，DEFAULT_RECOVERY_COMBINED_BYTES）。 */
   readonly maxRecoveryCombinedBytes?: number;
+  /** 恢复首捕授权（B12-1）：默认 false=锚点缺失→no-evidence-snapshot（fail-closed）。宿主显式
+   * 开启=声明「当前盘面首捕即权威」（迁移既有 journal/可信新建——修复发生在首捕前的风险由宿主背书）。 */
+  readonly trustFirstRecoveryCapture?: boolean;
   /** 恢复证据链锚点目录（B11-2；须绝对路径；默认=scanDir/recovery-evidence）。 */
   readonly recoveryEvidenceDir?: string;
   /** token 轮询间隔 ms（默认 5000；0=关闭轮询）。 */
@@ -129,6 +132,7 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     ...(config.sessionFor !== undefined ? { sessionFor: config.sessionFor } : {}),
     evidenceDir: recoveryEvidenceDir,
     ...(config.maxRecoveryCombinedBytes !== undefined ? { maxCombinedBytes: config.maxRecoveryCombinedBytes } : {}),
+    ...(config.trustFirstRecoveryCapture === true ? { trustFirstCapture: () => true } : {}),
     audit,
   });
   const gateway = new WsGateway({

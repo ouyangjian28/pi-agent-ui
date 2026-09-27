@@ -66,6 +66,26 @@ describe("3b-3① composition", () => {
       const r1 = await mkCfg({ tokenPollMs: 1 });
       const s1 = await start(r1.cfg); await s1.dispose();
     });
+    it("maxRecoveryCombinedBytes 三态矩阵（B12-3①）：省略=默认档/有限正整数≤1GiB=接受；非法值→拒绝启动", async () => {
+      // 非法五态：NaN/±Infinity/负数/分数/超 1GiB
+      for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1, 0.5, 1024 * 1024 * 1024 + 1]) {
+        const { cfg } = await mkCfg({ maxRecoveryCombinedBytes: bad });
+        await expect(startServer(cfg)).rejects.toThrow("maxRecoveryCombinedBytes 非法");
+      }
+      // 合法三态：省略（默认 8MiB 档）/恰 1GiB 上限/普通有限值
+      const a = await mkCfg({});
+      const sa = await start(a.cfg); await sa.dispose();
+      const b = await mkCfg({ maxRecoveryCombinedBytes: 1024 * 1024 * 1024 });
+      const sb = await start(b.cfg); await sb.dispose();
+      const c = await mkCfg({ maxRecoveryCombinedBytes: 4096 });
+      const sc = await start(c.cfg); await sc.dispose();
+    });
+    it("trustFirstRecoveryCapture：仅 boolean 接受（true=宿主声明首捕权威；默认省略=false fail-closed）", async () => {
+      const a = await mkCfg({ trustFirstRecoveryCapture: true });
+      const sa = await start(a.cfg); await sa.dispose();
+      const b = await mkCfg({ trustFirstRecoveryCapture: false });
+      const sb = await start(b.cfg); await sb.dispose();
+    });
     it("roots/sessionRoots/scanDir：相对路径 → 拒绝启动", async () => {
       const a = await mkCfg({ roots: ["relative/dir"] });
       await expect(startServer(a.cfg)).rejects.toThrow("roots 含非法元素");

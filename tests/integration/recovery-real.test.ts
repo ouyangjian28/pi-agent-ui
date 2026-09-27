@@ -64,6 +64,7 @@ async function makeRig(maxRecovery?: number): Promise<Rig> {
     sessionFor: () => "q.session.jsonl",
     scanDir: jr,
     ...(maxRecovery !== undefined ? { maxRecoveryCombinedBytes: maxRecovery } : {}),
+    trustFirstRecoveryCapture: true, // fix12：集成 rig 宿主声明首捕权威（B12-1 默认关）
     audit: (l) => { audits.push(l); },
   });
   return { srv, url: `ws://127.0.0.1:${srv.port}`, jp, sp, audits };
@@ -169,4 +170,43 @@ describe("3b-4 恢复真读源集成（真 WS+真文件）", () => {
       await rigDispose(r);
     }
   });
+
+  it("I5/B12-3⑤ 真实 sessionId 映射实证：sessionFor→真 session 文件计入合计预算（超→oversized；宽→available）", async () => {
+    // journal 恰 700B（合法行+填充）+真 session 文件 400B：700+400=1100>1000→oversized（session 真被打开计数）
+    const r = await makeRig(1000);
+    const c = new WsClient(r.url, "http://localhost:5173");
+    try {
+      const head = jEn("i-1", "t", 0) + "\n";
+      const pad = Buffer.alloc(700 - Buffer.byteLength(head, "utf8")).fill("\n");
+      await writeFile(r.jp, Buffer.concat([Buffer.from(head, "utf8"), pad]));
+      await writeFile(r.sp, Buffer.alloc(400).fill("s")); // 真 session 面（内容任意，只计字节）
+      await c.hello();
+      await c.say({ t: "get-recovery", requestId: "i5a", file: "q.jsonl", offset: 0 });
+      await until(() => c.recovery().length > 0);
+      const f = c.recovery().at(-1) as Record<string, unknown>;
+      expect(f).toMatchObject({ availability: "unavailable", reason: "oversized" });
+      expect(r.audits.some((l) => l.includes("recovery-oversized") && l.includes("session=400"))).toBe(true);
+    } finally {
+      c.dispose();
+      await rigDispose(r);
+    }
+    // 宽预算：同盘面 700+400=1100≤2000→available（session 参与但未超）
+    const w = await makeRig(2000);
+    const c2 = new WsClient(w.url, "http://localhost:5173");
+    try {
+      const head = jEn("i-1", "t", 0) + "\n";
+      const pad = Buffer.alloc(700 - Buffer.byteLength(head, "utf8")).fill("\n");
+      await writeFile(w.jp, Buffer.concat([Buffer.from(head, "utf8"), pad]));
+      await writeFile(w.sp, Buffer.alloc(400).fill("s"));
+      await c2.hello();
+      await c2.say({ t: "get-recovery", requestId: "i5b", file: "q.jsonl", offset: 0 });
+      await until(() => c2.recovery().length > 0);
+      const f = c2.recovery().at(-1) as Record<string, unknown>;
+      expect(f).toMatchObject({ availability: "available" });
+    } finally {
+      c2.dispose();
+      await rigDispose(w);
+    }
+  });
 });
+
