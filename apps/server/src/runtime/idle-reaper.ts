@@ -97,6 +97,19 @@ export class IdleReaper {
     if (Number.isFinite(n)) this.lastActivity = n;
   }
 
+  /** 观测面（3c-3 statusFor 真源）：闲置判定快照，纯读不推进计时（起点吸收/触发仍归 tick）。
+   * eligible=true 而 idleElapsedMs=null=已满足双条件但计时尚未开起（下一 tick 起算）。 */
+  stats(): { eligible: boolean; idleElapsedMs: number | null; idleRemainingMs: number | null; idleMs: number } {
+    const eligible = !this.disposed && this.eligible();
+    if (!eligible || this.idleSince === null || !Number.isFinite(this.idleSince)) {
+      return { eligible, idleElapsedMs: null, idleRemainingMs: null, idleMs: this.idleMs };
+    }
+    const now = this.deps.now();
+    if (!Number.isFinite(now)) return { eligible, idleElapsedMs: null, idleRemainingMs: null, idleMs: this.idleMs };
+    const elapsed = Math.max(0, now - this.idleSince);
+    return { eligible, idleElapsedMs: elapsed, idleRemainingMs: Math.max(0, this.idleMs - elapsed), idleMs: this.idleMs };
+  }
+
   /** 由宿主巡检循环驱动（与超时巡检共用一个 interval）；同步段完成复核+触发置位。 */
   tick(): void {
     if (this.disposed || this.reaping) return;

@@ -10,13 +10,18 @@
 // - dispose 顺序（冻结）：摘 onConnection → 停轮询/SIGHUP → gateway.dispose()（存量连接 1000
 //   "server-shutdown" 优雅关+文件观察器全解绑→DH 双源句柄归零）→ adapter.dispose()（传输层
 //   兜底 1001+关自建 server）→ tokens.dispose()。gateway 先于 adapter：应用层告别帧先于传输层断链。
-// - 不在本层：RpcSession 写侧接线（后续 UI 阶段）、statusFor（缺省=unknown）。recoveryEvidence 已于 3b-4 接入。
+// - 不在本层：RpcSession 写侧接线的实例构造细节（3c-3 起由 write 选项自建——会话注册表+statusFor
+//   真源+统一销毁；宿主仍可用 writeHost 注入自供实现）。recoveryEvidence 已于 3b-4 接入。
 import { WsServerAdapter, gatewayMetaFrom } from "./ws/ws-transport.ts";
 import { TokenAuthority } from "./ws/token-auth.ts";
 import { WsGateway } from "./ws/ws-gateway.ts";
 import { ComputeSemaphore } from "./ws/compute-semaphore.ts";
 import { DualHistorySource } from "./runtime/dual-history-source.ts";
 import { createRecoveryEvidenceProvider } from "./runtime/recovery-evidence-source.ts";
+import { createSessionRegistry, type SessionRegistry } from "./runtime/session-registry.ts";
+import { PiProcessHost } from "./host/process-host.ts";
+import { createRpcWriteHost } from "./ws/rpc-write-host.ts";
+import { resolveWithinRoots } from "./ws/safe-open.ts";
 import type { WriteHostPort } from "./ws/write-host.ts";
 import { isAbsolute, join } from "node:path";
 
@@ -53,9 +58,30 @@ export interface ServerConfig {
   readonly tokenPollMs?: number;
   /** 注册 SIGHUP 热轮换钩子（默认 false=库模式不碰进程信号；生产入口置 true）。 */
   readonly registerSighup?: boolean;
-  /** 写侧宿主（3c-1）：缺省=只读部署（写类帧 4405）；接入后网关开放 prompt/stop。 */
+  /** 写侧宿主（3c-1）：缺省=只读部署（写类帧 4405）；接入后网关开放 prompt/stop。
+   * 与 write（3c-3 自建接线）互斥——两者同供=配置歧义拒启。 */
   readonly writeHost?: WriteHostPort;
+  /** 写侧自建接线（3c-3）：组合根组装真实写链（PiProcessHost+会话注册表+RpcWriteHost+statusFor
+   * 真源）；server.dispose() 统一销毁（全量 stop+dispose）。sessionFor 必填（RpcSession 构造硬要求
+   * 会话文件；无映射=写侧无从落地=配置错误）。 */
+  readonly write?: WriteWiringOpts;
   readonly audit?: (line: string) => void;
+}
+
+/** 写侧接线选项（ServerConfig.write；进程/超时透传 RpcSessionOpts 同名项）。 */
+export interface WriteWiringOpts {
+  /** journal 绝对路径 → 会话文件绝对路径（必填；映射非法=运行时描述性错误→4402+审计）。 */
+  readonly sessionFor: (file: string) => string;
+  /** pi 可执行（默认 PATH 解析 "pi"）。 */
+  readonly piBin?: string;
+  readonly responseTimeoutMs?: number;
+  readonly turnTimeoutMs?: number;
+  readonly readinessTimeoutMs?: number;
+  readonly timeoutPollMs?: number;
+  /** 闲置回收期限（默认 30min）。 */
+  readonly idleMs?: number;
+  /** EOF 宽限（闲置回收优雅链）。 */
+  readonly eofGraceMs?: number;
 }
 
 export interface PiAgentUiServer {
@@ -113,6 +139,33 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
   }
   const audit = (line: string): void => { try { config.audit?.(line); } catch { /* 审计异常不阻断 */ } };
 
+  // 写侧接线互斥门（3c-3）：writeHost（宿主自供）与 write（自建）同供=歧义拒启。
+  if (config.writeHost !== undefined && config.write !== undefined) {
+    throw new Error("writeHost 与 write 同供：写侧接线歧义，拒绝启动（二选一）");
+  }
+  // 3c-3 写侧自建链：PiProcessHost+会话注册表（真实 RpcSession 工厂+statusFor 真源+统一销毁面）。
+  let registry: SessionRegistry | null = null;
+  if (config.write !== undefined) {
+    if (typeof config.write.sessionFor !== "function") {
+      throw new Error("write.sessionFor 缺失或非函数：写侧无从落地会话文件，拒绝启动");
+    }
+    const host = new PiProcessHost({
+      ...(config.write.piBin !== undefined ? { piBin: config.write.piBin } : {}),
+      onAudit: (l) => audit(l),
+    });
+    registry = createSessionRegistry({
+      host,
+      sessionFor: config.write.sessionFor,
+      ...(config.write.responseTimeoutMs !== undefined ? { responseTimeoutMs: config.write.responseTimeoutMs } : {}),
+      ...(config.write.turnTimeoutMs !== undefined ? { turnTimeoutMs: config.write.turnTimeoutMs } : {}),
+      ...(config.write.readinessTimeoutMs !== undefined ? { readinessTimeoutMs: config.write.readinessTimeoutMs } : {}),
+      ...(config.write.timeoutPollMs !== undefined ? { timeoutPollMs: config.write.timeoutPollMs } : {}),
+      ...(config.write.idleMs !== undefined ? { idleMs: config.write.idleMs } : {}),
+      ...(config.write.eofGraceMs !== undefined ? { eofGraceMs: config.write.eofGraceMs } : {}),
+      audit,
+    });
+  }
+
   // token fail-closed：缺失/不可读/非法/空集合→fromFile 抛错
   const tokens = await TokenAuthority.fromFile(config.tokenFile, {}, audit);
 
@@ -147,7 +200,9 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     semaphore,
     historySource: history,
     recoveryEvidence,
+    ...(registry !== null ? { statusFor: (file: string) => registry!.statusFor(resolveWithinRoots(file, config.roots) ?? file) } : {}),
     ...(config.writeHost !== undefined ? { writeHost: config.writeHost } : {}),
+    ...(registry !== null ? { writeHost: createRpcWriteHost({ sessionFor: (file: string) => registry!.sessionFor(file), audit }) } : {}),
     audit,
   });
 
@@ -194,6 +249,7 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
         if (config.registerSighup === true) process.off("SIGHUP", onSighup);
         gateway.dispose(); // 应用层告别（1000 server-shutdown）+观察器全解绑（DH 句柄归零）
         await adapter.dispose(); // 传输层兜底（1001+关自建 server）
+        if (registry !== null) await registry.dispose(); // 3c-3：写侧统一销毁（全量 stop+dispose；网关先告别再杀进程）
         tokens.dispose();
         audit("composition disposed");
       })();

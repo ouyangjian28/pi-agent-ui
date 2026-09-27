@@ -484,12 +484,14 @@ export class RpcSession {
     cancel(new Error("readiness-canceled（退役/停止）"));
   }
 
-  /** 观测面：gate/协调器/监管器状态（UI/诊断用）。 */
-  getState(): { gate: unknown; command: unknown; supervisor: unknown } {
+  /** 观测面（gate/协调器/监管器状态；3c-3 增补 readyGeneration/reap 供 statusFor 真源）。 */
+  getState(): { gate: unknown; command: unknown; supervisor: unknown; readyGeneration: number | null; reap: { eligible: boolean; idleElapsedMs: number | null; idleRemainingMs: number | null; idleMs: number } | null } {
     return {
       gate: this.gate.getState(),
       command: this.coordinator.getState().command,
       supervisor: this.supervisor.getState(),
+      readyGeneration: this.readyGeneration,
+      reap: this.reaper?.stats() ?? null, // null=闲置回收器已禁用/已销毁
     };
   }
 }
