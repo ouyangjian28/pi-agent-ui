@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-// A1a 会话列表组件测试：四空态（loading/empty/error/auth-failed）各一断言+
-// 列表渲染+快照推进重渲染（useSyncExternalStore 订阅链）。客户端用同形存根顶替，不起真连接。
+// A1a 会话列表组件测试：四空态（loading/empty/error/auth-failed）+列表渲染+快照推进重渲染
+// （useSyncExternalStore 订阅链）+R2 端到端链（真实 WsClient→组件 DOM：受控错误文案不泄漏远端反射文本）。
+// 存根测试用 StubClient（快照由测试推进）；R2 链路测试用真实 WsClient+注入式假 socket，不起真网络。
 import React from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { SessionList } from "../../../apps/web/src/components/session-list";
-import type { SessionsSnapshot } from "../../../apps/web/src/ws/ws-client";
+import { WsClient, type SessionsSnapshot, type WebSocketLike } from "../../../apps/web/src/ws/ws-client";
 
 /** 顶真 WsClient 的存根：subscribe/getSnapshot 同形，快照由测试推进。 */
 class StubClient {
@@ -26,6 +27,31 @@ class StubClient {
   }
 }
 
+/** R2 DOM 链路用的最小假 socket（仅本文件；与 ws-client.test.ts 的 FakeWebSocket 相互独立）。 */
+class MiniFakeSocket implements WebSocketLike {
+  readyState = 0;
+  readonly sent: string[] = [];
+  onopen: (() => void) | null = null;
+  onmessage: ((event: { readonly data: unknown }) => void) | null = null;
+  onclose: ((event: { readonly code: number }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  constructor(readonly url: string) {}
+  send(data: string): void {
+    this.sent.push(data);
+  }
+  close(): void {
+    this.readyState = 3;
+  }
+  // ---- 测试驱动面 ----
+  open(): void {
+    this.readyState = 1;
+    this.onopen?.();
+  }
+  receive(frame: unknown): void {
+    this.onmessage?.({ data: JSON.stringify(frame) });
+  }
+}
+
 function snapOf(patch: Partial<SessionsSnapshot>): SessionsSnapshot {
   return {
     state: "connecting",
@@ -38,16 +64,25 @@ function snapOf(patch: Partial<SessionsSnapshot>): SessionsSnapshot {
   };
 }
 
-const mount = (client: StubClient) => render(React.createElement(SessionList, { client }));
+const mount = (client: Pick<WsClient, "subscribe" | "getSnapshot">) =>
+  render(React.createElement(SessionList, { client }));
 
 afterEach(cleanup);
 
 describe("SessionList 四空态与列表渲染", () => {
-  it("loading：connecting/authenticating/ready 未收首帧均呈加载态", () => {
-    mount(new StubClient(snapOf({ state: "authenticating" })));
-    const status = screen.getByRole("status");
-    expect(status.getAttribute("aria-busy")).toBe("true");
-    expect(status.textContent).toContain("正在加载会话");
+  it("loading：connecting/authenticating/ready 未收首帧三态逐一实测均呈加载态", () => {
+    const loadingSnaps = [
+      snapOf({ state: "connecting" }),
+      snapOf({ state: "authenticating" }),
+      snapOf({ state: "ready", sessions: null }),
+    ];
+    for (const snap of loadingSnaps) {
+      const view = mount(new StubClient(snap));
+      const status = screen.getByRole("status");
+      expect(status.getAttribute("aria-busy")).toBe("true");
+      expect(status.textContent).toContain("正在加载会话");
+      view.unmount();
+    }
   });
 
   it("empty：ready 且空列表→空态", () => {
@@ -56,10 +91,10 @@ describe("SessionList 四空态与列表渲染", () => {
   });
 
   it("error：列表请求失败→错误提示（role=alert）", () => {
-    mount(new StubClient(snapOf({ state: "error", errorKind: "list-failed", errorMessage: "游标过期" })));
+    mount(new StubClient(snapOf({ state: "error", errorKind: "list-failed", errorMessage: "请求游标或状态已过期（4409）" })));
     const alert = screen.getByRole("alert");
     expect(alert.textContent).toContain("会话列表加载失败");
-    expect(alert.textContent).toContain("游标过期");
+    expect(alert.textContent).toContain("4409");
   });
 
   it("auth-failed：welcome 前 4401→认证失败提示", () => {
@@ -95,5 +130,49 @@ describe("SessionList 四空态与列表渲染", () => {
     client.push(snapOf({ state: "ready", sessions: [] }));
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.getByRole("heading", { name: "还没有会话" })).toBeTruthy();
+  });
+});
+
+describe("R2 真实客户端→组件 DOM 链：受控错误文案不泄漏远端反射文本", () => {
+  const SENTINEL = "review-token-sentinel";
+  const WELCOME = { t: "welcome", serverBootId: "boot-1", serverBuildId: "build-test", protocolVersion: 1 } as const;
+
+  function setupReal(): { client: WsClient; ws: MiniFakeSocket } {
+    const ws = new MiniFakeSocket("ws://127.0.0.1:9001/ws");
+    const client = new WsClient("ws://127.0.0.1:9001/ws", SENTINEL, () => ws);
+    client.connect();
+    return { client, ws };
+  }
+
+  it("列表错误链：4409 反射 token 的 error→DOM 呈受控文案；DOM 与快照序列化均不含 token", () => {
+    const { client, ws } = setupReal();
+    mount(client); // 初始 loading
+    act(() => {
+      ws.open();
+      ws.receive(WELCOME);
+    });
+    const requestId = (JSON.parse(ws.sent[1]!) as { requestId: string }).requestId;
+    act(() => {
+      ws.receive({ t: "error", code: 4409, requestId, message: `request rejected: ${SENTINEL}`, retryable: true });
+    });
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("会话列表加载失败");
+    expect(alert.textContent).toContain("4409");
+    expect(document.body.textContent ?? "").not.toContain(SENTINEL);
+    expect(JSON.stringify(client.getSnapshot())).not.toContain(SENTINEL);
+  });
+
+  it("认证失败链：4401 反射 token→固定认证提示；DOM 与快照序列化均不含 token", () => {
+    const { client, ws } = setupReal();
+    mount(client);
+    act(() => {
+      ws.open();
+      ws.receive({ t: "error", code: 4401, message: `未认证或令牌无效: ${SENTINEL}`, retryable: false });
+    });
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("认证失败");
+    expect(alert.textContent).not.toContain(SENTINEL);
+    expect(document.body.textContent ?? "").not.toContain(SENTINEL);
+    expect(JSON.stringify(client.getSnapshot())).not.toContain(SENTINEL);
   });
 });

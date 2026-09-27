@@ -1,6 +1,9 @@
-// A1a WS 客户端测试：FakeWebSocket 模式（注入式假 socket，不依赖真 ws 库/真网络）。
-// 覆盖：握手成功（hello 带 token→welcome→list-sessions）/握手 4401 两形态/sessions 列表更新/
-// 连接关闭终态/未知帧（含写类 ack）与畸形数据安全忽略。
+// @vitest-environment jsdom
+// A1a WS 客户端测试：FakeWebSocket 模式（注入式假 socket，不依赖真 ws 库/真网络；本文件不触 DOM，
+// docblock 为派单统一要求）。覆盖：握手成功（hello 带 token→welcome→list-sessions）/握手 4401 两形态/
+// sessions 列表更新/连接关闭终态/未知帧与非 JSON 外壳畸形安全忽略（已知帧的结构化畸形由 R1 各测覆盖）/
+// R1 消费帧运行时校验（审报 §2-R1 全部反例）/R2 错误文案受控（token 不进快照）/
+// R3 关闭=不可逆停止屏障（审报 §5-3 五时序）/C1 握手期非认证失败受控反馈。
 import { describe, expect, it } from "vitest";
 import { WsClient, type WebSocketLike } from "../../../apps/web/src/ws/ws-client";
 
@@ -11,6 +14,7 @@ class FakeWebSocket implements WebSocketLike {
   }
   readyState = 0; // CONNECTING
   readonly sent: string[] = [];
+  closeCount = 0; // 主动物理释放调用计数（close 幂等/迟到释放断言用）
   onopen: (() => void) | null = null;
   onmessage: ((event: { readonly data: unknown }) => void) | null = null;
   onclose: ((event: { readonly code: number }) => void) | null = null;
@@ -23,11 +27,16 @@ class FakeWebSocket implements WebSocketLike {
   }
   close(code = 1000): void {
     this.readyState = 3;
+    this.closeCount++;
     this.onclose?.({ code });
   }
   // ---- 测试驱动面（模拟服务端行为） ----
   open(): void {
     this.readyState = 1;
+    this.onopen?.();
+  }
+  /** 迟到的 open 回调：不改 readyState——模拟 close 后才触发的保存回调（§5-3 时序）。 */
+  lateOpen(): void {
     this.onopen?.();
   }
   receive(frame: unknown): void {
@@ -47,6 +56,17 @@ class FakeWebSocket implements WebSocketLike {
 
 const WELCOME = { t: "welcome", serverBootId: "boot-1", serverBuildId: "build-test", protocolVersion: 1 } as const;
 
+const VALID_DTO = {
+  sessionId: "s-1",
+  file: "a.jsonl",
+  title: { text: "搭建会话工作台", truncated: false },
+  lastActiveMs: 1_730_000_000_000,
+  entryCount: 12,
+  sizeBytes: 3456,
+  hasRecoveryNotice: false,
+  listReliability: "full",
+} as const;
+
 function setup(token = "test-token"): { client: WsClient; ws: FakeWebSocket } {
   FakeWebSocket.reset();
   const client = new WsClient("ws://127.0.0.1:9001/ws", token, (url) => new FakeWebSocket(url));
@@ -59,6 +79,37 @@ function setup(token = "test-token"): { client: WsClient; ws: FakeWebSocket } {
 function handshake(ws: FakeWebSocket): void {
   ws.open();
   ws.receive(WELCOME);
+}
+
+/** 握手后进入列表期：取出在途 list-sessions requestId，登记通知计数器与基线快照。 */
+function listPhase(): {
+  client: WsClient;
+  ws: FakeWebSocket;
+  requestId: string;
+  before: ReturnType<WsClient["getSnapshot"]>;
+  notified: () => number;
+} {
+  const { client, ws } = setup();
+  handshake(ws);
+  const requestId = (ws.sentFrames()[1] as { requestId: string }).requestId;
+  const before = client.getSnapshot();
+  let n = 0;
+  client.subscribe(() => n++);
+  return { client, ws, requestId, before, notified: () => n };
+}
+
+/** 与在途 requestId 关联的合法 sessions 回包。 */
+function validSessions(requestId: string): unknown {
+  return {
+    t: "sessions",
+    requestId,
+    sessions: [VALID_DTO],
+    total: 1,
+    offset: 0,
+    hasMore: false,
+    listVersion: 1,
+    listReliability: "full",
+  };
 }
 
 describe("WsClient 握手与状态机", () => {
@@ -80,13 +131,14 @@ describe("WsClient 握手与状态机", () => {
     expect(states).toEqual(["authenticating", "ready"]);
   });
 
-  it("握手期收到 error 4401→auth-failed；随后 1008 关闭不降级为 closed", () => {
+  it("握手期收到 error 4401→auth-failed（受控文案）；随后 1008 关闭不降级为 closed", () => {
     const { client, ws } = setup("bad-token");
     ws.open();
     ws.receive({ t: "error", code: 4401, message: "未认证或令牌无效", retryable: false });
     expect(client.getSnapshot().state).toBe("error");
     expect(client.getSnapshot().errorKind).toBe("auth-failed");
-    expect(client.getSnapshot().errorMessage).toBe("未认证或令牌无效");
+    expect(client.getSnapshot().errorMessage).toContain("认证失败");
+    expect(client.getSnapshot().errorMessage).toContain("4401");
     ws.serverClose(1008);
     expect(client.getSnapshot().state).toBe("error"); // 保留更具体的 auth-failed，不降级
     expect(client.getSnapshot().errorKind).toBe("auth-failed");
@@ -118,20 +170,10 @@ describe("WsClient 握手与状态机", () => {
     });
     expect(client.getSnapshot().sessions).toBeNull();
     expect(notified).toBe(0);
-    const dto = {
-      sessionId: "s-1",
-      file: "a.jsonl",
-      title: { text: "搭建会话工作台", truncated: false },
-      lastActiveMs: 1_730_000_000_000,
-      entryCount: 12,
-      sizeBytes: 3456,
-      hasRecoveryNotice: false,
-      listReliability: "full",
-    };
     ws.receive({
       t: "sessions",
       requestId: listReq.requestId,
-      sessions: [dto],
+      sessions: [VALID_DTO],
       total: 1,
       offset: 0,
       hasMore: false,
@@ -161,7 +203,7 @@ describe("WsClient 握手与状态机", () => {
     expect(again.client.getSnapshot().state).toBe("closed");
   });
 
-  it("未知帧类型（含写类 ack）与畸形数据一律安全忽略，不抛错不变更快照", () => {
+  it("未知帧类型（含写类 ack）与非 JSON/帧外壳畸形输入安全忽略，不抛错不变更快照", () => {
     const { client, ws } = setup();
     handshake(ws);
     const before = client.getSnapshot();
@@ -179,5 +221,219 @@ describe("WsClient 握手与状态机", () => {
     }).not.toThrow();
     expect(client.getSnapshot()).toBe(before); // 引用相等=无变更无通知
     expect(client.getSnapshot().state).toBe("ready");
+  });
+});
+
+describe("R1 已知帧运行时形状校验（畸形已知帧按未知帧零副作用；坏帧后合法回包仍成功）", () => {
+  it("welcome 缺字段：不算握手成功（保持 authenticating、不发 list）；随后合法 welcome 仍完成握手", () => {
+    const { client, ws } = setup();
+    ws.open();
+    ws.receive({ t: "welcome" });
+    expect(client.getSnapshot().state).toBe("authenticating");
+    expect(ws.sent).toHaveLength(1); // 仅 hello，未发 list-sessions
+    ws.receive(WELCOME);
+    expect(client.getSnapshot().state).toBe("ready");
+    expect((ws.sentFrames()[1] as { t: string }).t).toBe("list-sessions");
+  });
+
+  it("welcome protocolVersion:2：不支持版本不算握手成功；随后版本 1 的合法 welcome 仍成功", () => {
+    const { client, ws } = setup();
+    ws.open();
+    ws.receive({ ...WELCOME, protocolVersion: 2 });
+    expect(client.getSnapshot().state).toBe("authenticating");
+    expect(ws.sent).toHaveLength(1);
+    ws.receive(WELCOME);
+    expect(client.getSnapshot().state).toBe("ready");
+    expect(ws.sent).toHaveLength(2);
+  });
+
+  it("sessions 为对象：整帧忽略、不消耗在途请求；同 requestId 合法回包仍落地", () => {
+    const { client, ws, requestId, before, notified } = listPhase();
+    ws.receive({ t: "sessions", requestId, sessions: { length: 1 }, total: 1, offset: 0, hasMore: false, listVersion: 1, listReliability: "full" });
+    expect(client.getSnapshot()).toBe(before); // 引用不变=未改快照、未通知
+    expect(notified()).toBe(0);
+    ws.receive(validSessions(requestId));
+    expect(client.getSnapshot().sessions).toHaveLength(1); // 在途请求未被坏帧消耗
+  });
+
+  it("sessions 数组含 null：整帧忽略、在途请求保留；合法回包仍落地", () => {
+    const { client, ws, requestId, before, notified } = listPhase();
+    ws.receive({ t: "sessions", requestId, sessions: [null], total: 1, offset: 0, hasMore: false, listVersion: 1, listReliability: "full" });
+    expect(client.getSnapshot()).toBe(before);
+    expect(notified()).toBe(0);
+    ws.receive(validSessions(requestId));
+    expect(client.getSnapshot().sessions).toHaveLength(1);
+  });
+
+  it("条目 title:null：SessionSummaryDTO 校验拒绝整帧、在途请求保留；合法回包仍落地", () => {
+    const { client, ws, requestId, before, notified } = listPhase();
+    ws.receive({
+      t: "sessions",
+      requestId,
+      sessions: [{ ...VALID_DTO, title: null }],
+      total: 1,
+      offset: 0,
+      hasMore: false,
+      listVersion: 1,
+      listReliability: "full",
+    });
+    expect(client.getSnapshot()).toBe(before);
+    expect(notified()).toBe(0);
+    ws.receive(validSessions(requestId));
+    expect(client.getSnapshot().sessions).toHaveLength(1);
+  });
+
+  it("sessions 字段缺失：整帧忽略不清在途请求（不误判为空目录）；合法回包仍落地", () => {
+    const { client, ws, requestId, before, notified } = listPhase();
+    ws.receive({ t: "sessions", requestId, total: 1, offset: 0, hasMore: false, listVersion: 1, listReliability: "full" });
+    expect(client.getSnapshot()).toBe(before);
+    expect(notified()).toBe(0);
+    expect(client.getSnapshot().sessions).toBeNull(); // 不是「收到空列表」
+    ws.receive(validSessions(requestId));
+    expect(client.getSnapshot().sessions).toHaveLength(1);
+  });
+
+  it("error.message 为对象：畸形 error 整帧忽略（不清在途、不进错误态）；随后合法 sessions 仍成功", () => {
+    const { client, ws, requestId, before, notified } = listPhase();
+    ws.receive({ t: "error", code: 4409, requestId, message: { x: 1 }, retryable: true });
+    expect(client.getSnapshot()).toBe(before); // 仍 ready，无任何副作用
+    expect(notified()).toBe(0);
+    ws.receive(validSessions(requestId));
+    expect(client.getSnapshot().sessions).toHaveLength(1);
+  });
+});
+
+describe("R2 错误文案受控（远端 error.message 永不进快照）", () => {
+  const SENTINEL = "review-token-sentinel";
+
+  it("关联 4409 反射 token：快照只存受控文案（含码），序列化不含 token；error 后迟到合法回包不落地", () => {
+    const { client, ws, requestId } = listPhase();
+    ws.receive({ t: "error", code: 4409, requestId, message: `request rejected: ${SENTINEL}`, retryable: true });
+    const snap = client.getSnapshot();
+    expect(snap.state).toBe("error");
+    expect(snap.errorKind).toBe("list-failed");
+    expect(snap.errorMessage).toContain("4409");
+    expect(snap.errorMessage).not.toContain(SENTINEL);
+    expect(JSON.stringify(snap)).not.toContain(SENTINEL); // 全字段序列化无 token
+    ws.receive(validSessions(requestId)); // 在途已清+error 终态门：迟到回包零副作用
+    expect(client.getSnapshot()).toBe(snap);
+  });
+
+  it("4401 反射 token：auth-failed 快照序列化不含 token；随后 1008 关闭不降级零副作用", () => {
+    const { client, ws } = setup(SENTINEL);
+    ws.open();
+    ws.receive({ t: "error", code: 4401, message: `未认证或令牌无效: ${SENTINEL}`, retryable: false });
+    const snap = client.getSnapshot();
+    expect(snap.state).toBe("error");
+    expect(snap.errorKind).toBe("auth-failed");
+    expect(snap.errorMessage).toContain("认证失败");
+    expect(JSON.stringify(snap)).not.toContain(SENTINEL);
+    ws.serverClose(1008);
+    expect(client.getSnapshot()).toBe(snap); // 不降级、引用不变=零副作用
+  });
+});
+
+describe("R3 关闭=不可逆停止屏障（§5-3 五时序；断言只用发帧计数/close 计数/快照身份）", () => {
+  it("close-before-connect：未 connect 即 close→closed 终态；随后 connect 永久拒绝（不建 socket）", () => {
+    FakeWebSocket.reset();
+    const client = new WsClient("ws://127.0.0.1:9001/ws", "t", (url) => new FakeWebSocket(url));
+    client.close();
+    expect(client.getSnapshot().state).toBe("closed");
+    client.connect();
+    expect(FakeWebSocket.instances).toHaveLength(0); // 停止位生效：不创建连接
+  });
+
+  it("异步关闭窗口：CLOSING 中主动 close 定格终态；迟到的 close 事件/回包/open 回调全零副作用", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    ws.readyState = 2; // 服务端已发起关闭、close 事件未达（浏览器异步 CLOSING 窗口）
+    client.close();
+    const frozen = client.getSnapshot();
+    expect(frozen.state).toBe("closed");
+    expect(ws.closeCount).toBe(1); // 物理释放恰好一次
+    ws.serverClose(1000); // 迟到的 close 事件
+    expect(client.getSnapshot()).toBe(frozen);
+    const requestId = (ws.sentFrames()[1] as { requestId: string }).requestId;
+    ws.receive(validSessions(requestId)); // 迟到合法回包
+    expect(client.getSnapshot()).toBe(frozen);
+    ws.lateOpen(); // 迟到的 open 回调
+    expect(client.getSnapshot()).toBe(frozen);
+    expect(client.getSnapshot().state).toBe("closed"); // 不复活 authenticating
+    expect(ws.sentFrames()).toHaveLength(2); // 全程仅 hello+list，无第二次 hello
+  });
+
+  it("迟到 open 回调：serverClose(1000) 后保存的 onopen 触发不复活状态、不补发 hello", () => {
+    const { client, ws } = setup();
+    ws.serverClose(1000); // open 从未发生（CONNECTING 期被服务端关闭）
+    expect(client.getSnapshot().state).toBe("closed");
+    ws.lateOpen(); // 迟到的 open 回调
+    expect(client.getSnapshot().state).toBe("closed");
+    expect(ws.sent).toHaveLength(0); // 未发过 hello，也不补发
+  });
+
+  it("error 后主动 close：socket 物理释放、error 展示保留；迟到回包零副作用；重复 close 幂等；connect 拒绝", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    const requestId = (ws.sentFrames()[1] as { requestId: string }).requestId;
+    ws.receive({ t: "error", code: 4409, requestId, message: "拒绝", retryable: true });
+    expect(client.getSnapshot().state).toBe("error");
+    client.close(); // error 态也必须可关：展示态与物理释放分离
+    const frozen = client.getSnapshot();
+    expect(frozen.state).toBe("error"); // 展示保留具体错误
+    expect(frozen.errorKind).toBe("list-failed");
+    expect(ws.closeCount).toBe(1);
+    ws.receive(validSessions(requestId)); // 迟到合法回包
+    expect(client.getSnapshot()).toBe(frozen);
+    client.close(); // 重复 close 幂等
+    expect(ws.closeCount).toBe(1);
+    client.connect(); // close 后 connect 拒绝
+    expect(FakeWebSocket.instances).toHaveLength(1); // 不建第二连接
+  });
+
+  it("ready 主动 close 幂等：重复 close 只释放一次；close 后 connect 拒绝且迟到帧零副作用", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    client.close();
+    const frozen = client.getSnapshot();
+    expect(frozen.state).toBe("closed");
+    expect(ws.closeCount).toBe(1);
+    client.close(); // 幂等：不再触发释放/通知
+    expect(ws.closeCount).toBe(1);
+    expect(client.getSnapshot()).toBe(frozen);
+    client.connect(); // 拒绝重连
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    const requestId = (ws.sentFrames()[1] as { requestId: string }).requestId;
+    ws.receive(validSessions(requestId)); // 迟到帧
+    expect(client.getSnapshot()).toBe(frozen);
+  });
+});
+
+describe("C1 握手期非认证失败受控反馈", () => {
+  it("握手期 4403→handshake-failed 受控文案（不丢版本不匹配原因）；随后 1003 关闭不降级", () => {
+    const { client, ws } = setup();
+    ws.open();
+    ws.receive({ t: "error", code: 4403, message: "unsupported protocol version", retryable: false });
+    const snap = client.getSnapshot();
+    expect(snap.state).toBe("error");
+    expect(snap.errorKind).toBe("handshake-failed");
+    expect(snap.errorMessage).toContain("4403");
+    expect(snap.errorMessage).toContain("协议版本");
+    ws.serverClose(1003); // §5.3：4403 走 close 1003——不降级为通用 closed
+    expect(client.getSnapshot()).toBe(snap);
+  });
+
+  it("连接工厂抛异常→transport 受控错误；后续 connect 永久拒绝不重复抛出", () => {
+    FakeWebSocket.reset();
+    const client = new WsClient("ws://127.0.0.1:9001/ws", "t", () => {
+      throw new Error("no websocket");
+    });
+    client.connect();
+    const snap = client.getSnapshot();
+    expect(snap.state).toBe("error");
+    expect(snap.errorKind).toBe("transport");
+    expect(snap.errorMessage).toContain("连接创建失败");
+    client.connect();
+    expect(client.getSnapshot()).toBe(snap); // 幂等拒绝，无第二次迁移
+    expect(FakeWebSocket.instances).toHaveLength(0);
   });
 });
