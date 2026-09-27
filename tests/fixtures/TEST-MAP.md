@@ -733,3 +733,12 @@
 - 变异六连（tools/mutate-3c5.py，try/finally 保还原+树净断言，基线先提交，杀点判据=exit≠0 且 n_fail>0）：S1 DOT-GATES-OFF 点段+点文件两门同拔（合并理由=单向吸收：单拔点段门留点文件门不可杀，"."/".." 均以点开头被吸收；反向单拔点文件门留点段门可杀——旧 S2-DOTFILE 日志@103e726 有 SS2/SS7 两杀，/.hidden 放行；故两门须组合探针覆盖两向；GPT r2 N3 纠偏）→SS2/SS7/SS8 三杀（不含 SS1，旧句四杀有误）；S3 composition 固定端口门关→ST1 杀；S4 CLI 端口门关→SM3 杀（真 token+stderr 断言防 token 门偷杀）；S5 closeAllConnections 拔除→ST6 杀（半截头连接落 5s 守卫，基线即时=可区分）；S6 realpath 真实边界门关→SS9 杀（O_NOFOLLOW 不拦已解析路径，symlink 门必须独立成杀点）；S7 origin 快照关（opts.allowedOrigins 直通）→ST5 杀。全杀全还原，日志=tests/fixtures/run-records/3c5-mut-*.log。
 - 诚实披露：⓪N1 口径：裸 # 仅拒路径部分；query 内 # 不拒（/package.json?x=#fragment=200，query 不参与磁盘解析；SS8 补对照断言锁定，GPT r2 N1）；①旧 S3'=拔 closeAllConnections 曾判"设计上不可杀"有误（GPT E2 证实半截请求头场景可区分）→r1 落 ST6 成杀点；②SM3 两轮强化过程（root 门/ token 门先后偷换杀点）见提交链 4de316a→e1a3f15；③ST4=正常快速路径断言，不依赖 5s 守卫存在性（删守卫仍过），半截头证据在 ST6（旧句"依赖守卫存在性"有误已删，GPT r2 N2）；④S7 变异只杀 transport 层快照，gateway 层快照（hello 后检查）无独立变异覆盖——⑤C/写侧收线批补 gateway 直连用例（GPT r2 B3 附带建议）；⑤/proc/self 类根（realpath 根即特殊文件系统）不在支持面：realRoot 构造期 realpath 若失败=拒启，服务方自担。
 - 终态（r1）：1158 passed+11 skipped+tsc 三档+web tsc+eslint 全 0；提交链 af119ea→4de316a→e1a3f15→f928f59→42d666d（r1 主体）→103e726（变异 v2）→e21a569（S1/S2 合并）。
+
+## ⑤C 真组合根 E2E（2026-10-05；repo fe0bc07；GPT r2 88 GO 放行后落）
+
+- 范围与分工：**生产形态单端口共存面**——staticDir 静态+同源 WS+token 门+write 接线+真 pi 0.86.1 全组合。与 ws-write-e2e 分工明确：深写链路（退役/在飞销毁/代次）归 E1-E4 已证；本批只证**组合根共存与联动**：静态 GET 与 WS 同端口、token 门贯穿三面、订阅投影与写 journal 同组合联动、资源收口。PI_E2E=1 门控（默认 skip；真调一轮 LLM=一次小 prompt+一次 stop，成本面显式声明）。
+- C-1 同端口静态+WS+token（无 LLM）：GET /index.html 200+MARKER+GET /app.js 200+GET /nope.html 404；审计行 static-hit/static-miss 前缀断言（⑤B 面在组合根真实接线证据）；坏 token→**4401 错误帧先行+close 1008**（契约 §5.6 口径——首版断言 close=4401 写反已修，e2e 级契约再校验）；好 token→welcome。
+- C-2 订阅+写全链（真 pi 一轮）：预置空 s1.jsonl→subscribe→snapshot（subscriptionId）→prompt（"只回复两个字：收到"）→write-ack launched→journal 三行（enqueue<sending<settled 同 intentId 索引递增+generation≥1）→订阅面 events 帧投影（同 subscriptionId、events[].seq 帧内单调递增≥1 帧）——**watch→投影→推送在组合根内的真链路证据**。
+- C-3 stop+dispose 收口：write-stop-ack confirmed+assertExitShape 严格形状；stop→exit 同 handle 审计索引硬序（e2e-evidence 助手复用）；dispose<30s。
+- 运行证据：PI_E2E=1 3 passed（13.86s）；默认面 60 文件 1158 passed+2 skipped（integration 3 skipped 在内）；tsc 三档+eslint 0。固定端口=COMPOSED_E2E_PORT 默认 4319（staticDir 模式要求固定 port，同源 origin 预知）。
+- 残余披露：①订阅面 events 断言只锁「有投影且 seq 单调」，不断言 evidence 事件与 journal 行一一对应（投影语义归 3b-2 单测面）；②真浏览器面（fetch+WS 来自页面脚本）未起 Playwright——前端联调批（⑤D/UI 接线）归口；③gateway 层 origin 快照独立变异（N3-④）挂写侧收线批。
