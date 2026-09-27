@@ -1,10 +1,10 @@
-// 3b-4 恢复真读源 provider 单测 v3（fix11 安全读/证据链；fix12：B12-1 冷启动权威门+B12-2 session 复核）。
+// 3b-4 恢复真读源 provider 单测 v4（fix13：B13-1 仓级串行不丢登记/B13-2 登记不变量+seen 恒读）。
 // fix12 新增 R20-R27：Q02 默认拒首捕/Q03 锚丢失洗白/Q05 missing→新建/工厂补面/Q17 零长伪锚/detail 脱敏。
 // 预算边界用小预算（maxCombinedBytes 注入）做精确字节例；真 8MiB 默认档例证规模面。
 // 增长竞态用 openLike 接缝确定性复现（真 fs 计时窗不可稳定命中）；安全打开（symlink/FIFO）用真 fs
 // 实路径（openSafeFile 真旗标）；证据链（B11-2）用真 sidecar 目录跨实例续链。
 import { describe, expect, it } from "vitest";
-import { mkdtemp, rm, symlink, writeFile, mkdir, readFile } from "node:fs/promises";
+import { mkdtemp, rm, symlink, writeFile, mkdir, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
@@ -64,7 +64,7 @@ function fakeOpen(files: Record<string, { size: number; bytes?: Buffer }>): {
   return { openLike, journalReads: () => journalReads, opens: () => opens };
 }
 
-describe("recovery-evidence-source（fix12 v3：安全读+证据链+冷启动权威门）", () => {
+describe("recovery-evidence-source（fix13 v4：+仓级串行/登记不变量）", () => {
   it("R1 预算边界：合计 −1 与恰等→快照；+1→oversized（真 fs 字节精确；追加序列过链）", async () => {
     const { jRoot, evDir, cleanup } = await mkRig("rec1-");
     try {
@@ -579,6 +579,79 @@ describe("recovery-evidence-source（fix12 v3：安全读+证据链+冷启动权
       if (isRecoverySnapshot(r) || r.kind !== "file-unreadable") throw new Error(`期望 file-unreadable，实得 ${JSON.stringify(r)}`);
       expect(r.detail).toBe("Error"); // 构造名，非 message
       expect(JSON.stringify(r)).not.toContain("/abs/secret"); // 绝对路径不外泄（审计面）
+    } finally { await cleanup(); }
+  });
+
+  it("R28/B13-1 双首捕并发（同实例不同 file）：仓级串行→登记=并集不丢更新；随后 A 锚丢失→concurrent-modification（bless 不可重新授权）", async () => {
+    const { jRoot, evDir, cleanup } = await mkRig("r28");
+    try {
+      await writeFile(join(jRoot, "a.jsonl"), jl("a-1") + "\n", "utf8");
+      await writeFile(join(jRoot, "b.jsonl"), jl("b-1") + "\n", "utf8");
+      const p = createRecoveryEvidenceProvider({ trustFirstCapture: () => true, roots: [jRoot], evidenceDir: evDir, maxCombinedBytes: 100_000 });
+      const [ra, rb] = await Promise.all([p("a.jsonl"), p("b.jsonl")]);
+      snapOf(ra); snapOf(rb); // 两 file 都出快照
+      const seen = JSON.parse(await readFile(join(evDir, "seen.json"), "utf8")) as { files: string[] };
+      expect([...seen.files].sort()).toEqual(["a.jsonl", "b.jsonl"]); // 并集——非后写覆盖先写
+      await rm(join(evDir, `${encodeURIComponent("a.jsonl")}.evidence.json`), { force: true }); // A 锚点丢失
+      const r2 = await p("a.jsonl");
+      expect(r2).toEqual({ kind: "unavailable", reason: "concurrent-modification" }); // 已登记丢锚≠可信新生
+    } finally { await cleanup(); }
+  });
+
+  it("R29/B13-2 登记不变量：残局=锚在而登记无（首捕 seen 写败/B13-2 重试面）→恒读 fail-closed 或补登记放行；补后稳定复用；零 tmp 残留", async () => {
+    const { jRoot, evDir, cleanup } = await mkRig("r29");
+    const audits: string[] = [];
+    try {
+      await writeFile(join(jRoot, "k.jsonl"), jl("k-1") + "\n", "utf8");
+      const p = createRecoveryEvidenceProvider({ trustFirstCapture: () => true, roots: [jRoot], evidenceDir: evDir, maxCombinedBytes: 100_000, audit: (l) => { audits.push(l); } });
+      snapOf(await p("k.jsonl")); // 首捕正常（锚+登记齐）
+      await rm(join(evDir, "seen.json"), { force: true }); // 残局：登记丢失（锚仍在）——B13-2 重试面/fix11 旧锚迁移同构
+      const r2 = await p("k.jsonl");
+      snapOf(r2); // 验证纯追加后补登记再放行——非「有锚即直通快照」
+      const seen = JSON.parse(await readFile(join(evDir, "seen.json"), "utf8")) as { files: string[] };
+      expect(seen.files).toContain("k.jsonl"); // 登记已补（成功返回前不变量成立）
+      const r3 = await p("k.jsonl");
+      snapOf(r3); // 已登记稳定复用
+      // seen 恒读面：占位目录=不可读仓→fail-closed（v4 有锚也读——不再静默放行）
+      await rm(join(evDir, "seen.json"), { force: true });
+      await mkdir(join(evDir, "seen.json"));
+      const r4 = await p("k.jsonl");
+      expect(r4).toEqual({ kind: "unavailable", reason: "read-failed" });
+      expect(audits.some((l) => l.includes("detail=seen-load"))).toBe(true);
+      await rm(join(evDir, "seen.json"), { recursive: true, force: true });
+      const r5 = await p("k.jsonl");
+      snapOf(r5); // 故障清除→再补登记→快照（残局自愈全链）
+      const leftovers = (await readdir(evDir)).filter((n) => n.includes(".tmp"));
+      expect(leftovers).toEqual([]); // tmp 独占名+rename 收尾——无残留半成品
+    } finally { await cleanup(); }
+  });
+
+  it("R30/B13-2 seen 恒读 fail-closed：有锚+仓损坏（非合法 JSON）→read-failed——不静默放行", async () => {
+    const { jRoot, evDir, cleanup } = await mkRig("r30");
+    const audits: string[] = [];
+    try {
+      await writeFile(join(jRoot, "k.jsonl"), jl("k-1") + "\n", "utf8");
+      const p = createRecoveryEvidenceProvider({ trustFirstCapture: () => true, roots: [jRoot], evidenceDir: evDir, maxCombinedBytes: 100_000, audit: (l) => { audits.push(l); } });
+      snapOf(await p("k.jsonl")); // 首捕正常（锚+登记齐）
+      await writeFile(join(evDir, "seen.json"), "{oops", "utf8"); // 仓损坏
+      const r = await p("k.jsonl");
+      expect(r).toEqual({ kind: "unavailable", reason: "read-failed" }); // 有锚也读仓——损坏即拒
+      expect(audits.some((l) => l.includes("detail=seen-load"))).toBe(true);
+    } finally { await cleanup(); }
+  });
+
+  it("R31/B12-1 bless 异常面：trustFirstCapture 抛错→read-failed（宿主面故障≠拒授权）；锚/登记均不落盘", async () => {
+    const { jRoot, evDir, cleanup } = await mkRig("r31");
+    const audits: string[] = [];
+    try {
+      await writeFile(join(jRoot, "k.jsonl"), jl("k-1") + "\n", "utf8");
+      const p = createRecoveryEvidenceProvider({ trustFirstCapture: () => { throw new Error("bless boom"); }, roots: [jRoot], evidenceDir: evDir, maxCombinedBytes: 100_000, audit: (l) => { audits.push(l); } });
+      const r = await p("k.jsonl");
+      expect(r).toEqual({ kind: "unavailable", reason: "read-failed" });
+      expect(audits.some((l) => l.includes("detail=bless"))).toBe(true);
+      const names = await readdir(evDir);
+      expect(names.some((n) => n.endsWith(".evidence.json"))).toBe(false); // 首锚未建
+      expect(names.includes("seen.json")).toBe(false); // 登记未建
     } finally { await cleanup(); }
   });
 });

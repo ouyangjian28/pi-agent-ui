@@ -612,5 +612,5 @@
 - **读窗双复核（B11-3）**：stat 层合计早拒（零读独占面）→读后字节复核 raw.byteLength>allowed→oversized-grew→读后 session 复核（二次 open size s2，raw+s2>max→oversized-grew）；缩/消失=已披露残余不回退（P06）。R19 补 P07 session 复核独占杀（seam 定序开：预检 400/复核 500）。
 - **工厂自防御（B11-4）**：composition 预算校验移出 tokenPollMs 分支+provider 工厂自验（非法/超 1GiB/相对 evidenceDir/相对 roots 即抛）；R18 六非法值矩阵。sessionFor 映射非法（绝对/越界）→file-unreadable 响亮失败不静默 journal-only（P10；R13，嵌套合法）。
 - **4402 映射（B11-5）**：ws-gateway file-unreadable→{t:error,code:4402,message:恢复读取失败,retryable:true,requestId}；审计带逻辑 file/detail 不带绝对 path（P12）。T2 改标；I3 真集成同断。
-- 测试面：R1-R19（18→19 it）+T1-T5+I1-I4；变异五连（3b4-fix11.md+patches/3b4-fix11/）：ANCHOR→R11+R12 / SESRECHECK→R19 / SAFEFLAGS→R5+R16 / FACTORY→R18 / 4402→T2，全部退出码 1+首败断言+还原哈希 27632e0d…。
+- 测试面：R1-R19（18→19 it）+T1-T5+I1-I4；变异五连（3b4-fix11.md+patches/3b4-fix11/）：ANCHOR→R11+R12 / SESRECHECK→R19 / SAFEFLAGS→R5+R16 / FACTORY→R18 / 4402→T2，退出码=1（fix13 勘正披露口径：当时的管道捕获曾混入 grep 码，事后 ANCHOR 裸跑实证 VITEST_EXIT=1）+首败断言+还原 sha 27632e0d…（fix13 勘正：字段名实为 sha，原记 sha256）。
 - 终态：46 files **861 passed+7 skipped**（JSON=tests/fixtures/run-records/3b4-fix11-vitest.json）+tsc0+lint0；基线提交 132ee3f。

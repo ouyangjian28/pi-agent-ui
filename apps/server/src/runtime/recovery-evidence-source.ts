@@ -22,9 +22,18 @@
 //    message；同 file 串行 Map 所有权条件清理（Q14）；工厂补 roots 非空+sessionRoots 绝对校验。
 //  披露边界：serialize=单实例内串行（跨进程无锁，部署禁重叠写者——Q16）；锚点 tmp+rename 原子
 //    ≠掉电耐久（无 fsync——Q13）；读块固定 64KiB 探测（越限块不进结果但已读入临时 buffer）。
+// v4（fix13：GPT 第13轮 80/100 B13-1/B13-2）：
+//  B13-1 seen 丢更新闭合：捕获串行从 per-file Map 改为仓级单链（同实例内所有 file 串行——
+//    seen 读改写整体事务化，跨 file 并行首捕不再整体覆盖丢登记）；tmp 名加 randomBytes 独占量
+//    （同毫秒同名碰撞面消除）。
+//  B13-2 登记不变量：「成功返回快照前 seen 登记已建立」。seen 恒读（有锚也读——损坏/不可读→
+//    read-failed fail-closed，不再有锚跳过）；有锚而未登记（首捕 seen 写失败的 B13-2 残局、
+//    fix11 旧锚迁移）→验证纯追加后补登记再返回（补登记失败=read-failed）。
+//  部署前提（随 Q16）：evidenceDir 须为可信目录（seen/锚点 sidecar 本身不可被非信任方读写替换）；
+//    快照「已见证据」语义以捕获/提交时点为准（Q12：窗口内并发截断属运行时干预面）。
 // 取消语义（披露）：signal=各步骤间观察点+读后复核；当前挂起 I/O 本身不消费 signal（safe-open 读窗
 // 有界+快，取消语义=迟到结果被网关连接态丢弃——st.closed 不入帧不回填缓存）。
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { parseJournalText } from "./recover.ts";
@@ -174,16 +183,14 @@ export function createRecoveryEvidenceProvider(
     if (dirReady === null) dirReady = mkdir(evidenceDir, { recursive: true }).then(() => undefined, (e) => { dirReady = null; throw e; });
     return dirReady;
   };
-  // 同 file 捕获串行化（锚点读写竞争归一；不同 file 并行不受影响）
-  const inflight = new Map<string, Promise<unknown>>();
+  // B13-1 仓级单链：同实例内所有 file 的捕获串行（seen 读改写整体事务化——跨 file 并行首捕
+  // 不再各自 loadSeen 旧集后整体覆盖写丢登记）。O(1) 单链尾，无 Map 无所有权清理（Q14 随之消解）。
+  // 跨实例无锁（Q16 部署前提：禁重叠写者）。
+  let chain: Promise<unknown> = Promise.resolve();
   const serialize = <T>(file: string, body: () => Promise<T>): Promise<T> => {
-    const prev = inflight.get(file) ?? Promise.resolve();
-    const next = prev.then(body, body);
-    const tail = next.then(() => undefined, () => undefined);
-    inflight.set(file, tail);
-    void tail.then(() => {
-      if (inflight.get(file) === tail) inflight.delete(file); // Q14：仅当仍是链尾（无后来者）才清
-    });
+    void file; // 串行域=仓级（evidenceDir），file 仅入 body 闭包
+    const next = chain.then(body, body);
+    chain = next.then(() => undefined, () => undefined);
     return next;
   };
   const unavailable = (reason: "read-failed" | "concurrent-modification" | "oversized" | "no-evidence-snapshot") =>
@@ -305,18 +312,18 @@ export function createRecoveryEvidenceProvider(
           audit(`recovery-evidence-corrupt file=${file}`);
           return unavailable("concurrent-modification"); // 锚点损坏=篡改面（原子写防撕裂；坏=外部干预）
         }
+        // B13-2 seen 恒读（有锚也读）：仓损坏/不可读=read-failed fail-closed（不静默放行）。
+        let seen: ReadonlySet<string>;
+        try {
+          seen = await loadSeen(seenPath(evidenceDir));
+        } catch {
+          audit(`recovery-evidence-store-failed file=${file} detail=seen-load`);
+          return unavailable("read-failed");
+        }
         // B12-1 冷启动权威门（Q02/Q03）：锚点缺失时当前盘面不自行成为权威。已登记 file 锚点丢失
         // =证据丢失→concurrent-modification（bless 不可越）；未登记 file 默认 no-evidence-snapshot，
         // 仅宿主显式 trustFirstCapture=true（迁移/可信新建声明）才建立首锚。
-        let seenNow: ReadonlySet<string> | null = null;
         if (anchor === null) {
-          let seen: ReadonlySet<string>;
-          try {
-            seen = await loadSeen(seenPath(evidenceDir));
-          } catch {
-            audit(`recovery-evidence-store-failed file=${file} detail=seen-load`);
-            return unavailable("read-failed");
-          }
           if (seen.has(file)) {
             audit(`recovery-evidence-lost file=${file}`);
             return unavailable("concurrent-modification"); // Q03：已初始化仓丢条目≠可信新生
@@ -334,7 +341,6 @@ export function createRecoveryEvidenceProvider(
             audit(`recovery-no-first-authority file=${file}`);
             return unavailable("no-evidence-snapshot"); // Q02：默认 fail-closed
           }
-          seenNow = seen;
         }
         const sha = sha256Hex(raw);
         if (anchor !== null) {
@@ -348,18 +354,20 @@ export function createRecoveryEvidenceProvider(
         }
         // 锚点写穿（原子 tmp+rename；失败=证据不落盘不得发结论→read-failed）
         try {
-          const tmp = `${apath}.tmp-${process.pid}-${now().toString(36)}`;
+          const tmp = `${apath}.tmp-${process.pid}-${now().toString(36)}-${randomBytes(6).toString("hex")}`;
           await writeFile(tmp, JSON.stringify({ version: 1, file, len: raw.byteLength, sha } satisfies EvidenceAnchor), "utf8");
           await rename(tmp, apath);
         } catch {
           audit(`recovery-evidence-store-failed file=${file} detail=store`);
           return unavailable("read-failed");
         }
-        // 首捕登记 seen（Q03 防锚点丢失洗白；失败=fail-closed——仓登记不落盘不得发结论）
-        if (seenNow !== null && !seenNow.has(file)) {
+        // B13-2 登记不变量：成功返回快照前 seen 登记已建立。未登记而至此=首捕（bless 已过）或
+        // B13-2 残局（锚写成+seen 写败）或 fix11 旧锚迁移——一律补登记再返回（失败=fail-closed：
+        // 仓登记不落盘不得发结论，杜绝重试绕登记直通快照）。Q03 防锚点丢失洗白同源。
+        if (!seen.has(file)) {
           try {
-            const nextSeen = { version: 1, files: [...new Set([...seenNow, file])].sort() } satisfies EvidenceSeen;
-            const stmp = `${seenPath(evidenceDir)}.tmp-${process.pid}-${now().toString(36)}`;
+            const nextSeen = { version: 1, files: [...new Set([...seen, file])].sort() } satisfies EvidenceSeen;
+            const stmp = `${seenPath(evidenceDir)}.tmp-${process.pid}-${now().toString(36)}-${randomBytes(6).toString("hex")}`;
             await writeFile(stmp, JSON.stringify(nextSeen), "utf8");
             await rename(stmp, seenPath(evidenceDir));
           } catch {

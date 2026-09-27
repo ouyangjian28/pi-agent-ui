@@ -1,6 +1,6 @@
 // 3b-4 集成：真组合根（startServer 真 ws 监听）+真读源 recoveryEvidence——
 // 验收②③：≥501 条多页完整期望 ID 数组；缓存命中期间源变仍同 hash 冻结页（无 hash 刷新）；
-// 合计 8MiB 入口预算真路径（oversized 帧）；journal 缺失→read-failed。
+// 合计 8MiB 入口预算真路径（oversized 帧）；journal 缺失→file-unreadable→error 4402 retryable=true。
 // （网关分页缓存/LRU 驱逐/挂起断开的假源面已由 ws-gateway.test.ts B7/B8/R4a/R4b/D22 覆盖——此处只证真源接线。）
 import { describe, expect, it } from "vitest";
 import { appendFile, chmod, mkdtemp, writeFile } from "node:fs/promises";

@@ -3095,7 +3095,7 @@ describe("ws-gateway 3b-4：typed recovery 结果映射+连接级取消", () => 
     }
   });
 
-  it("T5 迟到交付：连接关后 provider 才 resolve→零帧+不回填缓存（二次请求重调不命中旧快照）", async () => {
+  it("T5 迟到交付：连接关后 provider 才 resolve（本例 unavailable 面）→零帧+不回填缓存（二次请求重调不命中旧结果；成功快照面=T5c）", async () => {
     let resolveP: ((v: { kind: "unavailable"; reason: "oversized" }) => void) | null = null;
     const calls: string[] = [];
     const r = await makeRig({
@@ -3159,7 +3159,7 @@ describe("ws-gateway 3b-4：typed recovery 结果映射+连接级取消", () => 
     }
   });
 
-  it("T5b 迟到交付资源回收：连接关后 resolve/reject 双面→零帧+信号量归零（inFlight==0）+重调不回填", async () => {
+  it("T5b 迟到交付资源回收（unavailable/Error 面）：连接关后 resolve/reject 双面→零帧+信号量归零（inFlight==0）+重调不回填（成功快照面=T5c）", async () => {
     const sem = new ComputeSemaphore();
     const calls: string[] = [];
     let resolveP: ((v: { kind: "unavailable"; reason: "oversized" }) => void) | null = null;
@@ -3195,6 +3195,44 @@ describe("ws-gateway 3b-4：typed recovery 结果映射+连接级取消", () => 
       expect(r.gw.connectionCount).toBe(0);
     } finally {
       await r.dispose();
+    }
+  });
+
+  it("T5c/B13-3② 迟到成功快照：连接关后 provider 才 resolve 合法 snapshot→零帧+死连接 recoveryPages 仍空+信号量归零（成功面同样不回填）", async () => {
+    const sem = new ComputeSemaphore();
+    const snap = { version: 1, file: "f.jsonl", sessionId: "s", lines: [], bad: [], attributedFragments: [], repaired: [], createdAt: 1 } as unknown as RecoveryEvidenceSnapshot;
+    let resolveP: ((v: RecoveryEvidenceSnapshot) => void) | null = null;
+    const r = await makeRig({ semaphore: sem, recoveryEvidence: () => new Promise((res) => { resolveP = res; }) });
+    try {
+      const c = await authed(r);
+      void c.say({ t: "get-recovery", requestId: "s1", file: "f.jsonl", offset: 0 });
+      await tick();
+      const conns = (r.gw as unknown as { conns: Map<string, { recoveryPages: Map<string, unknown> }> }).conns;
+      const st = [...conns.values()][0]; // 关闭前取死连接状态引用（conns 删除后仍可观测）
+      const before = c.frames().length;
+      c.closedByTransport();
+      resolveP!(snap); // 迟到的合法成功快照
+      await tick(); await tick();
+      expect(c.frames().length).toBe(before); // 零帧
+      expect(st.recoveryPages.size).toBe(0); // 成功快照不入死连接页缓存（与 unavailable 面同拒回填）
+      expect(sem.inFlight).toBe(0); // 槽已还
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("T4b/B13-3② 公开关闭入口：应用级关闭（rig.dispose→网关收尾关闭所有连接）也触发 abort——非仅私有 closeConn 可达", async () => {
+    let seen: AbortSignal | null = null;
+    const r = await makeRig({ recoveryEvidence: (_f, signal) => { seen = signal ?? null; return new Promise<never>(() => {}); } });
+    try {
+      const c = await authed(r);
+      void c.say({ t: "get-recovery", requestId: "h3", file: "f.jsonl", offset: 0 });
+      await tick();
+      await r.dispose(); // 公开入口（宿主关停路径；dispose 幂等）
+      expect((seen as AbortSignal | null)?.aborted).toBe(true); // 挂起读收到停读信号
+      expect(c.frames().some((f) => f.t === "error")).toBe(false); // 关停不喷错误帧
+    } finally {
+      await r.dispose(); // 幂等复跑不炸
     }
   });
 
@@ -3236,6 +3274,7 @@ describe("ws-gateway 3b-4：typed recovery 结果映射+连接级取消", () => 
       await c.say({ t: "get-recovery", requestId: "e9", file: "ev.jsonl", offset: 0, evidenceHash: hashOf.get("e9")! });
       const f9b = c.frames().filter((x) => x.t === "recovery" && (x as Record<string, unknown>).requestId === "e9").pop() as Record<string, unknown>;
       expect(f9b).toBeDefined();
+      expect(c.frames().filter((x) => x.t === "recovery" && (x as Record<string, unknown>).requestId === "e9").length).toBe(2); // B13-3③：幸存续页=第二帧（帧增量实证）
       expect(calls).toBe(10); // 未重调
     } finally {
       await r.dispose();

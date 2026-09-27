@@ -66,21 +66,25 @@ describe("3b-3① composition", () => {
       const r1 = await mkCfg({ tokenPollMs: 1 });
       const s1 = await start(r1.cfg); await s1.dispose();
     });
-    it("maxRecoveryCombinedBytes 三态矩阵（B12-3①）：省略=默认档/有限正整数≤1GiB=接受；非法值→拒绝启动", async () => {
-      // 非法五态：NaN/±Infinity/负数/分数/超 1GiB
-      for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1, 0.5, 1024 * 1024 * 1024 + 1]) {
-        const { cfg } = await mkCfg({ maxRecoveryCombinedBytes: bad });
-        await expect(startServer(cfg)).rejects.toThrow("maxRecoveryCombinedBytes 非法");
+    it("轮询×预算笛卡尔（B13-3①）：tokenPollMs 省略/0/正值 × maxRecoveryCombinedBytes 值域——非法拒启、合法接受", async () => {
+      // 非法七态：NaN/±Infinity/负数/0/分数/超 1GiB（0 非正整数——B13-3 点名补）
+      const bads = [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1, 0, 0.5, 1024 * 1024 * 1024 + 1];
+      // 合法三态：省略（默认 8MiB 档）/最小正整数 1/恰 1GiB 上限（B13-3 点名补 1）
+      const goods: Array<number | undefined> = [undefined, 1, 1024 * 1024 * 1024];
+      for (const poll of [undefined, 0, 50] as const) { // 轮询三态：省略（默认档）/0 禁用/普通正值
+        for (const bad of bads) {
+          const { cfg } = await mkCfg({ maxRecoveryCombinedBytes: bad });
+          if (poll === undefined) delete cfg.tokenPollMs; else cfg.tokenPollMs = poll;
+          await expect(startServer(cfg)).rejects.toThrow("maxRecoveryCombinedBytes 非法");
+        }
+        for (const good of goods) {
+          const { cfg } = await mkCfg(good === undefined ? {} : { maxRecoveryCombinedBytes: good });
+          if (poll === undefined) delete cfg.tokenPollMs; else cfg.tokenPollMs = poll;
+          const sv = await start(cfg); await sv.dispose();
+        }
       }
-      // 合法三态：省略（默认 8MiB 档）/恰 1GiB 上限/普通有限值
-      const a = await mkCfg({});
-      const sa = await start(a.cfg); await sa.dispose();
-      const b = await mkCfg({ maxRecoveryCombinedBytes: 1024 * 1024 * 1024 });
-      const sb = await start(b.cfg); await sb.dispose();
-      const c = await mkCfg({ maxRecoveryCombinedBytes: 4096 });
-      const sc = await start(c.cfg); await sc.dispose();
     });
-    it("trustFirstRecoveryCapture：仅 boolean 接受（true=宿主声明首捕权威；默认省略=false fail-closed）", async () => {
+    it("trustFirstRecoveryCapture：true/false 两态接受（非 true 一律按关处理——false=显式关；类型面由 TS 收敛，不作运行时拒）", async () => {
       const a = await mkCfg({ trustFirstRecoveryCapture: true });
       const sa = await start(a.cfg); await sa.dispose();
       const b = await mkCfg({ trustFirstRecoveryCapture: false });
