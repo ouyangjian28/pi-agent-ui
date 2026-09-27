@@ -41,7 +41,31 @@ export type JournalLine =
       readonly intentId: IntentId;
       readonly generation: number;
       readonly commandId: number;
-    };
+    }
+  | RepairLine; // P0-1a 修复留痕（无 intentId；重放聚合不参与，报告侧作持久修复事实呈现）
+
+export const JOURNAL_CONTRACT_VERSION = 2;
+
+/** P0-1a 修复留痕行（P0 冻结序①）：宿主显式撕裂尾截断修复的持久记录。
+ *  位置+字节边界+buildId+契约版本绑定——修复时 byteStart..byteEnd 段已物理移除，
+ *  本行紧随保留前缀之后追加（读面事实：本行自身起始偏移=byteStart）。
+ *  证据链语义：本行是锚点合法转移面（截尾后锚点由修复工具按新盘面重写，
+ *  转移合法性=修复时旧锚前缀哈希校验通过+removedSha256 复核；见 repair-tail.ts）。 */
+export interface RepairLine {
+  readonly t: "repair";
+  readonly reason: "torn-tail";
+  /** 保留前缀长度（=移除段起点；=本行自身在文件中的字节偏移）。 */
+  readonly byteStart: number;
+  /** 移除段终点（修复时 EOF）。 */
+  readonly byteEnd: number;
+  /** 移除段 sha256（hex；审计身份——修复后段已不在盘，摘要先行留存）。 */
+  readonly removedSha256: string;
+  /** 执行修复的宿主构建身份（非空串）。 */
+  readonly buildId: string;
+  /** 写入时 journal 契约版本（=JOURNAL_CONTRACT_VERSION）。 */
+  readonly contractVersion: number;
+  readonly at: string; // ISO8601
+}
 
 /** 意图恢复视图（对账算法输入：由 journal 行重放聚合）。 */
 export interface IntentRecord {
@@ -97,6 +121,7 @@ export function replayIntents(lines: readonly JournalLine[], sessionId: SessionI
     }
     const rec = byId.get((line as { intentId?: IntentId }).intentId ?? "");
     if (!rec) continue;
+    // repair 行（P0-1a）无 intentId：上面取 undefined→?? ""→无 rec→已跳过。此显式 case 仅为可读。
     switch (line.t) {
       case "sending":
         byId.set(rec.intentId, { ...rec, sending: true });

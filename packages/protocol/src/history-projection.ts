@@ -61,6 +61,8 @@ function projectLine(raw: string, lineNo: number): ScanRow {
       return { source: "journal", locator, raw, event: { ...evBase(null, j.intentId), kind: "verdict-unknown" } };
     case "response-timeout":
       return { source: "journal", locator, raw, event: { ...evBase(j.generation, j.intentId), kind: "response-timeout", commandId: j.commandId } };
+    case "repair":
+      return { source: "journal", locator, raw, event: { ...evBase(null, null), kind: "journal-repair", repairReason: j.reason, repairByteStart: j.byteStart, repairByteEnd: j.byteEnd } };
     default:
       // 结构合法但 t 未知（未来版本行）：保守 corrupt 占位（不猜语义）。
       return { source: "journal", locator, raw, event: { ...evBase(null, null), kind: "journal-corrupt" } };

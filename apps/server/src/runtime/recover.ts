@@ -100,6 +100,19 @@ export interface RecoverReport {
   readonly perIntent: readonly PerIntentRow[];
   /** 本报告实际消耗的残片归因修订（快照证据域成分；evidenceHash 输入）。 */
   readonly attributedFragments: readonly FragmentAttribution[];
+  /** P0-1a 持久修复事实（盘面 repair 行派生；顺序=盘面序）：宿主显式撕裂尾截断修复的留痕。
+ *  与快照内存标记 repaired 互补——本表=耐久事实（跨重启），内存标记=同靴修复中过渡态。 */
+  readonly repairLog: readonly RepairFact[];
+}
+
+/** P0-1a 修复留痕事实（repair 行的读面呈现形态）。 */
+export interface RepairFact {
+  readonly byteStart: number;
+  readonly byteEnd: number;
+  readonly removedSha256: string;
+  readonly buildId: string;
+  readonly contractVersion: number;
+  readonly at: string;
 }
 
 /** perIntent 行（contracts.RecoveryIntentRow 同构）：verdict 按优先级取值；
@@ -356,6 +369,9 @@ export interface RecoverOptions {
 export function buildRecoverReport(lines: readonly JournalLine[], sessionId: SessionId, opts: RecoverOptions = {}): RecoverReport {
   const fragments = opts.fragments ?? [];
   const diskBlocked = opts.blocked ?? fragments.length > 0;
+  const repairLog: RepairFact[] = lines
+    .filter((l): l is Extract<JournalLine, { t: "repair" }> => l.t === "repair")
+    .map((l) => ({ byteStart: l.byteStart, byteEnd: l.byteEnd, removedSha256: l.removedSha256, buildId: l.buildId, contractVersion: l.contractVersion, at: l.at }));
   const map = replayIntents(lines, sessionId);
   const intents = [...map.values()];
   const unknown = new Set(intents.filter(isUnknownEffect).map((r) => r.intentId));
@@ -413,6 +429,7 @@ export function buildRecoverReport(lines: readonly JournalLine[], sessionId: Ses
     unattributableFragments: unattributed,
     perIntent,
     attributedFragments: opts.attributedFragments ?? [],
+    repairLog,
   };
 }
 

@@ -145,7 +145,7 @@ export interface HistoryEventBase {
 export type HistoryEventKind =
   | "turn-enqueued" | "sending" | "turn-engaged" | "turn-consumed" | "turn-cancelled"
   | "verdict-delivered" | "verdict-settled" | "verdict-unknown" | "response-timeout" | "clear"
-  | "message" | "corrupt-entry" | "unknown-line" | "journal-corrupt";
+  | "message" | "corrupt-entry" | "unknown-line" | "journal-corrupt" | "journal-repair";
 
 export type HistoryEvent = HistoryEventBase & (
   | { readonly kind: "turn-enqueued"; readonly preview: SanitizedText; readonly ordinal: number }
@@ -153,6 +153,7 @@ export type HistoryEvent = HistoryEventBase & (
   | { readonly kind: "turn-cancelled" } | { readonly kind: "verdict-delivered" } | { readonly kind: "verdict-settled" }
   | { readonly kind: "verdict-unknown" } | { readonly kind: "unknown-line" } | { readonly kind: "journal-corrupt" }
   | { readonly kind: "response-timeout"; readonly commandId: number }
+  | { readonly kind: "journal-repair"; readonly repairReason: "torn-tail"; readonly repairByteStart: number; readonly repairByteEnd: number }
   | { readonly kind: "clear"; readonly clearedCount: number }
   | { readonly kind: "corrupt-entry"; readonly entryId: string }
   | { readonly kind: "message";

@@ -25,6 +25,7 @@ const KIND_LABELS: Readonly<Record<HistoryEvent["kind"], string>> = {
   clear: "清屏",
   "corrupt-entry": "损坏条目",
   "journal-corrupt": "日志损坏",
+  "journal-repair": "日志修复",
   "verdict-delivered": "判定已投递",
   "verdict-settled": "判定已落定",
   "verdict-unknown": "判定未知",

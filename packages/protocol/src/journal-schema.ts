@@ -89,6 +89,21 @@ export function journalLineSchemaError(obj: UnknownRecord): string | null {
       return str("intentId") ?? str("reason");
     case "response-timeout":
       return str("intentId") ?? finiteNum("generation") ?? finiteNum("commandId");
+    case "repair": {
+      // P0-1a：修复留痕行——位置+字节边界+buildId+契约版本绑定（非负安全整数区间+64hex 摘要）。
+      if (obj["reason"] !== "torn-tail") return "非法修复 reason";
+      for (const k of ["byteStart", "byteEnd"] as const) {
+        const v = obj[k];
+        if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 0) return `缺字段/错类型 ${k}`;
+      }
+      if ((obj["byteEnd"] as number) <= (obj["byteStart"] as number)) return "非法修复区间（byteEnd≤byteStart）";
+      if (typeof obj["removedSha256"] !== "string" || !/^[0-9a-f]{64}$/.test(obj["removedSha256"] as string))
+        return "缺字段/错类型 removedSha256";
+      if (typeof obj["buildId"] !== "string" || (obj["buildId"] as string).length === 0) return "缺字段/错类型 buildId";
+      if (typeof obj["contractVersion"] !== "number" || !Number.isSafeInteger(obj["contractVersion"] as number) || (obj["contractVersion"] as number) < 1)
+        return "缺字段/错类型 contractVersion";
+      return str("at");
+    }
     default:
       return `未知行型 ${String(t)}`;
   }

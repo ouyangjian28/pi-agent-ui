@@ -62,6 +62,34 @@ export async function openSafeFile(absPath: string): Promise<{ fh: import("node:
   }
 }
 
+/** 打开安全文件（读写版，P0-1a 修复工具用）：O_RDWR|O_NOFOLLOW|O_NONBLOCK+同 fd fstat 常规验证。
+ *  语义与 openSafeFile 完全同源（同错误分类）；仅旗标 O_RDONLY→O_RDWR——写面仅限修复工具截尾+补行，
+ *  生产读路径不得使用（读路径仍走 openSafeFile 只读）。 */
+export async function openSafeReadWrite(absPath: string): Promise<{ fh: import("node:fs/promises").FileHandle; size: number }> {
+  let fh: import("node:fs/promises").FileHandle;
+  const nbFlag = process.platform === "win32" || constants.O_NONBLOCK === undefined ? 0 : constants.O_NONBLOCK;
+  try {
+    fh = await open(absPath, constants.O_RDWR | constants.O_NOFOLLOW | nbFlag);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ELOOP" || code === "ENOTDIR") throw new SafeOpenError("symlink", absPath, code);
+    if (code === "ENOENT") throw new SafeOpenError("missing", absPath, code);
+    throw new SafeOpenError("open-denied", absPath, code ?? String(e));
+  }
+  try {
+    const st = await fh.stat(); // 同 fd 身份：不是「先 stat 路径再 open」
+    if (!st.isFile()) {
+      await fh.close().catch(() => {});
+      throw new SafeOpenError("not-regular", absPath, `mode=${st.mode & 0o170000}`);
+    }
+    return { fh, size: st.size };
+  } catch (e) {
+    if (e instanceof SafeOpenError) throw e;
+    await fh.close().catch(() => {});
+    throw new SafeOpenError("open-denied", absPath, String(e));
+  }
+}
+
 /** readBounded 所需的最小文件句柄形状（结构化接缝——测试可注入脚本化分次 read；FileHandle 结构兼容）。 */
 export interface BoundedReadHandle {
   read(buffer: Buffer, offset: number, length: number, position: number | null): Promise<{ bytesRead: number }>;

@@ -126,8 +126,9 @@ interface SessionStatus {
 | sending/engaged/consumed/cancelled/delivered/settled/unknown | 对应 `sending`/`turn-engaged`/`turn-consumed`/`turn-cancelled`/`verdict-delivered`/`verdict-settled`/`verdict-unknown` | `{}` |
 | clear | `clear` | `{ clearedCount: number }`（intentId=null） |
 | response-timeout | `response-timeout` | `{ commandId: number }` |
+| repair | `journal-repair` | `{ repairReason: "torn-tail"; repairByteStart: number; repairByteEnd: number }`（P0-1a：宿主撕裂尾修复留痕行；replay 聚合忽略；意图 id=null） |
 
-- `ts: number|null`（服务器读取时刻；不投宿主 sentAt；无独立 timeSource 字段——判别由读取器出口统一保证=c6 C5-07 单模型清理）。未知 t/坏行→`unknown-line`/`journal-corrupt` 独立位置投影（恢复仍阻断，不洗白）。
+- `ts: number|null`（服务器读取时刻；不投宿主 sentAt；无独立 timeSource 字段——判别由读取器出口统一保证=c6 C5-07 单模型清理）。未知 t/坏行→`unknown-line`/`journal-corrupt` 独立位置投影（恢复仍阻断，不洗白）。repair 行的 byteStart/byteEnd 为被移除撕裂尾的字节区间，removedSha256/buildId/contractVersion/at 见 journal-schema（读面 repairLog 派生权威=recover.ts）。
 
 ### 3.3 HistoryEvent
 
