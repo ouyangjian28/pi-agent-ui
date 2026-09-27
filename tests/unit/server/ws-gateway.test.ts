@@ -241,6 +241,26 @@ describe("ws-gateway w1：A 认证入站（W1-01/02）", () => {
     }
   });
 
+  it("B3 快照①：构造后向调用方数组热插白名单→仍拒（hello-origin-rejected）；热删→原白名单仍过", async () => {
+    const origins = ["http://localhost:5173"];
+    const r = await makeRig({ allowedOrigins: origins });
+    try {
+      origins.push("http://evil.example"); // 调用方数组热插（缺陷形=无快照时将被采纳）
+      const c1 = new FakeConn();
+      r.gw.attach(c1, c1.hooks(), { origin: "http://evil.example", loopback: true, tls: false });
+      await c1.say({ t: "hello", protocolVersion: 1, token: "tok-ok" });
+      expect(c1.frames().some((f) => f.code === 4401)).toBe(true);
+      expect(lastClose(c1)?.[0]).toBe(1008);
+      expect(r.audits.some((l) => l.includes("hello-origin-rejected"))).toBe(true);
+      origins.splice(0, 1); // 热删原白名单（缺陷形=鉴权跟活着变，合法端被踢）
+      const { c: c2 } = r.conn(); // 默认 origin=http://localhost:5173
+      await c2.say({ t: "hello", protocolVersion: 1, token: "tok-ok" });
+      expect(c2.frames().some((f) => f.t === "welcome")).toBe(true);
+    } finally {
+      await r.dispose();
+    }
+  });
+
   it("A3 protocolVersion=2→4403+close 1003（错误矩阵）", async () => {
     const r = await makeRig();
     try {
