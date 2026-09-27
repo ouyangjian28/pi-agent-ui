@@ -24,6 +24,7 @@ import { createRpcWriteHost } from "./ws/rpc-write-host.ts";
 import { resolveWithinRoots } from "./ws/safe-open.ts";
 import type { WriteHostPort } from "./ws/write-host.ts";
 import { createStaticHandler } from "./ws/static-serve.ts";
+import { createLoginRoute, newSessionSecret } from "./http/login-route.ts";
 import { createServer, type Server as HttpServer } from "node:http";
 import { isAbsolute, join } from "node:path";
 
@@ -218,11 +219,23 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
 
   // ⑤B：staticDir 模式=外部 http server（静态服务+同源 upgrade）；否则=适配器自建 server。
   // 外部模式下 listen 所有权在 composition：适配器只挂 upgrade 钩子，关 server 归 dispose。
-  const httpServer: HttpServer | null = config.staticDir !== undefined ? createServer(createStaticHandler(config.staticDir, audit)) : null;
+  // N4-v2：浏览器部署（staticDir）同端口叠加 /login+/logout（HttpOnly 会话 cookie）+升级面 sid 校验；
+  // 非 staticDir（纯 WS 部署）无 HTTP 面=无登录面，令牌通道不变。
+  const login = config.staticDir !== undefined
+    ? createLoginRoute({ authority: tokens, sessionSecret: newSessionSecret(), audit })
+    : null;
+  const staticHandler = config.staticDir !== undefined ? createStaticHandler(config.staticDir, audit) : null;
+  const httpServer: HttpServer | null = staticHandler !== null
+    ? createServer((req, res) => {
+      if (login !== null && login.handle(req, res)) return;
+      staticHandler(req, res);
+    })
+    : null;
   const adapter = new WsServerAdapter({
     allowedOrigins: config.allowedOrigins,
     ...(config.requireTlsOffLoopback !== undefined ? { requireTlsOffLoopback: config.requireTlsOffLoopback } : {}),
     ...(config.trustedProxies !== undefined ? { trustedProxies: config.trustedProxies } : {}),
+    ...(login !== null ? { sessionCookie: { name: "pi-agent-ui-session", validate: login.validateSid } } : {}),
     ...(httpServer !== null ? { server: httpServer } : {}),
     audit,
   });

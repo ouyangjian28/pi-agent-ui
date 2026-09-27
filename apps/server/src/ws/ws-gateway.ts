@@ -53,6 +53,9 @@ export interface ConnMeta {
   readonly tls: boolean;
   /** 有效客户端地址（传输层派生；缺省="unknown"）。per-IP 认证失败限流（R6/3b-1）以此为键。 */
   readonly clientIp?: string;
+  /** N4-v2（v1.1）：连接升级时携带有效登录会话 cookie（HttpOnly sid）——hello 免令牌通道（浏览器）；
+   * 缺省 false=令牌通道不变。 */
+  readonly sessionAuthed?: boolean;
 }
 
 /** 订阅数据入口（W1-04）：宿主提供安全读+观察。load=null→4402；observe 可选（无观察=只读快照）。
@@ -451,12 +454,20 @@ export class WsGateway {
       this.rejectAuth(st, "非 loopback 须 TLS");
       return;
     }
-    if (!this.opts.tokens.check(frame.token)) {
-      this.audit(`hello-token-rejected conn=${st.id}`);
-      this.rejectAuth(st, "令牌无效");
+    // N4-v2（v1.1 双通道）：呈令牌→令牌必真（错误令牌不静默降级 cookie）；免令牌→仅升级面已验登录会话 cookie 放行。
+    const hasToken = frame.token !== undefined;
+    if (hasToken) {
+      if (!this.opts.tokens.check(frame.token!)) {
+        this.audit(`hello-token-rejected conn=${st.id}`);
+        this.rejectAuth(st, "令牌无效");
+        return;
+      }
+    } else if (st.meta.sessionAuthed !== true) {
+      this.audit(`hello-session-missing conn=${st.id}`);
+      this.rejectAuth(st, "缺少登录会话");
       return;
     }
-    st.tokenDigest = sha256Hex(frame.token);
+    st.tokenDigest = hasToken ? sha256Hex(frame.token) : "session-cookie"; // 会话通道审计标记（不存 sid 原文）
     st.authed = true;
     this.authFailures.delete(ip); // 认证达成即清户（正常客户端不受限速面影响）
     const tm = this.connTimers.get(st.id);

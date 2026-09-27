@@ -200,6 +200,45 @@ async function authed(r: Rig, token = "tok-ok"): Promise<FakeConn> {
 const errFrames = (c: FakeConn): Array<Record<string, unknown>> => c.frames().filter((f) => f.t === "error");
 const lastClose = (c: FakeConn): [number | undefined, string | undefined] | undefined => c.closes[c.closes.length - 1];
 
+describe("ws-gateway N4-v2（v1.1）：登录会话 cookie 免令牌通道", () => {
+  it("S1 sessionAuthed 连接：免令牌 hello→welcome；审计标记 session-cookie", async () => {
+    const r = await makeRig();
+    try {
+      const { c } = r.conn({ sessionAuthed: true });
+      await c.say({ t: "hello", protocolVersion: 1 });
+      expect(c.frames().some((f) => f.t === "welcome")).toBe(true);
+      expect(r.audits.some((l) => l.includes("hello-auth") || l.includes("welcome"))).toBe(false); // 无新增敏感审计
+    } finally {
+      await r.dispose();
+    }
+  });
+  it("S2 sessionAuthed 连接：呈错令牌→仍 4401（不静默降级 cookie 通道）", async () => {
+    const r = await makeRig();
+    try {
+      const { c } = r.conn({ sessionAuthed: true });
+      await c.say({ t: "hello", protocolVersion: 1, token: "bad" });
+      expect(c.frames().some((f) => f.code === 4401)).toBe(true);
+      expect(lastClose(c)?.[0]).toBe(1008);
+    } finally {
+      await r.dispose();
+    }
+  });
+  it("S3 无会话连接：免令牌 hello→4401（缺少登录会话）；令牌通道不变", async () => {
+    const r = await makeRig();
+    try {
+      const { c } = r.conn(); // sessionAuthed 缺省
+      await c.say({ t: "hello", protocolVersion: 1 });
+      expect(c.frames().some((f) => f.code === 4401)).toBe(true);
+      expect(r.audits.some((l) => l.includes("hello-session-missing"))).toBe(true);
+      const { c: c2 } = r.conn();
+      await c2.say({ t: "hello", protocolVersion: 1, token: "tok-ok" });
+      expect(c2.frames().some((f) => f.t === "welcome")).toBe(true);
+    } finally {
+      await r.dispose();
+    }
+  });
+});
+
 describe("ws-gateway w1：A 认证入站（W1-01/02）", () => {
   it("A1 hello 成功→welcome；坏 token→4401+close 1008；重复 hello→4404", async () => {
     const r = await makeRig();

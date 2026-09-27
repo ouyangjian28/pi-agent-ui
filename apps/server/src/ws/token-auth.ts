@@ -101,6 +101,11 @@ export class TokenAuthority {
     return false;
   }
 
+  /** N4-v2 登录面：当前已知 token 摘要集（只读快照引用；轮换后下次调用自动生效——登录 sid 与升级面校验同基）。 */
+  currentDigests(): readonly Buffer[] {
+    return this.digestBufs;
+  }
+
   /** 运行期热轮换：失败沿用旧基准（审计，无秘密泄漏）；成功返回 revoked 供连接撤销。 */
   async reload(): Promise<TokenReloadResult> {
     if (this.tokenFile === null) return { changed: false, revoked: [] };

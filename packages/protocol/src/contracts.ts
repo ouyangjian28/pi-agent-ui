@@ -242,7 +242,7 @@ export type SubscribeFrame =
   | { readonly t: "subscribe"; readonly requestId: string; readonly file: string; readonly snapshotId: string; readonly historyNext: EventCursor };
 
 export type ClientFrame =
-  | { readonly t: "hello"; readonly protocolVersion: 1; readonly token: string }
+  | { readonly t: "hello"; readonly protocolVersion: 1; readonly token?: string }
   | { readonly t: "list-sessions"; readonly requestId: string; readonly offset?: number; readonly limit?: number }
   | SubscribeFrame
   | { readonly t: "unsubscribe"; readonly requestId: string; readonly subscriptionId: SubscriptionId }
@@ -323,14 +323,19 @@ export function validateClientFrame(raw: unknown): FrameCheck {
   // 未知 t：固定消息（不回显输入——恶意超长值不得借错误帧透传；c5 B07）
   switch (t) {
     case "hello": {
-      const r0 = requireExact(obj, ["t", "protocolVersion", "token"]); if (r0) return r0;
+      const r0 = requireExact(obj, ["t", "protocolVersion", ...extraKeys(obj, ["token"])]); if (r0) return r0;
       const v = obj["protocolVersion"];
       // 版本层：合法整数但 ≠1 → 4403（先于其余字段格式错？§5.3：格式层→版本层→写类层——hello 的 protocolVersion 类型错属格式层）
       if (typeof v !== "number" || !Number.isSafeInteger(v)) return bad(4404, "protocolVersion 必须是安全整数");
       if (v !== 1) return bad(4403, "协议版本不匹配");
-      const token = obj["token"];
-      if (typeof token !== "string" || token.length === 0 || token.length > 1024) return bad(4404, "token 非法");
-      return ok({ t: "hello", protocolVersion: 1, token });
+      // N4-v2（v1.1）：token 可选——免令牌通道（连接升级面登录会话 cookie 已验）；呈令牌时仍须合法非空。
+      let token: string | undefined;
+      if (has(obj, "token")) {
+        const tk = obj["token"];
+        if (typeof tk !== "string" || tk.length === 0 || tk.length > 1024) return bad(4404, "token 非法");
+        token = tk;
+      }
+      return ok({ t: "hello", protocolVersion: 1, ...(token !== undefined ? { token } : {}) });
     }
     case "list-sessions": {
       const r0 = requireExact(obj, ["t", "requestId", ...extraKeys(obj, ["offset", "limit"])]); if (r0) return r0;

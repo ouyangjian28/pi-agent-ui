@@ -12,8 +12,8 @@ describe("入站帧校验", () => {
   it("hello protocolVersion 非整数→4404（格式层先于版本层）", () => {
     expect(validateClientFrame({ t: "hello", protocolVersion: "1", token: "T" })).toMatchObject({ ok: false, code: 4404 });
   });
-  it("hello 缺 token→4404；token 空串→4404", () => {
-    expect(validateClientFrame({ t: "hello", protocolVersion: 1 })).toMatchObject({ ok: false, code: 4404 });
+  it("hello 缺 token→合法免令牌帧（N4-v2 v1.1：连接升级面会话通道）；token 空串→仍 4404", () => {
+    expect(validateClientFrame({ t: "hello", protocolVersion: 1 })).toMatchObject({ ok: true, frame: { t: "hello", protocolVersion: 1 } });
     expect(validateClientFrame({ t: "hello", protocolVersion: 1, token: "" })).toMatchObject({ ok: false, code: 4404 });
   });
   it("hello 多余字段→4404", () => {
