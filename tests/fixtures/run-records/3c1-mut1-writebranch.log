@@ -1,16 +1,16 @@
 
  RUN  v5.0.1 /home/yyj/ai/repos/pi-agent-ui
 
- ❯ |unit| tests/unit/server/ws-gateway-write.test.ts (12 tests | 8 failed) 17ms
+ ❯ |unit| tests/unit/server/ws-gateway-write.test.ts (12 tests | 8 failed) 25ms
    ❯ 3c-1 写侧帧：网关派发面 (12)
      × W2 prompt 合法→write-ack launched；宿主收到 file/text；审计行 3ms
      × W3 stop 合法→write-stop-ack confirmed 1ms
      × W4 file 越界→4404 且宿主未被调 2ms
-     × W5 形状违反→4404（缺 text/多余字段/rid 非法/空 text） 1ms
+     × W5 形状违反→4404（缺 text/多余字段/rid 非法/空 text） 3ms
      × W8 requestId 在途重复→第二次 4404（宿主只调一次） 1ms
      × W9 宿主抛错→4402 retryable=true+审计 write-frame-error 1ms
-     × W10 text 超 WRITE_TEXT_MAX_BYTES→4404 1ms
-     × W11 槽归还：同 rid 先后可复用（第一次 ack 后不再在途） 1ms
+     × W10 text 超 WRITE_TEXT_MAX_BYTES→4404 4ms
+     × W11 槽归还：同 rid 先后可复用（第一次 ack 后不再在途） 2ms
 
 ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 8 ⎯⎯⎯⎯⎯⎯⎯
 
@@ -148,6 +148,6 @@ AssertionError: expected +0 to be 1 // Object.is equality
 
  Test Files  1 failed (1)
       Tests  8 failed | 4 passed (12)
-   Start at  13:40:31
-   Duration  303ms (transform 74%, import 18%, tests 8%, worker 1%)
+   Start at  13:41:53
+   Duration  307ms (transform 69%, import 18%, tests 11%, worker 2%)
 

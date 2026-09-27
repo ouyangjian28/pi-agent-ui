@@ -1,0 +1,39 @@
+
+ RUN  v5.0.1 /home/yyj/ai/repos/pi-agent-ui
+
+ ❯ |unit| tests/unit/server/ws-gateway-write.test.ts (12 tests | 1 failed) 20ms
+   ❯ 3c-1 写侧帧：网关派发面 (12)
+     × W2 prompt 合法→write-ack launched；宿主收到 file/text；审计行 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |unit| tests/unit/server/ws-gateway-write.test.ts > 3c-1 写侧帧：网关派发面 > W2 prompt 合法→write-ack launched；宿主收到 file/text；审计行
+AssertionError: expected [ { file: 's1.jsonl', text: '你好 pi' } ] to deeply equal [ { …(2) } ]
+
+- Expected
++ Received
+
+  [
+    {
+-     "file": "/tmp/ws-write-tJn5Vb/s1.jsonl",
++     "file": "s1.jsonl",
+      "text": "你好 pi",
+    },
+  ]
+
+ ❯ tests/unit/server/ws-gateway-write.test.ts:125:30
+    123|       expect(oc["kind"]).toBe("launched");
+    124|       expect(oc["intentId"]).toBe("i-1");
+    125|       expect(r.host.prompts).toEqual([{ file: r.inAbs, text: "你好 pi" }…
+       |                              ^
+    126|       expect(r.audits.some((l) => l.includes("write-frame") && l.inclu…
+    127|     } finally { await r.dispose(); }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 11 passed (12)
+   Start at  13:42:06
+   Duration  296ms (transform 74%, import 16%, tests 9%, worker 1%)
+

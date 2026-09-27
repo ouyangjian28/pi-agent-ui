@@ -631,6 +631,15 @@
 - SERIAL 完整输出复跑+首败归属勘正（R37=bOpens 侵入；并集断言属 R28；教训=首败必须从 FAIL 块归属，不得跨块摘句）。
 - provider 接口注释 B15⑥ 分拆同步（:26-29 接缝契约注释+FsLike JSDoc；异步拒绝契约特化=仅 Promise 型原语，trustFirstCapture 允许同步 boolean）。注释级改动，逻辑未动。
 
+## 3c-1（写侧帧接线：契约扩展+网关派发面+WriteHostPort；2026-10-03）
+- 契约面（packages/protocol/src/contracts.ts）：WRITE_OPEN_FRAME_TYPES=["prompt","stop"]（冻结写集 9-t 中仅开放此二；其余仍 4405）；WRITE_TEXT_MAX_BYTES=65_536；WriteClientFrame=prompt{requestId,file,text}/stop{requestId,file}；validateWriteFrame（exactWrite 字段集全等+ridWrite /^[-\w]{1,64}$/+fileWrite=LIMITS.filePattern 裸名+text 非空+字节上限；不侵冻结校验器）；WriteSendOutcomeDTO（launched{intentId,commandId}/busy/gate-rejected/gate-failed/invalidated{stage}/no-process/not-ready{cause}/rejected{reason}——SessionSendResult 契约化映射，error:unknown 不跨面）；WriteStopOutcomeDTO（confirmed{exit}/deadline-exceeded/no-process/stopping）；ServerFrame 增 write-ack/write-stop-ack（回显原 file 裸名+requestId）。
+- 网关面（ws-gateway.ts）：入站管线认证门后写类层分支（t∈WRITE_FRAME_TYPES&&writeHost!==undefined→validateWriteFrame→在途门→派发；未接线→原路径 4405+close1008 字节级不变）；handleWritePrompt/handleWriteStop：resolveWithinRoots 解析→宿主收绝对路径（宿主不重做根数学）→ack 回显裸名；宿主抛错→4402 retryable=true+审计 write-frame-error；rid 槽 finally 归还。审计行 write-frame conn=… t=… file=… outcome=…。
+- 端口面：apps/server/src/ws/write-host.ts=WriteHostPort{sendPrompt(file,text)/stop(file)}（两方法不得抛错——抛错即 4402；映射归宿主 3c-2）。composition.ts ServerConfig.writeHost? 透传。
+- 测试 W1-W12（tests/unit/server/ws-gateway-write.test.ts；12 例全绿）：W1 未接线 4405+1008（冻结不变）/W2 合法 prompt→ack+宿主收 abs+审计/W3 stop→stop-ack/W4 越界形 4404/W5 形状×4→4404（第 3 个即 close1002）/W6 未开放 t(send)→4405/W7 未认证→4401/W8 在途重复→4404 宿主一次/W9 宿主抛错→4402 retryable/W10 text>64KiB→4404/W11 槽归还同 rid 复用/W12 接线态读路径回归。
+- 变异三连（3c1.md+patches/3c1/，基线先提交=6a3a124 后变异；完整输出 run-records/3c1-mut{1,2,3}-*.log）：WRITEBRANCH（写分支恒 false）→8 败首败=W2（write-ack undefined）；INFLIGHT（写在途门删）→1 败=W8；ABSRESOLVE（越根门+解析删，宿主收裸名）→1 败=W2（host 收 s1.jsonl 而非 abs）。还原=git hash-object 复核 HEAD tree（RESTORE_OK×3）。
+- **诚实披露**：filePattern 限裸名（^[\w.-]{1,114}\.jsonl$）⇒裸名必在任一根内解析成功⇒handleWrite* 的"file 越界"分支在当前契约下不可达=纵深防御（防未来 filePattern 放宽）；W4 的 4404 实由 validateWriteFrame 格式层出（"/etc/passwd" 不过裸名正则）——越界门无独立杀面，非缺口而是死分支披露。
+- 证据：run-records/3c1-full-vitest.log=907 passed+7 skipped（902+12 新增）；tsc/lint 裸码 0（当轮终端实录）；基线提交 6a3a124。
+
 ## 3b5-2（第16轮 92/100 GO 尾项：R36 独立首杀+seen 门残留面+R37/R38 加固；2026-10-03）
 - 测试 R39-R40（40 例文件）：R39 锚首写仅一次失败（后续原语健康）→read-failed+writes==1+seenPersists==0+零落盘——吞锚错变异独占首杀面（3b5-2 实证 R39 杀）；R40 seen 门 rename+清理 rm 双拒（锚已提交）→read-failed（detail=seen-store）+残留=seen tmp（锚在场区别于 R35 锚门残留）+默认重试收敛。
 - 加固：R37 entered 屏障（persist 入口即 resolve，await 5s 超时竞速，弃 50-tick 猜测）+finally 无条件放闸+allSettled 收束再删目录；R38 逐字节原文比对（seen/锚全文件内容，弃字段抽查——第16轮「原文不动」措辞兑现）。

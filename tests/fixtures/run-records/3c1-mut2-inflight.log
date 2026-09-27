@@ -1,0 +1,34 @@
+
+ RUN  v5.0.1 /home/yyj/ai/repos/pi-agent-ui
+
+ ❯ |unit| tests/unit/server/ws-gateway-write.test.ts (12 tests | 1 failed) 27ms
+   ❯ 3c-1 写侧帧：网关派发面 (12)
+     × W8 requestId 在途重复→第二次 4404（宿主只调一次） 8ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |unit| tests/unit/server/ws-gateway-write.test.ts > 3c-1 写侧帧：网关派发面 > W8 requestId 在途重复→第二次 4404（宿主只调一次）
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ tests/unit/server/ws-gateway-write.test.ts:193:86
+    191|       await c.say({ t: "prompt", requestId: "r8", file: r.inFile, text…
+    192|       await c.say({ t: "prompt", requestId: "r8", file: r.inFile, text…
+    193|       expect(errs(c).some((f) => f.code === 4404 && f.message === "req…
+       |                                                                                      ^
+    194|       expect(r.host.prompts.length).toBe(1);
+    195|     } finally { await r.dispose(); }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 11 passed (12)
+   Start at  13:41:58
+   Duration  296ms (transform 70%, import 17%, tests 12%, worker 1%)
+
