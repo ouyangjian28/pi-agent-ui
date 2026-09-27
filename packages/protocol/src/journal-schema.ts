@@ -104,6 +104,37 @@ export function journalLineSchemaError(obj: UnknownRecord): string | null {
         return "缺字段/错类型 contractVersion";
       return str("at");
     }
+    case "adjudicate": {
+      // P0-1b：裁决留痕行——subject（fragment 残片原文+归因意图 / repair 事务四元组身份）+
+      // verdict 双值+操作者+buildId+契约版本。身份字段与 AdjudicateLine 同构。
+      const subj = obj["subject"];
+      if (subj === null || typeof subj !== "object" || Array.isArray(subj)) return "嵌套非法 subject";
+      const sr = subj as UnknownRecord;
+      if (sr["kind"] === "fragment") {
+        if (typeof sr["raw"] !== "string" || (sr["raw"] as string).length === 0) return "嵌套非法 subject.raw";
+        if (typeof sr["intentId"] !== "string" || (sr["intentId"] as string).length === 0)
+          return "嵌套非法 subject.intentId";
+      } else if (sr["kind"] === "repair") {
+        for (const k of ["byteStart", "byteEnd"] as const) {
+          const v = sr[k];
+          if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 0) return `嵌套非法 subject.${k}`;
+        }
+        if ((sr["byteEnd"] as number) <= (sr["byteStart"] as number)) return "嵌套非法 subject 区间（byteEnd≤byteStart）";
+        if (typeof sr["removedSha256"] !== "string" || !/^[0-9a-f]{64}$/.test(sr["removedSha256"] as string))
+          return "嵌套非法 subject.removedSha256";
+        if (typeof sr["at"] !== "string" || (sr["at"] as string).length === 0) return "嵌套非法 subject.at";
+      } else return "非法 subject.kind";
+      if (obj["verdict"] !== "resend" && obj["verdict"] !== "abandon") return "缺字段/错类型 verdict";
+      if (typeof obj["operator"] !== "string" || (obj["operator"] as string).length === 0) return "缺字段/错类型 operator";
+      if (typeof obj["buildId"] !== "string" || (obj["buildId"] as string).length === 0) return "缺字段/错类型 buildId";
+      if (
+        typeof obj["contractVersion"] !== "number" ||
+        !Number.isSafeInteger(obj["contractVersion"] as number) ||
+        (obj["contractVersion"] as number) < 1
+      )
+        return "缺字段/错类型 contractVersion";
+      return str("at");
+    }
     default:
       return `未知行型 ${String(t)}`;
   }

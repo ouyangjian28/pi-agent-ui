@@ -1127,15 +1127,15 @@ describe("P0-1a GPT r4 修复批（B1-r4 无锚 pending 首捕零副作用）", 
       const snapDir = async () => {
         const names = (await readdir(evDir)).sort();
         const bodies = await Promise.all(names.map((n) => readFile(join(evDir, n))));
-        return names.map((n, i) => `${n}:${bodies[i].toString("utf8")}`).join("|");
+        return names.map((n, i) => `${n}:${bodies[i].toString("base64")}`).join("|"); // base64=无损字节编码（r6 L2：utf8 拼接非无损二进制）
       };
       const before = await snapDir();
       const r1 = await p1("q.jsonl");
       expect(r1).toMatchObject({ kind: "unavailable", reason: "no-evidence-snapshot" }); // 契约内四值（B1-r5）
       expect(auditSink.some((l) => l.includes("recovery-pending-no-anchor"))).toBe(true); // 具体成因留审计
       expect(await snapDir()).toBe(before); // 目录逐字节零副作用（seen.json 不建、锚不建、marker 原样）
-      await expect(readFile(join(evDir, "seen.json"), "utf8")).rejects.toThrow(); // seen 未登记（正确路径，L1）
-      await expect(readFile(join(evDir, encodeURIComponent("q.jsonl") + ".evidence.json"), "utf8")).rejects.toThrow(); // 锚未建
+      await expect(readFile(join(evDir, "seen.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" }); // seen 未登记（正确路径+精确 code，r6 L2）
+      await expect(readFile(join(evDir, encodeURIComponent("q.jsonl") + ".evidence.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" }); // 锚未建
       // 路二：pending 期间迁移面同样拒绝——不误报 migrated 无锚
       const mig = await (await import("../../../apps/server/src/runtime/evidence-migration.ts")).migrateLegacyEvidence({ roots: [jRoot], evidenceDir: evDir });
       expect(mig.files.some((f) => f.file === "q.jsonl" && f.outcome === "rejected")).toBe(true);

@@ -42,7 +42,8 @@ export type JournalLine =
       readonly generation: number;
       readonly commandId: number;
     }
-  | RepairLine; // P0-1a 修复留痕（无 intentId；重放聚合不参与，报告侧作持久修复事实呈现）
+  | RepairLine // P0-1a 修复留痕（无 intentId；重放聚合不参与，报告侧作持久修复事实呈现）
+  | AdjudicateLine; // P0-1b 裁决留痕（宿主人工裁决；重放聚合不参与，报告侧作持久裁决事实参与配对解锁）
 
 export const JOURNAL_CONTRACT_VERSION = 2;
 
@@ -63,6 +64,32 @@ export interface RepairLine {
   /** 执行修复的宿主构建身份（非空串）。 */
   readonly buildId: string;
   /** 写入时 journal 契约版本（=JOURNAL_CONTRACT_VERSION）。 */
+  readonly contractVersion: number;
+  readonly at: string; // ISO8601
+}
+
+/** P0-1b 裁决留痕行（P0 冻结序②）：宿主人工裁决的持久记录——重启不重问。
+ *  两种裁决对象：fragment=残片归因（raw 全等身份+归因意图）；repair=修复事务裁决
+ *  （四元组身份与 RepairFact 同构：removedSha256+byteStart+byteEnd+at——旧裁决不作用于新证据）。
+ *  verdict=resend（归因后允许重发）/abandon（终局放弃，不重发）；对 repair 事务两者
+ *  均视为「已裁决」（解锁阻断线只看配对存在；verdict 记录宿主决定本身）。
+ *  幂等：同 subject+verdict 重复落行由读面配对去重（R3）。 */
+export interface AdjudicateLine {
+  readonly t: "adjudicate";
+  readonly subject:
+    | { readonly kind: "fragment"; readonly raw: string; readonly intentId: IntentId }
+    | {
+        readonly kind: "repair";
+        readonly removedSha256: string;
+        readonly byteStart: number;
+        readonly byteEnd: number;
+        /** 目标修复事务 startedAt（与 repair 行/RepairFact.at 同源）。 */
+        readonly at: string;
+      };
+  readonly verdict: "resend" | "abandon";
+  /** 裁决操作者（宿主记名；单机单宿主信任域，非审计链签名）。 */
+  readonly operator: string;
+  readonly buildId: string;
   readonly contractVersion: number;
   readonly at: string; // ISO8601
 }
@@ -123,6 +150,7 @@ export function replayIntents(lines: readonly JournalLine[], sessionId: SessionI
     if (!rec) continue;
     switch (line.t) {
       case "repair": break; // P0-1a：修复留痕行无 intentId，聚合面显式无操作（GPT r1 B6/L1：真实 case，非注释宣称）
+      case "adjudicate": break; // P0-1b：裁决留痕行无顶层 intentId，聚合面无操作（报告侧由 buildRecoverReport 派生配对）
       case "sending":
         byId.set(rec.intentId, { ...rec, sending: true });
         break;
