@@ -851,3 +851,15 @@
 - 变异八连全杀（基线 5d6b311 提交后逐支 python 注入→定向红→git checkout 还原→复绿）：Mu-r3B1（withRepair undecided 置位删；RT40 杀）/Mu-r3B3a（前缀 equals 删=M-P 同型；RT37 杀）/Mu-r3B3b（回截前锚检查删；RT36 杀）/Mu-r3BH（canonical 删 pendingRepair=M-H 同型；RT41 杀）/Mu-r3BR（expectedRow=builtRow=M-R 同型；RT38 杀）/Mu-r3B3b2（provider pending 写穿条件删；RT39 杀）/Mu-r2B3-replay（冲突门恒假——判定重排后的新块；RT31 杀）/Mu-r2B1-replay（marker 检测删——检测块移位后的新位置；RT27 杀）。r2 六连中 Mu-r2B2a/B2b/B2c/B4 注入点未动，上批结论保留。
 - 运行证据：repair-tail 34 绿+recover 36 绿+recovery-evidence-source 45 绿（新增 8 例：repair-tail 4+recover 2+provider 2）；全仓 1261 绿（64 文件 passed+2 skipped+15 测试 skipped）；apps/server tsc --noEmit exit0；eslint 0。
 - 遗留披露：①rt38-debug 构造教训=测试 helper legalRepairRow 不带换行，已补行形 append 必须拼 "\n"（否则成撕裂尾落有尾分支）；②r3 审低项 L1（readBack 后仍有锚 tmp 写入窗=Q16 修复期禁写前提内）/L2（marker 哈希披露措辞限缩——removedSha256 无独立认证，截断形原尾已消失只能信任宿主 marker）/L4（无真实断电实测）——不阻断，下批吸收或部署前兑现。
+
+
+## P0-1a r4 修复批（2026-10-06；基线 32bb5a7）
+
+**审报**：projects/pi-agent-ui/audits/gpt-p01a-r4-review-2026-10-06.md（82 NO-GO：B1-r4 无锚 pending 首捕 seen 污染死锁/B6-r4 起点对齐条件无仓内杀手；零 open 高）。
+
+- **B1-r4【中】修法**：recovery-evidence-source.ts 捕获流程 marker 检测后新增门——pendingRepair 且 anchor===null（修复事务进行中且权威锚从未建立）→`unavailable("repair-pending-first-capture")` 零副作用拒绝（不建锚、不登记 seen、不写任何证据文件），杜绝「无锚+已登记」矛盾态：后续捕获必判 concurrent-modification 死锁、修复工具按无锚不建锚契约不补锚、迁移面误报 migrated 而无锚。事务完结（marker 清除）后首捕正常建锚。trustFirstCapture 授权不豁免此门（首捕权威=锚落地时点，pending 态无权威可建）。RT43=P8 三路对照全链（路一 pending 首捕拒绝+seen/锚双零文件实证；路二迁移面 rejected 不误报 migrated；路三修复完成后首捕正常建锚+repair 行进 lines+resumable 阻断）。
+- **B6-r4【中】修法**：repair-tail.test.ts RT42 交叉起点杀手——截断处先插完整 i2 行（当前撕裂尾起点≠marker.byteStart）再拼 repair 行严格前缀 11B→断言 aborted/repair-marker-conflict+盘面逐字节不变（i2 行保留）+marker 原文保留。守 `marker.byteStart === byteStart` 起点对齐条件（删则误判部分补行形→ftruncate 回截删掉 i2 整行=GPT 实证 455→448B 数据丢失）。
+- **L3** RT39b 标题改为「带授权仍保守拒绝（anchor-stale 不改盘）」如实语义；**L4** r3 节小计口径修正（新增 8 例/64+2 文件）；**L2** 跨 build 措辞按 buildId 边界精确化（共同前缀可收敛/已含不同 buildId 保守拒）。
+- 变异双连全杀：Mu-r4B1（无锚 pending 门删→RT43 红）+Mu-r4B6（byteStart 对齐删→RT42 红）；还原复绿。
+- 运行证据：三文件 117 绿（35+36+46）；全仓 1263 绿；tsc exit0；eslint 0。
+- 遗留挂账（沿承）：L1 信任域前提（resumeBlocked=授权门）/L5 marker 无独立认证+无真实断电实测/L7 repairUndecided 保守粘滞语义（P0-1b 统一术语）。
