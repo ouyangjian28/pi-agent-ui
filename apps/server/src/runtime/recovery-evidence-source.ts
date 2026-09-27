@@ -145,6 +145,11 @@ interface EvidenceAnchor {
   readonly sha: string; // hex
 }
 
+/** repair-pending marker 路径（与 repair-tail.ts markerPath 同规则：encodeURIComponent 裸名）。 */
+function markerPathOf(evidenceDir: string, file: string): string {
+  return `${evidenceDir}/${encodeURIComponent(file)}.repair-pending.json`;
+}
+
 function sha256Hex(buf: Buffer): string {
   return createHash("sha256").update(buf).digest("hex");
 }
@@ -417,8 +422,21 @@ export function createRecoveryEvidenceProvider(
             return unavailable("read-failed");
           }
         }
+        // P0-1a r2 B1/P4：pending marker 进权威证据链——捕获时 marker 在场（哪怕形状非法）
+        // =修复事务未完，快照必须携带该事实（recoverFromSnapshot 据此保守阻断重发授权；
+        // marker 清除后新捕获恢复常态）。读失败（非 ENOENT）=证据完整性存疑→fail-closed。
+        let pendingRepair = false;
+        try {
+          await readFile(markerPathOf(evidenceDir, file), "utf8");
+          pendingRepair = true;
+        } catch (e) {
+          if (!isIoErrno(e, "ENOENT")) {
+            audit(`recovery-evidence-store-failed file=${file} detail=marker-load`);
+            return unavailable("read-failed");
+          }
+        }
         const { lines, bad } = parseJournalText(raw.toString("utf8"));
-        return { version: 1, file, sessionId: sessionIdFor(file), lines, bad, attributedFragments: [], repaired: false, createdAt: now() };
+        return { version: 1, file, sessionId: sessionIdFor(file), lines, bad, attributedFragments: [], repaired: false, pendingRepair, createdAt: now() };
       } finally {
         await jh.close().catch(() => {});
       }

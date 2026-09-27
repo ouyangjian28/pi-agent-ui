@@ -364,6 +364,8 @@ export interface RecoverOptions {
   readonly fragments?: readonly BadJournalEntry[];
   readonly blocked?: boolean;
   readonly attributedFragments?: readonly FragmentAttribution[];
+  /** 捕获时 repair-pending marker 在场（修复事务未完）——与 repairLog 同入修复阴影（P0-1a r2 B1）。 */
+  readonly pendingRepair?: boolean;
 }
 
 export function buildRecoverReport(lines: readonly JournalLine[], sessionId: SessionId, opts: RecoverOptions = {}): RecoverReport {
@@ -401,7 +403,7 @@ export function buildRecoverReport(lines: readonly JournalLine[], sessionId: Ses
     consumedVerdictIds.add(target);
     unattributed = unattributed.filter((b) => b !== hit);
   }
-  const repairShadow = repairLog.length > 0; // P0-1a GPT r1 B1：物理修复≠裁决——被移除尾段里的效果证据不可再派生，repair 行在场即保守阻断重发授权（待 P0-1b 裁决行显式解锁，授权不得凭证据缺席升级）
+  const repairShadow = repairLog.length > 0 || (opts.pendingRepair ?? false); // P0-1a GPT r1 B1+r2 B1：物理修复≠裁决——被移除尾段里的效果证据不可再派生，repair 行在场或捕获时 pending marker 在场（修复事务未完=尾段内容不可知）均保守阻断重发授权（待 P0-1b 裁决行显式解锁，授权不得凭证据缺席升级）
   const resumeBlocked = diskBlocked || unattributed.length > 0 || repairShadow; // 盘面阻断、未裁决证据、修复阴影任一→授权阻断（两证分离）
   // 派生 unknown（provisional）：残片可靠关联或人工裁决消耗——非耐久终态事实
   const provisionals = new Set<IntentId>(attributed.map((a) => a.id)); // 可靠关联（结构证得）
@@ -460,13 +462,17 @@ export interface RecoveryEvidenceSnapshot {
   readonly attributedFragments: readonly FragmentAttribution[];
   /** true=快照后盘面已修复（修复事实入证据链）。 */
   readonly repaired: boolean;
+  /** true=捕获时 repair-pending marker 在场（修复事务未完；P0-1a r2 B1——进恢复阴影）。 */
+  readonly pendingRepair: boolean;
   readonly createdAt: number;
 }
 
 /** 捕获快照（宿主入口：修复前调用；幂等只读）。 */
 export async function captureRecoveryEvidence(path: string, sessionId: SessionId, now: () => number = Date.now): Promise<RecoveryEvidenceSnapshot> {
+  // 生产捕获走 recovery-evidence-source provider（带 marker 检测+锚点写穿）；本宿主工具入口
+  // 无 evidenceDir 视角，pendingRepair 恒 false（P0-1a r2 B1 披露——测试工具面不构成权威链）。
   const { lines, bad } = await readJournalFile(path);
-  return { version: 1, file: path, sessionId, lines, bad, attributedFragments: [], repaired: false, createdAt: now() };
+  return { version: 1, file: path, sessionId, lines, bad, attributedFragments: [], repaired: false, pendingRepair: false, createdAt: now() };
 }
 
 /** 快照证据哈希（身份摘要；c6 C5-07 冻结编码：attributedFragments 排序后参与，
@@ -475,7 +481,7 @@ export function snapshotEvidenceHash(snap: RecoveryEvidenceSnapshot): string {
   const attributed = [...snap.attributedFragments].sort((a, b) =>
     a.raw < b.raw ? -1 : a.raw > b.raw ? 1 : a.intentId < b.intentId ? -1 : a.intentId > b.intentId ? 1 : 0);
   const canonical = JSON.stringify([
-    snap.version, snap.file, snap.sessionId, snap.lines, snap.bad, attributed, snap.repaired,
+    snap.version, snap.file, snap.sessionId, snap.lines, snap.bad, attributed, snap.repaired, snap.pendingRepair,
   ]);
   return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
@@ -506,7 +512,9 @@ export function recoveryAvailability(snap: RecoveryEvidenceSnapshot | null | und
 /** 宿主修复盘面后标记快照（返回 repaired=true 的新快照；原快照不可变）。
  *  修复前快照=盘面阻断证据（diskBlocked）；修复标记后=残片裁决证据。 */
 export function withRepair(snap: RecoveryEvidenceSnapshot): RecoveryEvidenceSnapshot {
-  return { ...snap, repaired: true };
+  // 宿主声明「盘面修复已完成」——pending 事务同时视为完结（repairJournalTail 成功返回即已清
+  // marker；残留 pending=true 会与 repairLog 阴影重复阻断，语义失真）。P0-1a r2 B1。
+  return { ...snap, repaired: true, pendingRepair: false };
 }
 
 /** 由快照出恢复结论（B03 唯一合法入口）。
@@ -519,6 +527,7 @@ export function recoverFromSnapshot(snap: RecoveryEvidenceSnapshot): RecoverRepo
     fragments: snap.bad,
     blocked: diskBlocked,
     attributedFragments: snap.attributedFragments,
+    pendingRepair: snap.pendingRepair,
   });
   return report;
 }

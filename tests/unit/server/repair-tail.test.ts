@@ -487,3 +487,194 @@ describe("P0-1a GPT r1 阻断修复批（B1-B6）", () => {
 });
 
 void ({} as unknown as RepairTailResult);
+
+// P0-1a GPT r2 六阻断修复批（B1-B6；B1=provider 面见 recovery-evidence-source.test.ts RT27/RT28）。
+describe("P0-1a GPT r2 阻断修复批（B2/B3/B4）", () => {
+  /** marker 落盘后 truncate 抛（吻合形残局制造器：盘面尾仍在+marker 在场）。 */
+  const truncateBoomHandle = async (abs: string) => {
+    const real = await (await import("../../../apps/server/src/ws/safe-open.ts")).openSafeReadWrite(abs);
+    const fh = real.fh as unknown as import("node:fs/promises").FileHandle;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (fh as any).truncate = async () => { throw new Error("crash after marker"); };
+    return { fh, size: real.size };
+  };
+
+  /** 行校验后、readBack 首块（position=0 全量读）前外部等长改写某字节（P7 篡改注入：readBack 事务后像窗口外）。 */
+  const tamperAfterRowVerify = async (abs: string, mutate: (buf: Buffer) => void) => {
+    const real = await (await import("../../../apps/server/src/ws/safe-open.ts")).openSafeReadWrite(abs);
+    const fh = real.fh as unknown as import("node:fs/promises").FileHandle;
+    const origSync = fh.datasync.bind(fh);
+    const origRead = fh.read.bind(fh);
+    let syncs = 0;
+    let boomed = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (fh as any).datasync = async () => { syncs++; return origSync(); };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (fh as any).read = async (buf: Buffer, off: number, len: number, pos: number) => {
+      if (!boomed && syncs >= 2 && pos === 0) { boomed = true; const cur = Buffer.from(await readFile(abs, "utf8"), "utf8"); mutate(cur); const { writeFile: w } = await import("node:fs/promises"); await w(abs, cur); }
+      return origRead(buf, off, len, pos);
+    };
+    return { fh, size: real.size };
+  };
+
+  it("RT29-B2/P7 写后回读前等长篡改前缀→prefix-mismatch-after-repair 抛+锚不搬+marker 留（重试可续）", async () => {
+    const e = await env([jl("i1")], `{"t":"sending","intentId":"i1","pa`);
+    await seedAnchor(e);
+    const oldAnchor = await readFile(join(e.evidenceDir, `${encodeURIComponent(e.file)}.evidence.json`), "utf8");
+    const clean = await readFile(e.abs, "utf8");
+    await expect(repairJournalTail(OPT(e, { openHandle: (abs) => tamperAfterRowVerify(abs, (buf) => { buf[0] = buf[0] === 0x7b ? 0x5b : 0x7b; }) })))
+      .rejects.toThrow("prefix-mismatch-after-repair");
+    // 锚未转移（仍=篡改前事实）+marker 在场（事务未完）+盘面已含 repair 行（物理修复完成）
+    expect(await readFile(join(e.evidenceDir, `${encodeURIComponent(e.file)}.evidence.json`), "utf8")).toBe(oldAnchor);
+    expect((await readdir(e.evidenceDir)).some((f) => f.includes("repair-pending"))).toBe(true);
+    const now = await readFile(e.abs, "utf8");
+    expect(now.length).toBeGreaterThan(clean.length); // 行已补（回读验证=篡改暴露而非回退）
+    expect(now.includes(`"t":"repair"`)).toBe(true);
+    // 等长篡改不可逆（首字节已坏）→重试走 anchor-mismatch 拒（fail-closed 交宿主）
+    const r2 = await repairJournalTail(OPT(e));
+    expect(r2.kind).toBe("aborted");
+    await rm(e.roots, { recursive: true, force: true });
+    await rm(e.evidenceDir, { recursive: true, force: true });
+
+    // P7 行段版：等长改写 repair 行内字节（不动前缀）→row-mismatch-after-repair 抛（B6 专杀面：
+    // R2-row-check-off 变异=删行段验证必须被此例杀死）
+    const e2 = await env([jl("i1")], `{"t":"sending","intentId":"i1","pa`);
+    await seedAnchor(e2);
+    const clean2 = await readFile(e2.abs, "utf8");
+    const bs2 = Buffer.byteLength(clean2, "utf8") - Buffer.byteLength(`{"t":"sending","intentId":"i1","pa`, "utf8");
+    await expect(repairJournalTail(OPT(e2, { openHandle: (abs) => tamperAfterRowVerify(abs, (buf) => { buf[bs2] = buf[bs2] === 0x7b ? 0x5b : 0x7b; }) })))
+      .rejects.toThrow("row-mismatch-after-repair");
+    expect((await readdir(e2.evidenceDir)).some((f) => f.includes("repair-pending"))).toBe(true);
+    await rm(e2.roots, { recursive: true, force: true });
+    await rm(e2.evidenceDir, { recursive: true, force: true });
+  });
+
+  it("RT30-B2/P8 写后回读前截短→read-back-short 抛（不虚构锚）+marker 留", async () => {
+    const e = await env([jl("i1")], `{"t":"sending","intentId":"i1","par`);
+    await seedAnchor(e);
+    const oldAnchor = await readFile(join(e.evidenceDir, `${encodeURIComponent(e.file)}.evidence.json`), "utf8");
+    const truncateShortAfterWrite = async (abs: string) => {
+      const real = await (await import("../../../apps/server/src/ws/safe-open.ts")).openSafeReadWrite(abs);
+      const fh = real.fh as unknown as import("node:fs/promises").FileHandle;
+      const origSync = fh.datasync.bind(fh);
+      let syncs = 0;
+      const origRead = fh.read.bind(fh);
+      let boomed = false;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (fh as any).datasync = async () => { syncs++; return origSync(); };
+      // 校验后截短注入：行校验读之后、readBack 首块（position=0 的全量读）前——P8 原语义位
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (fh as any).read = async (buf: Buffer, off: number, len: number, pos: number) => {
+        if (!boomed && syncs >= 2 && pos === 0) {
+          boomed = true;
+          const { truncate: t } = await import("node:fs/promises");
+          await t(abs, 5);
+        }
+        return origRead(buf, off, len, pos);
+      };
+      return { fh, size: real.size };
+    };
+    await expect(repairJournalTail(OPT(e, { openHandle: truncateShortAfterWrite }))).rejects.toThrow("read-back-short");
+    expect(await readFile(join(e.evidenceDir, `${encodeURIComponent(e.file)}.evidence.json`), "utf8")).toBe(oldAnchor);
+    expect((await readdir(e.evidenceDir)).some((f) => f.includes("repair-pending"))).toBe(true);
+    await rm(e.roots, { recursive: true, force: true });
+    await rm(e.evidenceDir, { recursive: true, force: true });
+  });
+
+  it("RT31-B3/P5 有尾+marker 冲突（bounds 不吻合且非部分补行）→repair-marker-conflict 拒+marker 保留+盘面不动", async () => {
+    const e = await env([jl("i1")], `{"t":"sending","intentId":"i9","x`);
+    await seedAnchor(e);
+    const before = await readFile(e.abs, "utf8");
+    const mp = join(e.evidenceDir, `${encodeURIComponent(e.file)}.repair-pending.json`);
+    await writeFile(mp, JSON.stringify({ version: 1, file: e.file, byteStart: 999, byteEnd: 1040, removedSha256: "e".repeat(64), startedAt: "t" }), "utf8");
+    const r = await repairJournalTail(OPT(e, { authorizeStaleAnchorRepair: () => true }));
+    expect(r.kind).toBe("aborted");
+    if (r.kind === "aborted") expect(r.reason).toBe("repair-marker-conflict");
+    expect(await readFile(e.abs, "utf8")).toBe(before); // 盘面一字不动（旧代码在此覆盖真 marker=P5）
+    const markerAfter = JSON.parse(await readFile(mp, "utf8")) as { startedAt: string };
+    expect(markerAfter.startedAt).toBe("t"); // marker 原文保留（不被重写）
+    await rm(e.roots, { recursive: true, force: true });
+    await rm(e.evidenceDir, { recursive: true, force: true });
+  });
+
+  it("RT32-B3/P10 部分补行形：行写一半崩溃→ftruncate 回截断形+marker 补完（原始删除事实保留）", async () => {
+    const e = await env([jl("i1")]); // 无尾建锚（锚=干净前缀——不覆盖被移除字节）
+    await seedAnchor(e);
+    await appendFile(e.abs, `{"t":"sending","intentId":"i1","payload":{"kind":"prompt"`, "utf8");
+    // 阶段一：真跑到截断完成+写抛（marker 落盘，startedAt=真值）
+    const throwHandle = async (abs: string) => {
+      const real = await (await import("../../../apps/server/src/ws/safe-open.ts")).openSafeReadWrite(abs);
+      const fh = real.fh as unknown as import("node:fs/promises").FileHandle;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (fh as any).write = async () => { throw new Error("crash after truncate"); };
+      return { fh, size: real.size };
+    };
+    await expect(repairJournalTail(OPT(e, { openHandle: throwHandle }))).rejects.toThrow("crash after truncate");
+    const mp = join(e.evidenceDir, `${encodeURIComponent(e.file)}.repair-pending.json`);
+    const marker = JSON.parse(await readFile(mp, "utf8")) as { byteStart: number; byteEnd: number; removedSha256: string; startedAt: string };
+    // 阶段二：手工补「marker 构造行的严格前缀」= 行写一半崩溃形态（buildId/at 与重试参数一致）
+    const mrow = Buffer.from(JSON.stringify({ t: "repair", reason: "torn-tail", byteStart: marker.byteStart, byteEnd: marker.byteEnd, removedSha256: marker.removedSha256, buildId: "build-rt", contractVersion: 2, at: marker.startedAt }) + "\n", "utf8");
+    const tail = mrow.subarray(0, 30); // 30 字节严格前缀（< 区间长）
+    await appendFile(e.abs, tail, "utf8");
+    // 阶段三：重试→部分补行形→截回截断形→marker 补完（事实全部来自 marker）
+    const r = await repairJournalTail(OPT(e));
+    expect(r.kind).toBe("repaired");
+    if (r.kind === "repaired") {
+      expect(r.via).toBe("marker-complete");
+      expect(r.removedSha256).toBe(marker.removedSha256); // 原始删除事实不被二次修复覆盖（P10）
+      expect(r.at).toBe(marker.startedAt);
+    }
+    expect((await readdir(e.evidenceDir)).some((f) => f.includes("repair-pending"))).toBe(false);
+    const rec = await recoverFromJournal(e.abs, "q");
+    expect(rec.repairLog).toHaveLength(1);
+    expect(rec.resumable).toHaveLength(0); // B1 阴影同链
+    await rm(e.roots, { recursive: true, force: true });
+    await rm(e.evidenceDir, { recursive: true, force: true });
+  });
+
+  it("RT33-B3 吻合形 marker 复用：truncate 前崩溃重试→fresh 完成+startedAt 保留原始时间戳", async () => {
+    const e = await env([jl("i1")], `{"t":"sending","intentId":"i1","p`);
+    await seedAnchor(e);
+    await expect(repairJournalTail(OPT(e, { openHandle: truncateBoomHandle }))).rejects.toThrow("crash after marker");
+    const mp = join(e.evidenceDir, `${encodeURIComponent(e.file)}.repair-pending.json`);
+    const marker = JSON.parse(await readFile(mp, "utf8")) as { startedAt: string };
+    const r = await repairJournalTail(OPT(e));
+    expect(r.kind).toBe("repaired");
+    if (r.kind === "repaired") {
+      expect(r.via).toBe("fresh"); // 吻合形=续原事务（非新开）
+      expect(r.at).toBe(marker.startedAt); // 事实链时间戳保留
+    }
+    expect((await readdir(e.evidenceDir)).some((f) => f.includes("repair-pending"))).toBe(false);
+    const rec = await recoverFromJournal(e.abs, "q");
+    expect(rec.repairLog).toHaveLength(1);
+    expect(rec.resumable).toHaveLength(0);
+    await rm(e.roots, { recursive: true, force: true });
+    await rm(e.evidenceDir, { recursive: true, force: true });
+  });
+
+  it("RT34-B4/P6 幂等清理形+clearMarker 不吞错：rm 故障上浮→重试 marker-cleanup 补完（无需授权）", async () => {
+    const e = await env([jl("i1")], `{"t":"sending","intentId":"i1","p`);
+    await seedAnchor(e);
+    const rmBoom: FsLike = {
+      writeFile: async (p2, d, e2) => { const { writeFile: w } = await import("node:fs/promises"); await w(p2, d, e2); },
+      rename: async (f, t) => { const { rename: rn } = await import("node:fs/promises"); await rn(f, t); },
+      rm: async () => { throw new Error("marker-rm-boom"); },
+    };
+    await expect(repairJournalTail(OPT(e, { fsLike: rmBoom }))).rejects.toThrow("marker-rm-boom");
+    // 物理修复已完成（行+锚转移）+marker 残留=clearMarker 崩溃窗（旧代码吞错=静默残局）
+    const after = await readFile(e.abs, "utf8");
+    expect(after.includes(`"t":"repair"`)).toBe(true);
+    const anchor = JSON.parse(await readFile(join(e.evidenceDir, `${encodeURIComponent(e.file)}.evidence.json`), "utf8")) as { len: number; sha: string };
+    expect(anchor.len).toBe(Buffer.byteLength(after, "utf8"));
+    expect((await readdir(e.evidenceDir)).some((f) => f.includes("repair-pending"))).toBe(true);
+    // 重试（真 fs+无授权）：幂等清理形——盘面新后像与锚全等→清 marker 返 marker-cleanup
+    const r = await repairJournalTail(OPT(e));
+    expect(r.kind).toBe("reconciled");
+    if (r.kind === "reconciled") expect(r.via).toBe("marker-cleanup");
+    expect((await readdir(e.evidenceDir)).some((f) => f.includes("repair-pending"))).toBe(false);
+    const anchorAfter = JSON.parse(await readFile(join(e.evidenceDir, `${encodeURIComponent(e.file)}.evidence.json`), "utf8")) as { len: number; sha: string };
+    expect(anchorAfter).toEqual(anchor); // 幂等：锚不重写
+    await rm(e.roots, { recursive: true, force: true });
+    await rm(e.evidenceDir, { recursive: true, force: true });
+  });
+});

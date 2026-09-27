@@ -14,6 +14,9 @@
 // 信任边界（与 B12-1 同哲学）：
 //   - 本工具=宿主侧受信动作（与 migrateLegacyEvidence 同类）；journal 写者（pi 进程）无权触
 //     evidenceDir（含 marker 与锚点）；无锚不建锚（首捕授权面不在此）；
+//   - marker 无独立真实性证明（r2 B5 披露）：其权威性完全依赖 evidenceDir 目录访问隔离
+//     （Q16 部署前提）——越权写入 evidenceDir 者本可直改锚点，故 marker 不构成新增攻击面，
+//     但越权伪造 marker 可误导修复事务（bounds+哈希须与盘面密码学吻合才生效，见下）；
 //   - marker 补完仅认「盘面与 marker 事实密码学吻合」的形态（截断形=len==byteStart 且末无行；
 //     已补行形=末行 schema 合法且 byteStart/byteEnd/removedSha256 与 marker 全等），其余
 //     abort=repair-marker-conflict 留宿主调查；锚覆盖被移除字节时 marker 也不得转移锚（前缀
@@ -68,7 +71,7 @@ export type RepairTailResult =
       readonly removedSha256: string; readonly anchor: { readonly len: number; readonly sha: string } | null; readonly at: string;
       readonly via?: "fresh" | "marker-complete" }
   | { readonly kind: "reconciled"; readonly file: string; readonly anchor: { readonly len: number; readonly sha: string } | null;
-      readonly via?: "marker-reconcile" | "authorized" }
+      readonly via?: "marker-reconcile" | "authorized" | "marker-cleanup" }
   | { readonly kind: "no-torn-tail"; readonly file: string; readonly size: number }
   | { readonly kind: "oversized"; readonly file: string; readonly size: number; readonly budget: number }
   | { readonly kind: "aborted";
@@ -285,44 +288,10 @@ export async function repairJournalTail(opts: RepairTailOptions): Promise<Repair
     }
 
     if (byteStart === byteEnd) {
-      // 无撕裂尾：marker 优先（B5/P5——崩溃截断形/已补行形的补完走 marker 事实，不经授权门：
+      // 无撕裂尾：marker 优先（B5/P5——崩溃残局补完走 marker 事实，不经授权门：
       // marker 本身即宿主意图的持久记录）；无 marker 才走旧残局/健康判定。
       if (marker !== null) {
-        const last = lastRepairRowFact(raw);
-        const rowAtBounds = last !== null && last.offset === marker.byteStart && last.offset + last.rowLen === byteEnd &&
-          last.row.byteStart === marker.byteStart && last.row.byteEnd === marker.byteEnd && last.row.removedSha256 === marker.removedSha256;
-        const truncatedShape = byteEnd === marker.byteStart; // 截断已做、行未补（长度即证据：前缀段以 \n 结尾）
-        if (truncatedShape || rowAtBounds) {
-          // 锚可转移性：无锚直接跳过；有锚仍要求旧锚前缀可复验（journal 写者可改盘面——marker
-          // 不豁免前缀伪造，锚覆盖被移除字节依旧永拒走迁移）。
-          const prefixOk = anchor === null ||
-            (anchor.len <= marker.byteStart && byteEnd >= anchor.len && sha256Hex(raw.subarray(0, anchor.len)) === anchor.sha);
-          if (!prefixOk) {
-            audit(`repair-tail-aborted file=${opts.file} reason=anchor-stale detail=marker-prefix-irreproducible`);
-            return { kind: "aborted", file: opts.file, reason: "anchor-stale", detail: "marker 残局但旧锚前缀不可复验（覆盖被移除字节/改写面）：需宿主重走迁移/调查" };
-          }
-          if (!rowAtBounds) {
-            // 截断形补行（removedSha256 等事实全部来自 marker——尾已物理消失）
-            const row = buildRepairRow({ byteStart: marker.byteStart, byteEnd: marker.byteEnd, removedSha256: marker.removedSha256, buildId: opts.buildId, at: marker.startedAt });
-            await writeFull(fh, row, marker.byteStart, opts.file);
-            await fh.datasync();
-            const chk = Buffer.allocUnsafe(row.byteLength);
-            await fh.read(chk, 0, chk.byteLength, marker.byteStart);
-            if (!chk.equals(row)) throw new Error("repair-tail marker-completion verify failed");
-          }
-          const finalRaw = await readBack(fh, marker.byteStart + (rowAtBounds ? (last as { rowLen: number }).rowLen : buildRepairRow({ byteStart: marker.byteStart, byteEnd: marker.byteEnd, removedSha256: marker.removedSha256, buildId: opts.buildId, at: marker.startedAt }).byteLength));
-          const newAnchor = { len: finalRaw.byteLength, sha: sha256Hex(finalRaw) };
-          if (anchor !== null) {
-            await writeAnchor(opts, anchorPath(opts.evidenceDir, opts.file), { version: 1, file: opts.file, len: newAnchor.len, sha: newAnchor.sha });
-          }
-          await clearMarker(opts, markerPath(opts.evidenceDir, opts.file));
-          audit(`repair-tail-marker-complete file=${opts.file} shape=${rowAtBounds ? "row-already-written" : "truncated"} len=${newAnchor.len}`);
-          return rowAtBounds
-            ? { kind: "reconciled", file: opts.file, anchor: anchor === null ? null : newAnchor, via: "marker-reconcile" }
-            : { kind: "repaired", file: opts.file, byteStart: marker.byteStart, byteEnd: marker.byteEnd, removedSha256: marker.removedSha256, anchor: anchor === null ? null : newAnchor, at: marker.startedAt, via: "marker-complete" };
-        }
-        audit(`repair-tail-aborted file=${opts.file} reason=repair-marker-conflict size=${byteEnd} marker=[${marker.byteStart},${marker.byteEnd}]`);
-        return { kind: "aborted", file: opts.file, reason: "repair-marker-conflict", detail: "盘面与 marker 事实不吻合（非截断形/已补行形）——留宿主调查（marker 保留）" };
+        return await completeMarkerResidue(fh, raw, anchor, marker, opts, audit);
       }
       // 无 marker：三分支（前缀不可复验→永拒；未完成修复事务+授权→补完锚；纯扩展→no-op）
       if (anchor === null) return { kind: "no-torn-tail", file: opts.file, size: byteEnd };
@@ -363,7 +332,29 @@ export async function repairJournalTail(opts: RepairTailOptions): Promise<Repair
     }
 
     const removedSha256 = sha256Hex(raw.subarray(byteStart, byteEnd));
-    const at = new Date(now()).toISOString();
+    // B3/r2：有撕裂尾时在场 marker 必须参与判定——吻合（bounds+尾哈希全等）=「marker 写后
+    // truncate 前崩溃」残局，复用原 marker 事实继续 fresh 修复（startedAt 保留原始时间戳）；
+    // 部分补行形=truncate 已做+行写一半崩溃（尾段恰为 marker 构造行的严格前缀）→截回截断形
+    // 走 marker 补完（原始删除事实不被二次修复覆盖）；其余=冲突拒绝（marker 保留）。
+    if (marker !== null) {
+      if (marker.byteStart === byteStart && marker.byteEnd === byteEnd) {
+        if (marker.removedSha256 !== removedSha256) {
+          audit(`repair-tail-aborted file=${opts.file} reason=file-changed detail=marker-tail-hash`);
+          return { kind: "aborted", file: opts.file, reason: "file-changed", detail: "尾段哈希与在场 marker 不符（并发改写）" };
+        }
+      } else {
+        const mrow = buildRepairRow({ byteStart: marker.byteStart, byteEnd: marker.byteEnd, removedSha256: marker.removedSha256, buildId: opts.buildId, at: marker.startedAt });
+        const tail = raw.subarray(byteStart, byteEnd);
+        if (marker.byteStart === byteStart && byteEnd < marker.byteEnd && mrow.subarray(0, tail.byteLength).equals(tail)) {
+          await fh.truncate(marker.byteStart);
+          await fh.datasync();
+          return await completeMarkerResidue(fh, raw.subarray(0, marker.byteStart), anchor, marker, opts, audit);
+        }
+        audit(`repair-tail-aborted file=${opts.file} reason=repair-marker-conflict size=${byteEnd} marker=[${marker.byteStart},${marker.byteEnd}]`);
+        return { kind: "aborted", file: opts.file, reason: "repair-marker-conflict", detail: "有撕裂尾且与在场 marker 事实不吻合（非部分补行形）——留宿主调查（marker 保留）" };
+      }
+    }
+    const at = marker !== null ? marker.startedAt : new Date(now()).toISOString();
     const row = buildRepairRow({ byteStart, byteEnd, removedSha256, buildId: opts.buildId, at });
 
     // 测试接缝：读后竞态注入点（读窗完成→复核截断前）
@@ -383,7 +374,10 @@ export async function repairJournalTail(opts: RepairTailOptions): Promise<Repair
     }
 
     // 持久意图先于破坏（B5/P5）：marker 落 evidenceDir 后才截断——崩溃残局可识别可补完。
-    await writeMarker(opts, markerPath(opts.evidenceDir, opts.file), { version: 1, file: opts.file, byteStart, byteEnd, removedSha256, startedAt: at });
+    // 吻合形 marker 已在场（上文判定）——不重写，保留原始 startedAt/事实链。
+    if (marker === null) {
+      await writeMarker(opts, markerPath(opts.evidenceDir, opts.file), { version: 1, file: opts.file, byteStart, byteEnd, removedSha256, startedAt: at });
+    }
 
     // 物理修复：截断→行内 datasync→写循环补行→datasync→回读验证（硬序，与写面同纪律）
     await fh.truncate(byteStart);
@@ -395,7 +389,15 @@ export async function repairJournalTail(opts: RepairTailOptions): Promise<Repair
     if (!chk.equals(row)) throw new Error("repair-tail row verify failed");
 
     // 锚点合法转移（仅既有锚；无锚不建——首捕授权面不在此）。锚内容=回读验证后的盘面事实。
-    const finalRaw = await readBack(fh, byteStart + row.byteLength);
+    // B2/r2 P7/P8：回读=严格事务后像验证——短读即抛（不做短 Buffer 静默）；保留前缀与授权
+    // 前缀逐字节全等+行段与预期行全等（复核窗口外的等长篡改/校验后截短在此暴露，锚不搬）。
+    const finalRaw = await readBack(fh, byteStart + row.byteLength, opts.file);
+    if (!finalRaw.subarray(0, byteStart).equals(raw.subarray(0, byteStart))) {
+      throw new Error(`repair-tail prefix-mismatch-after-repair file=${opts.file}`);
+    }
+    if (!finalRaw.subarray(byteStart).equals(row)) {
+      throw new Error(`repair-tail row-mismatch-after-repair file=${opts.file}`);
+    }
     const newAnchor = { len: finalRaw.byteLength, sha: sha256Hex(finalRaw) };
     if (anchor !== null) {
       await writeAnchor(opts, anchorPath(opts.evidenceDir, opts.file), { version: 1, file: opts.file, len: newAnchor.len, sha: newAnchor.sha });
@@ -408,16 +410,85 @@ export async function repairJournalTail(opts: RepairTailOptions): Promise<Repair
   }
 }
 
-/** 全量回读（B4：锚只信盘面——write 返回值不可作为内容证据）。 */
-async function readBack(fh: import("node:fs/promises").FileHandle, expectedLen: number): Promise<Buffer> {
+/** 无尾 marker 残局补完（r2 B3 状态机收敛点）：raw=截断形或已补行形盘面（以 \n 结尾）。
+ *  四形分派：①锚已转移+行已落盘=只欠清理（B4 幂等清 marker）②截断形=补行 ③已补行形=转锚
+ *  ④其余=repair-marker-conflict 拒绝（marker 保留，原始事实不被二次修复覆盖）。 */
+async function completeMarkerResidue(
+  fh: import("node:fs/promises").FileHandle,
+  raw: Buffer,
+  anchor: AnchorFile | null,
+  marker: RepairMarker,
+  opts: RepairTailOptions,
+  audit: (line: string) => void,
+): Promise<RepairTailResult> {
+  const byteEnd = raw.byteLength;
+  const last = lastRepairRowFact(raw);
+  const rowAtBounds = last !== null && last.offset === marker.byteStart && last.offset + last.rowLen === byteEnd &&
+    last.row.byteStart === marker.byteStart && last.row.byteEnd === marker.byteEnd && last.row.removedSha256 === marker.removedSha256;
+  const truncatedShape = byteEnd === marker.byteStart; // 截断已做、行未补（长度即证据：前缀段以 \n 结尾）
+  // B4/r2 P6：锚已转移+行已落盘=物理修复全部完成、只欠 marker 清理（clearMarker 崩溃窗）——
+  // 幂等补完：盘面新后像与锚全等即清 marker 返回（不重写锚、不经前缀门——新锚本身就是完成证据）。
+  if (rowAtBounds && anchor !== null && anchor.len === byteEnd && sha256Hex(raw) === anchor.sha) {
+    await clearMarker(opts, markerPath(opts.evidenceDir, opts.file));
+    audit(`repair-tail-marker-cleanup file=${opts.file} len=${byteEnd}`);
+    return { kind: "reconciled", file: opts.file, anchor: { len: anchor.len, sha: anchor.sha }, via: "marker-cleanup" };
+  }
+  if (truncatedShape || rowAtBounds) {
+    // 锚可转移性：无锚直接跳过；有锚仍要求旧锚前缀可复验（journal 写者可改盘面——marker
+    // 不豁免前缀伪造，锚覆盖被移除字节依旧永拒走迁移）。
+    const prefixOk = anchor === null ||
+      (anchor.len <= marker.byteStart && byteEnd >= anchor.len && sha256Hex(raw.subarray(0, anchor.len)) === anchor.sha);
+    if (!prefixOk) {
+      audit(`repair-tail-aborted file=${opts.file} reason=anchor-stale detail=marker-prefix-irreproducible`);
+      return { kind: "aborted", file: opts.file, reason: "anchor-stale", detail: "marker 残局但旧锚前缀不可复验（覆盖被移除字节/改写面）：需宿主重走迁移/调查" };
+    }
+    const builtRow = buildRepairRow({ byteStart: marker.byteStart, byteEnd: marker.byteEnd, removedSha256: marker.removedSha256, buildId: opts.buildId, at: marker.startedAt });
+    if (!rowAtBounds) {
+      // 截断形补行（removedSha256 等事实全部来自 marker——尾已物理消失）
+      await writeFull(fh, builtRow, marker.byteStart, opts.file);
+      await fh.datasync();
+      const chk = Buffer.allocUnsafe(builtRow.byteLength);
+      await fh.read(chk, 0, chk.byteLength, marker.byteStart);
+      if (!chk.equals(builtRow)) throw new Error("repair-tail marker-completion verify failed");
+    }
+    // B2/r2：回读=严格事务后像验证——短读即抛；保留前缀与授权前缀逐字节全等+行段全等
+    // （预期=盘面已补行段的字节原文（rowAtBounds）或刚写入的构造行——不用重构造行对比盘面
+    // 行：marker 不存 buildId，跨 build 部署重试不得因 buildId 差异误判行不符）。
+    const expectedRow = rowAtBounds ? raw.subarray((last as { offset: number }).offset, byteEnd) : builtRow;
+    const finalRaw = await readBack(fh, marker.byteStart + expectedRow.byteLength, opts.file);
+    if (!finalRaw.subarray(0, marker.byteStart).equals(raw.subarray(0, marker.byteStart))) {
+      throw new Error(`repair-tail prefix-mismatch-after-marker-completion file=${opts.file}`);
+    }
+    if (!finalRaw.subarray(marker.byteStart).equals(expectedRow)) {
+      throw new Error(`repair-tail row-mismatch-after-marker-completion file=${opts.file}`);
+    }
+    const newAnchor = { len: finalRaw.byteLength, sha: sha256Hex(finalRaw) };
+    if (anchor !== null) {
+      await writeAnchor(opts, anchorPath(opts.evidenceDir, opts.file), { version: 1, file: opts.file, len: newAnchor.len, sha: newAnchor.sha });
+    }
+    await clearMarker(opts, markerPath(opts.evidenceDir, opts.file));
+    audit(`repair-tail-marker-complete file=${opts.file} shape=${rowAtBounds ? "row-already-written" : "truncated"} len=${newAnchor.len}`);
+    return rowAtBounds
+      ? { kind: "reconciled", file: opts.file, anchor: anchor === null ? null : newAnchor, via: "marker-reconcile" }
+      : { kind: "repaired", file: opts.file, byteStart: marker.byteStart, byteEnd: marker.byteEnd, removedSha256: marker.removedSha256, anchor: anchor === null ? null : newAnchor, at: marker.startedAt, via: "marker-complete" };
+  }
+  audit(`repair-tail-aborted file=${opts.file} reason=repair-marker-conflict size=${byteEnd} marker=[${marker.byteStart},${marker.byteEnd}]`);
+  return { kind: "aborted", file: opts.file, reason: "repair-marker-conflict", detail: "盘面与 marker 事实不吻合（非截断形/已补行形）——留宿主调查（marker 保留）" };
+}
+
+/** 全量回读（B4：锚只信盘面——write 返回值不可作为内容证据）。
+ *  B2/r2 P8：严格等长——提前 EOF 即抛（短 Buffer 静默返回=虚构锚：校验后盘面被截短仍报成功）。 */
+async function readBack(fh: import("node:fs/promises").FileHandle, expectedLen: number, file: string): Promise<Buffer> {
   const buf = Buffer.allocUnsafe(expectedLen);
   let got = 0;
   while (got < expectedLen) {
     const r = await fh.read(buf, got, expectedLen - got, got);
-    if (r.bytesRead <= 0) break;
+    if (r.bytesRead <= 0) {
+      throw new Error(`repair-tail read-back-short file=${file} got=${got}/${expectedLen}`);
+    }
     got += r.bytesRead;
   }
-  return buf.subarray(0, got);
+  return buf;
 }
 
 /** 锚点原子写（tmp 高熵独占名+rename；非掉电耐久=Q13 披露；失败=tmp 卫生后抛=修复事务失败上浮）。 */
@@ -431,7 +502,9 @@ async function writeMarker(opts: RepairTailOptions, mpath: string, marker: Repai
 
 async function clearMarker(opts: RepairTailOptions, mpath: string): Promise<void> {
   const fsx = opts.fsLike ?? realFsAnchor;
-  await fsx.rm(mpath, { force: true }).catch(() => {});
+  // B4/r2 P6：清理失败不上浮=静默残局（重试永久误拒）——rm 故障必须抛（物理修复已完成，
+  // 调用方重试走 marker-cleanup 幂等补完）；force:true 下 ENOENT 不抛。
+  await fsx.rm(mpath, { force: true });
 }
 
 async function atomicWrite(opts: RepairTailOptions, apath: string, text: string): Promise<void> {

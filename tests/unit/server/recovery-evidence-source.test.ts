@@ -18,7 +18,7 @@ import {
   type SafeHandleLike,
 } from "../../../apps/server/src/runtime/recovery-evidence-source.ts";
 import { SafeOpenError } from "../../../apps/server/src/ws/safe-open.ts";
-import { snapshotEvidenceHash, type RecoveryEvidenceSnapshot } from "../../../apps/server/src/runtime/recover.ts";
+import { snapshotEvidenceHash, recoverFromSnapshot, type RecoveryEvidenceSnapshot } from "../../../apps/server/src/runtime/recover.ts";
 import { createHash } from "node:crypto";
 import { matchKeyOf } from "@pi-agent-ui/protocol";
 
@@ -957,6 +957,59 @@ describe("recovery-evidence-source（fix13 v4：+仓级串行/登记不变量）
       expect(isRecoverySnapshot(r2)).toBe(true);
       const seen = JSON.parse(await readFile(join(evDir, "seen.json"), "utf8")) as { files: string[] };
       expect(seen.files).toContain("s.jsonl");
+    } finally { await cleanup(); }
+  });
+});
+
+// P0-1a r2 B1/P4：pending marker 进权威证据链——捕获时 marker 在场（哪怕形状非法）=修复事务
+// 未完，快照携带 pendingRepair 事实（recoverFromSnapshot 据此保守阻断重发授权）；marker 读失败
+// （非 ENOENT）=证据完整性存疑→unavailable read-failed fail-closed（不静默吞）。
+describe("P0-1a r2 B1 pendingRepair（marker 进恢复链）", () => {
+  it("RT27-B1 marker 在场（含形状非法）→捕获 pendingRepair=true→recoverFromSnapshot resumeBlocked 恒阻断（resumable 空）", async () => {
+    const { jRoot, evDir, cleanup } = await mkRig("rt27-");
+    try {
+      await writeFile(join(jRoot, "q.jsonl"), `${jl("i1")}\n`, "utf8");
+      // 首捕建锚（enqueue-only 盘面=「已受理未发送」→无 marker 时 resumable 应含 i1：正对照自证判别力）
+      const p0 = createRecoveryEvidenceProvider({ trustFirstCapture: () => true, roots: [jRoot], evidenceDir: evDir });
+      const cap0 = snapOf(await p0("q.jsonl"));
+      const rep0 = recoverFromSnapshot(cap0);
+      expect(rep0.resumable).toContain("i1");
+      expect(rep0.resumeBlocked).toBe(false);
+      // 形状合法伪 marker 在场（信任域=evidenceDir 隔离）：捕获照常成功但携带 pendingRepair
+      const mpath = join(evDir, `${encodeURIComponent("q.jsonl")}.repair-pending.json`);
+      await writeFile(mpath, JSON.stringify({ version: 1, file: "q.jsonl", byteStart: 99, byteEnd: 199, removedSha256: "a".repeat(64), startedAt: "t0" }), "utf8");
+      const p1 = createRecoveryEvidenceProvider({ roots: [jRoot], evidenceDir: evDir });
+      const cap1 = snapOf(await p1("q.jsonl"));
+      expect(cap1.pendingRepair).toBe(true);
+      const rep1 = recoverFromSnapshot(cap1);
+      expect(rep1.diskBlocked).toBe(false); // 盘面本身干净（bad 空）——阻断纯来自修复事务未完
+      expect(rep1.resumeBlocked).toBe(true); // repairShadow：物理修复≠裁决
+      expect(rep1.resumable).toHaveLength(0); // i1 不得凭「证据缺席」解锁重发
+      // 形状非法 marker 同计（在场即事实——解析失败不吞 pending）
+      await writeFile(mpath, "{not-json", "utf8");
+      const cap2 = snapOf(await createRecoveryEvidenceProvider({ roots: [jRoot], evidenceDir: evDir })("q.jsonl"));
+      expect(cap2.pendingRepair).toBe(true);
+      // marker 清除后新捕获恢复常态（残局收敛出口）
+      await rm(mpath, { force: true });
+      const cap3 = snapOf(await createRecoveryEvidenceProvider({ roots: [jRoot], evidenceDir: evDir })("q.jsonl"));
+      expect(cap3.pendingRepair).toBe(false);
+      expect(recoverFromSnapshot(cap3).resumable).toContain("i1");
+    } finally { await cleanup(); }
+  });
+
+  it("RT28-B1 marker 读失败（非 ENOENT，EISDIR）→unavailable read-failed fail-closed（不洗白）", async () => {
+    const { jRoot, evDir, cleanup } = await mkRig("rt28-");
+    try {
+      await writeFile(join(jRoot, "q.jsonl"), `${jl("i1")}\n`, "utf8");
+      const p0 = createRecoveryEvidenceProvider({ trustFirstCapture: () => true, roots: [jRoot], evidenceDir: evDir });
+      expect(isRecoverySnapshot(await p0("q.jsonl"))).toBe(true);
+      // marker 路径做成目录 → readFile EISDIR（非 ENOENT）→ 证据完整性存疑 fail-closed
+      await mkdir(join(evDir, `${encodeURIComponent("q.jsonl")}.repair-pending.json`));
+      const r = await createRecoveryEvidenceProvider({ roots: [jRoot], evidenceDir: evDir })("q.jsonl");
+      expect(r).toEqual({ kind: "unavailable", reason: "read-failed" });
+      // 清障后重试收敛
+      await rm(join(evDir, `${encodeURIComponent("q.jsonl")}.repair-pending.json`), { recursive: true, force: true });
+      expect(isRecoverySnapshot(await createRecoveryEvidenceProvider({ roots: [jRoot], evidenceDir: evDir })("q.jsonl"))).toBe(true);
     } finally { await cleanup(); }
   });
 });
