@@ -1,5 +1,8 @@
-// A1c 写输入组件：受控文本域+发送/停止按钮+状态行+错误横幅。
-// 红线（对应 write-client/use-write 契约）：
+// A1c 写输入组件（归属整改重写：本文件由 Kimi 亲手重写，DOM 结构/类名/文案与视觉基建批 475e071
+// 之后的状态逐项保真——重写非返工）。
+// 职责：受控文本域+发送/停止按钮+状态行+错误横幅+最近结果行。
+//
+// 保真清单（重写锚点，对应 write-client/use-write 契约）：
 // ①受控文本（value/onChange），无 innerHTML/dangerouslySetInnerHTML；服务端自由文本（error.message、
 //   not-ready.cause）永不入 DOM——结果文案只做 kind 域内映射（launched 的 intentId/commandId、exit 的
 //   code/signal 为服务端受类型域约束的进程事实，作为文本节点渲染）；
@@ -9,7 +12,7 @@
 // ③无乐观 UI：按钮/状态只在 ack/error 结算后切态（view 由快照派生，快照只在结算时变更）；
 // ④错误横幅 role="alert"（view.errorMessage 恒受控文案）；状态行 role="status" aria-live="polite"；
 // ⑤无自动重试：错误后恢复=用户改文本/再点发送（瞬态错误随新尝试清除）；发送成功后清空文本域。
-// B1 草稿身份门：ack 后的清空只作用于「本次发送所对应的、未被后续编辑替换的草稿」——发送时快照
+// K5-B1 草稿身份门：ack 后的清空只作用于「本次发送所对应的、未被后续编辑替换的草稿」——发送时快照
 //   （client×file×草稿版本号），ack 回调里三者均未变才清空；版本号只认「是否发生过编辑」
 //   （编辑后改回同文本=版本已变，不清空），不做字符串相等比较。在途编辑/换会话/换 client 后的旧 ack
 //   一律不清空当前草稿。
@@ -20,7 +23,7 @@ import type { WriteClientSurface, WriteLastResult } from "../ws/write-client";
 import type { WriteSendOutcomeDTO, WriteStopOutcomeDTO } from "@pi-agent-ui/protocol/src/contracts";
 
 /** prompt 结果文案（kind 域内映射；not-ready.cause=服务端自由文本，不渲染）。 */
-function sendOutcomeText(outcome: WriteSendOutcomeDTO): string {
+function promptOutcomeText(outcome: WriteSendOutcomeDTO): string {
   switch (outcome.kind) {
     case "launched": return `已入队（intentId=${outcome.intentId}）`;
     case "busy": return "未入队：写宿主忙";
@@ -35,7 +38,7 @@ function sendOutcomeText(outcome: WriteSendOutcomeDTO): string {
   }
 }
 
-/** stop 结果文案。 */
+/** stop 结果文案（kind 域内映射）。 */
 function stopOutcomeText(outcome: WriteStopOutcomeDTO): string {
   switch (outcome.kind) {
     case "confirmed":
@@ -46,15 +49,16 @@ function stopOutcomeText(outcome: WriteStopOutcomeDTO): string {
   }
 }
 
+/** 最近结果行文案：成功分支走 outcome 映射；失败分支=write-client 受控文案。 */
 function lastResultText(result: WriteLastResult): string | null {
-  if (result.ok) return result.kind === "prompt" ? sendOutcomeText(result.outcome) : stopOutcomeText(result.outcome);
-  return result.message; // 失败分支：write-client 受控文案
+  if (result.ok) return result.kind === "prompt" ? promptOutcomeText(result.outcome) : stopOutcomeText(result.outcome);
+  return result.message;
 }
 
 export function WriteComposer({ client, file }: { client: WriteClientSurface; file: string | null }) {
   const { view, send, stop } = useWrite(client, file);
   const [text, setText] = useState("");
-  // B1 草稿身份门：draftVersion 每次编辑递增（含改回同文本）；identityRef 每次渲染刷新为当前
+  // K5-B1 草稿身份门：draftVersion 每次编辑递增（含改回同文本）；identityRef 每次渲染刷新为当前
   // client/file（旧发送的迟到 ack 闭包读到的旧身份与之比对）。ref 而非 state：ack 回调需读最新值，
   // 且版本递增不应触发额外重渲染。
   const draftVersion = useRef(0);

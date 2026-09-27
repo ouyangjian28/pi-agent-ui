@@ -14,8 +14,8 @@
 import React from "react";
 import { useSessionDetail } from "../ws/use-session-detail";
 import type { SubscribeClientSurface } from "../ws/subscribe-client";
-import type { WriteClientSurface } from "../ws/write-client";
 import { WriteComposer } from "./write-composer";
+import type { WriteClientSurface } from "../ws/write-client";
 import type { HistoryEvent, LiveEvent } from "@pi-agent-ui/protocol/src/contracts";
 
 const KIND_LABELS: Readonly<Record<HistoryEvent["kind"], string>> = {
@@ -75,11 +75,14 @@ export function SessionDetail({
 }: {
   client: SubscribeClientSurface;
   file: string | null;
-  /** 可选写面：注入即挂写输入（独立写连接；未注入=纯只读视图，既有调用点零改动）。 */
+  /** 可选写面（A1c 挂点）：注入即挂写输入（独立写连接）；不注入=纯只读视图，既有调用点零改动。 */
   writeClient?: WriteClientSurface | null;
 }) {
   const view = useSessionDetail(client, file);
-  // 槽位 1（稳定挂载）：key=file——同一位置换会话强制新实例；同一会话内视图切换实例保留。
+  // 槽位 1（A1c 写面稳定挂载）：仅注入 writeClient 且已选会话且视图∈{empty, streaming,
+  // resync-needed, stopped} 时展示；loading/auth-failed/error/closed/unsubscribed 不展示（既有行为）。
+  // key=file——同一槽位换会话强制新 composer 实例（旧草稿不泄入新会话）；同一会话内视图切换实例保留
+  //（草稿/在途/结果态不丢）。
   const composerVisible =
     writeClient !== null && file !== null &&
     (view.status === "empty" || view.status === "streaming" || view.status === "resync-needed" || view.status === "stopped");
