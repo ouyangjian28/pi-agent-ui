@@ -403,6 +403,14 @@ export function createRecoveryEvidenceProvider(
             return unavailable("read-failed");
           }
         }
+        // r4 B1：无旧锚 + pending = 修复事务进行中且该文件权威锚从未建立。若此刻放行快照并
+        // 登记 seen，会写入「无锚+已登记」矛盾态——后续捕获必判 concurrent-modification 死锁
+        // （修复工具按无锚不建锚契约也不补锚；迁移面会误报 migrated 而无锚）。fail-closed：
+        // 拒绝首捕且零副作用（不建锚、不登记 seen），待事务完结（marker 清除）后正常首捕。
+        if (pendingRepair && anchor === null) {
+          audit(`recovery-pending-no-anchor file=${file}`);
+          return unavailable("repair-pending-first-capture");
+        }
         const sha = sha256Hex(raw);
         if (!pendingRepair && anchor !== null) {
           // fix12/Q17：去 len===0 直通特判——零长锚也须 sha==H(empty)（形似的 64 个 0 伪锚必拒）

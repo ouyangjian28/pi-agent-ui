@@ -693,6 +693,27 @@ describe("P0-1a GPT r3 阻断修复批（B3a/B3b/B6）", () => {
     Buffer.from(JSON.stringify({ t: "repair", reason: "torn-tail", byteStart: m.byteStart, byteEnd: m.byteEnd, removedSha256: m.removedSha256, buildId: "build-rt", contractVersion: 2, at: m.startedAt }) + "\n", "utf8");
   const cleanup = async (e: Env) => { await rm(e.roots, { recursive: true, force: true }); await rm(e.evidenceDir, { recursive: true, force: true }); };
 
+  it("RT42-B6/r4 交叉起点：marker 起点后多一条完整合法行+尾恰为 repair 严格前缀→conflict+盘面逐字节不变（起点对齐杀手）", async () => {
+    const e = await env([jl("i1")]);
+    await seedAnchor(e);
+    await appendFile(e.abs, `{"t":"sending"`, "utf8"); // 原尾 14 字节
+    await expect(repairJournalTail(OPT(e, { openHandle: crashAfterTruncate }))).rejects.toThrow("crash after truncate");
+    const m = await markerOf(e);
+    // 攻击形盘面：截断处先插一整行合法 i2（当前撕裂尾起点≠marker.byteStart），再拼 repair 行严格前缀 11B
+    await appendFile(e.abs, jl("i2") + "\n", "utf8");
+    await appendFile(e.abs, mrowOf(m).subarray(0, 11), "utf8");
+    const before = await readFile(e.abs);
+    const markerBefore = await readFile(join(e.evidenceDir, `${encodeURIComponent(e.file)}.repair-pending.json`), "utf8");
+    const r = await repairJournalTail(OPT(e));
+    expect(r.kind).toBe("aborted");
+    if (r.kind === "aborted") {
+      expect(r.reason).toBe("repair-marker-conflict"); // 非起点对齐=非部分补行形——不得回截掉 i2 整行
+    }
+    expect((await readFile(e.abs)).equals(before)).toBe(true); // 盘面逐字节不变（i2 行保留）
+    expect(await readFile(join(e.evidenceDir, `${encodeURIComponent(e.file)}.repair-pending.json`), "utf8")).toBe(markerBefore);
+    await cleanup(e);
+  });
+
   it("RT35-B3a/P3 部分补行形：前缀上界=修复行长度——等于原尾长/超过原尾长的合法前缀同样收敛（四态 5/14/40/100）", async () => {
     for (const n of [5, 14, 40, 100]) {
       const e = await env([jl("i1")]);

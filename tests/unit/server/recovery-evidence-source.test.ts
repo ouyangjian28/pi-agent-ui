@@ -1064,7 +1064,7 @@ describe("P0-1a GPT r3 修复批（B3b provider pending 捕获不写穿锚+死�
     } finally { await cleanup(); }
   });
 
-  it("RT39b-B3b 截断形含尾锚：pending 捕获不判 concurrent-modification（缩盘=事务中间态）+授权重试收敛", async () => {
+  it("RT39b-B3b 截断形含尾锚：pending 捕获不判 concurrent-modification（缩盘=事务中间态）；带授权仍保守拒绝（anchor-stale 不改盘，宿主走迁移裁决）", async () => {
     const { jRoot, evDir, cleanup } = await mkRig("r39b-");
     try {
       const jp = join(jRoot, "q.jsonl");
@@ -1096,6 +1096,49 @@ describe("P0-1a GPT r3 修复批（B3b provider pending 捕获不写穿锚+死�
       if (!isRecoverySnapshot(cap2)) throw new Error(`复捕获被拒：${JSON.stringify(cap2)}`);
       expect(cap2.pendingRepair).toBe(true);
       expect(recoverFromSnapshot(cap2).resumable).toEqual([]); // 阴影持续阻断直至宿主迁移裁决
+    } finally { await cleanup(); }
+  });
+});
+
+describe("P0-1a GPT r4 修复批（B1-r4 无锚 pending 首捕零副作用）", () => {
+  const jl = (i: string) => JSON.stringify({ t: "enqueue", intentId: i, sessionId: "q", generation: 1, leafId: "L", matchKey: { textHash: "h" + i, attachmentIdentity: "a", ordinal: 1 }, payload: { kind: "prompt", rawText: "t" + i, attachments: [], sentAt: "1" } });
+
+  it("RT43-B1/r4 P8 三路对照：无锚 pending 首捕零副作用（不登记 seen 不建锚）→修复完成→首捕正常建锚（死锁解全链）", async () => {
+    const rt = await import("../../../apps/server/src/runtime/repair-tail.ts");
+    const { jRoot, evDir, cleanup } = await mkRig("rec1-");
+    try {
+      const jp = join(jRoot, "q.jsonl");
+      await writeFile(jp, jl("i1") + "\n" + jl("i2").slice(0, 30), "utf8"); // 合法行+撕裂尾，无锚（从未捕获）
+      const opts = { file: "q.jsonl", roots: [jRoot], evidenceDir: evDir, buildId: "build-rt" };
+      const crashAfterMarker = async (abs: string) => {
+        const real = await (await import("../../../apps/server/src/ws/safe-open.ts")).openSafeReadWrite(abs);
+        const fh = real.fh as unknown as import("node:fs/promises").FileHandle;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (fh as any).write = async () => { throw new Error("crash-after-marker"); };
+        return { fh, size: real.size };
+      };
+      // 修复阶段一：marker 落+truncate 完成后崩溃
+      await expect(rt.repairJournalTail({ ...opts, openHandle: crashAfterMarker })).rejects.toThrow("crash-after-marker");
+      // 路一（核心）：pending 期间 provider 首捕→拒绝且零副作用
+      const p1 = createRecoveryEvidenceProvider({ roots: [jRoot], evidenceDir: evDir, trustFirstCapture: () => true });
+      const r1 = await p1("q.jsonl");
+      expect(r1).toMatchObject({ kind: "unavailable", reason: "repair-pending-first-capture" });
+      expect(await readFile(join(evDir, "evidence-seen.json"), "utf8").then(() => true, () => false)).toBe(false); // seen 未登记
+      await expect(readFile(join(evDir, encodeURIComponent("q.jsonl") + ".evidence.json"), "utf8")).rejects.toThrow(); // 锚未建
+      // 路二：pending 期间迁移面同样拒绝——不误报 migrated 无锚
+      const mig = await (await import("../../../apps/server/src/runtime/evidence-migration.ts")).migrateLegacyEvidence({ roots: [jRoot], evidenceDir: evDir });
+      expect(mig.files.some((f) => f.file === "q.jsonl" && f.outcome === "rejected")).toBe(true);
+      // 修复完成（marker 清除，锚=null 不建锚契约下 repaired）
+      const done = await rt.repairJournalTail(opts);
+      expect(done.kind).toBe("repaired");
+      // 路三：事务完结后首捕正常建锚（死锁解）——repair 行在场阻断重发
+      const r3 = await p1("q.jsonl");
+      if (!isRecoverySnapshot(r3)) throw new Error(`修复后首捕被拒：${JSON.stringify(r3)}`);
+      expect(r3.pendingRepair).toBe(false);
+      expect(r3.lines.filter((l) => (l as { t: string }).t === "repair").length).toBe(1); // repair 行进 lines
+      expect(recoverFromSnapshot(r3).resumable).toEqual([]); // 修复阴影保留
+      const anchorFile = JSON.parse(await readFile(join(evDir, encodeURIComponent("q.jsonl") + ".evidence.json"), "utf8"));
+      expect(anchorFile.len).toBeGreaterThan(0); // 权威锚已建立
     } finally { await cleanup(); }
   });
 });
