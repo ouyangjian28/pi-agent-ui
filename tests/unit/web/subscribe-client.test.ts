@@ -2,9 +2,11 @@
 // A1b 订阅客户端测试：FakeWebSocket 注入（同 ws-client.test.ts 模式）。覆盖验收点：
 // ①subscribe 三分支（初始化/重同步 cursor/续页 snapshotId+historyNext）②unsubscribe ③流式帧
 // （snapshot 分页→末页 liveFrom→history/live events 追加幂等）④终局语义（4431 订阅级 close 连接不受影响/
-// 4409 stream-replaced 旧流不进快照/末页 60s 宽限重试收 4409=按末页 cursor 续读不重建）⑤同 file 至多一个
+// 4409 stream-replaced 旧流不进快照/重同步 cursor 请求收 4409→resync-needed 可手动再试——快照续页 60s 宽限
+// 路径未验：客户端无尾页重试公共入口）⑤同 file 至多一个
 // 活动订阅+在途 4404 不崩 ⑥cursor 严格透传服务端值 ⑦R1 消费帧运行时校验（坏帧零副作用可续收）⑧R2 受控
-// 文案（error.message 不进快照）⑨R3 close 停止屏障简版。快照断言用身份比较（toBe）。
+// 文案（error.message 不进快照）⑨R3 close 停止屏障简版 ⑩B2 首页在途取消留痕补退订 ⑪C2 跨字段/续页绑定
+// 一致性拒绝后可恢复 ⑫C5 连接级错误码（无 requestId）映射。快照断言用身份比较（toBe）。
 import { describe, expect, it } from "vitest";
 import { SubscribeClient, type WebSocketLike } from "../../../apps/web/src/ws/subscribe-client";
 import type { EventCursor, HistoryEvent, LiveEvent } from "@pi-agent-ui/protocol/src/contracts";
@@ -88,6 +90,8 @@ interface PageSpec {
   subscriptionId?: string;
   streamId?: string;
   snapshotId?: string;
+  /** 快照水位 H（C2 fixture 一致性：非空多页禁用 H=0；空流 H=0 为默认）。同一快照实例各页 barrier 恒等。 */
+  barrier?: number;
   page: HistoryEvent[];
   historyNext?: EventCursor | null;
   liveFrom?: EventCursor | null;
@@ -101,7 +105,7 @@ function pageFrame(spec: PageSpec): unknown {
     subscriptionId: spec.subscriptionId ?? "sub-1",
     streamId: spec.streamId ?? "stream-1",
     snapshotId: spec.snapshotId ?? "snap-1",
-    barrier: 0,
+    barrier: spec.barrier ?? 0,
     status: STATUS,
     page: spec.page,
     historyNext: spec.historyNext ?? null,
@@ -131,7 +135,7 @@ function handshake(ws: FakeWebSocket): void {
   ws.receive(WELCOME);
 }
 
-/** ready 后订阅 a.jsonl 并回放两页到末页（页1: msg1 hasMore / 页2: msg2+msg3 末页 liveFrom={stream-1,4}），进入 live。 */
+/** ready 后订阅 a.jsonl 并回放两页到末页（H=3；页1: msg1 hasMore / 页2: msg2+msg3 末页 liveFrom={stream-1,4}），进入 live。 */
 function livePhase(): {
   client: SubscribeClient;
   ws: FakeWebSocket;
@@ -143,11 +147,12 @@ function livePhase(): {
   handshake(ws);
   client.subscribeSession("a.jsonl");
   const initRequestId = (ws.sentFrames()[1] as { requestId: string }).requestId;
-  ws.receive(pageFrame({ requestId: initRequestId, page: [msg(1)], historyNext: { streamId: "stream-1", seq: 2 } }));
+  ws.receive(pageFrame({ requestId: initRequestId, barrier: 3, page: [msg(1)], historyNext: { streamId: "stream-1", seq: 2 } }));
   const pageRequestId = (ws.sentFrames()[2] as { requestId: string }).requestId;
   ws.receive(
     pageFrame({
       requestId: pageRequestId,
+      barrier: 3,
       page: [msg(2), msg(3)],
       historyNext: null,
       liveFrom: { streamId: "stream-1", seq: 4 },
@@ -186,11 +191,12 @@ describe("subscribe 三分支与订阅生命周期", () => {
       pageFrame({
         requestId: initRequestId,
         snapshotId: "snap-77",
+        streamId: "stream-9",
+        barrier: 41,
         page: [msg(1)],
         historyNext: { streamId: "stream-9", seq: 41 },
       }),
     );
-    process.stdout.write("DBG_SNAP=" + JSON.stringify(client.getSnapshot()) + "\n");
     expect(ws.sentFrames()[2]).toEqual({
       t: "subscribe",
       requestId: expect.stringMatching(/^[\w-]{1,64}$/),
@@ -217,7 +223,7 @@ describe("subscribe 三分支与订阅生命周期", () => {
     handshake(ws);
     client.subscribeSession("empty.jsonl");
     const requestId = (ws.sentFrames()[1] as { requestId: string }).requestId;
-    ws.receive(pageFrame({ requestId, page: [], historyNext: null, liveFrom: { streamId: "stream-e", seq: 1 } }));
+    ws.receive(pageFrame({ requestId, streamId: "stream-e", page: [], historyNext: null, liveFrom: { streamId: "stream-e", seq: 1 } }));
     const snap = client.getSnapshot();
     expect(snap.phase).toBe("live");
     expect(snap.events).toHaveLength(0);
@@ -248,7 +254,7 @@ describe("subscribe 三分支与订阅生命周期", () => {
     expect(frames[0]).toEqual({ t: "unsubscribe", requestId: expect.any(String), subscriptionId });
     expect(frames[1]).toEqual({ t: "subscribe", requestId: expect.any(String), file: "a.jsonl" });
     const newRequestId = (frames[1] as { requestId: string }).requestId;
-    ws.receive(pageFrame({ requestId: newRequestId, subscriptionId: "sub-2", page: [msg(9)], historyNext: null, liveFrom: { streamId: "stream-1", seq: 10 } }));
+    ws.receive(pageFrame({ requestId: newRequestId, subscriptionId: "sub-2", barrier: 9, page: [msg(9)], historyNext: null, liveFrom: { streamId: "stream-1", seq: 10 } }));
     const snap = client.getSnapshot();
     expect(snap.subscriptionId).toBe("sub-2");
     expect(snap.events.map((e) => e.seq)).toEqual([9]); // 新订阅=新快照（旧事件不残留）
@@ -377,7 +383,11 @@ describe("订阅终局语义", () => {
     expect(client.getSnapshot().phase).toBe("subscribing");
   });
 
-  it("末页 60s 宽限后重试收 4409：置 resync-needed（events+cursor 不重建）；再续读按末页 cursor 收增量页——原事件保留、seq 幂等吸收重放", () => {
+  // C1 口径收窄：本轨迹=重同步（cursor 路径）请求收 4409 后可手动再试——不是快照续页 60s 宽限的验证。
+  // 契约的末页 60s 宽限（末页已发后网络重试尾页、宽限内幂等重发/超限后重试收 4409）路径未在前端测试覆盖：
+  // 客户端成功收完末页后没有重发尾页的公共入口（无自动重试承诺），无法以现有公共 API 构造该轨迹；
+  // 服务端宽限语义由后端线验证。
+  it("重同步（cursor）请求收 4409：置 resync-needed（events+cursor 不重建）；再手动续读按末页 cursor 收增量页——原事件保留、seq 幂等吸收重放（快照续页 60s 宽限路径未验）", () => {
     const { client, ws, subscriptionId } = livePhase();
     ws.receive({ t: "resync-required", subscriptionId, reason: "server-side-gap" });
     client.resyncFromCursor(); // 用户显式续读（宽限已过）
@@ -395,6 +405,7 @@ describe("订阅终局语义", () => {
       pageFrame({
         requestId: retryRequestId,
         subscriptionId: "sub-3",
+        barrier: 4,
         page: [msg(2), msg(4)], // 重放 2 + 增量 4：幂等吸收
         historyNext: null,
         liveFrom: { streamId: "stream-1", seq: 5 },
@@ -444,7 +455,7 @@ describe("R1 消费帧运行时校验（坏帧零副作用：不污染快照/不
     client.subscribeSession("a.jsonl");
     const requestId = (ws.sentFrames()[1] as { requestId: string }).requestId;
     const before = client.getSnapshot();
-    ws.receive(pageFrame({ requestId, page: [msg(1), null as unknown as HistoryEvent], historyNext: null, liveFrom: { streamId: "stream-1", seq: 2 } }));
+    ws.receive(pageFrame({ requestId, barrier: 1, page: [msg(1), null as unknown as HistoryEvent], historyNext: null, liveFrom: { streamId: "stream-1", seq: 2 } }));
     expect(client.getSnapshot()).toBe(before); // 零副作用（身份不变）
     expect(client.getSnapshot().phase).toBe("subscribing"); // 在途未被坏帧消耗
     ws.receive(pageFrame({ requestId, page: [msg(1)], historyNext: null, liveFrom: { streamId: "stream-1", seq: 2 } }));
@@ -513,14 +524,14 @@ describe("R1 消费帧运行时校验（坏帧零副作用：不污染快照/不
     ws.receive({ t: "error", code: 4402, requestId, message: "x" });
     expect(client.getSnapshot()).toBe(before);
     expect(before.connState).toBe("ready");
-    ws.receive(pageFrame({ requestId, page: [msg(1)], historyNext: null, liveFrom: { streamId: "stream-1", seq: 2 } }));
+    ws.receive(pageFrame({ requestId, barrier: 1, page: [msg(1)], historyNext: null, liveFrom: { streamId: "stream-1", seq: 2 } }));
     expect(client.getSnapshot().phase).toBe("live"); // 合法帧照常受理
   });
 
   it("requestId 不符的 snapshot（迟到页/无关请求）与非活动 subscriptionId 的 events：忽略；合法帧落地", () => {
     const { client, ws, initRequestId, subscriptionId } = livePhase();
     const before = client.getSnapshot();
-    ws.receive(pageFrame({ requestId: initRequestId, subscriptionId: "sub-late", page: [msg(9)], historyNext: null, liveFrom: { streamId: "stream-1", seq: 10 } }));
+    ws.receive(pageFrame({ requestId: initRequestId, subscriptionId: "sub-late", barrier: 9, page: [msg(9)], historyNext: null, liveFrom: { streamId: "stream-1", seq: 10 } }));
     ws.receive(historyEvents("sub-ghost", 4, [msg(4)]));
     ws.receive(liveEvents("sub-ghost", 1, [liveProgress()]));
     expect(client.getSnapshot()).toBe(before);
@@ -607,5 +618,192 @@ describe("R3 close 停止屏障与连接级错误", () => {
     ws.receive(historyEvents(subscriptionId, 4, [msg(4)]));
     expect(client.getSnapshot()).toBe(frozen);
     expect(ws.sentFrames().length).toBeLessThanOrEqual(3); // 无重连帧
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("B2 首页在途取消：留痕补退订（迟到首页绝不写快照、绝不清当前 file 订阅）", () => {
+  it("首包前退订/卸载：在途初始化留痕——迟到首页只触发补发 unsubscribe（订阅 id 由首页识别），快照零污染；其后该订阅帧零受理", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    client.subscribeSession("a.jsonl");
+    const initRequestId = (ws.sentFrames()[1] as { requestId: string }).requestId;
+    client.unsubscribeSession(); // 首包前退订（无活动订阅：此刻无退订帧可发）
+    expect((ws.sentFrames().at(-1) as { t: string }).t).toBe("subscribe"); // 仍只有 hello+subscribe
+    // 迟到首页：仅识别订阅并补发退订——不写当前快照
+    ws.receive(
+      pageFrame({
+        requestId: initRequestId,
+        subscriptionId: "sub-late",
+        streamId: "stream-1",
+        barrier: 1,
+        page: [msg(1)],
+        historyNext: null,
+        liveFrom: { streamId: "stream-1", seq: 2 },
+      }),
+    );
+    const snap = client.getSnapshot();
+    expect(snap.phase).toBe("idle"); // 未被迟到页改写
+    expect(snap.events).toHaveLength(0);
+    expect(snap.subscriptionId).toBeNull();
+    expect(snap.cursor).toBeNull();
+    expect(ws.sentFrames().at(-1)).toEqual({ t: "unsubscribe", requestId: expect.any(String), subscriptionId: "sub-late" });
+    const frozen = client.getSnapshot();
+    ws.receive(historyEvents("sub-late", 2, [msg(2)]));
+    ws.receive(liveEvents("sub-late", 1, [liveProgress()]));
+    ws.receive({ t: "status", subscriptionId: "sub-late", status: STATUS });
+    expect(client.getSnapshot()).toBe(frozen); // 补退订后：该订阅全部帧零副作用
+  });
+
+  it("A→B→A 往返：A/B 各自迟到首页只补退订各自订阅；二次 A 首页正常落地且当前 file 订阅续流不受影响", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    client.subscribeSession("a.jsonl"); // init-1 在途
+    client.subscribeSession("b.jsonl"); // init-2 在途（init-1 作废留痕）
+    client.subscribeSession("a.jsonl"); // init-3 在途（init-2 作废留痕）
+    const [initA1, initB, initA2] = (ws.sentFrames().slice(1) as { requestId: string }[]).map((f) => f.requestId);
+    const beforeLate = client.getSnapshot();
+    expect(beforeLate.file).toBe("a.jsonl");
+    expect(beforeLate.events).toHaveLength(0);
+    // A 首页迟到（init-1 → sub-a1）：只退订 sub-a1
+    ws.receive(
+      pageFrame({ requestId: initA1, subscriptionId: "sub-a1", streamId: "stream-a", barrier: 1, page: [msg(1)], historyNext: null, liveFrom: { streamId: "stream-a", seq: 2 } }),
+    );
+    expect(ws.sentFrames().at(-1)).toEqual({ t: "unsubscribe", requestId: expect.any(String), subscriptionId: "sub-a1" });
+    expect(client.getSnapshot().file).toBe("a.jsonl");
+    expect(client.getSnapshot().events).toHaveLength(0); // 绝不写当前快照
+    expect(client.getSnapshot().phase).toBe("subscribing"); // 当前在途（init-3）绝不被清
+    // B 首页迟到（init-2 → sub-b1）：只退订 sub-b1
+    ws.receive(
+      pageFrame({ requestId: initB, subscriptionId: "sub-b1", streamId: "stream-b", barrier: 7, page: [msg(7)], historyNext: null, liveFrom: { streamId: "stream-b", seq: 8 } }),
+    );
+    expect(ws.sentFrames().at(-1)).toEqual({ t: "unsubscribe", requestId: expect.any(String), subscriptionId: "sub-b1" });
+    // 二次 A 首页（init-3 → sub-a2）：正常落地
+    ws.receive(
+      pageFrame({ requestId: initA2, subscriptionId: "sub-a2", streamId: "stream-a", barrier: 1, page: [msg(1)], historyNext: null, liveFrom: { streamId: "stream-a", seq: 2 } }),
+    );
+    const snap = client.getSnapshot();
+    expect(snap.phase).toBe("live");
+    expect(snap.subscriptionId).toBe("sub-a2");
+    expect(snap.events.map((e) => e.seq)).toEqual([1]);
+    expect(snap.cursor).toEqual({ streamId: "stream-a", seq: 2 }); // 当前订阅游标未被迟到清理污染
+    ws.receive(historyEvents("sub-a2", 2, [msg(2)])); // 当前流续读不受影响（绝不清当前 file 订阅）
+    expect(client.getSnapshot().events.map((e) => e.seq)).toEqual([1, 2]);
+  });
+
+  it("failSubscribe 残留：本地终局的活动订阅补发退订帧（不再仅本地退役）；本地拒绝丢弃的建订在途同样留痕补退订", () => {
+    // ① 活动订阅 + 非法文件名调用：退订帧必须发出
+    const live = livePhase();
+    live.client.subscribeSession("../etc/passwd");
+    expect(live.ws.sentFrames().at(-1)).toEqual({ t: "unsubscribe", requestId: expect.any(String), subscriptionId: live.subscriptionId });
+    // ② 建订在途 + 非法文件名调用：在途留痕，迟到首页补退订且不落快照
+    const { client, ws } = setup();
+    handshake(ws);
+    client.subscribeSession("a.jsonl");
+    const initRequestId = (ws.sentFrames()[1] as { requestId: string }).requestId;
+    client.subscribeSession("../bad"); // 本地拒绝：目标 file 不变，订阅终局
+    expect(client.getSnapshot().errorKind).toBe("subscribe-failed");
+    ws.receive(
+      pageFrame({ requestId: initRequestId, subscriptionId: "sub-x", streamId: "stream-1", barrier: 1, page: [msg(1)], historyNext: null, liveFrom: { streamId: "stream-1", seq: 2 } }),
+    );
+    expect(ws.sentFrames().at(-1)).toEqual({ t: "unsubscribe", requestId: expect.any(String), subscriptionId: "sub-x" });
+    const snap = client.getSnapshot();
+    expect(snap.phase).toBe("closed"); // 迟到首页未改写终局
+    expect(snap.events).toHaveLength(0); // 未写入事件
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("C2 跨字段/续页实例绑定一致性（矛盾帧拒绝后可恢复续读）", () => {
+  it("hasMore 与末页不变量矛盾（末页却 hasMore=true / 非末页却 hasMore=false）：整帧拒绝零消费；同 requestId 一致帧恢复续读", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    client.subscribeSession("a.jsonl");
+    const requestId = (ws.sentFrames()[1] as { requestId: string }).requestId;
+    const before = client.getSnapshot();
+    // 末页（historyNext=null+liveFrom）却 hasMore=true
+    ws.receive(pageFrame({ requestId, barrier: 1, page: [msg(1)], historyNext: null, liveFrom: { streamId: "stream-1", seq: 2 }, hasMore: true }));
+    // 非末页（historyNext 非空）却 hasMore=false
+    ws.receive(pageFrame({ requestId, barrier: 1, page: [msg(1)], historyNext: { streamId: "stream-1", seq: 2 }, liveFrom: null, hasMore: false }));
+    expect(client.getSnapshot()).toBe(before); // 两矛盾帧均拒绝：在途未被消费
+    expect(client.getSnapshot().cursor).toBeNull(); // 矛盾帧游标不得成为下一游标
+    ws.receive(pageFrame({ requestId, barrier: 1, page: [msg(1)], historyNext: { streamId: "stream-1", seq: 2 }, liveFrom: null, hasMore: true })); // 一致首页
+    expect(client.getSnapshot().phase).toBe("paging");
+    expect(client.getSnapshot().cursor).toEqual({ streamId: "stream-1", seq: 2 });
+  });
+
+  it("跨流游标（historyNext.streamId ≠ frame.streamId）：整帧拒绝，不得成为下一游标；本流一致帧恢复续读", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    client.subscribeSession("a.jsonl");
+    const requestId = (ws.sentFrames()[1] as { requestId: string }).requestId;
+    const before = client.getSnapshot();
+    ws.receive(pageFrame({ requestId, streamId: "stream-1", barrier: 1, page: [msg(1)], historyNext: { streamId: "stream-other", seq: 2 } })); // 跨流游标
+    expect(client.getSnapshot()).toBe(before);
+    expect(client.getSnapshot().cursor).toBeNull();
+    ws.receive(pageFrame({ requestId, streamId: "stream-1", barrier: 1, page: [msg(1)], historyNext: { streamId: "stream-1", seq: 2 } })); // 本流一致帧
+    expect(client.getSnapshot().phase).toBe("paging");
+    expect(ws.sentFrames()[2]).toMatchObject({ t: "subscribe", snapshotId: "snap-1", historyNext: { streamId: "stream-1", seq: 2 } }); // 下一游标=本流值
+  });
+
+  it("续页实例绑定：snapshotId/streamId/barrier/subscriptionId 与当前快照实例不符的续页帧拒绝（不消费在途）；绑定一致帧恢复续读到末页", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    client.subscribeSession("a.jsonl");
+    const initRequestId = (ws.sentFrames()[1] as { requestId: string }).requestId;
+    ws.receive(pageFrame({ requestId: initRequestId, barrier: 3, page: [msg(1)], historyNext: { streamId: "stream-1", seq: 2 } }));
+    const pageRequestId = (ws.sentFrames()[2] as { requestId: string }).requestId;
+    const paging = client.getSnapshot();
+    // 绑定不一致四连：snapshotId / streamId / barrier / subscriptionId 各错一档
+    ws.receive(pageFrame({ requestId: pageRequestId, snapshotId: "snap-other", barrier: 3, page: [msg(2)], historyNext: null, liveFrom: { streamId: "stream-1", seq: 4 } }));
+    ws.receive(pageFrame({ requestId: pageRequestId, streamId: "stream-x", barrier: 3, page: [msg(2)], historyNext: null, liveFrom: { streamId: "stream-x", seq: 4 } }));
+    ws.receive(pageFrame({ requestId: pageRequestId, barrier: 9, page: [msg(2)], historyNext: null, liveFrom: { streamId: "stream-1", seq: 4 } }));
+    ws.receive(pageFrame({ requestId: pageRequestId, subscriptionId: "sub-2", barrier: 3, page: [msg(2)], historyNext: null, liveFrom: { streamId: "stream-1", seq: 4 } }));
+    expect(client.getSnapshot()).toBe(paging); // 全部拒绝：相位/游标/在途不变
+    expect(ws.sentFrames().length).toBe(3); // 未发新帧（在途未被消费也未重发）
+    // 绑定一致的续页（同 requestId 重发）恢复：
+    ws.receive(pageFrame({ requestId: pageRequestId, barrier: 3, page: [msg(2), msg(3)], historyNext: null, liveFrom: { streamId: "stream-1", seq: 4 } }));
+    const done = client.getSnapshot();
+    expect(done.phase).toBe("live");
+    expect(done.events.map((e) => e.seq)).toEqual([1, 2, 3]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("C5 连接级错误映射（ready 后无 requestId 的连接级码）", () => {
+  it("4432/4403 无 requestId：进 failConn——connState=error、transport、受控文案含码（4432 心跳原因不丢）；内容保留、其后帧零受理", () => {
+    const { client, ws, subscriptionId } = livePhase();
+    const eventsBefore = client.getSnapshot().events;
+    ws.receive({ t: "error", code: 4432, message: "heartbeat dead", retryable: false });
+    let snap = client.getSnapshot();
+    expect(snap.connState).toBe("error");
+    expect(snap.errorKind).toBe("transport");
+    expect(snap.errorMessage).toContain("4432"); // 原因（心跳超时）以受控文案保留
+    expect(snap.events).toBe(eventsBefore); // 内容保留
+    const frozen = client.getSnapshot();
+    ws.receive(liveEvents(subscriptionId, 2, [liveProgress()])); // 连接级失败后帧零受理
+    expect(client.getSnapshot()).toBe(frozen);
+    const again = livePhase();
+    again.ws.receive({ t: "error", code: 4403, message: "version", retryable: false });
+    snap = again.client.getSnapshot();
+    expect(snap.connState).toBe("error");
+    expect(snap.errorKind).toBe("transport");
+    expect(snap.errorMessage).toContain("4403");
+  });
+
+  it("边界：4413/4429 无 requestId 不升级连接级（请求级码无关联时忽略）；4431 带 subscriptionId 的订阅级分支语义不变", () => {
+    const { client, ws, subscriptionId } = livePhase();
+    const before = client.getSnapshot();
+    ws.receive({ t: "error", code: 4413, message: "x", retryable: false });
+    ws.receive({ t: "error", code: 4429, message: "x", retryable: false });
+    expect(client.getSnapshot()).toBe(before); // 请求级码无关联时不升级为连接级
+    ws.receive({ t: "error", code: 4431, subscriptionId: "sub-ghost", message: "x", retryable: false });
+    expect(client.getSnapshot()).toBe(before); // 非活动订阅 4431 忽略（既有语义）
+    ws.receive({ t: "error", code: 4431, subscriptionId, message: "预算", retryable: false });
+    expect(client.getSnapshot().errorKind).toBe("stream-terminal"); // 活动订阅 4431=订阅级终局
+    expect(client.getSnapshot().connState).toBe("ready"); // 连接保持（既有语义不变）
   });
 });

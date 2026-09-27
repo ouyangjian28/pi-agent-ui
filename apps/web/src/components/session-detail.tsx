@@ -1,7 +1,8 @@
 // A1b 会话详情组件：只读流消费面——历史分页加载+直播追加+四空态（loading/empty/error/auth-failed）
-// + 流终局态（resync-needed/unsubscribed/closed）。纯文本渲染：textPreview.text 只作 React 文本节点，
+// + 流终局态（resync-needed/unsubscribed/stopped/closed）。纯文本渲染：textPreview.text 只作 React 文本节点，
 // 无 innerHTML/dangerouslySetInnerHTML。只读面：唯一动作=4409 终局后的用户显式「续读」（resyncFromCursor，
-// subscribe 家族读帧）；无任何写操作入口（prompt/stop 不在本面）。
+// subscribe 家族读帧）；无任何写操作入口（prompt/stop 不在本面）。C4：stopped 终局诚实标注恢复入口=
+// 上层重选文件（当前版本无重建按钮，不做自动重发/自动重订）。
 
 import React from "react";
 import { useSessionDetail } from "../ws/use-session-detail";
@@ -128,6 +129,10 @@ export function SessionDetail({ client, file }: { client: SubscribeClientSurface
               <button type="button" onClick={() => client.resyncFromCursor()}>
                 继续读取
               </button>
+            </>
+          ) : view.status === "stopped" ? (
+            <>
+              {" "}内容已冻结（终局）——当前版本无重建按钮；如需继续读取，请重新选择会话文件。
             </>
           ) : null}
         </p>

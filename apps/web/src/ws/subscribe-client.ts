@@ -10,7 +10,13 @@
 //   （快照分页的自动续页属订阅协议本体 §3.7 时序 1，非重连）；
 // ⑤同 file 至多一个活动订阅：subscribeSession 显式退旧（退订帧+本地退役，旧流帧一律按 subscriptionId 忽略）；
 // ⑥cursor 严格透传服务端值（页 historyNext/末页 liveFrom 原样回传续用，不重算序号）；
-// ⑦close()=不可逆停止屏障（任何状态可关、迟到回调零副作用、幂等；closed=终态，无自动重连）。
+// ⑦close()=不可逆停止屏障（任何状态可关、迟到回调零副作用、幂等；closed=终态，无自动重连）；
+// ⑧首页在途取消留痕（B2）：被取消/作废的初始化·重同步建订请求记入 canceledInits——其迟到首页只用于识别
+//   服务端已建立的订阅并补发 unsubscribe（绝不写当前快照、绝不清当前 file 订阅）；本地终局的活动订阅补发退订帧；
+// ⑨续页实例绑定与跨字段一致性（C2）：page 类续页帧的 subscriptionId/snapshotId/streamId/barrier 必须与当前
+//   快照实例一致；hasMore⟺historyNext、页游标 streamId 必须绑本帧流——矛盾帧整帧拒绝（零消费，合法帧可恢复续读）；
+// ⑩ready 后无 requestId 的连接级错误码（4403/4405/4432/无订阅域 4431）进连接级失败映射（C5；受控文案按 code，
+//   4432 心跳原因不丢）；4413/4429 契约定为请求级，无关联时不升级为连接级。
 
 // 同 ws-client：绕开 barrel 直引自包含 contracts 模块（浏览器安全、零 Node 依赖）。
 // LIMITS 为值导入（filePattern/idPattern 冻结源，避免本地复制漂移；contracts.ts 无副作用可入浏览器包）。
@@ -137,7 +143,9 @@ function isBoolean(v: unknown): v is boolean {
 function isNonNegativeNumber(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v) && v >= 0;
 }
-/** 传输 ID 域（idPattern 等价：非空≤128，字符不收紧——形状校验只防类型错认，不复制白名单语义）。 */
+/** 传输 ID 域（idPattern 等价：非空≤128，字符不收紧——形状校验只防类型错认，不复制白名单语义）。
+ * 口径记录（C2）：本层上限=128（与 LIMITS.idPattern 同源）；契约文档对传输 stream/subscription 域为 64。
+ * 此处不做域长分立收紧（形状校验不复制白名单语义），精确域由服务端 4404 校验把关。 */
 function isTransportId(v: unknown): v is string {
   return isString(v) && v.length > 0 && v.length <= 128;
 }
@@ -346,6 +354,10 @@ function asSnapshotFrame(v: Record<string, unknown>): SnapshotServerFrame | null
   // 末页不变量：historyNext 与 liveFrom 互斥同现（§3.6：historyNext=null ⟺ 末页；空流 H=0 也有 liveFrom={s,1}）
   if (historyNext === null && liveFrom === null) return null;
   if (historyNext !== null && liveFrom !== null) return null;
+  // C2 跨字段一致性：hasMore ⟺ historyNext 非空（矛盾帧整帧拒绝）；页游标必须属于本帧流（跨流游标拒绝）。
+  if (v.hasMore !== (historyNext !== null)) return null;
+  if (historyNext !== null && historyNext.streamId !== v.streamId) return null;
+  if (liveFrom !== null && liveFrom.streamId !== v.streamId) return null;
   return {
     t: "snapshot",
     requestId: v.requestId,
@@ -443,10 +455,17 @@ export class SubscribeClient {
   private activeSub: SubscriptionId | null = null;
   /** 已退役订阅（同 file 新订阅替换/退订/终局后）：其帧一律忽略——旧流不得再进快照。 */
   private readonly retiredSubs = new Set<SubscriptionId>();
-  /** history 幂等去重（seq 域；重发页/重放帧吸收）。 */
+  /** history 幂等去重（seq 域；重发页/重放帧吸收）。只去重、不检测缺号——不校验 refSeq/seq 连续性；
+   * 连续性依赖服务端每订阅有序队列（§3.6 出帧串行化），这是当前边界，不宣称已实现缺口检测。 */
   private readonly seenSeqs = new Set<number>();
-  /** live 幂等去重（帧级 liveSeq；≤last 即重复帧）。 */
+  /** live 幂等去重：liveSeq=服务端按批内事件数推进的批末序号（liveBatch.length，非「帧号+1」）；
+   * ≤last 视为重复/回退帧吸收——同样不据此做缺口检测。 */
   private lastLiveSeq: number | null = null;
+  /** B2 已取消建订请求（init/resync）关联记录：其迟到首页只用于识别服务端已建立的订阅并补发 unsubscribe。
+   * 上限 32 条 FIFO（防长期翻动 file 无界增长；续页请求不新建服务端订阅，不入此表）。 */
+  private readonly canceledInits = new Map<string, true>();
+  /** C2 当前快照实例绑定（首页落地时建立；退订/终局/换订即清）：续页帧四元组一致性校验基准。 */
+  private pageBinding: { readonly snapshotId: string; readonly streamId: string; readonly barrier: number } | null = null;
 
   constructor(
     private readonly url: string,
@@ -493,7 +512,7 @@ export class SubscribeClient {
     }
     // 显式退旧：活动订阅先发退订帧（§3.6 c5 B01：新 subscribe 先退旧）；本地退役使旧流帧此后一律忽略
     this.retireActiveSubscription(true);
-    this.inflight = null; // 作废在途请求（其迟到回包因 requestId 不符被忽略）
+    this.cancelInitRequest(); // B2：被作废的建订在途留痕——迟到首页用于识别并补发退订（不写当前快照）
     this.seenSeqs.clear();
     this.lastLiveSeq = null;
     this.queuedFile = file;
@@ -525,6 +544,7 @@ export class SubscribeClient {
     const cursor = this.snapshot.cursor;
     if (file === null || cursor === null) return;
     this.retireActiveSubscription(false);
+    this.cancelInitRequest(); // B2：此处正常无在途（终局态已清），防御性留痕
     this.lastLiveSeq = null;
     const requestId = this.newRequestId("sub");
     this.inflight = { requestId, kind: "resync" };
@@ -536,7 +556,7 @@ export class SubscribeClient {
   unsubscribeSession(): void {
     if (this.stopped) return;
     this.queuedFile = null;
-    this.inflight = null;
+    this.cancelInitRequest(); // B2：首包前退订——建订在途留痕，迟到首页只补退订不落快照
     this.retireActiveSubscription(true);
     this.transition({ phase: "idle", cursor: null, streamNote: null, errorKind: null, errorMessage: null });
   }
@@ -550,6 +570,7 @@ export class SubscribeClient {
     this.stopped = true;
     this.inflight = null;
     this.queuedFile = null;
+    this.canceledInits.clear(); // 终态：连接关闭即服务端释放订阅，无需留痕
     if (this.snapshot.connState !== "closed" && this.snapshot.connState !== "error") {
       this.transition({ connState: "closed" });
     }
@@ -588,9 +609,23 @@ export class SubscribeClient {
     if (sub === null) return;
     this.retiredSubs.add(sub);
     this.activeSub = null;
+    this.pageBinding = null; // 实例绑定随订阅退役作废
     if (sendUnsubscribe) {
       this.sendFrame({ t: "unsubscribe", requestId: this.newRequestId("unsub"), subscriptionId: sub });
     }
+  }
+
+  /** B2：作废在途建订请求并留痕（init/resync 迟到首页→识别服务端已建订阅并补发 unsubscribe；page 类不留痕——
+   *  续页不新建服务端订阅，清理由活动订阅退订路径负责）。表上限 32 条 FIFO 防无界增长。 */
+  private cancelInitRequest(): void {
+    const inflight = this.inflight;
+    this.inflight = null;
+    if (inflight === null || inflight.kind === "page") return;
+    if (this.canceledInits.size >= 32) {
+      const oldest = this.canceledInits.keys().next().value;
+      if (oldest !== undefined) this.canceledInits.delete(oldest);
+    }
+    this.canceledInits.set(inflight.requestId, true);
   }
 
   /** 发出初始化订阅（排队文件出队或 ready 后直发共用）。 */
@@ -643,6 +678,7 @@ export class SubscribeClient {
         const frame = asStatusFrame(parsed);
         if (frame === null) return; // R1：畸形整帧忽略
         if (this.activeSub === null || frame.subscriptionId !== this.activeSub) return;
+        // 注：statusVersion 回退帧当前不拒绝（无版本门）——有序传输前提下的已知边界，不宣称已防乱序。
         this.transition({ status: frame.status });
         return;
       }
@@ -661,10 +697,31 @@ export class SubscribeClient {
   private onSnapshot(v: Record<string, unknown>): void {
     const frame = asSnapshotFrame(v);
     if (frame === null) return; // R1：坏帧零副作用——不污染快照、不消费在途请求，可续收合法帧
+    if (this.canceledInits.delete(frame.requestId)) {
+      // B2 已取消建订请求的迟到首页：服务端已建立该订阅——仅识别+补发退订；不写当前快照、
+      // 不清当前在途/活动订阅/实例绑定（迟到页先过 R1 形状门：畸形迟到页仍按未知帧零副作用处理）。
+      this.retiredSubs.add(frame.subscriptionId);
+      this.sendFrame({ t: "unsubscribe", requestId: this.newRequestId("unsub"), subscriptionId: frame.subscriptionId });
+      return;
+    }
     const inflight = this.inflight;
     if (inflight === null || frame.requestId !== inflight.requestId) return; // 迟到页/无关请求忽略
+    if (inflight.kind === "page") {
+      // C2 续页实例绑定：subscriptionId/snapshotId/streamId/barrier 必须与当前快照实例一致——
+      // 不一致整帧拒绝（不消费在途；绑定一致的续页/重发仍可续读）。
+      const binding = this.pageBinding;
+      if (
+        binding === null || this.activeSub === null || frame.subscriptionId !== this.activeSub ||
+        frame.snapshotId !== binding.snapshotId || frame.streamId !== binding.streamId || frame.barrier !== binding.barrier
+      ) {
+        return;
+      }
+    }
     this.inflight = null;
     this.activeSub = frame.subscriptionId;
+    if (inflight.kind !== "page") {
+      this.pageBinding = { snapshotId: frame.snapshotId, streamId: frame.streamId, barrier: frame.barrier };
+    }
     // 页追加（seq 幂等）：重发页/重放由 seenSeqs 吸收
     const events = [...this.snapshot.events];
     for (const ev of frame.page) {
@@ -717,7 +774,7 @@ export class SubscribeClient {
       const frame = asLiveEventsFrame(v);
       if (frame === null) return;
       if (frame.subscriptionId !== this.activeSub) return;
-      if (this.lastLiveSeq !== null && frame.liveSeq <= this.lastLiveSeq) return; // 帧号幂等：重复 live 帧忽略
+      if (this.lastLiveSeq !== null && frame.liveSeq <= this.lastLiveSeq) return; // liveSeq 幂等（批末序≤last 即重复/回退帧；不做缺口检测）
       this.lastLiveSeq = frame.liveSeq;
       if (frame.events.length > 0) this.transition({ liveEvents: [...this.snapshot.liveEvents, ...frame.events] });
       return;
@@ -733,6 +790,7 @@ export class SubscribeClient {
       // 活动订阅被新订阅替换（本客户端发起的替换已先行退役——此为服务端迟到通知或外部替换）
       this.retiredSubs.add(frame.subscriptionId);
       this.activeSub = null;
+      this.pageBinding = null;
       this.inflight = null;
       this.transition({ phase: "closed", subscriptionId: null, streamNote: "订阅已被新订阅替换，旧流已停止" });
       return;
@@ -759,6 +817,7 @@ export class SubscribeClient {
       if (this.activeSub !== null && frame.subscriptionId === this.activeSub) {
         this.retiredSubs.add(this.activeSub);
         this.activeSub = null;
+        this.pageBinding = null;
         this.inflight = null;
         this.transition({ phase: "closed", errorKind: "stream-terminal", errorMessage: controlledErrorText(4431) });
       }
@@ -768,8 +827,9 @@ export class SubscribeClient {
     if (inflight !== null && frame.requestId === inflight.requestId) {
       this.inflight = null;
       if (frame.code === 4409 && (inflight.kind === "page" || inflight.kind === "resync") && this.snapshot.cursor !== null) {
-        // 末页 60s 宽限后重试收 4409（快照资源已释放，streamId 仍有效）：按末页 cursor 续读不重建——
-        // 置 resync-needed 保留 events+cursor，等待用户显式续读（无自动重发）
+        // 续页/重同步请求收 4409（契约场景之一=末页 60s 宽限失效后的尾页重试：快照资源已释放、streamId 仍有效）：
+        // 置 resync-needed 保留 events+cursor，等待用户显式续读（无自动重发）。注（C1 口径）：快照续页 60s 宽限的
+        // 真实轨迹未在前端测试验证（客户端无尾页重试公共入口）；已验路径=重同步 cursor 请求收 4409 后可手动再试。
         this.transition({ phase: "resync-needed", streamNote: controlledErrorText(4409) });
         return;
       }
@@ -777,7 +837,17 @@ export class SubscribeClient {
       this.failSubscribe(controlledErrorText(frame.code));
       return;
     }
-    // 无关联请求/订阅的 error 帧安全忽略
+    // C5：ready 后无 requestId 关联的连接级错误码进连接级失败映射（受控文案按 code——4432 心跳原因不丢）。
+    // 边界：4413/4429 契约定为请求级，无关联时不升级为连接级；4431 带 subscriptionId 的既有分支语义不变（B1 批另行接线）。
+    if (
+      frame.requestId === undefined &&
+      (frame.code === 4403 || frame.code === 4405 || frame.code === 4432 ||
+        (frame.code === 4431 && frame.subscriptionId === undefined))
+    ) {
+      this.failConn("transport", controlledErrorText(frame.code));
+      return;
+    }
+    // 其余无关联请求/订阅的 error 帧安全忽略
   }
 
   private onClose(code: number): void {
@@ -788,6 +858,8 @@ export class SubscribeClient {
       this.failConn("auth-failed", "认证失败（连接被 1008 关闭）");
       return;
     }
+    this.inflight = null; // C5：与 failConn 归一——连接终态清在途/排队，迟到回包不再有归属
+    this.queuedFile = null;
     this.transition({ connState: "closed" }); // 连接终态；无自动重连
   }
 
@@ -798,10 +870,11 @@ export class SubscribeClient {
     this.transition({ connState: "error", errorKind, errorMessage });
   }
 
-  /** 订阅请求失败出口：不作废连接（连接与其余订阅面保持），订阅相位终局+受控文案。 */
+  /** 订阅请求失败出口：不作废连接（连接与其余订阅面保持），订阅相位终局+受控文案。
+   * B2：被丢弃的建订在途留痕（迟到首页→补退订）；本地终局的活动订阅补发退订帧（服务端资源不残留）。 */
   private failSubscribe(errorMessage: string): void {
-    this.retireActiveSubscription(false);
-    this.inflight = null;
+    this.cancelInitRequest();
+    this.retireActiveSubscription(true);
     this.transition({ phase: "closed", errorKind: "subscribe-failed", errorMessage, streamNote: null });
   }
 
