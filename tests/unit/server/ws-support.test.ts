@@ -495,6 +495,25 @@ describe("ws-support w1 修复面（W1-03/09/12）", () => {
   });
 });
 
+describe("R2-B2：适配器 trustedProxies 快照冻结", () => {
+  it("构造后 push 原数组→适配器快照不含热插项且冻结（XFF/XFP 永不被热插源采信）", async () => {
+    const { createServer } = await import("node:http");
+    const { WsServerAdapter } = await import("../../../apps/server/src/ws/ws-transport.js");
+    const proxies: string[] = [];
+    const srv = createServer();
+    const adapter = new WsServerAdapter({ allowedOrigins: ["http://localhost:4173"], trustedProxies: proxies, server: srv });
+    try {
+      proxies.push("198.51.100.5"); // 调用方保留原数组引用热插
+      const snapshot = (adapter as unknown as { trustedProxies: readonly string[] }).trustedProxies;
+      expect(Array.isArray(snapshot) && Object.isFrozen(snapshot)).toBe(true); // 直绑变体（可热变更）在此失败
+      expect(snapshot.length).toBe(0); // 构造时表为空——不含热插项
+    } finally {
+      await adapter.dispose();
+      srv.close();
+    }
+  });
+});
+
 describe("gatewayMetaFrom（3b-2 clientIp 接线）", () => {
   it("直连元数据全链映射（origin/loopback/tls/clientIp）", () => {
     const m = gatewayMetaFrom({ origin: "http://localhost:5173", loopback: true, tls: false, clientIp: "::1", remoteAddress: "::1", proxied: false });
