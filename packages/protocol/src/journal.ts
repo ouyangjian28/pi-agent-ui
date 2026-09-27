@@ -121,8 +121,8 @@ export function replayIntents(lines: readonly JournalLine[], sessionId: SessionI
     }
     const rec = byId.get((line as { intentId?: IntentId }).intentId ?? "");
     if (!rec) continue;
-    // repair 行（P0-1a）无 intentId：上面取 undefined→?? ""→无 rec→已跳过。此显式 case 仅为可读。
     switch (line.t) {
+      case "repair": break; // P0-1a：修复留痕行无 intentId，聚合面显式无操作（GPT r1 B6/L1：真实 case，非注释宣称）
       case "sending":
         byId.set(rec.intentId, { ...rec, sending: true });
         break;

@@ -401,7 +401,8 @@ export function buildRecoverReport(lines: readonly JournalLine[], sessionId: Ses
     consumedVerdictIds.add(target);
     unattributed = unattributed.filter((b) => b !== hit);
   }
-  const resumeBlocked = diskBlocked || unattributed.length > 0; // 盘面阻断或仍有未裁决证据→授权阻断（两证分离）
+  const repairShadow = repairLog.length > 0; // P0-1a GPT r1 B1：物理修复≠裁决——被移除尾段里的效果证据不可再派生，repair 行在场即保守阻断重发授权（待 P0-1b 裁决行显式解锁，授权不得凭证据缺席升级）
+  const resumeBlocked = diskBlocked || unattributed.length > 0 || repairShadow; // 盘面阻断、未裁决证据、修复阴影任一→授权阻断（两证分离）
   // 派生 unknown（provisional）：残片可靠关联或人工裁决消耗——非耐久终态事实
   const provisionals = new Set<IntentId>(attributed.map((a) => a.id)); // 可靠关联（结构证得）
   for (const id of consumedVerdictIds) provisionals.add(id); // 有效人工裁决

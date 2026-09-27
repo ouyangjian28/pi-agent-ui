@@ -2,24 +2,33 @@
 // 背景（勘察结论）：仓内此前无任何生产 truncate/修复代码路径——撕裂尾修复纯靠宿主手工截尾，
 // 修复事实只在内存快照（withRepair 标记）里活一次重启即灭，且截尾后证据链锚点（len+sha）判
 // concurrent-modification → 文件永久不可再捕获 = 链路死结。本工具把修复变成显式宿主事务：
-//   ① 安全校验：根内解析+O_RDWR|O_NOFOLLOW 同 fd fstat+旧锚前缀哈希复核（锚不匹配=改写面，拒绝动手）；
-//   ② 物理修复：ftruncate(byteStart)+fdatasync → 原位置追加 repair 行（P0-1a 行型：
-//      byteStart/byteEnd/removedSha256/buildId/contractVersion/at）+fdatasync；
-//   ③ 锚点合法转移：锚点 sidecar 重写为修复后盘面 {len,sha}（tmp+rename 原子）——修复行+新锚
-//      同在本次宿主授权内完成，截尾不再是「洗白」而是「有留痕的转移」。
+//   ① 安全校验：根内词法解析+realpath 实根包含门（GPT r1 B3：稳定祖先 symlink 不得越权引入
+//      根外实文件）+O_RDWR|O_NOFOLLOW 同 fd fstat+旧锚前缀哈希复核（锚不匹配=改写面，拒绝动手）；
+//   ② 持久意图先于破坏（GPT r1 B5/P5）：truncate 前先把 repair-pending marker 写入 evidenceDir
+//      （tmp+rename 原子；与锚点同信任域=宿主专属，journal 写者无权触）——崩溃后重试可凭 marker
+//      识别「截断已做/行未补」「行已补/锚未转」两种残局并完成事务，物理修复不再可能无痕回退；
+//   ③ 物理修复：ftruncate(byteStart)+fdatasync → 写循环补 repair 行（bytesWritten 死循环推进，
+//      零进展即抛；GPT r1 B4：单次 write 短写不检查会误报成功+虚构锚）+fdatasync+回读验证；
+//   ④ 锚点合法转移：以回读验证后的盘面字节为准重写锚点（tmp+rename）——修复行+新锚同在本次
+//      宿主授权内完成，截尾不是「洗白」而是「有留痕的转移」。
 // 信任边界（与 B12-1 同哲学）：
-//   - 本工具=宿主侧受信动作（与 migrateLegacyEvidence 同类）；journal 写者（pi 进程）无权触锚点；
-//   - 锚点缺失时不建锚（不做首捕授权——那是 trustFirstCapture/迁移工具的职责面）；
-//   - 崩溃残局（文件已改、锚点未写）→ 默认 fail-closed（aborted:anchor-stale）；仅宿主显式
-//     authorizeStaleAnchorRepair 且旧锚前缀仍可密码学复验（anchor.len ≤ 末条 repair 行 byteStart
-//     且前缀哈希吻合）才补完锚点（reconciled）；锚曾覆盖被移除字节 → 前缀不可复验 → 永拒。
-// 披露（如实，非缺陷）：truncate 与 repair 行写回之间存在崩溃微窗（残局=无行可对账→锚点死结，
-// 需重走迁移/重置仓）——P0-3 writerEpoch 与未来原子段切换再收口；跨进程无锁（Q16 部署前提：
-// 修复期禁写，与 provider serialize 同部署纪律）。读面认行（recover/projection）不依赖本工具存在。
+//   - 本工具=宿主侧受信动作（与 migrateLegacyEvidence 同类）；journal 写者（pi 进程）无权触
+//     evidenceDir（含 marker 与锚点）；无锚不建锚（首捕授权面不在此）；
+//   - marker 补完仅认「盘面与 marker 事实密码学吻合」的形态（截断形=len==byteStart 且末无行；
+//     已补行形=末行 schema 合法且 byteStart/byteEnd/removedSha256 与 marker 全等），其余
+//     abort=repair-marker-conflict 留宿主调查；锚覆盖被移除字节时 marker 也不得转移锚（前缀
+//     伪造不可排除——journal 写者可改盘面，故锚转移仍要求旧锚前缀可复验，与无 marker 残局同界）；
+//   - 无 marker 的「行已落盘锚未转移」残局仍走 authorizeStaleAnchorRepair 显式授权门
+//     （默认拒绝；GPT r1 B2：识别 repair 行必须过共享 journalLineSchemaError——非法行不得
+//     作为合法修复事务凭证）。
+// 披露（如实，非缺陷）：marker/锚 tmp+rename 不代表掉电耐久（无目录 fsync，沿用 Q13 限制）；
+// 跨进程无锁（Q16 部署前提：修复期禁写，与 provider serialize 同部署纪律）。恢复语义（GPT r1
+// B1）：repair 行存在=物理修复事实，不等于裁决——读面（recover.ts）对含 repairLog 的盘面保守
+// 阻断重发授权，待 P0-1b 裁决行显式解锁。
 import { createHash, randomBytes } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { isAbsolute } from "node:path";
-import { JOURNAL_CONTRACT_VERSION, type RepairLine } from "@pi-agent-ui/protocol";
+import { readFile, realpath } from "node:fs/promises";
+import { isAbsolute, sep } from "node:path";
+import { JOURNAL_CONTRACT_VERSION, journalLineSchemaError, type RepairLine } from "@pi-agent-ui/protocol";
 import { openSafeReadWrite, resolveWithinRoots } from "../ws/safe-open.ts";
 import { SafeOpenError } from "../ws/safe-open.ts";
 import type { FsLike } from "./recovery-evidence-source.ts";
@@ -35,7 +44,7 @@ export interface RepairTailOptions {
   readonly file: string;
   /** journal 授权根（绝对路径；与网关 roots 同源口径）。 */
   readonly roots: readonly string[];
-  /** 证据链 sidecar 目录（绝对路径；与 provider 同目录——锚点转移写入处）。 */
+  /** 证据链 sidecar 目录（绝对路径；与 provider 同目录——marker 与锚点写入处）。 */
   readonly evidenceDir: string;
   /** 宿主构建身份（非空串；入 repair 行）。 */
   readonly buildId: string;
@@ -43,29 +52,37 @@ export interface RepairTailOptions {
   readonly maxBytes?: number;
   readonly now?: () => number;
   readonly audit?: (line: string) => void;
-  /** 锚点原子写接缝（受信宿主边界；默认真 fs/promises tmp+rename）。 */
+  /** 锚点/marker 原子写接缝（受信宿主边界；默认真 fs/promises tmp+rename）。 */
   readonly fsLike?: FsLike;
+  /** 测试接缝：journal 打开器（默认 openSafeReadWrite；GPT r1 B4 短写注入点）。 */
+  readonly openHandle?: (abs: string) => Promise<import("node:fs/promises").FileHandle>;
   /** 测试接缝：读取完成后、复核截断前调用（确定性注入读后竞态——成长/篡改注入点）。 */
   readonly afterRead?: (ctx: { readonly byteStart: number; readonly byteEnd: number }) => Promise<void>;
-  /** 崩溃残局领回授权（默认拒绝）。true=宿主声明「锚点前缀可复验的修复事务补完」——
-   * 密码学可验（旧锚前缀哈希吻合+末条 repair 行对界）才生效，否则仍拒。 */
+  /** 无 marker 残局领回授权（默认拒绝）。true=宿主声明「锚点前缀可复验的修复事务补完」——
+   * 密码学可验（旧锚前缀哈希吻合+末条 repair 行对界且过 schema）才生效，否则仍拒。 */
   readonly authorizeStaleAnchorRepair?: (file: string) => boolean | Promise<boolean>;
 }
 
 export type RepairTailResult =
   | { readonly kind: "repaired"; readonly file: string; readonly byteStart: number; readonly byteEnd: number;
-      readonly removedSha256: string; readonly anchor: { readonly len: number; readonly sha: string }; readonly at: string }
-  | { readonly kind: "reconciled"; readonly file: string; readonly anchor: { readonly len: number; readonly sha: string } }
+      readonly removedSha256: string; readonly anchor: { readonly len: number; readonly sha: string } | null; readonly at: string;
+      readonly via?: "fresh" | "marker-complete" }
+  | { readonly kind: "reconciled"; readonly file: string; readonly anchor: { readonly len: number; readonly sha: string } | null;
+      readonly via?: "marker-reconcile" | "authorized" }
   | { readonly kind: "no-torn-tail"; readonly file: string; readonly size: number }
   | { readonly kind: "oversized"; readonly file: string; readonly size: number; readonly budget: number }
   | { readonly kind: "aborted";
       readonly file: string;
-      readonly reason: "anchor-corrupt" | "anchor-mismatch" | "anchor-stale" | "file-changed";
+      readonly reason: "anchor-corrupt" | "anchor-mismatch" | "anchor-stale" | "file-changed" | "path-escape" | "repair-marker-conflict";
       readonly detail?: string }
   | { readonly kind: "unreadable"; readonly file: string; readonly detail?: string };
 
 /** 侧车锚点形状（与 recovery-evidence-source.ts EvidenceAnchor 同构；此处独立声明避免跨模块私有类型泄漏）。 */
 interface AnchorFile { readonly version: 1; readonly file: string; readonly len: number; readonly sha: string }
+
+/** 修复意图 marker（B5/P5：truncate 前持久化——崩溃后残局可识别可补完）。 */
+interface RepairMarker { readonly version: 1; readonly file: string; readonly byteStart: number; readonly byteEnd: number;
+  readonly removedSha256: string; readonly startedAt: string }
 
 function sha256Hex(buf: Buffer): string {
   return createHash("sha256").update(buf).digest("hex");
@@ -73,6 +90,10 @@ function sha256Hex(buf: Buffer): string {
 
 function anchorPath(evidenceDir: string, file: string): string {
   return `${evidenceDir}/${encodeURIComponent(file)}.evidence.json`;
+}
+
+function markerPath(evidenceDir: string, file: string): string {
+  return `${evidenceDir}/${encodeURIComponent(file)}.repair-pending.json`;
 }
 
 async function loadAnchor(evidenceDir: string, file: string): Promise<AnchorFile | null | "corrupt"> {
@@ -83,12 +104,39 @@ async function loadAnchor(evidenceDir: string, file: string): Promise<AnchorFile
     if ((e as { code?: string }).code === "ENOENT") return null;
     return "corrupt";
   }
+  return parseAnchor(txt, file);
+}
+
+function parseAnchor(txt: string, file: string): AnchorFile | "corrupt" {
   try {
     const p = JSON.parse(txt) as Partial<AnchorFile>;
     if (p !== null && typeof p === "object" && p.version === 1 && p.file === file &&
         typeof p.len === "number" && Number.isInteger(p.len) && p.len >= 0 &&
         typeof p.sha === "string" && /^[0-9a-f]{64}$/.test(p.sha)) {
       return { version: 1, file, len: p.len, sha: p.sha };
+    }
+    return "corrupt";
+  } catch {
+    return "corrupt";
+  }
+}
+
+async function loadMarker(evidenceDir: string, file: string): Promise<RepairMarker | null | "corrupt"> {
+  let txt: string;
+  try {
+    txt = await readFile(markerPath(evidenceDir, file), "utf8");
+  } catch (e) {
+    if ((e as { code?: string }).code === "ENOENT") return null;
+    return "corrupt";
+  }
+  try {
+    const p = JSON.parse(txt) as Partial<RepairMarker>;
+    if (p !== null && typeof p === "object" && p.version === 1 && p.file === file &&
+        typeof p.byteStart === "number" && Number.isInteger(p.byteStart) && p.byteStart >= 0 &&
+        typeof p.byteEnd === "number" && Number.isInteger(p.byteEnd) && p.byteEnd > p.byteStart &&
+        typeof p.removedSha256 === "string" && /^[0-9a-f]{64}$/.test(p.removedSha256) &&
+        typeof p.startedAt === "string" && p.startedAt.length > 0) {
+      return { version: 1, file, byteStart: p.byteStart, byteEnd: p.byteEnd, removedSha256: p.removedSha256, startedAt: p.startedAt };
     }
     return "corrupt";
   } catch {
@@ -111,29 +159,52 @@ function buildRepairRow(opts: { byteStart: number; byteEnd: number; removedSha25
   return Buffer.from(`${JSON.stringify(line)}\n`, "utf8");
 }
 
-/** 解析全文，末条 repair 行事实（offset=行首字节偏移；len=含换行行字节长）。 */
+/** 解析全文，末条 schema 合法 repair 行事实（offset=行首字节偏移；rowLen=含换行行字节长）。
+ * 空行与共享解析器同语义（跳过不中断——GPT r1 P6）；坏行/非法行不认（须过共享 journalLineSchemaError——GPT r1 B2）。 */
 function lastRepairRowFact(raw: Buffer): { row: RepairLine; offset: number; rowLen: number } | null {
   let off = 0;
   let last: { row: RepairLine; offset: number; rowLen: number } | null = null;
   const text = raw.toString("utf8");
-  for (const seg of text.split("\n")) {
-    if (seg === "") break; // 末段（撕裂或空）
+  const segs = text.split("\n");
+  for (let i = 0; i < segs.length; i++) {
+    const seg = segs[i] as string;
+    const isFinal = i === segs.length - 1;
+    if (seg === "") {
+      if (isFinal) break; // 文件末换行后的空段
+      off += 1; // 盘内空行（1 字节）——跳过继续扫（P6：不得截断后续完整行识别）
+      continue;
+    }
     const rowLen = Buffer.byteLength(`${seg}\n`, "utf8");
     if (seg.includes("\"t\":\"repair\"")) {
       try {
-        const p = JSON.parse(seg) as RepairLine;
-        if (p !== null && typeof p === "object" && p.t === "repair") last = { row: p, offset: off, rowLen };
-      } catch { /* 坏行：非末条完整 repair 行不认 */ }
+        const p = JSON.parse(seg) as unknown;
+        if (p !== null && typeof p === "object" && !Array.isArray(p) && (p as { t?: string }).t === "repair" &&
+            journalLineSchemaError(p as Record<string, unknown>) === null) {
+          last = { row: p as RepairLine, offset: off, rowLen };
+        }
+      } catch { /* 非 JSON 行不认 */ }
     }
     off += rowLen;
   }
   return last;
 }
 
+/** 写循环（B4：单次 write 可合法短写——零进展抛、逐段推进直至写满）。 */
+async function writeFull(fh: import("node:fs/promises").FileHandle, buf: Buffer, position: number, file: string): Promise<void> {
+  let written = 0;
+  while (written < buf.byteLength) {
+    const r = await fh.write(buf, written, buf.byteLength - written, position + written);
+    if (r.bytesWritten <= 0) {
+      throw new Error(`repair-tail write-stall file=${file} written=${written}/${buf.byteLength}`);
+    }
+    written += r.bytesWritten;
+  }
+}
+
 /**
- * 宿主显式撕裂尾修复（P0-1a）。幂等：无撕裂尾=no-torn-tail（锚点一致时）；
- * 已完成修复后的重复调用同样走 no-torn-tail。返回 typed 结果；任何 aborted/unreadable 均不动盘面
- * （fail-closed：宁可让文件留在坏态交宿主调查，不半途改写）。
+ * 宿主显式撕裂尾修复（P0-1a）。幂等：无撕裂尾且无 marker=no-torn-tail（锚点一致时）。
+ * 返回 typed 结果；aborted/unreadable 均不动盘面（fail-closed：宁可让文件留在坏态交宿主调查，
+ * 不半途改写）。写途异常（短写停滞/回读不符/锚写失败）上浮抛错——marker 已持久，重试可续。
  */
 export async function repairJournalTail(opts: RepairTailOptions): Promise<RepairTailResult> {
   const audit = opts.audit ?? (() => {});
@@ -142,6 +213,9 @@ export async function repairJournalTail(opts: RepairTailOptions): Promise<Repair
   if (typeof opts.buildId !== "string" || opts.buildId.length === 0) {
     throw new Error("buildId 非法（须非空串）：拒绝修复（行身份不可缺）");
   }
+  if (!Number.isFinite(maxBytes) || maxBytes <= 0) {
+    throw new Error(`maxBytes 非法（须有限正数，实得 ${String(maxBytes)}）：拒绝修复`);
+  }
   if (!isAbsolute(opts.evidenceDir)) throw new Error("evidenceDir 非法（须绝对路径）：拒绝修复");
   if (opts.roots.length === 0 || !opts.roots.every(isAbsolute)) {
     throw new Error("roots 非法（非空且须绝对路径）：拒绝修复");
@@ -149,10 +223,34 @@ export async function repairJournalTail(opts: RepairTailOptions): Promise<Repair
   const jAbs = resolveWithinRoots(opts.file, opts.roots);
   if (jAbs === null) return { kind: "unreadable", file: opts.file, detail: "journal 不在授权根内" };
 
-  let fh: import("node:fs/promises").FileHandle;
-  let size: number;
+  // B3 实根包含门：词法落根不够——稳定祖先 symlink 可把实文件引到根外；realpath 全链解析后
+  // 必须仍落在某授权根的实路径之下（部署前提：祖先目录不可被非信任方替换——此门挡的是
+  // 「预先存在/宿主误配」的越界 symlink，不承诺拦截开窗替换竞态）。
+  let jReal: string;
   try {
-    ({ fh, size } = await openSafeReadWrite(jAbs));
+    jReal = await realpath(jAbs);
+  } catch {
+    audit(`repair-tail-unreadable file=${opts.file} detail=realpath-failed`);
+    return { kind: "unreadable", file: opts.file, detail: "realpath-failed" };
+  }
+  let insideRoots = false;
+  for (const r of opts.roots) {
+    let rReal: string;
+    try {
+      rReal = await realpath(r);
+    } catch { continue; }
+    if (jReal === rReal || jReal.startsWith(rReal + sep)) { insideRoots = true; break; }
+  }
+  if (!insideRoots) {
+    audit(`repair-tail-aborted file=${opts.file} reason=path-escape real=${jReal}`);
+    return { kind: "aborted", file: opts.file, reason: "path-escape", detail: "实路径越出全部授权根（祖先 symlink 越界）" };
+  }
+
+  const openH = opts.openHandle ?? openSafeReadWrite;
+  let fh: import("node:fs/promises").FileHandle;
+  try {
+    const opened = await openH(jAbs) as { fh?: import("node:fs/promises").FileHandle } | import("node:fs/promises").FileHandle;
+    fh = "fh" in opened && opened.fh ? opened.fh : opened as import("node:fs/promises").FileHandle;
   } catch (e) {
     const detail = e instanceof SafeOpenError ? e.kind : "open-failed";
     audit(`repair-tail-unreadable file=${opts.file} detail=${detail}`);
@@ -166,7 +264,7 @@ export async function repairJournalTail(opts: RepairTailOptions): Promise<Repair
       raw = await readBounded(fh, maxBytes, opts.file);
     } catch (e) {
       if (e instanceof SafeOpenError && e.kind === "too-large") {
-        return { kind: "oversized", file: opts.file, size, budget: maxBytes };
+        return { kind: "oversized", file: opts.file, size: (await fh.stat()).size, budget: maxBytes };
       }
       audit(`repair-tail-unreadable file=${opts.file} detail=read-failed`);
       return { kind: "unreadable", file: opts.file, detail: "read-failed" };
@@ -174,18 +272,59 @@ export async function repairJournalTail(opts: RepairTailOptions): Promise<Repair
     const byteEnd = raw.byteLength;
     const byteStart = raw.lastIndexOf(0x0a) + 1; // 无 \n=0（全文件皆撕裂尾）
 
-    // 锚点事实（先载入；无论有无撕裂尾都可能需要它判一致性）
+    // 锚点与 marker 事实（先载入；残局判定要联合两者）
     const anchor = await loadAnchor(opts.evidenceDir, opts.file);
     if (anchor === "corrupt") {
       audit(`repair-tail-aborted file=${opts.file} reason=anchor-corrupt`);
       return { kind: "aborted", file: opts.file, reason: "anchor-corrupt", detail: "锚点 sidecar 损坏=篡改面（fail-closed）" };
     }
+    const marker = await loadMarker(opts.evidenceDir, opts.file);
+    if (marker === "corrupt") {
+      audit(`repair-tail-aborted file=${opts.file} reason=repair-marker-conflict detail=marker-corrupt`);
+      return { kind: "aborted", file: opts.file, reason: "repair-marker-conflict", detail: "repair-pending marker 损坏=篡改面（fail-closed，留宿主调查）" };
+    }
 
     if (byteStart === byteEnd) {
-      // 无撕裂尾。判定序（测试抓出首版把 reconciled 写成不可达死码后重排）：
-      // ①前缀不可复验（锚覆盖被移除字节/盘面改写）→永拒；②未完成修复事务（崩溃窗口 B：
-      // repair 行已落盘、锚未转移）且锚前缀仍可验+行对界→需显式授权补完（reconciled）；
-      // ③其余（纯扩展正常增长）→干净 no-op。
+      // 无撕裂尾：marker 优先（B5/P5——崩溃截断形/已补行形的补完走 marker 事实，不经授权门：
+      // marker 本身即宿主意图的持久记录）；无 marker 才走旧残局/健康判定。
+      if (marker !== null) {
+        const last = lastRepairRowFact(raw);
+        const rowAtBounds = last !== null && last.offset === marker.byteStart && last.offset + last.rowLen === byteEnd &&
+          last.row.byteStart === marker.byteStart && last.row.byteEnd === marker.byteEnd && last.row.removedSha256 === marker.removedSha256;
+        const truncatedShape = byteEnd === marker.byteStart; // 截断已做、行未补（长度即证据：前缀段以 \n 结尾）
+        if (truncatedShape || rowAtBounds) {
+          // 锚可转移性：无锚直接跳过；有锚仍要求旧锚前缀可复验（journal 写者可改盘面——marker
+          // 不豁免前缀伪造，锚覆盖被移除字节依旧永拒走迁移）。
+          const prefixOk = anchor === null ||
+            (anchor.len <= marker.byteStart && byteEnd >= anchor.len && sha256Hex(raw.subarray(0, anchor.len)) === anchor.sha);
+          if (!prefixOk) {
+            audit(`repair-tail-aborted file=${opts.file} reason=anchor-stale detail=marker-prefix-irreproducible`);
+            return { kind: "aborted", file: opts.file, reason: "anchor-stale", detail: "marker 残局但旧锚前缀不可复验（覆盖被移除字节/改写面）：需宿主重走迁移/调查" };
+          }
+          if (!rowAtBounds) {
+            // 截断形补行（removedSha256 等事实全部来自 marker——尾已物理消失）
+            const row = buildRepairRow({ byteStart: marker.byteStart, byteEnd: marker.byteEnd, removedSha256: marker.removedSha256, buildId: opts.buildId, at: marker.startedAt });
+            await writeFull(fh, row, marker.byteStart, opts.file);
+            await fh.datasync();
+            const chk = Buffer.allocUnsafe(row.byteLength);
+            await fh.read(chk, 0, chk.byteLength, marker.byteStart);
+            if (!chk.equals(row)) throw new Error("repair-tail marker-completion verify failed");
+          }
+          const finalRaw = await readBack(fh, marker.byteStart + (rowAtBounds ? (last as { rowLen: number }).rowLen : buildRepairRow({ byteStart: marker.byteStart, byteEnd: marker.byteEnd, removedSha256: marker.removedSha256, buildId: opts.buildId, at: marker.startedAt }).byteLength));
+          const newAnchor = { len: finalRaw.byteLength, sha: sha256Hex(finalRaw) };
+          if (anchor !== null) {
+            await writeAnchor(opts, anchorPath(opts.evidenceDir, opts.file), { version: 1, file: opts.file, len: newAnchor.len, sha: newAnchor.sha });
+          }
+          await clearMarker(opts, markerPath(opts.evidenceDir, opts.file));
+          audit(`repair-tail-marker-complete file=${opts.file} shape=${rowAtBounds ? "row-already-written" : "truncated"} len=${newAnchor.len}`);
+          return rowAtBounds
+            ? { kind: "reconciled", file: opts.file, anchor: anchor === null ? null : newAnchor, via: "marker-reconcile" }
+            : { kind: "repaired", file: opts.file, byteStart: marker.byteStart, byteEnd: marker.byteEnd, removedSha256: marker.removedSha256, anchor: anchor === null ? null : newAnchor, at: marker.startedAt, via: "marker-complete" };
+        }
+        audit(`repair-tail-aborted file=${opts.file} reason=repair-marker-conflict size=${byteEnd} marker=[${marker.byteStart},${marker.byteEnd}]`);
+        return { kind: "aborted", file: opts.file, reason: "repair-marker-conflict", detail: "盘面与 marker 事实不吻合（非截断形/已补行形）——留宿主调查（marker 保留）" };
+      }
+      // 无 marker：三分支（前缀不可复验→永拒；未完成修复事务+授权→补完锚；纯扩展→no-op）
       if (anchor === null) return { kind: "no-torn-tail", file: opts.file, size: byteEnd };
       const prefixValid = byteEnd >= anchor.len && sha256Hex(raw.subarray(0, anchor.len)) === anchor.sha;
       const last = lastRepairRowFact(raw);
@@ -210,7 +349,7 @@ export async function repairJournalTail(opts: RepairTailOptions): Promise<Repair
         const newSha = sha256Hex(raw);
         await writeAnchor(opts, anchorPath(opts.evidenceDir, opts.file), { version: 1, file: opts.file, len: byteEnd, sha: newSha });
         audit(`repair-tail-reconciled file=${opts.file} len=${byteEnd}`);
-        return { kind: "reconciled", file: opts.file, anchor: { len: byteEnd, sha: newSha } };
+        return { kind: "reconciled", file: opts.file, anchor: { len: byteEnd, sha: newSha }, via: "authorized" };
       }
       return { kind: "no-torn-tail", file: opts.file, size: byteEnd };
     }
@@ -243,31 +382,63 @@ export async function repairJournalTail(opts: RepairTailOptions): Promise<Repair
       return { kind: "aborted", file: opts.file, reason: "file-changed", detail: "复核尾段哈希漂移（并发写者）" };
     }
 
-    // 物理修复：截断→行内 datasync→原位追加 repair 行→datasync（硬序，与写面同纪律）
+    // 持久意图先于破坏（B5/P5）：marker 落 evidenceDir 后才截断——崩溃残局可识别可补完。
+    await writeMarker(opts, markerPath(opts.evidenceDir, opts.file), { version: 1, file: opts.file, byteStart, byteEnd, removedSha256, startedAt: at });
+
+    // 物理修复：截断→行内 datasync→写循环补行→datasync→回读验证（硬序，与写面同纪律）
     await fh.truncate(byteStart);
     await fh.datasync();
-    await fh.write(row, 0, row.byteLength, byteStart);
+    await writeFull(fh, row, byteStart, opts.file);
     await fh.datasync();
+    const chk = Buffer.allocUnsafe(row.byteLength);
+    await fh.read(chk, 0, chk.byteLength, byteStart);
+    if (!chk.equals(row)) throw new Error("repair-tail row verify failed");
 
-    // 锚点合法转移（仅既有锚；无锚不建——首捕授权面不在此）
-    const newRaw = Buffer.concat([raw.subarray(0, byteStart), row]);
-    const newAnchor = { len: newRaw.byteLength, sha: sha256Hex(newRaw) };
+    // 锚点合法转移（仅既有锚；无锚不建——首捕授权面不在此）。锚内容=回读验证后的盘面事实。
+    const finalRaw = await readBack(fh, byteStart + row.byteLength);
+    const newAnchor = { len: finalRaw.byteLength, sha: sha256Hex(finalRaw) };
     if (anchor !== null) {
       await writeAnchor(opts, anchorPath(opts.evidenceDir, opts.file), { version: 1, file: opts.file, len: newAnchor.len, sha: newAnchor.sha });
     }
+    await clearMarker(opts, markerPath(opts.evidenceDir, opts.file));
     audit(`repair-tail-repaired file=${opts.file} byteStart=${byteStart} byteEnd=${byteEnd} buildId=${opts.buildId} anchor=${anchor !== null ? "moved" : "absent"}`);
-    return { kind: "repaired", file: opts.file, byteStart, byteEnd, removedSha256, anchor: newAnchor, at };
+    return { kind: "repaired", file: opts.file, byteStart, byteEnd, removedSha256, anchor: anchor === null ? null : newAnchor, at, via: "fresh" };
   } finally {
     await fh.close().catch(() => {});
   }
 }
 
-/** 锚点原子写（tmp 独占名+rename；失败=tmp 卫生后抛=修复事务失败上浮——锚不落盘=转移未完成）。 */
+/** 全量回读（B4：锚只信盘面——write 返回值不可作为内容证据）。 */
+async function readBack(fh: import("node:fs/promises").FileHandle, expectedLen: number): Promise<Buffer> {
+  const buf = Buffer.allocUnsafe(expectedLen);
+  let got = 0;
+  while (got < expectedLen) {
+    const r = await fh.read(buf, got, expectedLen - got, got);
+    if (r.bytesRead <= 0) break;
+    got += r.bytesRead;
+  }
+  return buf.subarray(0, got);
+}
+
+/** 锚点原子写（tmp 高熵独占名+rename；非掉电耐久=Q13 披露；失败=tmp 卫生后抛=修复事务失败上浮）。 */
 async function writeAnchor(opts: RepairTailOptions, apath: string, anchor: AnchorFile): Promise<void> {
+  await atomicWrite(opts, apath, JSON.stringify(anchor));
+}
+
+async function writeMarker(opts: RepairTailOptions, mpath: string, marker: RepairMarker): Promise<void> {
+  await atomicWrite(opts, mpath, JSON.stringify(marker));
+}
+
+async function clearMarker(opts: RepairTailOptions, mpath: string): Promise<void> {
+  const fsx = opts.fsLike ?? realFsAnchor;
+  await fsx.rm(mpath, { force: true }).catch(() => {});
+}
+
+async function atomicWrite(opts: RepairTailOptions, apath: string, text: string): Promise<void> {
   const fsx = opts.fsLike ?? realFsAnchor;
   const tmp = `${apath}.tmp-${process.pid}-${(opts.now ?? Date.now)().toString(36)}-${randomBytes(6).toString("hex")}`;
   try {
-    await fsx.writeFile(tmp, JSON.stringify(anchor), "utf8");
+    await fsx.writeFile(tmp, text, "utf8");
     await fsx.rename(tmp, apath);
   } catch (err) {
     await fsx.rm(tmp, { force: true }).catch(() => {});
