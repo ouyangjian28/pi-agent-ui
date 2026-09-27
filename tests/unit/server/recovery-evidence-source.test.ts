@@ -1119,11 +1119,22 @@ describe("P0-1a GPT r4 修复批（B1-r4 无锚 pending 首捕零副作用）", 
       };
       // 修复阶段一：marker 落+truncate 完成后崩溃
       await expect(rt.repairJournalTail({ ...opts, openHandle: crashAfterMarker })).rejects.toThrow("crash-after-marker");
-      // 路一（核心）：pending 期间 provider 首捕→拒绝且零副作用
-      const p1 = createRecoveryEvidenceProvider({ roots: [jRoot], evidenceDir: evDir, trustFirstCapture: () => true });
+      // 路一（核心）：pending 期间 provider 首捕→拒绝且零副作用。B1-r5：对外 reason 映射
+      // no-evidence-snapshot（协议 v1 冻结四值）；具体成因断言在审计行。
+      const auditSink: string[] = [];
+      const p1 = createRecoveryEvidenceProvider({ roots: [jRoot], evidenceDir: evDir, trustFirstCapture: () => true, audit: (l) => auditSink.push(l) });
+      // 拒绝前证据目录全量快照（文件名+逐文件字节——零副作用强断言，L1 修正）
+      const snapDir = async () => {
+        const names = (await readdir(evDir)).sort();
+        const bodies = await Promise.all(names.map((n) => readFile(join(evDir, n))));
+        return names.map((n, i) => `${n}:${bodies[i].toString("utf8")}`).join("|");
+      };
+      const before = await snapDir();
       const r1 = await p1("q.jsonl");
-      expect(r1).toMatchObject({ kind: "unavailable", reason: "repair-pending-first-capture" });
-      expect(await readFile(join(evDir, "evidence-seen.json"), "utf8").then(() => true, () => false)).toBe(false); // seen 未登记
+      expect(r1).toMatchObject({ kind: "unavailable", reason: "no-evidence-snapshot" }); // 契约内四值（B1-r5）
+      expect(auditSink.some((l) => l.includes("recovery-pending-no-anchor"))).toBe(true); // 具体成因留审计
+      expect(await snapDir()).toBe(before); // 目录逐字节零副作用（seen.json 不建、锚不建、marker 原样）
+      await expect(readFile(join(evDir, "seen.json"), "utf8")).rejects.toThrow(); // seen 未登记（正确路径，L1）
       await expect(readFile(join(evDir, encodeURIComponent("q.jsonl") + ".evidence.json"), "utf8")).rejects.toThrow(); // 锚未建
       // 路二：pending 期间迁移面同样拒绝——不误报 migrated 无锚
       const mig = await (await import("../../../apps/server/src/runtime/evidence-migration.ts")).migrateLegacyEvidence({ roots: [jRoot], evidenceDir: evDir });

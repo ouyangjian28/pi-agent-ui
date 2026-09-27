@@ -409,7 +409,9 @@ export function createRecoveryEvidenceProvider(
         // 拒绝首捕且零副作用（不建锚、不登记 seen），待事务完结（marker 清除）后正常首捕。
         if (pendingRepair && anchor === null) {
           audit(`recovery-pending-no-anchor file=${file}`);
-          return unavailable("repair-pending-first-capture");
+          // B1-r5：对外 reason 映射进冻结契约既有值 no-evidence-snapshot（协议 v1 四值不新增枚举）；
+          // 具体成因（修复事务进行中且无权威锚）留在上方审计行 recovery-pending-no-anchor。
+          return unavailable("no-evidence-snapshot");
         }
         const sha = sha256Hex(raw);
         if (!pendingRepair && anchor !== null) {
