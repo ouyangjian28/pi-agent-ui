@@ -1,8 +1,11 @@
-// 3c-3：真进程写/停端到端（第19d轮 GO 放行范围；第20轮 F1/F2 修复版）。
+// 3c-3：真进程写/停端到端（第19d轮 GO 放行范围；第20轮 F1/F2+第20b轮 B1/B2 修复版）。
 // 守卫：默认 skip（真调 LLM）；显式跑=PI_E2E=1 npx vitest run tests/integration/ws-write-e2e.test.ts。
 // 链=composition(write)→gateway→RpcWriteHost→session-registry→RpcSession→PiProcessHost→真 pi 0.86.1。
 // journal 行=结构化 JSONL（t∈enqueue/sending/engaged/consumed/cancelled/delivered/settled，带 intentId；
 // enqueue 另带 generation——冷启动代次证据）。逐行解析断言，不做 substring 冒充。
+// 20b B2：E4 在飞=onSpawned 身份（spawn 时记录）+snapshot 判活（sending 已现且 settled 未现）+
+// 窗口处理（dispose 后 settled 出现=检查后完成→换文件重试，含 server 重启）；销毁链=绑定 handle 的
+// token 级索引比较（tests/helpers/e2e-evidence.ts，负例在 e2e-evidence-helpers.test.ts）。
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { spawnSync } from "node:child_process";
 import { chmod, mkdir, writeFile, readFile } from "node:fs/promises";
@@ -11,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
 import { startServer, type PiAgentUiServer } from "../../apps/server/src/composition.ts";
+import { assertExitShape, disposeChain, findSpawnFor, inFlightAt, type SpawnRecord } from "../../tests/helpers/e2e-evidence.js";
 
 const PI_BIN = "/home/yyj/.nvm/versions/node/v24.18.0/bin/pi";
 const PI_VERSION = "0.86.1"; // 与 pi-e2e.test.ts 同锁（升级须显式改并复跑）
@@ -27,8 +31,34 @@ const d = describe.skipIf(!RUN)("3c-3 真进程写/停 E2E", () => {
   const audits: string[] = [];
   let ws: WebSocket | null = null;
   const frames: Frame[] = [];
+  // 20b B2：onSpawned 观测面——spawn 时即记录 (journal 绝对路径, handle, generation) 身份，E4 不事后反推
+  const spawns: SpawnRecord[] = [];
   // 跨测试共享的轮次事实（E1 写、E2/E3 读）：journal 行解析后按 intentId 建档
   const turns = new Map<string, { enqueue: number; sending: number; settled: number; generation: number }>();
+
+  async function startAndConnect(): Promise<void> {
+    server = await startServer({
+      tokenFile: join(dir, "tokens.json"),
+      allowedOrigins: [ORIGIN],
+      roots: [dir],
+      scanDir: dir,
+      tokenPollMs: 0,
+      write: {
+        sessionFor: (f) => join(dir, "sessions", `${f.split("/").pop()}.session`),
+        piBin: PI_BIN,
+        responseTimeoutMs: 60_000,
+        turnTimeoutMs: 120_000,
+        readinessTimeoutMs: 20_000,
+        onSpawned: (file, handle, generation) => { spawns.push({ file, id: handle.id, generation }); },
+      },
+      audit: (l) => audits.push(l),
+    });
+    ws = new WebSocket(`ws://127.0.0.1:${server.port}`, { origin: ORIGIN });
+    await new Promise<void>((res, rej) => { ws!.on("open", res); ws!.on("error", (e) => rej(e as Error)); });
+    ws.on("message", (data) => frames.push(JSON.parse(String(data))));
+    ws.send(JSON.stringify({ t: "hello", protocolVersion: 1, token: TOKEN }));
+    await until(() => frames.some((f) => f.t === "welcome"), "welcome");
+  }
 
   beforeAll(async () => {
     const v = spawnSync(PI_BIN, ["--version"], { encoding: "utf8" });
@@ -40,26 +70,7 @@ const d = describe.skipIf(!RUN)("3c-3 真进程写/停 E2E", () => {
     const tokenFile = join(dir, "tokens.json");
     await writeFile(tokenFile, JSON.stringify({ version: 1, tokens: [TOKEN] }), { mode: 0o600 });
     await chmod(tokenFile, 0o600);
-    server = await startServer({
-      tokenFile,
-      allowedOrigins: [ORIGIN],
-      roots: [dir],
-      scanDir: dir,
-      tokenPollMs: 0,
-      write: {
-        sessionFor: (f) => join(dir, "sessions", `${f.split("/").pop()}.session`),
-        piBin: PI_BIN,
-        responseTimeoutMs: 60_000,
-        turnTimeoutMs: 120_000,
-        readinessTimeoutMs: 20_000,
-      },
-      audit: (l) => audits.push(l),
-    });
-    ws = new WebSocket(`ws://127.0.0.1:${server.port}`, { origin: ORIGIN });
-    await new Promise<void>((res, rej) => { ws!.on("open", res); ws!.on("error", (e) => rej(e as Error)); });
-    ws.on("message", (data) => frames.push(JSON.parse(String(data))));
-    ws.send(JSON.stringify({ t: "hello", protocolVersion: 1, token: TOKEN }));
-    await until(() => frames.some((f) => f.t === "welcome"), "welcome");
+    await startAndConnect();
   });
 
   afterAll(async () => {
@@ -107,68 +118,100 @@ const d = describe.skipIf(!RUN)("3c-3 真进程写/停 E2E", () => {
     expect(tr.sending).toBeLessThan(tr.settled); // 三写硬序：结构化行索引断言
   });
 
-  it("E2 stop：settled 后暖进程驻留→stop 驱动退役→confirmed.exit={code,signal} 形状+该 stop 的真进程退出证据", { timeout: 60_000 }, async () => {
-    const lsBefore = (await readJournal("s1.jsonl")).length;
+  it("E2 stop：settled 后暖进程驻留→stop 驱动退役→confirmed.exit 形状严格校验+该 stop 的真进程退出证据（绑定 handle）", { timeout: 60_000 }, async () => {
+    const a0 = audits.length; // 审计边界（20b 尾项）：本用例只认边界后的 stop/exit 证据
     send({ t: "stop", requestId: "e2", file: "s1.jsonl" });
     const ack = await next("write-stop-ack", (f) => f.requestId === "e2");
     const kind = ack.outcome!.kind;
     if (kind === "confirmed") {
-      const exit = (ack.outcome as { exit: { code: number | null; signal: string | null } }).exit;
-      expect(exit !== null && typeof exit === "object").toBe(true); // 形状断言（20轮尾项）：exit={code,signal}
-      expect(exit.code !== null || exit.signal !== null).toBe(true); // 真进程退出证据二选一在场
+      assertExitShape((ack.outcome as { exit: unknown }).exit); // 形状严格校验（{}/[]/缺字段拒收，负例见 H15-N3）
     } else {
+      // no-process（进程已被闲置回收）：诚实口径——边界后不得出现任何 stop 行（无进程可停不伪造）
       expect(kind).toBe("no-process");
+      expect(audits.slice(a0).some((l) => l.startsWith("stop handle="))).toBe(false);
+      return;
     }
-    // 退役链真退出证据：stop handle=X 之后有同 X 的 exit 行
+    // 退役链真退出证据：边界后 stop handle=X 之后有同 X 的 exit 行（绑定 handle 的索引比较，非最后一条反推）
     await until(() => {
-      const stopIdx = audits.map((l) => l.includes("stop handle=") ? l : "").filter(Boolean).length;
-      return stopIdx > 0 && audits.some((l) => l.includes("exit handle="));
+      const stop = audits.slice(a0).find((l) => l.startsWith("stop handle="));
+      if (stop === undefined) return false;
+      const handle = /stop handle=([\w.-]+)/.exec(stop)![1];
+      return audits.slice(a0).some((l) => l.startsWith(`exit handle=${handle} `) || l === `exit handle=${handle}`);
     }, "stop→exit 证据", 30_000);
-    const stopLine = audits.filter((l) => l.includes("stop handle=")).pop()!;
-    const handle = /stop handle=([\w.-]+)/.exec(stopLine)![1];
-    expect(audits.some((l) => l.includes(`exit handle=${handle}`))).toBe(true);
-    void lsBefore;
+    const stop = audits.slice(a0).find((l) => l.startsWith("stop handle="))!;
+    const handle = /stop handle=([\w.-]+)/.exec(stop)![1];
+    const iStop = audits.indexOf(stop);
+    const iExit = audits.findIndex((l, i) => i > iStop && (l.startsWith(`exit handle=${handle} `) || l === `exit handle=${handle}`));
+    expect(iExit).toBeGreaterThan(iStop); // 同 handle 索引硬序
   });
 
-  it("E3 退役后冷启动：同会话文件新轮次独有终态（journal 边界+新 intentId+enqueue 代次严格递增）", { timeout: 180_000 }, async () => {
+  it("E3 退役后冷启动：同会话文件新轮次独有终态（journal 续写+新 intentId+enqueue 代次严格递增，显式断言）", { timeout: 180_000 }, async () => {
     const before = await readJournal("s1.jsonl"); // 边界：E1/E2 已有行
-    const gen1 = [...turns.values()][0]?.generation ?? -1; // E1 轮代次
+    const id1 = [...turns.keys()].find((k) => turns.get(k)!.generation >= 1) ?? [...turns.keys()][0];
+    const gen1 = turns.get(id1)?.generation ?? -1; // E1 轮代次
     send({ t: "prompt", requestId: "e3", file: "s1.jsonl", text: "我上一句让你回复什么？只答那两个字" });
     const ack = await next("write-ack", (f) => f.requestId === "e3");
     expect(ack.outcome!.kind).toBe("launched");
     const id2 = ack.outcome!.intentId!;
+    expect(id2).not.toBe(id1); // 显式：新轮次独有 intentId（非复用旧轮）
+    expect(typeof id2).toBe("string");
     await awaitTurn("s1.jsonl", id2, "E3 三行齐");
     const tr2 = turns.get(id2)!;
-    // 新轮次三行全部落在边界之后（E1 旧行不能满足）
+    // 新轮次三行全部落在边界之后（E1/E2 旧行不能满足；含 sending——20b 尾项显式化）
     expect(tr2.enqueue).toBeGreaterThanOrEqual(before.length);
+    expect(tr2.sending).toBeGreaterThanOrEqual(before.length);
     expect(tr2.settled).toBeGreaterThanOrEqual(before.length);
-    // 冷启动代次：E2 已退役（confirmed+exit 证据），E3 必须新进程新代次
+    expect(tr2.enqueue).toBeLessThan(tr2.sending);
+    expect(tr2.sending).toBeLessThan(tr2.settled);
+    // 冷启动代次：E2 已退役（confirmed+exit 证据），E3 必须新进程新代次（安全整数+严格递增）
+    expect(Number.isSafeInteger(tr2.generation)).toBe(true);
     expect(tr2.generation).toBeGreaterThan(gen1);
-    // 恢复面（结构性证据，诚实口径）：同文件追加+代次连续计数=会话在退役后从同一 journal 继续；
+    // 恢复面（结构性证据，诚实口径）：同文件追加+代次递增=会话在退役后从同一 journal 续写+冷启动新进程；
     // 回答文本不在本仓 journal（pi 转录另存），不断言自然语言内容——TECH B17 已注明。
   });
 
-  it("E4 在飞销毁：launched+sending 检查点后 dispose→目标进程退出证据+审计序 stop<exit<registry<composition", { timeout: 90_000 }, async () => {
-    send({ t: "prompt", requestId: "e4", file: "s2.jsonl", text: "数到一百再停" });
-    const ack = await next("write-ack", (f) => f.requestId === "e4");
-    expect(ack.outcome!.kind).toBe("launched"); // 只认 launched 作在飞起点（20轮F2）
-    const id4 = ack.outcome!.intentId!;
-    // 在飞检查点：s2 journal 已出现该轮 sending 行（轮次真在执行，非仅受理）
-    await until(async () => (await readJournal("s2.jsonl")).some((l) => l.t === "sending" && l.intentId === id4), "s2 在飞 sending", 60_000);
-    const t0 = Date.now();
-    await server!.dispose();
-    expect(Date.now() - t0).toBeLessThan(30_000);
-    server = null; // afterAll 不再重复 dispose
-    // 审计序：stop handle=X → exit handle=X → session-registry disposed → composition disposed
-    const stopLine = audits.filter((l) => l.includes("stop handle=")).pop()!;
-    const handle = /stop handle=([\w.-]+)/.exec(stopLine)![1];
-    const iStop = audits.indexOf(stopLine);
-    const iExit = audits.findIndex((l) => l.includes(`exit handle=${handle}`) && audits.indexOf(l) > iStop);
-    const iReg = audits.findIndex((l) => l.includes("session-registry disposed"));
-    const iComp = audits.findIndex((l) => l.includes("composition disposed"));
-    expect(iExit).toBeGreaterThan(iStop); // 目标进程（本轮 stop 的句柄）退出证据
-    expect(iReg).toBeGreaterThan(iExit);
-    expect(iComp).toBeGreaterThan(iReg);
+  it("E4 在飞销毁（20b B2 重写）：真在飞检查点+onSpawned 身份绑定+窗口重试→目标进程退出证据+审计序 stop<exit<registry<composition", { timeout: 240_000 }, async () => {
+    // 长生成指令：把轮次在飞窗口拉长到秒级，让 snapshot→dispose 的毫秒级窗口不至于常命中
+    const LONG = "请写一首十六行的诗（每行至少十字），写完后再逐行用一句话点评。";
+    const files = ["s2.jsonl", "s2b.jsonl", "s2c.jsonl"];
+    let killed = false;
+    let missReason = "";
+    for (let n = 0; n < files.length && !killed; n += 1) {
+      const f = files[n];
+      const rid = `e4-${n}`;
+      if (server === null) await startAndConnect(); // 窗口重试后重启（前一 server 已 dispose）
+      send({ t: "prompt", requestId: rid, file: f, text: LONG });
+      const ack = await next("write-ack", (fr) => fr.requestId === rid);
+      expect(ack.outcome!.kind).toBe("launched");
+      const id = ack.outcome!.intentId!;
+      // 身份：spawn 时即记录（onSpawned 观测面），不靠事后审计反推
+      const absF = join(dir, f);
+      await until(() => spawns.some((sp) => sp.file === absF), `onSpawned ${f}`);
+      const rec = findSpawnFor(spawns, absF);
+      expect(rec.generation).toBeGreaterThanOrEqual(1);
+      // 在飞检查点：sending 已现（轮次真在执行，非仅受理）
+      await until(async () => (await readJournal(f)).some((l) => l.t === "sending" && l.intentId === id), `${f} 在飞 sending`, 60_000);
+      const snap = await readJournal(f); // 真在飞快照：settled 未现（历史 sending 行不冒充当前运行态）
+      if (!inFlightAt(snap, id)) { missReason = `snapshot 已收口（attempt=${n}）`; continue; }
+      const a0 = audits.length;
+      const t0 = Date.now();
+      await server!.dispose();
+      server = null; // afterAll 不再重复 dispose
+      expect(Date.now() - t0).toBeLessThan(30_000);
+      // 窗口处理：检查后、调用前完成→journal 出现该轮 settled 行=本轮不算在飞击杀→重试
+      const post = await readJournal(f);
+      if (post.some((l) => l.t === "settled" && l.intentId === id)) {
+        missReason = `窗口内收口（attempt=${n}：snapshot 无 settled，dispose 后出现）`;
+        continue;
+      }
+      // 销毁链：绑定 rec.id 的 stop→exit→registry→composition（token 级比较，借不到其他 handle）
+      await until(() => audits.some((l, i) => i >= a0 && l.startsWith(`exit handle=${rec.id} `)), "目标 exit 证据", 30_000);
+      const chain = disposeChain(audits, rec.id, a0);
+      expect(chain.stop).toBeGreaterThanOrEqual(a0);
+      expect(chain.composition).toBeGreaterThan(chain.registry);
+      killed = true;
+    }
+    if (!killed) throw new Error(`E4：三次尝试均未取得在飞击杀证据（最后原因：${missReason}）`);
   });
 });
 

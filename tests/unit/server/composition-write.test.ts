@@ -214,7 +214,7 @@ describe("3c-3 composition 写侧接线", () => {
     const { dir, cfg } = await mkCfg({
       write: {
         ...CAT_WRITE,
-        onSpawned: (file, handle, generation) => { spawns.push({ file, id: handle.id, generation }); },
+        onSpawned: (file: string, handle: { id: string }, generation: number) => { spawns.push({ file, id: handle.id, generation }); },
       },
     });
     const spawns: { file: string; id: string; generation: number }[] = [];
@@ -225,7 +225,7 @@ describe("3c-3 composition 写侧接线", () => {
       await c.next("write-ack", (f) => f.requestId === "r1");
       await new Promise((res) => setTimeout(res, 50)); // spawn 同步于 prompt 冷启动；给观测回调一个宏任务窗口
       expect(spawns.length).toBeGreaterThanOrEqual(1);
-      const first = spawns[0];
+      const first = spawns[0]!; // 上行已断言非空
       expect(first.file).toBe(join(dir, "s1.jsonl")); // journal 绝对路径（原样传递）
       expect(typeof first.id).toBe("string");
       expect(first.id.length).toBeGreaterThan(0);
