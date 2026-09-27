@@ -1,0 +1,100 @@
+# S2-DOTFILE-GATE-OFF  2026-09-27T19:42:46.795483  repo@af119ea（实时 git rev-parse）
+# 锚点文件=apps/server/src/ws/static-serve.ts 基线sha256[:16]=bbf8a8bcc0c08b25
+# stderr 已并入本档（3c2-19c/d 证据口径）
+
+$ npx vitest run tests/unit/server/static-serve.test.ts   (exit=1)
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.1 [39m[90m/home/yyj/ai/repos/pi-agent-ui[39m
+
+ [31m❯[39m [30m[42m unit [49m[39m tests/unit/server/static-serve.test.ts [2m([22m[2m16 tests[22m[2m | [22m[31m3 failed[39m[2m)[22m[33m 1381[2mms[22m[39m
+   [31m❯[39m ⑤B SS：resolveStaticPath 纯函数 [2m(2)[22m
+[31m     [31m×[31m SS1 根内普通路径 → 绝对文件路径；尾斜杠与裸根 → null（归一职责在 handler 的 /→/index.html）[39m[32m 6[2mms[22m[39m
+[31m     [31m×[31m SS2 穿越/编码逃逸/点文件/畸形解码 → null（fail-closed）[39m[32m 1[2mms[22m[39m
+   [31m❯[39m ⑤B SS：createStaticHandler（真 http server） [2m(5)[22m
+     [32m✓[39m SS3 GET / → index.html 200 + text/html + no-store[32m 27[2mms[22m[39m
+     [32m✓[39m SS4 MIME 表（js/css/json/svg）+未知扩展回退 octet-stream[32m 11[2mms[22m[39m
+     [32m✓[39m SS5 HEAD → 头全、body 空[32m 2[2mms[22m[39m
+     [32m✓[39m SS6 非法方法 → 405 + Allow[32m 5[2mms[22m[39m
+[31m     [31m×[31m SS7 缺失文件/点文件/目录 → 404；审计行落 static-*[39m[32m 5[2mms[22m[39m
+   [32m✓[39m ⑤B ST：composition staticDir 集成（同端口 HTTP+WS） [2m(4)[22m
+     [32m✓[39m ST1 staticDir+port 0 → 拒启（同源 origin 需固定端口）[32m 3[2mms[22m[39m
+     [32m✓[39m ST2 HTTP fetch：/ → 200 html；missing → 404；审计含 static-hit/static-miss[32m 5[2mms[22m[39m
+     [32m✓[39m ST3 WS 同端口共存：hello→welcome→list-sessions→sessions（读链不受静态托管影响）[32m 55[2mms[22m[39m
+     [32m✓[39m ST4 dispose 有界（keep-alive 连接被 closeAllConnections 截断，不挂 5s 守卫上限）[32m 5[2mms[22m[39m
+   [32m✓[39m ⑤B SM：main.ts CLI 冒烟 [2m(5)[22m
+     [32m✓[39m SM1 --help → 用法文本+退出 0[32m 179[2mms[22m[39m
+     [32m✓[39m SM2 缺 token-file → 退出 1+必填提示[32m 183[2mms[22m[39m
+     [33m[2m✓[22m[39m SM3 非法 port（0/越界/非整数）→ 退出 1[33m 534[2mms[22m[39m
+     [32m✓[39m SM4 root 不存在 → 退出 1+目录提示[32m 164[2mms[22m[39m
+     [32m✓[39m SM5 全参数起服→ready 审计行→SIGTERM 优雅退出 0（静态托管真跑）[32m 196[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 3 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m tests/unit/server/static-serve.test.ts[2m > [22m⑤B SS：resolveStaticPath 纯函数[2m > [22mSS1 根内普通路径 → 绝对文件路径；尾斜杠与裸根 → null（归一职责在 handler 的 /→/index.html）
+[31m[1mAssertionError[22m: expected '/srv/dist' to be null[39m
+
+[32m- Expected:[39m
+null
+
+[31m+ Received:[39m
+"/srv/dist"
+
+[36m [2m❯[22m tests/unit/server/static-serve.test.ts:[2m61:49[22m[39m
+    [90m 59|[39m     expect(resolveStaticPath("/srv/dist", "/app.js")).toBe("/srv/dist/…
+    [90m 60|[39m     expect(resolveStaticPath("/srv/dist", "/a/b.js")).toBe("/srv/dist/…
+    [90m 61|[39m     expect(resolveStaticPath("/srv/dist", "/")).toBeNull();
+    [90m   |[39m                                                 [31m^[39m
+    [90m 62|[39m     expect(resolveStaticPath("/srv/dist", "/a/")).toBe("/srv/dist/a");…
+    [90m 63|[39m   });
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m tests/unit/server/static-serve.test.ts[2m > [22m⑤B SS：resolveStaticPath 纯函数[2m > [22mSS2 穿越/编码逃逸/点文件/畸形解码 → null（fail-closed）
+[31m[1mAssertionError[22m: expected '/srv/dist/.hidden' to be null[39m
+
+[32m- Expected:[39m
+null
+
+[31m+ Received:[39m
+"/srv/dist/.hidden"
+
+[36m [2m❯[22m tests/unit/server/static-serve.test.ts:[2m68:56[22m[39m
+    [90m 66|[39m     expect(resolveStaticPath("/srv/dist", "/a/../../etc/passwd")).toBe…
+    [90m 67|[39m     expect(resolveStaticPath("/srv/dist", "/%2e%2e/etc/passwd")).toBeN…
+    [90m 68|[39m     expect(resolveStaticPath("/srv/dist", "/.hidden")).toBeNull();
+    [90m   |[39m                                                        [31m^[39m
+    [90m 69|[39m     expect(resolveStaticPath("/srv/dist", "/a/.env")).toBeNull();
+    [90m 70|[39m     expect(resolveStaticPath("/srv/dist", "/%")).toBeNull(); // 畸形百分号
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m tests/unit/server/static-serve.test.ts[2m > [22m⑤B SS：createStaticHandler（真 http server）[2m > [22mSS7 缺失文件/点文件/目录 → 404；审计行落 static-*
+[31m[1mAssertionError[22m: expected 200 to be 404 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 404[39m
+[31m+ 200[39m
+
+[36m [2m❯[22m tests/unit/server/static-serve.test.ts:[2m123:52[22m[39m
+    [90m121|[39m     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    [90m122|[39m     expect((await req(server, "/missing.js")).status).toBe(404);
+    [90m123|[39m     expect((await req(server, "/.hidden")).status).toBe(404);
+    [90m   |[39m                                                    [31m^[39m
+    [90m124|[39m     expect((await req(server, "/%2e%2e/etc/passwd")).status).toBe(404);
+    [90m125|[39m     expect(lines.some((l) => l.startsWith("static-miss"))).toBe(true);
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m3 failed[39m[22m[2m | [22m[1m[32m13 passed[39m[22m[90m (16)[39m
+[2m   Start at [22m 19:42:47
+[2m   Duration [22m 1.74s[2m (tests 82%, transform 13%, import 4%)[22m
+
+
+
+# 失败测试计数(FAIL/× 行)=3  期望>0
+# restore 后 sha256[:16]=bbf8a8bcc0c08b25  与基线一致=OK
+# git status --porcelain（排除 mut 日志）原始输出：''  树净=OK

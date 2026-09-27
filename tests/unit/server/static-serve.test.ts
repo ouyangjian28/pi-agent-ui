@@ -230,10 +230,10 @@ describe("⑤B SM：main.ts CLI 冒烟", () => {
     expect(r.code).toBe(1);
     expect(r.stderr).toContain("--token-file 必填");
   });
-  it("SM3 非法 port（0/越界/非整数）→ 退出 1", async () => {
-    expect((await run(["--port", "0", "--token-file", "/tmp/x.json"])).code).toBe(1);
-    expect((await run(["--port", "70000", "--token-file", "/tmp/x.json"])).code).toBe(1);
-    expect((await run(["--port", "abc", "--token-file", "/tmp/x.json"])).code).toBe(1);
+  it("SM3 非法 port（0/越界/非整数）→ 退出 1（带合法 --root，钉住端口门本身）", async () => {
+    expect((await run(["--port", "0", "--token-file", "/tmp/x.json", "--root", "/tmp"])).code).toBe(1);
+    expect((await run(["--port", "70000", "--token-file", "/tmp/x.json", "--root", "/tmp"])).code).toBe(1);
+    expect((await run(["--port", "abc", "--token-file", "/tmp/x.json", "--root", "/tmp"])).code).toBe(1);
   });
   it("SM4 root 不存在 → 退出 1+目录提示", async () => {
     const r = await run(["--port", "18787", "--token-file", "/tmp/x.json", "--root", "/nonexistent-xyz"]);
