@@ -1,12 +1,14 @@
 // A1b 会话详情组件：只读流消费面——历史分页加载+直播追加+四空态（loading/empty/error/auth-failed）
 // + 流终局态（resync-needed/unsubscribed/stopped/closed）。纯文本渲染：textPreview.text 只作 React 文本节点，
-// 无 innerHTML/dangerouslySetInnerHTML。只读面：唯一动作=4409 终局后的用户显式「续读」（resyncFromCursor，
-// subscribe 家族读帧）；无任何写操作入口（prompt/stop 不在本面）。C4：stopped 终局诚实标注恢复入口=
-// 上层重选文件（当前版本无重建按钮，不做自动重发/自动重订）。
+// 无 innerHTML/dangerouslySetInnerHTML。只读流本身无写操作（订阅面 subscribe 家族读帧）；A1c 起可选挂
+// 写输入面（writeClient 注入即启用，独立写连接，不侵入订阅面）：空会话与内容视图均可发送 prompt/stop。
+// C4：stopped 终局诚实标注恢复入口=上层重选文件（当前版本无重建按钮，不做自动重发/自动重订）。
 
 import React from "react";
 import { useSessionDetail } from "../ws/use-session-detail";
 import type { SubscribeClientSurface } from "../ws/subscribe-client";
+import type { WriteClientSurface } from "../ws/write-client";
+import { WriteComposer } from "./write-composer";
 import type { HistoryEvent, LiveEvent } from "@pi-agent-ui/protocol/src/contracts";
 
 const KIND_LABELS: Readonly<Record<HistoryEvent["kind"], string>> = {
@@ -59,8 +61,18 @@ function liveText(event: LiveEvent): string {
   }
 }
 
-export function SessionDetail({ client, file }: { client: SubscribeClientSurface; file: string | null }) {
+export function SessionDetail({
+  client,
+  file,
+  writeClient = null,
+}: {
+  client: SubscribeClientSurface;
+  file: string | null;
+  /** 可选写面：注入即挂写输入（独立写连接；未注入=纯只读视图，既有调用点零改动）。 */
+  writeClient?: WriteClientSurface | null;
+}) {
   const view = useSessionDetail(client, file);
+  const composer = writeClient !== null && file !== null ? <WriteComposer client={writeClient} file={file} /> : null;
   if (view.status === "loading") {
     return (
       <div className="empty" role="status" aria-busy="true">
@@ -106,6 +118,7 @@ export function SessionDetail({ client, file }: { client: SubscribeClientSurface
       <div className="empty">
         <h2>空会话</h2>
         <p>该会话文件没有任何事件（空文件或刚创建）。</p>
+        {composer}
       </div>
     );
   }
@@ -154,6 +167,7 @@ export function SessionDetail({ client, file }: { client: SubscribeClientSurface
           ))}
         </ul>
       ) : null}
+      {composer}
     </section>
   );
 }
