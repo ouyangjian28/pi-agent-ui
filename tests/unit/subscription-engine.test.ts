@@ -368,7 +368,32 @@ describe("订阅引擎 13 时序", () => {
     expect(r2["t"]).toBe("error");
     expect(r2["code"]).toBe(4431);
     expect(r2["retryable"]).toBe(false); // c7 C6-04：4431 统一 retryable=false（订阅已亡，恢复=重新订阅）
+    // 注：本帧出自 servePage 请求级出口（:244，携页请求 requestId）——非 drain 出口；drain 出口信封见下例 ⑲b
     expect(eng2.state.phase).toBe("closed");
+  });
+
+  it("⑲b K4-发现1：drain 出口整帧超预算 4431=流终局信封（subscriptionId 指认+requestId 空）", () => {
+    const idx = new ReadIndex("f.jsonl", "s");
+    for (let i = 1; i <= 1; i++) idx.append("journal", `L${i}`, `L${i}`, hEv(i));
+    let idSeq = 0;
+    let poison = false;
+    const eng = new SubscriptionEngine({ index: idx, status: () => fakeStatus(1), now: () => 0, newId: () => `id-${++idSeq}`,
+      estimateFrame: (f) => {
+        if (poison && f.t === "events") return LIMITS.frameMaxBytes + 1;
+        return 64;
+      } });
+    eng.startSnapshot("r-1");
+    eng.drain(4); // 首页（快照帧 64B 不受毒）→live
+    poison = true; // live 期后续 events 帧全部「超帧预算」
+    idx.append("journal", `L2`, `L2`, hEv(2));
+    eng.onHistoryAppend(hEv(2));
+    const out = eng.drain(16);
+    const last = out[out.length - 1] as Record<string, unknown>;
+    expect(last["t"]).toBe("error");
+    expect(last["code"]).toBe(4431);
+    expect(last["subscriptionId"]).toBe(eng.subscriptionId);
+    expect(last["requestId"]).toBe("");
+    expect(eng.state.phase).toBe("closed");
   });
 
   it("⑳C5-04：live 期积压双门——1025 帧 status→超 subscriptionBacklogMax→4431 关订阅", () => {

@@ -720,3 +720,5 @@
 - 测试面：C16 补结构化身份断言（4409: requestId==""+subscriptionId==subId1）；B4 补流终局型 4402 断言（subscriptionId==snap.subscriptionId+requestId==""）；引擎⑳补 4431 断言（subscriptionId==eng.subscriptionId+requestId==""）。
 - 变异三连（手动 python 替换+git checkout 还原，树净核验）：MB1 引擎终局帧去 subscriptionId→引擎⑳杀（断言 382 失败）；MB2 退旧帧回误携新 requestId+无身份→C16 杀；MB3 退旧恢复先发后撤自杀序→C16+B3a 双杀（B3a 同 file 并发双 init 同面）。
 - 终态：1010 passed+11 skipped（55 文件）+tsc 0+eslint 0；基线/交付提交 df0e576（含契约档增补）。
+
+- **K4 后续批（发现1 收口，repo 本提交）**：drain 出口整帧超预算 4431（subscription-engine.ts overBudget）补 subscriptionId（与 close() 终局信封统一；servePage :244/:256 请求级出口携页 requestId=既有正确语义不改）。⑲b 新例专测 drain 出口信封；⑲ 原例头注指明其帧出自 servePage 请求级出口（非 drain）。变异 MB4（drain 出口去 subscriptionId）→⑲b 单杀。1087 passed+11 skipped。
