@@ -1,7 +1,8 @@
-// 3c-3：会话注册表单元测试（SR1-SR10）。
+// 3c-3：会话注册表单元测试（SR1-SR14）。
 // 面覆：同步幂等缓存/映射校验/statusFor 真源（未构造 idle+unknown、构造后各真值段）/
-// dispose（幂等/串行全量 stop+dispose/销毁后拒绝构造）。
+// dispose（幂等/串行全量 stop+dispose/销毁后拒绝构造/20轮F3 并发共享/20b B1 同步重入）。
 // 全部用假宿主+假耐久（构造零 IO：RpcSession 不 spawn；send 面由 composition-write 测试走真链）。
+// SR7 审计面=vi.fn() 记录，仅断审计被调用（调用序断言在 SR8/CW 系，不在本用例）。
 import { describe, expect, it, vi } from "vitest";
 import { createSessionRegistry } from "../../../apps/server/src/runtime/session-registry.js";
 import { RpcSession } from "../../../apps/server/src/runtime/rpc-session.js";
@@ -198,4 +199,77 @@ it("SR12（20轮F3）并发 dispose 共享收尾：受控挂起 close 放行前�
   expect(r.files()).toEqual([]);
   await expect(r.dispose()).resolves.toBeUndefined(); // 完成后重复调用仍成功
   expect(() => r.sessionFor("/root/b.jsonl")).toThrow("已销毁"); // 销毁后拒建维持（message 原文断言）
+});
+
+it("SR13（20b B1）host.stop 同步重入 dispose：发布已先于外部回调——重入共享同一收尾，不提前完成/不提前 disposed 审计（受控信号驱动）", async () => {
+  const host = fakeHost();
+  host.spawn = (args, h) => { host.handlers = h; return { id: "h1" }; }; // 存 handlers：stop 时补发 exit（retire 等退出）
+  const lines: string[] = [];
+  let release: (() => void) | null = null;
+  const gate = new Promise<void>((r) => { release = r; });
+  let closes = 0;
+  const slow = { ...fakeDurability(), close: () => { closes += 1; return gate; } }; // 受控未决
+  const holder: { r: ReturnType<typeof createSessionRegistry> | null } = { r: null };
+  // 重入点：host.stop 同步回调里再 dispose（20b B1 的真实窗口：收尾循环正 await s.stop() 时）
+  host.stop = (hd) => {
+    host.stops.push(hd.id);
+    reenteredP = holder.r?.dispose() ?? null; // 同步重入（旧缺陷：此时 disposeP 仍 null → 空表捷径提前完成+提前审计）
+    host.handlers?.onExit?.(null, "SIGTERM");
+  };
+  const r = createSessionRegistry({ host, sessionFor: (f) => `${f}.session`, durabilityFor: () => slow, readinessTimeoutMs: 10_000, audit: (l) => lines.push(l) });
+  holder.r = r;
+  const sess = r.sessionFor("/root/a.jsonl");
+  const sent = sess.send("in-flight"); // 起 start/readiness 等待窗（进程在飞：stop 链才会真调宿主）
+  await new Promise((res) => setTimeout(res, 50));
+  const p1 = r.dispose();
+  let reenteredP: Promise<void> | null = null; // 重入调用返回的 Promise（旧缺陷下它会提前 resolve）
+  let done1 = false;
+  void p1.then(() => { done1 = true; });
+  // 受控信号：等到重入点已发生（stop 已被调），close gate 仍挂——此刻旧缺陷会已出现提前 disposed 审计
+  const t0 = Date.now();
+  while (host.stops.length === 0) {
+    if (Date.now() - t0 > 2000) throw new Error("SR13：重入点未到达（host.stop 未被调）");
+    await new Promise((res) => setTimeout(res, 10));
+  }
+  expect(done1).toBe(false);
+  expect(lines.filter((l) => l === "session-registry disposed")).toHaveLength(0); // 提前审计为零（旧缺陷在此处即已 1 次）
+  expect(host.stops).toHaveLength(1); // 重入未驱动第二次 stop（未走空表捷径后另一轮全量）
+  release!();
+  await expect(p1).resolves.toBeUndefined();
+  await expect(reenteredP!).resolves.toBeUndefined(); // 重入者与主收尾同终（共享同一收尾）
+  expect(lines.filter((l) => l === "session-registry disposed")).toHaveLength(1); // 恰一次
+  expect(closes).toBe(1);
+  await expect(sent).resolves.toMatchObject({ kind: expect.stringMatching(/not-ready|invalidated|gate-rejected/) }); // 在飞 send 同 SR8 口径收口
+});
+
+it("SR14（20b B1）审计回调同步重入 dispose（含空表）：共享收尾/恰一次 disposed 审计/不无限递归", async () => {
+  // 场景 A：有待收会话，dispose 循环中的 supervisor 级审计行内同步重入（真正的中逄重入，非仅末行）
+  const host = fakeHost();
+  const lines: string[] = [];
+  let reentries = 0;
+  const holder: { r: ReturnType<typeof createSessionRegistry> | null } = { r: null };
+  const r = createSessionRegistry({
+    host,
+    sessionFor: (f) => `${f}.session`,
+    durabilityFor: () => fakeDurability(),
+    audit: (l) => {
+      lines.push(l);
+      if (l.startsWith("supervisor ") || l.startsWith("session-registry") || l === "session-registry disposed") {
+        reentries += 1;
+        void holder.r?.dispose(); // 审计行内同步重入（构造期无此类前缀行，不会误触提前销毁）
+      }
+    },
+  });
+  holder.r = r;
+  r.sessionFor("/root/a.jsonl");
+  await expect(r.dispose()).resolves.toBeUndefined();
+  expect(lines.filter((l) => l === "session-registry disposed")).toHaveLength(1); // 不无限递归，恰一次
+  expect(reentries).toBeGreaterThan(0); // 重入确实发生过（否则用例空转）
+  // 场景 B：空表 dispose + 审计回调重入（重入时列表已空，不得另起收尾/不得双审计）
+  const lines2: string[] = [];
+  const holder2: { r: ReturnType<typeof createSessionRegistry> | null } = { r: null };
+  const r2 = createSessionRegistry({ host: fakeHost(), sessionFor: (f) => `${f}.session`, audit: (l) => { lines2.push(l); void holder2.r?.dispose(); } });
+  holder2.r = r2;
+  await expect(r2.dispose()).resolves.toBeUndefined();
+  expect(lines2.filter((l) => l === "session-registry disposed")).toHaveLength(1); // 空表+重入：仍恰一次
 });

@@ -152,7 +152,9 @@ export function createSessionRegistry(opts: SessionRegistryOpts): SessionRegistr
       disposed = true; // 同步置位：销毁后拒建立即生效（发布 Promise 先于可能重入的外部回调）
       const all = [...sessions.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
       sessions.clear();
-      disposeP = (async () => {
+      // 20b B1：先发布后执行——收尾体压入微任务，保证 host.stop/audit 等外部回调里的同步重入
+      // 看到的 disposeP 已非 null（直接共享，不走空表捷径）；rpc-session.ts dispose 同款先发布模式。
+      disposeP = Promise.resolve().then(async () => {
         for (const [file, s] of all) {
           try {
             await s.stop();
@@ -166,7 +168,7 @@ export function createSessionRegistry(opts: SessionRegistryOpts): SessionRegistr
           }
         }
         safeAudit("session-registry disposed");
-      })();
+      });
       return disposeP;
     },
   };

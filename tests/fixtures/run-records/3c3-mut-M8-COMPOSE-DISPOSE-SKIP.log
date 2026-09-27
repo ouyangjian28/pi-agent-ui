@@ -1,4 +1,4 @@
-# M8-COMPOSE-DISPOSE-SKIP  2026-09-27T15:29:34.890200  baseline=pi-agent-ui@ce9e4c8
+# M8-COMPOSE-DISPOSE-SKIP  2026-09-27T16:06:36.473255  baseline=pi-agent-ui@ce9e4c8
 # 锚点文件=apps/server/src/composition.ts 基线sha256[:16]=d478e69ab507d9d3
 # stderr 已并入本档（第19c/19d轮证据口径）
 
@@ -6,41 +6,60 @@ $ npx vitest run tests/unit/server/session-registry.test.ts tests/unit/server/co
 
 [1m[30m[46m RUN [49m[39m[22m [36mv5.0.1 [39m[90m/home/yyj/ai/repos/pi-agent-ui[39m
 
- [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/session-registry.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 8[2mms[22m[39m
- [31m❯[39m [30m[42m unit [49m[39m tests/unit/server/composition-write.test.ts [2m([22m[2m10 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 2317[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/session-registry.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 121[2mms[22m[39m
+ [31m❯[39m [30m[42m unit [49m[39m tests/unit/server/composition-write.test.ts [2m([22m[2m10 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[33m 2314[2mms[22m[39m
    [31m❯[39m 3c-3 composition 写侧接线 [2m(10)[22m
      [32m✓[39m CW1 writeHost 与 write 同供 → 拒启（接线歧义门）[32m 3[2mms[22m[39m
      [32m✓[39m CW2 write.sessionFor 缺失 → 拒启（写侧无从落地）[32m 1[2mms[22m[39m
-     [32m✓[39m CW3 真链失败面：prompt→cat 回声不答探针→not-ready(cause=readiness-timeout)+write-ack；审计含 spawn/registry/readiness 链[32m 98[2mms[22m[39m
-     [33m[2m✓[22m[39m CW4 会话缓存：两次 prompt 同 file→registry 恰建一次（audit 计数）[33m 859[2mms[22m[39m
-     [33m[2m✓[22m[39m CW5 stop on idle 会话：write-stop-ack {kind:no-process}（不伪造进程死活）[33m 353[2mms[22m[39m
-     [32m✓[39m CW6 dispose 在途：readiness 等待期 server.dispose()→resolve 有限时间内+审计含 registry disposed（统一销毁面）[32m 189[2mms[22m[39m
-     [32m✓[39m CW7 statusFor 真源接线：订阅快照 status.process.phase=idle（未构造会话）+sessionId 确定性派生[32m 52[2mms[22m[39m
-     [33m[2m✓[22m[39m CW8 statusFor 构造后：prompt 失败退 idle 后快照 process.phase 仍 idle+bg known（注册表观测面贯通）[33m 358[2mms[22m[39m
-[31m     [31m×[31m CW9 dispose 审计序：session-registry disposed 先于 composition disposed（统一销毁挂在收尾链）[39m[33m 351[2mms[22m[39m
-     [32m✓[39m CW10 越界 file 照旧 4404（写侧接线不放宽读侧授权域）：prompt file=/etc/hosts.jsonl[32m 51[2mms[22m[39m
+     [32m✓[39m CW3 真链失败面：prompt→cat 回声不答探针→not-ready(cause=readiness-timeout)+write-ack；审计含 spawn/registry/readiness 链[32m 101[2mms[22m[39m
+     [33m[2m✓[22m[39m CW4 会话缓存：两次 prompt 同 file→registry 恰建一次（audit 计数）[33m 851[2mms[22m[39m
+     [33m[2m✓[22m[39m CW5 stop on idle 会话：write-stop-ack {kind:no-process}（不伪造进程死活）[33m 358[2mms[22m[39m
+[31m     [31m×[31m CW6 dispose 在途：readiness 等待期 server.dispose()→resolve 有限时间内+审计含 registry disposed（统一销毁面）[39m[32m 193[2mms[22m[39m
+     [32m✓[39m CW7 statusFor 真源接线：订阅快照 status.process.phase=idle（未构造会话）+sessionId 确定性派生[32m 50[2mms[22m[39m
+     [33m[2m✓[22m[39m CW8 statusFor 构造后：prompt 退役后快照 process.phase∈{idle,running,stopping}+bg known（注册表观测面贯通）[33m 357[2mms[22m[39m
+[31m     [31m×[31m CW9 dispose 审计序：session-registry disposed 先于 composition disposed（统一销毁挂在收尾链）[39m[33m 350[2mms[22m[39m
+     [32m✓[39m CW10 越界 file 照旧 4404（写侧接线不放宽读侧授权域）：prompt file=/etc/hosts.jsonl[32m 50[2mms[22m[39m
 
-[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 2 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m tests/unit/server/composition-write.test.ts[2m > [22m3c-3 composition 写侧接线[2m > [22mCW6 dispose 在途：readiness 等待期 server.dispose()→resolve 有限时间内+审计含 registry disposed（统一销毁面）
+[31m[1mAssertionError[22m: expected false to be true // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- true[39m
+[31m+ false[39m
+
+[36m [2m❯[22m tests/unit/server/composition-write.test.ts:[2m147:73[22m[39m
+    [90m145|[39m     await s.dispose();
+    [90m146|[39m     expect(Date.now() - t0).toBeLessThan(15_000); // 退出确认预算内（SIGTERM 链…
+    [90m147|[39m     expect(audits.some((l) => l.includes("session-registry disposed"))…
+    [90m   |[39m                                                                         [31m^[39m
+    [90m148|[39m     c.close();
+    [90m149|[39m   });
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯[22m[39m
 
 [41m[1m FAIL [22m[49m [30m[42m unit [49m[39m tests/unit/server/composition-write.test.ts[2m > [22m3c-3 composition 写侧接线[2m > [22mCW9 dispose 审计序：session-registry disposed 先于 composition disposed（统一销毁挂在收尾链）
 [31m[1mAssertionError[22m: expected -1 to be greater than or equal to 0[39m
-[36m [2m❯[22m tests/unit/server/composition-write.test.ts:[2m195:18[22m[39m
-    [90m193|[39m     const iReg = audits.findIndex((l) => l.includes("session-registry …
-    [90m194|[39m     const iComp = audits.findIndex((l) => l.includes("composition disp…
-    [90m195|[39m     expect(iReg).toBeGreaterThanOrEqual(0);
+[36m [2m❯[22m tests/unit/server/composition-write.test.ts:[2m196:18[22m[39m
+    [90m194|[39m     const iReg = audits.findIndex((l) => l.includes("session-registry …
+    [90m195|[39m     const iComp = audits.findIndex((l) => l.includes("composition disp…
+    [90m196|[39m     expect(iReg).toBeGreaterThanOrEqual(0);
     [90m   |[39m                  [31m^[39m
-    [90m196|[39m     expect(iComp).toBeGreaterThan(iReg);
-    [90m197|[39m   });
+    [90m197|[39m     expect(iComp).toBeGreaterThan(iReg);
+    [90m198|[39m   });
 
-[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯[22m[39m
 
 
 [2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m1 passed[39m[22m[90m (2)[39m
-[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m20 passed[39m[22m[90m (21)[39m
-[2m   Start at [22m 15:29:35
-[2m   Duration [22m 2.66s[2m (tests 84%, transform 12%, import 4%)[22m
+[2m      Tests [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m21 passed[39m[22m[90m (23)[39m
+[2m   Start at [22m 16:06:36
+[2m   Duration [22m 2.65s[2m (tests 85%, transform 11%, import 3%)[22m
 
 
 
-# 失败测试计数(FAIL/× 行)=1  期望>0
+# 失败测试计数(FAIL/× 行)=2  期望>0
 # restore 后 sha256[:16]=d478e69ab507d9d3  与基线一致=OK
