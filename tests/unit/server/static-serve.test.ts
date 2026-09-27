@@ -230,10 +230,16 @@ describe("⑤B SM：main.ts CLI 冒烟", () => {
     expect(r.code).toBe(1);
     expect(r.stderr).toContain("--token-file 必填");
   });
-  it("SM3 非法 port（0/越界/非整数）→ 退出 1（带合法 --root，钉住端口门本身）", async () => {
-    expect((await run(["--port", "0", "--token-file", "/tmp/x.json", "--root", "/tmp"])).code).toBe(1);
-    expect((await run(["--port", "70000", "--token-file", "/tmp/x.json", "--root", "/tmp"])).code).toBe(1);
-    expect((await run(["--port", "abc", "--token-file", "/tmp/x.json", "--root", "/tmp"])).code).toBe(1);
+  it("SM3 非法 port（0/越界/非整数）→ 退出 1+端口门提示（真 token/真 root：排际 token/root 门先触发偷换杀点）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "sm3-3c5-"));
+    const tokenFile = join(dir, "tokens.json");
+    await writeFile(tokenFile, JSON.stringify({ version: 1, tokens: [TOKEN] }), { mode: 0o600 });
+    await chmod(tokenFile, 0o600);
+    for (const bad of ["0", "70000", "abc"]) {
+      const r = await run(["--port", bad, "--token-file", tokenFile, "--root", dir]);
+      expect(r.code, `port=${bad}`).toBe(1);
+      expect(r.stderr, `port=${bad}`).toContain("--port 必填");
+    }
   });
   it("SM4 root 不存在 → 退出 1+目录提示", async () => {
     const r = await run(["--port", "18787", "--token-file", "/tmp/x.json", "--root", "/nonexistent-xyz"]);

@@ -1,0 +1,68 @@
+# S3-STATIC-GUARD-OFF  2026-09-27T19:44:25.253834  repo@4de316a（实时 git rev-parse）
+# 锚点文件=apps/server/src/composition.ts 基线sha256[:16]=33731b6727df43d6
+# stderr 已并入本档（3c2-19c/d 证据口径）
+
+$ npx vitest run tests/unit/server/static-serve.test.ts   (exit=1)
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.1 [39m[90m/home/yyj/ai/repos/pi-agent-ui[39m
+
+ [31m❯[39m [30m[42m unit [49m[39m tests/unit/server/static-serve.test.ts [2m([22m[2m16 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 1426[2mms[22m[39m
+   [32m✓[39m ⑤B SS：resolveStaticPath 纯函数 [2m(2)[22m
+     [32m✓[39m SS1 根内普通路径 → 绝对文件路径；尾斜杠与裸根 → null（归一职责在 handler 的 /→/index.html）[32m 1[2mms[22m[39m
+     [32m✓[39m SS2 穿越/编码逃逸/点文件/畸形解码 → null（fail-closed）[32m 0[2mms[22m[39m
+   [32m✓[39m ⑤B SS：createStaticHandler（真 http server） [2m(5)[22m
+     [32m✓[39m SS3 GET / → index.html 200 + text/html + no-store[32m 24[2mms[22m[39m
+     [32m✓[39m SS4 MIME 表（js/css/json/svg）+未知扩展回退 octet-stream[32m 10[2mms[22m[39m
+     [32m✓[39m SS5 HEAD → 头全、body 空[32m 3[2mms[22m[39m
+     [32m✓[39m SS6 非法方法 → 405 + Allow[32m 3[2mms[22m[39m
+     [32m✓[39m SS7 缺失文件/点文件/目录 → 404；审计行落 static-*[32m 5[2mms[22m[39m
+   [31m❯[39m ⑤B ST：composition staticDir 集成（同端口 HTTP+WS） [2m(4)[22m
+[31m     [31m×[31m ST1 staticDir+port 0 → 拒启（同源 origin 需固定端口）[39m[32m 8[2mms[22m[39m
+     [32m✓[39m ST2 HTTP fetch：/ → 200 html；missing → 404；审计含 static-hit/static-miss[32m 4[2mms[22m[39m
+     [32m✓[39m ST3 WS 同端口共存：hello→welcome→list-sessions→sessions（读链不受静态托管影响）[32m 53[2mms[22m[39m
+     [32m✓[39m ST4 dispose 有界（keep-alive 连接被 closeAllConnections 截断，不挂 5s 守卫上限）[32m 6[2mms[22m[39m
+   [32m✓[39m ⑤B SM：main.ts CLI 冒烟 [2m(5)[22m
+     [32m✓[39m SM1 --help → 用法文本+退出 0[32m 177[2mms[22m[39m
+     [32m✓[39m SM2 缺 token-file → 退出 1+必填提示[32m 185[2mms[22m[39m
+     [33m[2m✓[22m[39m SM3 非法 port（0/越界/非整数）→ 退出 1（带合法 --root，钉住端口门本身）[33m 553[2mms[22m[39m
+     [32m✓[39m SM4 root 不存在 → 退出 1+目录提示[32m 179[2mms[22m[39m
+     [32m✓[39m SM5 全参数起服→ready 审计行→SIGTERM 优雅退出 0（静态托管真跑）[32m 214[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m tests/unit/server/static-serve.test.ts[2m > [22m⑤B ST：composition staticDir 集成（同端口 HTTP+WS）[2m > [22mST1 staticDir+port 0 → 拒启（同源 origin 需固定端口）
+[31m[1mAssertionError[22m: promise resolved "{ port: 34645, host: '127.0.0.1', …(2) }" instead of rejecting[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- Error {[39m
+[32m-   "message": "rejected promise",[39m
+[31m+ {[39m
+[31m+   "dispose": [Function dispose],[39m
+[31m+   "host": "127.0.0.1",[39m
+[31m+   "port": 34645,[39m
+[31m+   "reloadTokens": [Function reloadTokens],[39m
+[2m  }[22m
+
+[36m [2m❯[22m tests/unit/server/static-serve.test.ts:[2m147:83[22m[39m
+    [90m145|[39m     const dist = await mkDist();
+    [90m146|[39m     const { cfg } = await mkStaticCfg(dist, 0);
+    [90m147|[39m     await expect(startServer(cfg as unknown as Parameters<typeof start…
+    [90m   |[39m                                                                                   [31m^[39m
+    [90m148|[39m   });
+    [90m149|[39m   it("ST2 HTTP fetch：/ → 200 html；missing → 404；审计含 static-hit/static-…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m15 passed[39m[22m[90m (16)[39m
+[2m   Start at [22m 19:44:25
+[2m   Duration [22m 1.78s[2m (tests 83%, transform 13%, import 4%)[22m
+
+
+
+# 失败测试计数(FAIL/× 行)=1  期望>0
+# restore 后 sha256[:16]=33731b6727df43d6  与基线一致=OK
+# git status --porcelain（排除 mut 日志）原始输出：''  树净=OK
