@@ -24,8 +24,10 @@
 //    ≠掉电耐久（无 fsync——Q13）；读块固定 64KiB 探测（越限块不进结果但已读入临时 buffer）。
 // v4.2（3b5-1：GPT 第15轮 90/100 §六②④）：
 //  fsLike 低层原语接缝（writeFile/rename/rm）贯穿锚点写与默认 seen 持久化——默认=真 fs/promises，
-//    生产 composition 不注入（第15轮接缝契约：受信任宿主边界，resolve=完整提交；确定性故障回归
-//    注入专用）；persistSeenLike 文档契约同步收口（resolve 必须表示完整登记已原子提交）。
+//    生产 composition 不注入（接缝契约=B15⑥ 分拆：四者均受信任宿主边界、仅供确定性故障回归注入；
+//    语义分拆——persistSeenLike.resolve=登记已按约定原子提交；fsLike 各原语 resolve=该原语完成
+//    （非整笔事务）；openLike=安全句柄契约；trustFirstCapture=授权决定）。异步拒绝契约适用于
+//    Promise 型原语（writeFile/rename/rm）；trustFirstCapture 允许同步 boolean。
 //  语义无变化：默认路径行为与 v4.1 逐操作一致（仅原语可注入）。
 // v4（fix13：GPT 第13轮 80/100 B13-1/B13-2）：
 //  B13-1 seen 丢更新闭合：捕获串行从 per-file Map 改为仓级单链（同实例内所有 file 串行——
@@ -82,8 +84,8 @@ const defaultOpenLike: OpenLike = async (abs) => {
 
 export type PersistSeenLike = (evidenceDir: string, next: { version: 1; files: string[] }) => Promise<void>;
 
-/** 3b5-1/第15轮§六②：默认持久化路径的低层原语接缝（受信任宿主边界，与 persistSeenLike 同类契约——
- * 仅供确定性故障回归注入；生产 composition 不注入=真 fs/promises。resolve 语义=完整提交）。 */
+/** 3b5-1/第15轮§六②：默认持久化路径的低层原语接缝（受信任宿主边界——仅供确定性故障回归注入；
+ * 生产 composition 不注入=真 fs/promises。resolve 语义=该原语完成（B15⑥ 分拆，非整笔事务）。 */
 export interface FsLike {
   writeFile(path: string, data: string, encoding: "utf8"): Promise<void>;
   rename(from: string, to: string): Promise<void>;

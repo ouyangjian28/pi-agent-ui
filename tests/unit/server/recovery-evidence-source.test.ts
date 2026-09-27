@@ -923,8 +923,37 @@ describe("recovery-evidence-source（fix13 v4：+仓级串行/登记不变量）
       const names = await readdir(evDir);
       expect(names.some((n) => n === "s.jsonl.evidence.json")).toBe(true); // 锚已提交（区别于 R35 的锚门残留）
       expect(names.includes("seen.json")).toBe(false);
-      expect(names.filter((n) => n.includes(".tmp-")).length).toBe(1); // 残留=seen tmp（锚已归位）
+      // 第17轮加固：路径级身份断言——唯一残留必须以 seen.json.tmp- 开头（非锚 tmp），归属不再靠序号推演
+      const leftovers = names.filter((n) => n.includes(".tmp-"));
+      expect(leftovers.length).toBe(1);
+      expect(leftovers[0]!.startsWith("seen.json.tmp-")).toBe(true);
       const r2 = await mk()("s.jsonl"); // 默认健康重试
+      expect(isRecoverySnapshot(r2)).toBe(true);
+      const seen = JSON.parse(await readFile(join(evDir, "seen.json"), "utf8")) as { files: string[] };
+      expect(seen.files).toContain("s.jsonl");
+      // 重试成功不追溯清理孤儿（先前失败的 seen tmp 仍在）——无掩盖、无静默删除
+      const after = await readdir(evDir);
+      expect(after.includes(leftovers[0]!)).toBe(true);
+      expect(after.filter((n) => n.includes(".tmp-")).length).toBe(1);
+    } finally { await cleanup(); }
+  });
+
+  it("R39b/第17轮 默认持久化路径首杀配套：只拒首次 fsx.writeFile 且不注入 persistSeenLike——锚门失败走默认 seen 算法原路", async () => {
+    const { jRoot, evDir, cleanup } = await mkRig("r39b-");
+    let writes = 0;
+    const fsx: FsLike = {
+      writeFile: async (path, data, enc) => { writes++; if (writes === 1) throw new Error("EIO: first write denied"); return writeFile(path, data, enc); },
+      rename: async (a, b) => rename(a, b),
+      rm: async (path, options) => rm(path, options),
+    };
+    try {
+      await writeFile(join(jRoot, "s.jsonl"), jl("s-1") + "\n", "utf8");
+      const p = createRecoveryEvidenceProvider({ trustFirstCapture: () => true, roots: [jRoot], evidenceDir: evDir, maxCombinedBytes: 100_000, fsLike: fsx });
+      const r1 = await p("s.jsonl"); // 无 persistSeenLike 注入——seen 走 defaultPersistSeenLike(fsx,…)
+      expect(r1).toEqual({ kind: "unavailable", reason: "read-failed" });
+      expect(writes).toBe(1); // 默认 seen 持久化零发生（首写失败后即返回）
+      expect((await readdir(evDir)).filter((n) => n.endsWith(".evidence.json") || n === "seen.json")).toEqual([]);
+      const r2 = await p("s.jsonl"); // 原语健康后默认路径重试：锚归位+默认 seen（fsx 第 2+ 次写）落成
       expect(isRecoverySnapshot(r2)).toBe(true);
       const seen = JSON.parse(await readFile(join(evDir, "seen.json"), "utf8")) as { files: string[] };
       expect(seen.files).toContain("s.jsonl");

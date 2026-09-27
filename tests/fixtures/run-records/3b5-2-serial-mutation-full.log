@@ -1,0 +1,56 @@
+
+ RUN  v5.0.1 /home/yyj/ai/repos/pi-agent-ui
+
+ ❯ |unit| tests/unit/server/recovery-evidence-source.test.ts (40 tests | 2 failed) 190ms
+   ❯ recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） (40)
+     × R28/B13-1 双首捕并发（同实例不同 file）：仓级串行→登记=并集不丢更新；随后 A 锚丢失→concurrent-modification（bless 不可重新授权） 6ms
+     × R37/§六③ 受控并发闸门：A 持仓链阻塞在 seen 持久化时 B 未入读改写（连 journal 都未开）；释放后双快照+seen 并集 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R28/B13-1 双首捕并发（同实例不同 file）：仓级串行→登记=并集不丢更新；随后 A 锚丢失→concurrent-modification（bless 不可重新授权）
+AssertionError: expected [ 'b.jsonl' ] to deeply equal [ 'a.jsonl', 'b.jsonl' ]
+
+- Expected
++ Received
+
+  [
+-   "a.jsonl",
+    "b.jsonl",
+  ]
+
+ ❯ tests/unit/server/recovery-evidence-source.test.ts:596:38
+    594|       snapOf(ra); snapOf(rb); // 两 file 都出快照
+    595|       const seen = JSON.parse(await readFile(join(evDir, "seen.json"),…
+    596|       expect([...seen.files].sort()).toEqual(["a.jsonl", "b.jsonl"]); …
+       |                                      ^
+    597|       await rm(join(evDir, `${encodeURIComponent("a.jsonl")}.evidence.…
+    598|       const r2 = await p("a.jsonl");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R37/§六③ 受控并发闸门：A 持仓链阻塞在 seen 持久化时 B 未入读改写（连 journal 都未开）；释放后双快照+seen 并集
+AssertionError: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ tests/unit/server/recovery-evidence-source.test.ts:819:22
+    817|       pB = p("b.jsonl");
+    818|       for (let i = 0; i < 10; i++) await tick();
+    819|       expect(bOpens).toBe(0); // B 未开 journal——整个 body 在仓级链上排队（强于「未入读改…
+       |                      ^
+    820|       expect(persists).toEqual([1]); // B 未触发第二次 persist
+    821|       expect((await readdir(evDir)).includes("seen.json")).toBe(false);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 38 passed (40)
+   Start at  13:13:03
+   Duration  453ms (tests 50%, transform 39%, import 10%, worker 1%)
+
