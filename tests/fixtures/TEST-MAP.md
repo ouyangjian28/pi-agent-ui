@@ -639,6 +639,14 @@
 
 ## 3c-3（composition 写侧接线：session-registry+statusFor 真源+统一销毁；19d 轮 92 GO 放行；r20 修复批 2026-10-04）
 
+### r21 修复批（20b 裁决 83 NO-GO：B1 dispose 同步重入窗口+B2 E4 身份反推/在飞不成立；基线 6125e52→b416997）
+- B1（中）：session-registry dispose 收尾体压微任务（`disposeP = Promise.resolve().then(async () => {…})`——先发布后执行，IIFE 同步段先跑会把 disposeP=null 暴露给 host.stop 同步重入→空表捷径提前完成）。SR13=受控信号下 host.stop 同步重入（发布已先于外部回调，重入共享同收尾不提前完成/不提前 disposed 审计）；SR14=审计回调同步重入（含空表，恰一次 disposed 不无限递归）。M10 变异（恢复直接 IIFE）双杀 SR13+SR14。
+- B2①观测面：SessionRegistryOpts.onSpawned?(file,handle,generation)（file=journal 绝对路径闭包包装）→RpcSession opts 透传；composition WriteWiringOpts.onSpawned 透传。CW11=CAT_WRITE+onSpawned 收 spawns[]，断言 {file:join(dir,"s1.jsonl"), id 非空, generation:1}。M11 变异（透传短路）单杀 CW11。
+- B2②E2E 重写：E4=LONG 提示词拉长在飞窗→launched→等 onSpawned 身份（findSpawnFor，不事后反推）→snapshot 判活 inFlightAt（sending 已现且 settled 未现；false=continue 换文件重试）→dispose<30s→窗口处理（post 出现 settled=窗口内收口 continue；server 已 dispose 下轮循环顶部重启）→exit handle=rec.id→disposeChain(audits,rec.id,a0) 全序断言；E2=审计边界 a0+assertExitShape（{}/[]/缺字段/双空拒）+绑定 handle 索引比较+no-process 分支零 stop 行；E3=新 intentId 显式+三索引含 sending≥before.length+Number.isSafeInteger(generation)。
+- **r21 批内根因修（E2E 首败）**：真实审计行带模块前缀（`process-host stop handle=proc-1 signal=SIGTERM`），旧 startsWith 匹配漏前缀行致 E2/E4 假败两轮；e2e-evidence.ts 改 token 级正则 stopLineFor/exitLineFor/stopHandleOf（前缀无关+token 边界 proc-1≠proc-11），E2/E4 失败自带审计尾部诊断，H15-N5 锁根因（带前缀链命中+边界诱饵）。E2E 三跑：两败（根因）→修后 4/4 双档。
+- 证据（r21 档）：全量 verbose=1010 passed+11 skipped（1034 行 3c3-r21-full-vitest.log；r20=970+11，增量 40=A1a 前端 31+SR13/14 2+CW11 1+H15-N1..N4 5+N5 1）；tsc 全仓 exit 0+eslint 全仓 exit 0（含 E2E 档）；E2E 双档 4/4（3c3-r21-e2e-vitest-{1,2}.log）；六变异全杀（3c3.md r21 段+run-records/3c3-mut-*.log r21 复跑覆盖）。
+- mutate 脚本升级：HEAD 实时 rev-parse（弃硬编码）；每变 git status 原始输出入档；M10 两锚点成对替换结构（MUTS 改替换对列表）。
+
 ### r20 修复批（20 轮 79 NO-GO 三阻断+尾项；基线 beede1f）
 - F3（registry 并发 dispose 第二等待者提前 resolve）：session-registry.ts 增 `disposeP` 共享收尾 Promise——首调用者起异步收尾，并发第二等待者复用同一 Promise；SR12=受控挂起 close gate→p1/p2 均未决→release→均完成+closes==1+完成后重复 dispose 仍成功+拒建 throw"已销毁"；M9 对应变异单杀 SR12。
 - stats 活动窗口旧值：idle-reaper stats() origin=Math.max(idleSince, lastActivity??idleSince)（吸收 noteActivity 后 lastActivity；S5-R2=900 活动 950 读=elapsed 50 非 950；isFinite 非 narrow 须显式判 null）。
