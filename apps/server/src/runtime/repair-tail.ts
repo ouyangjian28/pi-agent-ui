@@ -332,23 +332,37 @@ export async function repairJournalTail(opts: RepairTailOptions): Promise<Repair
     }
 
     const removedSha256 = sha256Hex(raw.subarray(byteStart, byteEnd));
-    // B3/r2：有撕裂尾时在场 marker 必须参与判定——吻合（bounds+尾哈希全等）=「marker 写后
+    // B3/r2+r3-B3a：有撕裂尾时在场 marker 必须参与判定——吻合（bounds+尾哈希全等）=「marker 写后
     // truncate 前崩溃」残局，复用原 marker 事实继续 fresh 修复（startedAt 保留原始时间戳）；
-    // 部分补行形=truncate 已做+行写一半崩溃（尾段恰为 marker 构造行的严格前缀）→截回截断形
-    // 走 marker 补完（原始删除事实不被二次修复覆盖）；其余=冲突拒绝（marker 保留）。
+    // 部分补行形=truncate 已做+行写一半崩溃（尾段恰为 marker 构造行的严格前缀——上界=完整修复行
+    // 长度，与被删尾长度无关：修复行可长于原尾）→截回截断形走 marker 补完（原始删除事实不被
+    // 二次修复覆盖）；bounds 全等但尾哈希不符且非部分行前缀=并发改写；其余=冲突拒绝（marker 保留）。
     if (marker !== null) {
-      if (marker.byteStart === byteStart && marker.byteEnd === byteEnd) {
-        if (marker.removedSha256 !== removedSha256) {
-          audit(`repair-tail-aborted file=${opts.file} reason=file-changed detail=marker-tail-hash`);
-          return { kind: "aborted", file: opts.file, reason: "file-changed", detail: "尾段哈希与在场 marker 不符（并发改写）" };
-        }
-      } else {
+      const tail = raw.subarray(byteStart, byteEnd);
+      const boundsEqual = marker.byteStart === byteStart && marker.byteEnd === byteEnd;
+      const tailHashMatch = boundsEqual && marker.removedSha256 === removedSha256;
+      if (!tailHashMatch) {
         const mrow = buildRepairRow({ byteStart: marker.byteStart, byteEnd: marker.byteEnd, removedSha256: marker.removedSha256, buildId: opts.buildId, at: marker.startedAt });
-        const tail = raw.subarray(byteStart, byteEnd);
-        if (marker.byteStart === byteStart && byteEnd < marker.byteEnd && mrow.subarray(0, tail.byteLength).equals(tail)) {
+        // r3-B3a：严格前缀判据以修复行全长为界（tail.byteLength < mrow.byteLength）——不再用
+        // byteEnd < marker.byteEnd（被删尾长度）做上界；写入恰等于原尾长（bounds 全等）或超过
+        // 原尾长的合法崩溃前缀同样收敛。跨 build 部分行前缀不匹配（mrow 含本 buildId）→保守冲突拒。
+        const isPartialRow = marker.byteStart === byteStart
+          && tail.byteLength < mrow.byteLength
+          && mrow.subarray(0, tail.byteLength).equals(tail);
+        if (isPartialRow) {
+          // r3-B3b：锚可转移性检查必须先于任何盘面改动——锚已写穿事务原始锚界（anchor.len >
+          // marker.byteStart，旧版 pending 捕获造成的脏态）时拒绝且盘面一字不动（aborted 契约）。
+          if (anchor !== null && anchor.len > marker.byteStart) {
+            audit(`repair-tail-aborted file=${opts.file} reason=anchor-stale detail=anchor-covers-marker-start oldLen=${anchor.len} markerStart=${marker.byteStart}`);
+            return { kind: "aborted", file: opts.file, reason: "anchor-stale", detail: "锚已覆盖事务原始锚界（pending 捕获写穿残局）：需宿主以修复后新捕获重建锚链，不得动盘面" };
+          }
           await fh.truncate(marker.byteStart);
           await fh.datasync();
           return await completeMarkerResidue(fh, raw.subarray(0, marker.byteStart), anchor, marker, opts, audit);
+        }
+        if (boundsEqual) {
+          audit(`repair-tail-aborted file=${opts.file} reason=file-changed detail=marker-tail-hash`);
+          return { kind: "aborted", file: opts.file, reason: "file-changed", detail: "尾段哈希与在场 marker 不符且非部分行前缀（并发改写）" };
         }
         audit(`repair-tail-aborted file=${opts.file} reason=repair-marker-conflict size=${byteEnd} marker=[${marker.byteStart},${marker.byteEnd}]`);
         return { kind: "aborted", file: opts.file, reason: "repair-marker-conflict", detail: "有撕裂尾且与在场 marker 事实不吻合（非部分补行形）——留宿主调查（marker 保留）" };

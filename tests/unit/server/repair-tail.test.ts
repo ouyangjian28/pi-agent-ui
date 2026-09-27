@@ -678,3 +678,96 @@ describe("P0-1a GPT r2 阻断修复批（B2/B3/B4）", () => {
     await rm(e.evidenceDir, { recursive: true, force: true });
   });
 });
+
+describe("P0-1a GPT r3 阻断修复批（B3a/B3b/B6）", () => {
+  /** 阶段一共用：真跑到 marker 落盘+truncate 完成+行写抛（marker 事实=真值）。 */
+  const crashAfterTruncate = async (abs: string) => {
+    const real = await (await import("../../../apps/server/src/ws/safe-open.ts")).openSafeReadWrite(abs);
+    const fh = real.fh as unknown as import("node:fs/promises").FileHandle;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (fh as any).write = async () => { throw new Error("crash after truncate"); };
+    return { fh, size: real.size };
+  };
+  const markerOf = async (e: Env) => JSON.parse(await readFile(join(e.evidenceDir, `${encodeURIComponent(e.file)}.repair-pending.json`), "utf8")) as { byteStart: number; byteEnd: number; removedSha256: string; startedAt: string };
+  const mrowOf = (m: { byteStart: number; byteEnd: number; removedSha256: string; startedAt: string }) =>
+    Buffer.from(JSON.stringify({ t: "repair", reason: "torn-tail", byteStart: m.byteStart, byteEnd: m.byteEnd, removedSha256: m.removedSha256, buildId: "build-rt", contractVersion: 2, at: m.startedAt }) + "\n", "utf8");
+  const cleanup = async (e: Env) => { await rm(e.roots, { recursive: true, force: true }); await rm(e.evidenceDir, { recursive: true, force: true }); };
+
+  it("RT35-B3a/P3 部分补行形：前缀上界=修复行长度——等于原尾长/超过原尾长的合法前缀同样收敛（四态 5/14/40/100）", async () => {
+    for (const n of [5, 14, 40, 100]) {
+      const e = await env([jl("i1")]);
+      await seedAnchor(e);
+      await appendFile(e.abs, `{"t":"sending"`, "utf8"); // 原尾恰 14 字节
+      await expect(repairJournalTail(OPT(e, { openHandle: crashAfterTruncate }))).rejects.toThrow("crash after truncate");
+      const m = await markerOf(e);
+      const mrow = mrowOf(m);
+      expect(mrow.byteLength).toBeGreaterThan(100); // 行长于任何测试前缀（上界语义成立前提）
+      await appendFile(e.abs, mrow.subarray(0, n), "utf8");
+      const r = await repairJournalTail(OPT(e));
+      expect(r.kind).toBe("repaired"); // n=14：bounds 全等但尾≠原尾（哈希不等）——不落 file-changed，仍判部分行
+      if (r.kind === "repaired") {
+        expect(r.via).toBe("marker-complete");
+        expect(r.removedSha256).toBe(m.removedSha256); // 原始删除事实不被覆盖
+        expect(r.at).toBe(m.startedAt);
+      }
+      expect((await readdir(e.evidenceDir)).some((f) => f.includes("repair-pending"))).toBe(false);
+      await cleanup(e);
+    }
+  });
+
+  it("RT36-B3b/P4 锚已写穿事务锚界：拒绝且盘面一字不动（aborted 契约，不先 truncate 后拒）", async () => {
+    const e = await env([jl("i1")]);
+    await seedAnchor(e);
+    await appendFile(e.abs, `{"t":"sending","intentId":"i1","payload":{"kind":"prompt"`.slice(0, 100), "utf8"); // 100 字节原尾
+    await expect(repairJournalTail(OPT(e, { openHandle: crashAfterTruncate }))).rejects.toThrow("crash after truncate");
+    const m = await markerOf(e);
+    await appendFile(e.abs, mrowOf(m).subarray(0, 20), "utf8"); // 部分行 20 字节=合法崩溃前缀
+    // 模拟旧版 provider pending 捕获写穿锚的脏态：锚=len(当前盘面)+sha(全文)，覆盖事务锚界
+    const raw233 = await readFile(e.abs);
+    const apath = join(e.evidenceDir, `${encodeURIComponent(e.file)}.evidence.json`);
+    await writeFile(apath, JSON.stringify({ version: 1, file: e.file, len: raw233.byteLength, sha: createHash("sha256").update(raw233).digest("hex") }), "utf8");
+    const r = await repairJournalTail(OPT(e));
+    expect(r.kind).toBe("aborted");
+    if (r.kind === "aborted") {
+      expect(r.reason).toBe("anchor-stale");
+      expect(r.detail).toContain("锚已覆盖事务原始锚界");
+    }
+    expect((await readFile(e.abs)).equals(raw233)).toBe(true); // 盘面一字不动（旧代码先 truncate 后拒=违反 aborted 契约）
+    expect((await readdir(e.evidenceDir)).some((f) => f.includes("repair-pending"))).toBe(true); // marker 保留
+    await cleanup(e);
+  });
+
+  it("RT37-B6/M-P 非修复行前缀的短尾：冲突拒绝（判据必须含字节前缀匹配，非仅长度/对齐）", async () => {
+    const e = await env([jl("i1")]);
+    await seedAnchor(e);
+    await appendFile(e.abs, `{"t":"sending"`, "utf8");
+    await expect(repairJournalTail(OPT(e, { openHandle: crashAfterTruncate }))).rejects.toThrow("crash after truncate");
+    await appendFile(e.abs, "NOT the repair row prefix at all: attacker padding bytes...", "utf8"); // 40 字节非 mrow 前缀
+    const before = await readFile(e.abs);
+    const r = await repairJournalTail(OPT(e));
+    expect(r.kind).toBe("aborted"); // 删 mrow.equals 判据（M-P 变异）→误判部分行→truncate+补行→repaired=本测试杀点
+    if (r.kind === "aborted") expect(r.reason).toBe("repair-marker-conflict");
+    expect((await readFile(e.abs)).equals(before)).toBe(true);
+    expect((await readdir(e.evidenceDir)).some((f) => f.includes("repair-pending"))).toBe(true);
+    await cleanup(e);
+  });
+
+  it("RT38-B6/M-R 跨 build 已补行形：重试转锚不重写行——盘面原文逐字节保留", async () => {
+    const e = await env([jl("i1")]);
+    await seedAnchor(e);
+    await appendFile(e.abs, `{"t":"sending"`, "utf8");
+    await expect(repairJournalTail(OPT(e, { openHandle: crashAfterTruncate }))).rejects.toThrow("crash after truncate");
+    const m = await markerOf(e);
+    // old-build 完整合法行已落盘（buildId=b1≠重试 build-rt；at 也不同——rowAtBounds 不看 buildId/at）
+    await appendFile(e.abs, legalRepairRow(m.byteStart, m.byteEnd, m.removedSha256) + "\n", "utf8"); // helper 不带换行——已补行形必须以 \n 收尾（否则成撕裂尾落有尾分支）
+    const before = await readFile(e.abs);
+    const r = await repairJournalTail(OPT(e)); // buildId=build-rt 重试
+    expect(r.kind).toBe("reconciled"); // 已补行形→转锚（M-R 变异 expectedRow=builtRow 时 readBack 行不符→抛→本测试杀点）
+    if (r.kind === "reconciled") expect(r.via).toBe("marker-reconcile");
+    expect((await readFile(e.abs)).equals(before)).toBe(true); // 盘面原文（b1 行）一字不改
+    const anchor = JSON.parse(await readFile(join(e.evidenceDir, `${encodeURIComponent(e.file)}.evidence.json`), "utf8")) as { len: number; sha: string };
+    expect(anchor.len).toBe(before.byteLength); // 锚=新后像
+    expect((await readdir(e.evidenceDir)).some((f) => f.includes("repair-pending"))).toBe(false);
+    await cleanup(e);
+  });
+});

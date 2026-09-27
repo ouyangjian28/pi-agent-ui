@@ -387,8 +387,24 @@ export function createRecoveryEvidenceProvider(
             return unavailable("no-evidence-snapshot"); // Q02：默认 fail-closed
           }
         }
+        // P0-1a r2 B1/P4+r3 B3b：pending marker 检测先于锚验证/写穿——捕获时 marker 在场
+        // （哪怕形状非法）=修复事务未完，快照必须携带该事实（recoverFromSnapshot 据此保守
+        // 阻断重发授权；marker 清除后新捕获恢复常态）。读失败（非 ENOENT）=证据完整性存疑
+        // →fail-closed。r3 B3b：pending 态盘面是修复事务中间态（截断形 len<锚/部分补行形=锚
+        // 前缀+部分行），锚验证（concurrent-modification）与锚点写穿都不适用——写穿会覆盖
+        // 事务原始锚界制造 anchor-stale 死结；锚保留事务前值，事务完结后下一次捕获再推进。
+        let pendingRepair = false;
+        try {
+          await readFile(markerPathOf(evidenceDir, file), "utf8");
+          pendingRepair = true;
+        } catch (e) {
+          if (!isIoErrno(e, "ENOENT")) {
+            audit(`recovery-evidence-store-failed file=${file} detail=marker-load`);
+            return unavailable("read-failed");
+          }
+        }
         const sha = sha256Hex(raw);
-        if (anchor !== null) {
+        if (!pendingRepair && anchor !== null) {
           // fix12/Q17：去 len===0 直通特判——零长锚也须 sha==H(empty)（形似的 64 个 0 伪锚必拒）
           const pureExtension = raw.byteLength >= anchor.len &&
             sha256Hex(raw.subarray(0, anchor.len)) === anchor.sha;
@@ -397,17 +413,22 @@ export function createRecoveryEvidenceProvider(
             return unavailable("concurrent-modification"); // 已见证据被缩/重写/替换——修复残片消失≠干净
           }
         }
-        // 锚点写穿（原子 tmp+rename；失败=证据不落盘不得发结论→read-failed）
-        let anchorTmp: string | null = null;
-        try {
-          anchorTmp = `${apath}.tmp-${process.pid}-${now().toString(36)}-${randomBytes(6).toString("hex")}`;
-          await fsx.writeFile(anchorTmp, JSON.stringify({ version: 1, file, len: raw.byteLength, sha } satisfies EvidenceAnchor), "utf8");
-          await fsx.rename(anchorTmp, apath);
-          anchorTmp = null; // 已 rename 归位，不再属清理责任
-        } catch {
-          if (anchorTmp !== null) await fsx.rm(anchorTmp, { force: true }).catch(() => {}); // fix14/Y14-1：失败 tmp 卫生
-          audit(`recovery-evidence-store-failed file=${file} detail=store`);
-          return unavailable("read-failed");
+        // 锚点写穿（原子 tmp+rename；失败=证据不落盘不得发结论→read-failed）。
+        // r3 B3b：pending 修复事务进行中不写穿锚（保留事务前锚界；盘面变化=事务中间态，
+        // 不判 concurrent-modification 也不推进锚——marker 在场即宿主事务证据，信任域同
+        // evidenceDir 隔离前提）。
+        if (!pendingRepair) {
+          let anchorTmp: string | null = null;
+          try {
+            anchorTmp = `${apath}.tmp-${process.pid}-${now().toString(36)}-${randomBytes(6).toString("hex")}`;
+            await fsx.writeFile(anchorTmp, JSON.stringify({ version: 1, file, len: raw.byteLength, sha } satisfies EvidenceAnchor), "utf8");
+            await fsx.rename(anchorTmp, apath);
+            anchorTmp = null; // 已 rename 归位，不再属清理责任
+          } catch {
+            if (anchorTmp !== null) await fsx.rm(anchorTmp, { force: true }).catch(() => {}); // fix14/Y14-1：失败 tmp 卫生
+            audit(`recovery-evidence-store-failed file=${file} detail=store`);
+            return unavailable("read-failed");
+          }
         }
         // B13-2 登记不变量：成功返回快照前 seen 登记已建立。未登记而至此=首捕（bless 已过）或
         // B13-2 残局（锚写成+seen 写败）或 fix11 旧锚迁移——一律补登记再返回（失败=fail-closed：
@@ -419,19 +440,6 @@ export function createRecoveryEvidenceProvider(
             await persistSeenLike(evidenceDir, nextSeen);
           } catch {
             audit(`recovery-evidence-store-failed file=${file} detail=seen-store`);
-            return unavailable("read-failed");
-          }
-        }
-        // P0-1a r2 B1/P4：pending marker 进权威证据链——捕获时 marker 在场（哪怕形状非法）
-        // =修复事务未完，快照必须携带该事实（recoverFromSnapshot 据此保守阻断重发授权；
-        // marker 清除后新捕获恢复常态）。读失败（非 ENOENT）=证据完整性存疑→fail-closed。
-        let pendingRepair = false;
-        try {
-          await readFile(markerPathOf(evidenceDir, file), "utf8");
-          pendingRepair = true;
-        } catch (e) {
-          if (!isIoErrno(e, "ENOENT")) {
-            audit(`recovery-evidence-store-failed file=${file} detail=marker-load`);
             return unavailable("read-failed");
           }
         }

@@ -677,3 +677,53 @@ describe("恢复证据快照（c5 B03：结论只对快照负责）", () => {
     expect(r.resumable).toEqual(["i-2"]); // cancelled 不在 resumable
   });
 });
+
+describe("P0-1a GPT r3 修复批（B1 修复阴影保留+B6 哈希身份）", () => {
+  const snapOf = (over: Partial<RecoveryEvidenceSnapshot>): RecoveryEvidenceSnapshot => ({
+    version: 1, file: "q.jsonl", sessionId: "q", lines: [], bad: [], attributedFragments: [],
+    repaired: false, pendingRepair: false, createdAt: 1, ...over,
+  });
+  const line = (i: string) => ({ t: "enqueue", intentId: i, sessionId: "q", generation: 1, leafId: "L", matchKey: { textHash: "h", attachmentIdentity: "a", ordinal: 1 }, payload: { kind: "prompt", rawText: "t", attachments: [], sentAt: "1" } }) as unknown as RecoveryEvidenceSnapshot["lines"][number];
+  const repairLine = (byteStart: number, byteEnd: number) => ({ t: "repair", reason: "torn-tail", byteStart, byteEnd, removedSha256: "r".repeat(64), buildId: "b1", contractVersion: 2, at: "2026-10-05T00:00:00.000Z" }) as unknown as RecoveryEvidenceSnapshot["lines"][number];
+
+  it("RT40-B1/r3 withRepair 不丢修复阴影：旧快照（pending 事务完结但裁决事实缺席）仍阻断重发", () => {
+    // 旧快照在补完前捕获：lines 无 repair 行、bad 空（盘面截断形无残片）、pending=true
+    const S = snapOf({ lines: [line("i1")], pendingRepair: true });
+    const rS = recoverFromSnapshot(S);
+    expect(rS.resumeBlocked).toBe(true);
+    expect(rS.resumable).toEqual([]); // r3 B1：pending 捕获态阻断 ✓
+    // 宿主物理修复完成后对旧快照标记——裁决事实从未进入该快照 lines，阴影必须保留
+    const S2 = withRepair(S);
+    expect(S2.repaired).toBe(true);
+    expect(S2.pendingRepair).toBe(false);
+    expect(S2.repairUndecided).toBe(true); // r3 B1 核心：清 pending ≠ 裁决完成
+    const rS2 = recoverFromSnapshot(S2);
+    expect(rS2.resumeBlocked).toBe(true);
+    expect(rS2.resumable).toEqual([]); // 旧代码：pending 清空+repairLog 空→授权洗白（P1 复现）
+    // 对照一：修复后**新捕获**快照（lines 含 repair 行）——repairLog 阴影同链阻断
+    const S3 = snapOf({ lines: [line("i1"), repairLine(10, 24)], repaired: true });
+    expect(recoverFromSnapshot(S3).resumeBlocked).toBe(true);
+    expect(recoverFromSnapshot(S3).resumable).toEqual([]);
+    // 对照二：无 pending 历史+无 repair 行+无残片的快照——withRepair 后正当解锁（语义分层）
+    const S4 = snapOf({ lines: [line("i1")], bad: [] });
+    const S4r = withRepair(S4);
+    expect(S4r.repairUndecided).toBeUndefined();
+    const r4 = recoverFromSnapshot(S4r);
+    expect(r4.resumeBlocked).toBe(false);
+    expect(r4.resumable).toEqual(["i1"]);
+    // 对照三：二次 withRepair 幂等——repairUndecided 保留（不因重复标记丢阴影）
+    const S5 = withRepair(withRepair(S));
+    expect(S5.repairUndecided).toBe(true);
+    expect(recoverFromSnapshot(S5).resumable).toEqual([]);
+  });
+
+  it("RT41-B6/M-H 快照哈希身份：仅 pendingRepair（或 repairUndecided）不同即不同哈希", () => {
+    const base = snapOf({ lines: [line("i1")] });
+    const h0 = snapshotEvidenceHash(base);
+    const hPending = snapshotEvidenceHash(snapOf({ lines: [line("i1")], pendingRepair: true }));
+    expect(hPending).not.toBe(h0); // M-H 变异（canonical 删 pendingRepair）杀点
+    const hUndecided = snapshotEvidenceHash(snapOf({ lines: [line("i1")], repaired: true, repairUndecided: true }));
+    const hPlain = snapshotEvidenceHash(snapOf({ lines: [line("i1")], repaired: true }));
+    expect(hUndecided).not.toBe(hPlain); // r3 新字段进 canonical 专杀
+  });
+});

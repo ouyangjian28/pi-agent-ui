@@ -366,6 +366,9 @@ export interface RecoverOptions {
   readonly attributedFragments?: readonly FragmentAttribution[];
   /** 捕获时 repair-pending marker 在场（修复事务未完）——与 repairLog 同入修复阴影（P0-1a r2 B1）。 */
   readonly pendingRepair?: boolean;
+  /** 快照曾见 pending 事务且其被移除尾段的裁决事实从未在本快照 lines 中出现（物理修复完成≠裁决
+   *  授权；P0-1a r3 B1——withRepair 清 pending 时置位，保守保留修复阴影，待 P0-1b adjudicate 显式解锁）。 */
+  readonly repairUndecided?: boolean;
 }
 
 export function buildRecoverReport(lines: readonly JournalLine[], sessionId: SessionId, opts: RecoverOptions = {}): RecoverReport {
@@ -403,7 +406,7 @@ export function buildRecoverReport(lines: readonly JournalLine[], sessionId: Ses
     consumedVerdictIds.add(target);
     unattributed = unattributed.filter((b) => b !== hit);
   }
-  const repairShadow = repairLog.length > 0 || (opts.pendingRepair ?? false); // P0-1a GPT r1 B1+r2 B1：物理修复≠裁决——被移除尾段里的效果证据不可再派生，repair 行在场或捕获时 pending marker 在场（修复事务未完=尾段内容不可知）均保守阻断重发授权（待 P0-1b 裁决行显式解锁，授权不得凭证据缺席升级）
+  const repairShadow = repairLog.length > 0 || (opts.pendingRepair ?? false) || (opts.repairUndecided ?? false); // P0-1a GPT r1 B1+r2 B1+r3 B1：物理修复≠裁决——被移除尾段里的效果证据不可再派生，repair 行在场、捕获时 pending marker 在场（修复事务未完=尾段内容不可知）、或 pending 事务完结但裁决事实从未进入本快照（repairUndecided）均保守阻断重发授权（待 P0-1b 裁决行显式解锁，授权不得凭证据缺席升级）
   const resumeBlocked = diskBlocked || unattributed.length > 0 || repairShadow; // 盘面阻断、未裁决证据、修复阴影任一→授权阻断（两证分离）
   // 派生 unknown（provisional）：残片可靠关联或人工裁决消耗——非耐久终态事实
   const provisionals = new Set<IntentId>(attributed.map((a) => a.id)); // 可靠关联（结构证得）
@@ -464,6 +467,9 @@ export interface RecoveryEvidenceSnapshot {
   readonly repaired: boolean;
   /** true=捕获时 repair-pending marker 在场（修复事务未完；P0-1a r2 B1——进恢复阴影）。 */
   readonly pendingRepair: boolean;
+  /** true=本快照曾见 pending 事务且裁决事实从未进入 lines（r3 B1：withRepair 清 pending 时置位；
+   *  物理修复完成≠裁决授权，阴影保留至 P0-1b adjudicate 显式裁决）。 */
+  readonly repairUndecided?: boolean;
   readonly createdAt: number;
 }
 
@@ -481,7 +487,7 @@ export function snapshotEvidenceHash(snap: RecoveryEvidenceSnapshot): string {
   const attributed = [...snap.attributedFragments].sort((a, b) =>
     a.raw < b.raw ? -1 : a.raw > b.raw ? 1 : a.intentId < b.intentId ? -1 : a.intentId > b.intentId ? 1 : 0);
   const canonical = JSON.stringify([
-    snap.version, snap.file, snap.sessionId, snap.lines, snap.bad, attributed, snap.repaired, snap.pendingRepair,
+    snap.version, snap.file, snap.sessionId, snap.lines, snap.bad, attributed, snap.repaired, snap.pendingRepair, snap.repairUndecided,
   ]);
   return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
@@ -514,7 +520,11 @@ export function recoveryAvailability(snap: RecoveryEvidenceSnapshot | null | und
 export function withRepair(snap: RecoveryEvidenceSnapshot): RecoveryEvidenceSnapshot {
   // 宿主声明「盘面修复已完成」——pending 事务同时视为完结（repairJournalTail 成功返回即已清
   // marker；残留 pending=true 会与 repairLog 阴影重复阻断，语义失真）。P0-1a r2 B1。
-  return { ...snap, repaired: true, pendingRepair: false };
+  // P0-1a r3 B1：清 pending ≠ 裁决完成——若本快照 lines 从未含该事务的 repair 行（旧快照在补完
+  // 前捕获），被移除尾段的裁决事实缺席，置 repairUndecided 保留修复阴影（布尔 OR 无重复阻断
+  // 问题，丢事实才会漏阻断）；待 P0-1b adjudicate 显式解锁。
+  const undecided = snap.pendingRepair === true || snap.repairUndecided === true;
+  return { ...snap, repaired: true, pendingRepair: false, ...(undecided ? { repairUndecided: true } : {}) };
 }
 
 /** 由快照出恢复结论（B03 唯一合法入口）。
@@ -528,6 +538,7 @@ export function recoverFromSnapshot(snap: RecoveryEvidenceSnapshot): RecoverRepo
     blocked: diskBlocked,
     attributedFragments: snap.attributedFragments,
     pendingRepair: snap.pendingRepair,
+    ...(snap.repairUndecided !== undefined ? { repairUndecided: snap.repairUndecided } : {}),
   });
   return report;
 }

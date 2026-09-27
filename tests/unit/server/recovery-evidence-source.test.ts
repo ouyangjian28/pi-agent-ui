@@ -4,7 +4,7 @@
 // 增长竞态用 openLike 接缝确定性复现（真 fs 计时窗不可稳定命中）；安全打开（symlink/FIFO）用真 fs
 // 实路径（openSafeFile 真旗标）；证据链（B11-2）用真 sidecar 目录跨实例续链。
 import { describe, expect, it } from "vitest";
-import { mkdtemp, rm, symlink, writeFile, mkdir, readFile, readdir, rename } from "node:fs/promises";
+import { mkdtemp, rm, symlink, writeFile, mkdir, readFile, readdir, rename, appendFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
@@ -1010,6 +1010,92 @@ describe("P0-1a r2 B1 pendingRepair（marker 进恢复链）", () => {
       // 清障后重试收敛
       await rm(join(evDir, `${encodeURIComponent("q.jsonl")}.repair-pending.json`), { recursive: true, force: true });
       expect(isRecoverySnapshot(await createRecoveryEvidenceProvider({ roots: [jRoot], evidenceDir: evDir })("q.jsonl"))).toBe(true);
+    } finally { await cleanup(); }
+  });
+});
+
+describe("P0-1a GPT r3 修复批（B3b provider pending 捕获不写穿锚+死结解闭环）", () => {
+  const jl = (i: string) => JSON.stringify({ t: "enqueue", intentId: i, sessionId: "q", generation: 1, leafId: "L", matchKey: { textHash: "h", attachmentIdentity: "a", ordinal: 1 }, payload: { kind: "prompt", rawText: "t", attachments: [], sentAt: "1" } });
+  const crashAfterTruncate = async (abs: string) => {
+    const real = await (await import("../../../apps/server/src/ws/safe-open.ts")).openSafeReadWrite(abs);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (real.fh as any).write = async () => { throw new Error("crash after truncate"); };
+    return { fh: real.fh, size: real.size };
+  };
+  const readAnchor = async (evDir: string) => JSON.parse(await readFile(join(evDir, `${encodeURIComponent("q.jsonl")}.evidence.json`), "utf8")) as { len: number; sha: string };
+
+  it("RT39-B3b/P4 部分补行 pending 捕获不写穿锚→重试收敛→复捕获推进锚（死结解全链）", async () => {
+    const { jRoot, evDir, cleanup } = await mkRig("r39a-");
+    try {
+      const jp = join(jRoot, "q.jsonl");
+      await writeFile(jp, jl("i1") + "\n", "utf8");
+      const p = createRecoveryEvidenceProvider({ roots: [jRoot], evidenceDir: evDir, trustFirstCapture: () => true });
+      const first = await p("q.jsonl"); // 建锚=len(干净前缀)
+      if (!isRecoverySnapshot(first)) throw new Error("首捕失败");
+      const anchorBefore = await readAnchor(evDir);
+      await appendFile(jp, `{"t":"sending","intentId":"i1","payload":{"kind":"prompt"`.slice(0, 100), "utf8"); // 100 字节撕裂尾
+      const rt = await import("../../../apps/server/src/runtime/repair-tail.ts");
+      await expect(rt.repairJournalTail({ file: "q.jsonl", roots: [jRoot], evidenceDir: evDir, buildId: "build-rt", openHandle: crashAfterTruncate })).rejects.toThrow("crash after truncate");
+      const m = JSON.parse(await readFile(join(evDir, `${encodeURIComponent("q.jsonl")}.repair-pending.json`), "utf8")) as { byteStart: number; byteEnd: number; removedSha256: string; startedAt: string };
+      const mrow = Buffer.from(JSON.stringify({ t: "repair", reason: "torn-tail", byteStart: m.byteStart, byteEnd: m.byteEnd, removedSha256: m.removedSha256, buildId: "build-rt", contractVersion: 2, at: m.startedAt }) + "\n", "utf8");
+      await appendFile(jp, mrow.subarray(0, 20), "utf8"); // 部分行 20 字节（合法崩溃前缀）
+      // pending 捕获：不写穿锚（保留事务前锚界）——写穿=重试 anchor-stale 死结（r3 B3b）
+      const cap = await p("q.jsonl");
+      if (!isRecoverySnapshot(cap)) throw new Error(`pending 捕获失败：${JSON.stringify(cap)}`);
+      expect(cap.pendingRepair).toBe(true);
+      const rCap = recoverFromSnapshot(cap);
+      expect(rCap.resumeBlocked).toBe(true);
+      expect(rCap.resumable).toEqual([]); // pending 阴影阻断（r2 B1 链）
+      expect((await readAnchor(evDir)).len).toBe(anchorBefore.len); // 锚未写穿（核心断言）
+      expect((await readAnchor(evDir)).sha).toBe(anchorBefore.sha);
+      // 重试收敛：部分补行形→截回→marker 补完（锚可转移：anchor.len<=marker.byteStart）
+      const rr = await rt.repairJournalTail({ file: "q.jsonl", roots: [jRoot], evidenceDir: evDir, buildId: "build-rt" });
+      expect(rr.kind).toBe("repaired");
+      // 复捕获：锚推进到新长度+pending=false（marker 已清）——快照 repairLog 阴影仍阻断
+      const cap2 = await p("q.jsonl");
+      if (!isRecoverySnapshot(cap2)) throw new Error("复捕获失败");
+      expect(cap2.pendingRepair).toBe(false);
+      const a2 = await readAnchor(evDir);
+      const disk = await readFile(jp);
+      expect(a2.len).toBe(disk.byteLength); // 事务完结后下一次捕获推进锚
+      const r2 = recoverFromSnapshot(cap2);
+      expect(r2.resumeBlocked).toBe(true); // repair 行阴影（B1 同链）
+      expect(r2.resumable).toEqual([]);
+    } finally { await cleanup(); }
+  });
+
+  it("RT39b-B3b 截断形含尾锚：pending 捕获不判 concurrent-modification（缩盘=事务中间态）+授权重试收敛", async () => {
+    const { jRoot, evDir, cleanup } = await mkRig("r39b-");
+    try {
+      const jp = join(jRoot, "q.jsonl");
+      await writeFile(jp, jl("i1") + "\n", "utf8");
+      const p = createRecoveryEvidenceProvider({ roots: [jRoot], evidenceDir: evDir, trustFirstCapture: () => true });
+      await appendFile(jp, `{"t":"sending"`.padEnd(50, "x"), "utf8"); // 含尾首捕：锚覆盖将被移除的字节
+      const first = await p("q.jsonl");
+      if (!isRecoverySnapshot(first)) throw new Error("首捕失败");
+      const anchorBefore = await readAnchor(evDir);
+      const rt = await import("../../../apps/server/src/runtime/repair-tail.ts");
+      await expect(rt.repairJournalTail({ file: "q.jsonl", roots: [jRoot], evidenceDir: evDir, buildId: "build-rt", openHandle: crashAfterTruncate })).rejects.toThrow("crash after truncate");
+      // 盘面=截断形（len<锚 len）：非 pending 判定会 concurrent-modification 拒；pending 态=事务中间态放行
+      const cap = await p("q.jsonl");
+      if (!isRecoverySnapshot(cap)) throw new Error(`pending 捕获被拒：${JSON.stringify(cap)}`);
+      expect(cap.pendingRepair).toBe(true);
+      expect((await readAnchor(evDir)).len).toBe(anchorBefore.len); // 锚不动
+      // 含尾锚重试截断形：prefixOk=false（锚覆盖被移除字节，删除面超出尾段不可证）——授权不豁免
+      // 前缀门（r2 既有保守设计：授权出口只领回「行已落盘锚未转移」形）；宿主解法=重走迁移面。
+      const beforeDisk = await readFile(jp);
+      const rr = await rt.repairJournalTail({ file: "q.jsonl", roots: [jRoot], evidenceDir: evDir, buildId: "build-rt", authorizeStaleAnchorRepair: () => true });
+      expect(rr.kind).toBe("aborted"); // 保守拒绝语义守护：授权≠前缀伪造豁免
+      if (rr.kind === "aborted") {
+        expect(rr.reason).toBe("anchor-stale");
+        expect(rr.detail).toContain("不可复验");
+      }
+      expect((await readFile(jp)).equals(beforeDisk)).toBe(true); // 盘面不动
+      // pending 捕获仍可用（不因重试被拒破坏阻断链）
+      const cap2 = await p("q.jsonl");
+      if (!isRecoverySnapshot(cap2)) throw new Error(`复捕获被拒：${JSON.stringify(cap2)}`);
+      expect(cap2.pendingRepair).toBe(true);
+      expect(recoverFromSnapshot(cap2).resumable).toEqual([]); // 阴影持续阻断直至宿主迁移裁决
     } finally { await cleanup(); }
   });
 });
