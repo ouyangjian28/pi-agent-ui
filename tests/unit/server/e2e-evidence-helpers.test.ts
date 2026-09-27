@@ -2,7 +2,7 @@
 // GPT 20b 要求：先完成该轮不算在飞成功；s2 提前退出只剩 s1 停不能借 s1 过；坏形状 exit 拒收。
 // 这些失败面在真进程 E2E 里只作断言路径，此处用合成数据直接证明「断言确实会拒绝」。
 import { describe, expect, it } from "vitest";
-import { assertExitShape, disposeChain, findSpawnFor, inFlightAt, type JLineLike, type SpawnRecord } from "../../helpers/e2e-evidence.js";
+import { assertExitShape, disposeChain, exitLineFor, findSpawnFor, inFlightAt, stopHandleOf, type JLineLike, type SpawnRecord } from "../../helpers/e2e-evidence.js";
 
 describe("e2e-evidence 助手（20b B2 负例面）", () => {
   it("H15-N1 先完成的轮不算在飞：settled 已现 → inFlightAt=false（sending 历史行不冒充当前运行态）", () => {
@@ -54,6 +54,25 @@ describe("e2e-evidence 助手（20b B2 负例面）", () => {
     expect(() => assertExitShape({ code: null, signal: null })).toThrow(/双空/);
     expect(assertExitShape({ code: 0, signal: null })).toEqual({ code: 0, signal: null });
     expect(assertExitShape({ code: null, signal: "SIGTERM" })).toEqual({ code: null, signal: "SIGTERM" });
+  });
+
+  it("H15-N5 模块前缀行（真审计形态）：`process-host stop handle=X` 带前缀行必须命中；token 边界带前缀形态同样成立（N5 锁 E2E 实跑首败根因：startsWith 漏前缀行）", () => {
+    // 真实审计行形态（E2E 实跑诊断档：process-host 前缀 + signal 尾）
+    const audits = [
+      "composition listening host=127.0.0.1 port=1",
+      "process-host stop handle=proc-1 signal=SIGTERM",
+      "process-host exit handle=proc-1 code=143 signal=null",
+      "session-registry disposed",
+      "composition disposed",
+    ];
+    const chain = disposeChain(audits, "proc-1", 0);
+    expect([chain.stop, chain.exit, chain.registry, chain.composition]).toEqual([1, 2, 3, 4]);
+    expect(stopHandleOf(audits[1]!)).toBe("proc-1"); // 前缀无关提取
+    expect(stopHandleOf("composition listening port=1")).toBeNull();
+    const decoy = ["process-host stop handle=proc-11 signal=SIGTERM", "process-host exit handle=proc-11 code=0 signal=null"];
+    expect(() => disposeChain(decoy, "proc-1", 0)).toThrow(/stop handle=proc-1/); // token 边界
+    expect(exitLineFor("proc-1").test("process-host exit handle=proc-1 code=143 signal=null")).toBe(true);
+    expect(exitLineFor("proc-1").test("process-host exit handle=proc-11 code=0 signal=null")).toBe(false);
   });
 
   it("H15-N4 findSpawnFor 严格相等：无记录抛错不猜；多代取最新", () => {
