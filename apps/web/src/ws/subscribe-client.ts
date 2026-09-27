@@ -850,10 +850,12 @@ export class SubscribeClient {
       return;
     }
     // C5：ready 后无 requestId 关联的连接级错误码进连接级失败映射（受控文案按 code——4432 心跳原因不丢）。
+    // 关联判定口径：undefined 或空串""——空串是服务端 errFrame 对「不关联任何请求」的统一惯例
+    // （ws-gateway 对 4403/4405/4432 等连接级码一律发 requestId:""，非缺省）。
     // 边界：4413/4429 契约定为请求级，无关联时不升级为连接级；空 requestId 的 4409/4431/4402 已由上方
-    // K3-B1 终局分支（结构化/旧信封兼容）接走，此处不再重叠接 4431。
+    // K3-B1 终局分支（结构化/旧信封兼容，同样认 undefined|""）接走，此处不再重叠接 4431。
     if (
-      frame.requestId === undefined &&
+      (frame.requestId === undefined || frame.requestId === "") &&
       (frame.code === 4403 || frame.code === 4405 || frame.code === 4432)
     ) {
       this.failConn("transport", controlledErrorText(frame.code));

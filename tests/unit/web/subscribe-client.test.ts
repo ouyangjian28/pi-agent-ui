@@ -6,7 +6,7 @@
 // 路径未验：客户端无尾页重试公共入口）⑤同 file 至多一个
 // 活动订阅+在途 4404 不崩 ⑥cursor 严格透传服务端值 ⑦R1 消费帧运行时校验（坏帧零副作用可续收）⑧R2 受控
 // 文案（error.message 不进快照）⑨R3 close 停止屏障简版 ⑩B2 首页在途取消留痕补退订 ⑪C2 跨字段/续页绑定
-// 一致性拒绝后可恢复 ⑫C5 连接级错误码（无 requestId）映射⑬K3-B1 终局帧结构化路由（新信封 df0e576：subscriptionId 指认所停流+requestId 恒空）与旧信封兼容（无 subscriptionId 空 requestId 的 4409/4431/4402 按活动流终局）。快照断言用身份比较（toBe）。
+// 一致性拒绝后可恢复 ⑫C5 连接级错误码（无/空 requestId——空串=服务端 errFrame 无关联惯例）映射⑬K3-B1 终局帧结构化路由（新信封 df0e576：subscriptionId 指认所停流+requestId 恒空）与旧信封兼容（无 subscriptionId 空 requestId 的 4409/4431/4402 按活动流终局）。快照断言用身份比较（toBe）。
 import { describe, expect, it } from "vitest";
 import { SubscribeClient, type WebSocketLike } from "../../../apps/web/src/ws/subscribe-client";
 import type { EventCursor, HistoryEvent, LiveEvent } from "@pi-agent-ui/protocol/src/contracts";
@@ -787,6 +787,21 @@ describe("C5 连接级错误映射（ready 后无 requestId 的连接级码）",
     expect(client.getSnapshot()).toBe(frozen);
     const again = livePhase();
     again.ws.receive({ t: "error", code: 4403, message: "version", retryable: false });
+    snap = again.client.getSnapshot();
+    expect(snap.connState).toBe("error");
+    expect(snap.errorKind).toBe("transport");
+    expect(snap.errorMessage).toContain("4403");
+  });
+
+  it("空串口径（服务端 errFrame 惯例）：4403/4432 带 requestId=\"\"（非缺省）→ 同入 failConn(transport) 受控文案", () => {
+    const { client, ws } = livePhase();
+    ws.receive({ t: "error", code: 4432, message: "heartbeat dead", retryable: false, requestId: "" });
+    let snap = client.getSnapshot();
+    expect(snap.connState).toBe("error");
+    expect(snap.errorKind).toBe("transport");
+    expect(snap.errorMessage).toContain("4432");
+    const again = livePhase();
+    again.ws.receive({ t: "error", code: 4403, message: "version", retryable: false, requestId: "" });
     snap = again.client.getSnapshot();
     expect(snap.connState).toBe("error");
     expect(snap.errorKind).toBe("transport");
