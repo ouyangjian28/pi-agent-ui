@@ -193,11 +193,23 @@ export function createLoginRoute(opts: LoginRouteOpts): LoginRoute {
     res.end(payload);
   };
 
-  // R2-B3：有界关停——响应写完即销毁流（不被慢发送方拖住），封顶 1s 强制。
+  // R2-B3+R3-Y1：有界关停——响应写完即销毁流（25ms 缓冲，不被慢发送方拖住），封顶 1s 强制；
+  // 统一幂等 kill：finish/客户端放弃/错误任一路径先到先收口，并撤销全部兜底 timer（不悬挂）。
   const closeAfterReply = (req: IncomingMessage, res: ServerResponse): void => {
-    const kill = (): void => { req.destroy(); };
-    res.once("finish", () => { setTimeout(kill, 25).unref?.(); });
-    setTimeout(kill, 1_000).unref?.();
+    let killed = false;
+    let soft: NodeJS.Timeout | undefined;
+    const hard: NodeJS.Timeout = setTimeout(kill, 1_000); hard.unref?.();
+    const kill = (): void => {
+      if (killed) return;
+      killed = true;
+      if (soft !== undefined) clearTimeout(soft);
+      if (hard !== undefined) clearTimeout(hard);
+      req.destroy();
+    };
+    res.once("finish", () => { soft = setTimeout(kill, 25); soft.unref?.(); });
+    res.once("close", () => kill()); // 响应面提前断开（对端 RST/挂断）也收口
+    req.once("aborted", () => kill()); // B4a：未完成请求的主动清理
+    req.once("error", () => kill());
   };
 
   // B5：媒体类型门——application/json（可带 charset 参数；大小写不敏感媒体类型）。

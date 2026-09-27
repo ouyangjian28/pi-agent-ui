@@ -275,6 +275,20 @@ describe("3b-1 真网络：②TLS+代理头", () => {
     await c.closed;
   });
 
+  it("r3-Y2 升级面真用快照：构造后热插 trustedProxies→XFF 不被采信（Mu-WS-live-options-bypass 行为杀点）", async () => {
+    const proxies: string[] = [];
+    const h = await makeHarness({ trustedProxies: proxies }); // 构造时快照=空表
+    proxies.push("127.0.0.1", "::1"); // 调用方热插：若升级面改读 opts 原数组→伪造 XFF 将被采信
+    const c = connect(h.url(), { headers: { Origin: ORIGIN, "X-Forwarded-For": "203.0.113.9", "X-Forwarded-Proto": "https" } });
+    await c.opened;
+    const line = h.audits.find((l) => l.includes("upgrade-accepted"));
+    expect(line).toBeDefined();
+    expect(line as string).toContain("proxied=false"); // 快照不含热插项→仍按 socket 事实
+    expect(line as string).not.toContain("clientIp=203.0.113.9");
+    c.ws.close();
+    await c.closed;
+  });
+
   it("deriveConnMeta 单元对照：可信代理但头缺失→保守回退 socket 事实", () => {
     const fakeReq = { headers: {} as Record<string, string | string[] | undefined> } as never;
     const fakeSock = { remoteAddress: "127.0.0.1" } as never;

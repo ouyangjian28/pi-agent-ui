@@ -188,6 +188,7 @@ describe("N4-v2 登录面 E2E（真 HTTP+真 WS）", () => {
       expect(login.headers.get("set-cookie")).toBeNull(); // 不发会话（GPT r2 真组合根复现：r2 前 200+清 cookie）
       const out = await fetch(`${r.base}/logout`, { method: "POST", headers: { Origin: "null" } });
       expect(out.status).toBe(403);
+      expect(out.headers.get("set-cookie")).toBeNull(); // r3-Y2：logout 拒面同样不发任何 Set-Cookie（标题与断言对齐）
       expect(r.audits.join("\n")).toContain("login-origin-rejected origin=null");
     } finally {
       await r.dispose();

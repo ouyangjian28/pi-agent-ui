@@ -18,9 +18,10 @@ const ORIGIN = "http://localhost:4173";
 class FakeReq extends EventEmitter {
   url: string;
   method: string;
-  headers: Record<string, string>;
+  headers: Record<string, string | string[]>; // r3-Y2：真实 IncomingMessage 头可为数组（Node 合并/重复头），替身同面
   socket: { remoteAddress: string };
-  constructor(method: string, url: string, body: string, over: { tls?: boolean; headers?: Record<string, string>; remote?: string; autoBody?: boolean } = {}) {
+  paused = false; // R3-B1：生产读体面调 req.pause()（真 IncomingMessage 内建），替身必须跟随流接口
+  constructor(method: string, url: string, body: string, over: { tls?: boolean; headers?: Record<string, string | string[]>; remote?: string; autoBody?: boolean } = {}) {
     super();
     this.method = method;
     this.url = url;
@@ -33,11 +34,14 @@ class FakeReq extends EventEmitter {
       });
     }
   }
-  destroy(): void { this.destroyed = true; }
+  pause(): void { this.paused = true; }
+  resume(): void { this.paused = false; }
+  destroy(): void { this.destroyed = true; this.emit("close"); }
   destroyed = false;
 }
 
-class FakeRes {
+// R3-B1：响应替身跟随 ServerResponse 事件面（finish/close），异步发 finish 模拟真写回完成。
+class FakeRes extends EventEmitter {
   code = 0;
   headers: Record<string, string | string[]> = {};
   body = "";
@@ -50,12 +54,13 @@ class FakeRes {
   end(payload?: string): void {
     this.headersSent = true;
     if (payload !== undefined) this.body = payload;
+    queueMicrotask(() => { this.emit("finish"); });
   }
 }
 
 interface Call { code: number; headers: Record<string, string>; body: string; }
 
-async function callRoute(route: ReturnType<typeof createLoginRoute>, method: string, url: string, body: string, over: { tls?: boolean; headers?: Record<string, string>; remote?: string; autoBody?: boolean } = {}): Promise<Call | null> {
+async function callRoute(route: ReturnType<typeof createLoginRoute>, method: string, url: string, body: string, over: { tls?: boolean; headers?: Record<string, string | string[]>; remote?: string; autoBody?: boolean } = {}): Promise<Call | null> {
   const res = new FakeRes();
   const handled = route.handle(new FakeReq(method, url, body, over) as never, res as never);
   if (!handled) return null;
@@ -175,7 +180,7 @@ describe("login-route N4-v2（r1 修复批后）", () => {
     expect(resT.code).toBe(408);
   });
 
-  it("L7 sid 身份（r1-B2）：真 sid→token 摘要 hex；篡改/形态/未知派生→null；换令牌集（旧 authority 失效）后旧 sid 失效+新 sid 生效", async () => {
+  it("L7 sid 身份（r1-B2）：真 sid→token 摘要 hex；篡改/形态/未知派生→null；另一 authority 使用新令牌集时旧 sid 在新 authority 失效+新 sid 生效（r3 收窄：非同 authority 热轮换；同 authority 真实轮换证据在 S4/S5）", async () => {
     const { route } = makeRoute();
     const sid = sidOfToken("tok-ok");
     expect(route.sessionIdentityOf(sid)).toBe(digestOf("tok-ok"));
@@ -319,6 +324,26 @@ describe("login-route r1-B4：并发在途预算+读后复核", () => {
     t = 2_100;
     const b = await callRoute(route, "POST", "/login", JSON.stringify({ token: "tok-ok" }), { headers: { origin: ORIGIN, "x-forwarded-for": "203.0.113.2", "x-forwarded-proto": "https" } });
     expect(b?.code).toBe(429); // B（幸存封锁户）仍封锁——淘汰只逐 A
+    t = 2_200;
+    const a = await callRoute(route, "POST", "/login", JSON.stringify({ token: "tok-ok" }), { headers: { origin: ORIGIN, "x-forwarded-for": "203.0.113.1", "x-forwarded-proto": "https" } });
+    expect(a?.code).toBe(200); // r3-Y2：A（被逐户）封锁史确已删除可再登录（Mu-eviction-no-delete 杀点：只审计不删则仍 429）
+  });
+
+  it("B4c3 混合表保封锁户（r3-Y2）：A 封锁+B 未封锁满表→插 C 逐 B（非封锁优先）；A 仍 429，B 史清可 200", async () => {
+    let t = 0;
+    const { route, audits } = makeRoute({ rateMapMax: 2, rateMaxFailures: 2, rateBaseBlockMs: 60_000, trustedProxies: ["127.0.0.1"], now: () => t });
+    const hdr = (ip: string) => ({ headers: { origin: ORIGIN, "x-forwarded-for": ip, "x-forwarded-proto": "https" } });
+    const bad = JSON.stringify({ token: "bad" });
+    t = 0; await callRoute(route, "POST", "/login", bad, hdr("203.0.113.11")); // A 1/2
+    t = 1; await callRoute(route, "POST", "/login", bad, hdr("203.0.113.11")); // A 达阈封锁（表满前 1 户）
+    t = 2; await callRoute(route, "POST", "/login", bad, hdr("203.0.113.12")); // B 1/2 未封锁（满表）
+    t = 3;
+    expect((await callRoute(route, "POST", "/login", bad, hdr("203.0.113.13")))?.code).toBe(401); // C 失败插入→逐非封锁 B
+    expect(audits.some((l) => l.includes("login-rate-table-evict-blocked"))).toBe(false); // 走非封锁优先路径
+    t = 4;
+    expect((await callRoute(route, "POST", "/login", JSON.stringify({ token: "tok-ok" }), hdr("203.0.113.11")))?.code).toBe(429); // A（封锁户）被保留仍拒
+    t = 5;
+    expect((await callRoute(route, "POST", "/login", JSON.stringify({ token: "tok-ok" }), hdr("203.0.113.12")))?.code).toBe(200); // B 被逐，史清可再登录
   });
 
   it("B4c2 优先逐非封锁项（r2）：满表含未封锁户时插入新户不逐封锁户", async () => {
@@ -366,6 +391,8 @@ describe("login-route r1-B5：HTTP 来源门+媒体类型门", () => {
     expect((await callRoute(route, "POST", "/login", JSON.stringify({ token: "tok-ok" }), { headers: { origin: "" } }))?.code).toBe(403);
     const arr = await callRoute(route, "POST", "/login", JSON.stringify({ token: "tok-ok" }), { headers: { origin: ORIGIN } as Record<string, string> });
     expect(arr?.code).toBe(200); // 对照：白名单命中正常
+    const arrForm = await callRoute(route, "POST", "/login", JSON.stringify({ token: "tok-ok" }), { headers: { origin: [ORIGIN] } });
+    expect(arrForm?.code).toBe(403); // r3-Y2：真数组形态（重复/合并头）→非字符串一律拒（GPT 受控探针补证回填）
     const out = await callRoute(route, "POST", "/logout", "", { headers: { origin: "null" } });
     expect(out?.code).toBe(403); // r2 前旧代码：logout Origin:null→200+清 cookie
   });
