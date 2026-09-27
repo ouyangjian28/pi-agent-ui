@@ -1,0 +1,13 @@
+# 3c-3 真进程 E2E（PI_E2E=1 门控；真 pi 0.86.1；宿主时钟漂移注记同前）
+# $ PI_E2E=1 npx vitest run tests/integration/ws-write-e2e.test.ts  (repo@1a0ea16+E2修复)
+2026-09-27T15:36:30+08:00
+
+ RUN  v5.0.1 /home/yyj/ai/repos/pi-agent-ui
+
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  15:36:30
+   Duration  16.44s (tests 98%, transform 1%)
+
+exit=0

@@ -85,11 +85,17 @@ const d = describe.skipIf(!RUN)("3c-3 真进程写/停 E2E", () => {
     expect(lines.length).toBeGreaterThan(1);
   });
 
-  it("E2 stop：settled 后无进程在飞→no-process（不伪造）；审计含真进程退出证据", { timeout: 60_000 }, async () => {
-    await until(() => audits.some((l) => l.includes("process-host exit")), "process-host exit", 30_000); // E1 轮收口后闲置回收器/正常退出
+  it("E2 stop：settled 后暖进程驻留→stop 退役→confirmed{exit}+真进程退出证据（若已被回收则 no-process）", { timeout: 60_000 }, async () => {
     send({ t: "stop", requestId: "e2", file: "s1.jsonl" });
     const ack = await next("write-stop-ack", (f) => f.requestId === "e2");
-    expect(["no-process", "confirmed"]).toContain((ack.outcome as { kind: string }).kind);
+    const kind = (ack.outcome as { kind: string }).kind;
+    expect(["no-process", "confirmed"]).toContain(kind);
+    if (kind === "confirmed") {
+      await until(() => audits.some((l) => l.includes("process-host exit")), "stop 退役链 process-host exit", 30_000);
+    } else {
+      // 已被回收：上一轮 exit 证据应在审计里存在（退役链曾真退过）
+      expect(audits.some((l) => l.includes("process-host exit"))).toBe(true);
+    }
   });
 
   it("E3 退役后冷启动：再次 prompt→新代次 launched（同会话文件恢复原上下文）", { timeout: 180_000 }, async () => {
