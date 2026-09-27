@@ -275,6 +275,25 @@ describe("P0-1b 裁决持久化 v2（崩溃/重启矩阵 R1-R10）", () => {
     await cleanup(e);
   });
 
+  it("R11 祖先 symlink 越界（B4/P11 杀点）：实路径越出全部授权根=path-escape 拒零改盘；真实根内正常通过", async () => {
+    const torn = '{"t":"sending","intentId":"i1"';
+    const e = await env([jl("i1"), repairRow(30, 66, sha(torn))]);
+    await seedAnchor(e);
+    // 攻击面：授权根=普通目录，journal 通过祖先 symlink 引到根外真实位置
+    const outside = await mkdtemp(join(tmpdir(), "adj-out-"));
+    const realJournal = join(outside, e.file);
+    await writeFile(realJournal, await readFile(e.abs));
+    const gate = await mkdtemp(join(tmpdir(), "adj-gate-")); // 授权根（词法内）
+    const { symlink } = await import("node:fs/promises");
+    await symlink(realJournal, join(gate, e.file));
+    const r = await adjudicateJournal({ file: e.file, roots: [gate], evidenceDir: e.evidenceDir, subject: repairSubject(sha(torn), 30, 66), verdict: "resend", operator: "host", buildId: "b1" });
+    expect(r).toMatchObject({ kind: "aborted", reason: "file-absent", detail: "path-escape" }); // 词法在根内、实路径在根外→拒
+    expect(await readFile(realJournal, "utf8")).not.toContain('"t":"adjudicate"'); // 真实文件零改盘
+    // 对照组：真实根（无 symlink）正常通过
+    expect((await adjudicateJournal(opts(e, repairSubject(sha(torn), 30, 66), "resend"))).kind).toBe("adjudicated");
+    await cleanup(e); await rm(outside, { recursive: true, force: true }); await rm(gate, { recursive: true, force: true });
+  });
+
   it("R10 生产路径综合：resend 覆盖残片归因 unknown 进 resumable；derivedAdjudications 呈现有效裁决；stale/冲突组不呈现不派生", async () => {
     const torn = '{"t":"sending","intentId":"i1"';
     const at = "2026-10-05T00:00:00.000Z";

@@ -57,3 +57,16 @@ R10 派生面回归：attributedFragments 不再依赖调用方内存（生产�
 - 多操作者/审计链签名（单机单宿主信任域，operator 记名即可）。
 - 裁决 UI（前端面等 Kimi 线恢复后另批）。
 - extension_ui_request 透传（P0-4）。
+
+
+## 7. r2 身份模型重构（GPT r1 审 66 NO-GO 修复批；2026-10-07）
+
+r1 实现的裁决身份（fragment=raw 内容匹配/repair=四元组+词法落根）被审出五高——本节为**权威语义**，覆盖第 3 节相应部分：
+
+1. **统一事务身份**：两种 subject 均=修复事务四元组 `(removedSha256, byteStart, byteEnd, at)`；fragment 另携归因目标 `intentId`。raw 全文不入裁决行（同内容新事务误解锁 P3/换目标假幂等 P2/撕裂字节 SHA 失配 P7/行膨胀 L2 全消）。
+2. **追加前置盘面门**：marker 在场→`repair-pending` 拒；bad 行（含撕裂尾）非空→`bad-tail` 拒。均零改盘。裁决只能在「盘面已愈+无在途事务」形态下追加。
+3. **幂等/冲突终局**：同 kind 同四元组已裁决——同 verdict 且同归因目标=幂等（返回原 at）；反 verdict（不可翻转）或换归因目标（不可静默更换）=`conflicting-verdict`。
+4. **锚转移失败不阻断**：provider 验锚只查旧前缀不变→纯扩展允许→下轮捕获自动收敛（无死锁，P1 证明）。write-failed=提交结果不确定（append 已落+sync 抛形裁决已在盘），幂等重试收敛。
+5. **读面**：有效裁决=四元组在场当前 repairLog（stale 淘汰）；同四元组多目标=冲突组整组无效（阴影保留）；journal 派生裁决效果走 abandonedIds/resendIds 通道，不进 G2 raw 匹配；呈现面=新报告字段 derivedAdjudications。
+
+崩溃矩阵同步扩为 R1a/R1b/R2/R3/R4/R5/R6/R7/R8/R9/R10/R11（TEST-MAP r2 节权威）。
