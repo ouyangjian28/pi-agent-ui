@@ -612,7 +612,7 @@
 - 测试：R28（双首捕并发→登记并集+丢锚拒）/R29（残局补登记全链+占位目录 fail-closed+零 tmp 残留）/R30（损坏仓恒读拒）/R31（bless 抛错→read-failed+锚/登记零落盘）；composition 轮询×预算笛卡尔（tokenPollMs 省略/0/50 × 非法七态拒/合法三态收——B13-3① 补 0 与 1）；T5c（迟到成功快照：零帧+死连接 recoveryPages 空+槽归零）/T4b（公开关闭入口 r.dispose 也触发 abort，dispose 幂等）/T6 补帧增量断言（e9 续页=第二帧）。
 - 变异三连（3b4-fix13.md+patches/3b4-fix13/）：SERIAL→R28 / BACKFILL→fix14 重跑勘正=五杀 R21+R22+R28+R29+R32（裸跑 EXIT=1；R28 实际首败=:593 读 seen ENOENT 而非并集断言）/ SEENALWAYS→R29+R30；还原 sha b5304a6324e6c245；tmp 独占名无变异（如实记卫生面观察）。
 - 披露就地收口（B13-4）：集成文件头 4402 勘正/3b4-fix11.md「三态矩阵既有例」勘正/TEST-MAP fix11 节 sha 字段名+退出码口径勘正/T5、T5b 标题限定（成功面=T5c）/3b4-fix12.md LRU 首败顺序勘正/provider 头 v4 部署前提（evidenceDir 可信目录+Q12 提交时点）。
-- 终态：tsc 0/lint 0/vitest 47 files 885 passed+7 skipped=892（基线 886，+6）。
+- 终态：tsc 0/lint 0/vitest 47 files 885 passed+7 skipped=892（基线 886，+6）。（fix14 勘正原位指针：本行「tsc 0」不实——composition 轮询矩阵 delete-readonly 两错被管线口径吞，fix14 已修复并立规裸跑直录；原始输出自 fix14b 起入 run-records）
 
 
 ## 3b-4 fix14（GPT 第 14 轮 88/100 GO 后 Y14 非阻断收尾；2026-10-03）
@@ -624,10 +624,15 @@
 - fix13「tsc 0」断言不实勘正（composition delete-readonly 两错被管线吞）——fix14 起 tsc 一律裸跑直录 TSC_EXIT。
 - 过程失误实录：BACKFILL 首次重放在未提交态上做，checkout 还原吞掉 v4.1 源改动——重放+先提交再变异（M-240 同型教训再确认：变异前基线必须已提交）。
 - 终态：tsc 0（裸码）/lint 0/vitest 47 files 886 passed+7 skipped=893（基线 892，+1=R32）。
+## 3b5-2（第16轮 92/100 GO 尾项：R36 独立首杀+seen 门残留面+R37/R38 加固；2026-10-03）
+- 测试 R39-R40（40 例文件）：R39 锚首写仅一次失败（后续原语健康）→read-failed+writes==1+seenPersists==0+零落盘——吞锚错变异独占首杀面（3b5-2 实证 R39 杀）；R40 seen 门 rename+清理 rm 双拒（锚已提交）→read-failed（detail=seen-store）+残留=seen tmp（锚在场区别于 R35 锚门残留）+默认重试收敛。
+- 加固：R37 entered 屏障（persist 入口即 resolve，await 5s 超时竞速，弃 50-tick 猜测）+finally 无条件放闸+allSettled 收束再删目录；R38 逐字节原文比对（seen/锚全文件内容，弃字段抽查——第16轮「原文不动」措辞兑现）。
+- 变异二连（3b5-2.md+patches/3b5-2/）：ANCHORSWALLOW2 复放→R39+R35 双杀（R39 独占首杀成立）；SERIAL（chain→per-file Map）→R28+R37 双杀（R37 首败 seen=['b.jsonl'] 丢 a 登记=丢更新实态）。
+- 证据：run-records/3b5-2-vitest.json=901/894/7/0；3b5-2-tsc.log/-lint.log 裸码 0；3b5-1-lint-firstfail-repro.log=首次 lint 失败诊断复现（6c320ba 版原文重跑，诊断文本原样保留）。
 ## 3b5-1（第15轮 §六②③④：确定性故障回归+受控并发+接缝契约；2026-10-03）
 - 源（v4.2）：fsLike 低层原语接缝（writeFile/rename/rm）贯穿锚点写+默认 seen 持久化（默认=真 fs/promises；生产 composition 不注入——受信任宿主边界契约随 persistSeenLike 文档同步收口：resolve=完整提交）。语义无变化（默认路径与 v4.1 逐操作一致）。
 - 测试 R33-R38（38 例文件）：R33 seen tmp 写拒→read-failed+锚留+tmp 尽力清+重试收敛；R34 rename 拒（tmp 已建）同面；R35 清理 rm 自身失败→仍 read-failed 不洗白+残留=披露边界+成功不受阻；R36 锚写拒（首写）→read-failed+零落盘+bless 已消耗；R37 受控并发闸门（A 持链阻塞于 seen 提交时 B 连 journal 都未开——bOpens==0+persists==[1]；释放后双快照+seen 并集 [a,b]）；R38 有锚无登记+非法前缀（截断/同长改写）→concurrent-modification+不补登记+bless 不耗+锚原文不动。
-- 变异二连（3b5-1.md+patches/3b5-1/）：M-3B5-CLEANUP（清理行移除）→R33+R34 双杀（BARE_EXIT=1）；M-3B5-ANCHORSWALLOW（锚吞错）→R35 杀——R36 未杀=纵深防御实录（seen-store 第二道门独立兜住，双 tmp 断言=告警面），非缺口。
+- 变异二连（3b5-1.md+patches/3b5-1/）：M-3B5-CLEANUP（清理行移除）→R33+R34 双杀（BARE_EXIT=1）；M-3B5-ANCHORSWALLOW（锚吞错）→R35 杀。（第16轮勘正+3b5-2 实证：「R36 未杀=非缺口/第二道门独立闭合」撤回——那=失败注入耦合掩蔽（R36 恒拒所有写使 seen 门必然兜住）的纵深效果；独立首杀由 3b5-2 的 R39 承担：只拒首写后续健康，吞锚错变异 R39 独杀实证）
 - 还原 sha=26086490878e1c96；run-record 3b5-1-vitest.json=899/892/7/0；tsc/lint 裸码 0（3b5-1-tsc.log/-lint.log 原始输出附档；lint 首跑抓 R35 未用参自纠实录）。
 - **fix14b（第 15 轮 90/100 确认 GO 后尾项窄清）**：D20 补 diskBlocked=true 断言（repaired []→false 翻转=正确性修正非等价）；tsc/lint 原始输出入仓（run-records/3b4-fix14b-tsc.log/-lint.log，TSC_EXIT=0/LINT_EXIT=0）；变异档补可复制命令实录；上述四处措辞收窄原位落档；PROJECT 补真实 fix14/fix14b 段（第 15 轮指出的过称项）。
 

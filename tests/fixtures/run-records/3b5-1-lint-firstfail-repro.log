@@ -1,0 +1,11 @@
+# 首次 lint 失败诊断复现（第16轮尾项：保留原始诊断文本）
+# 方法：git show 6c320ba:tests/unit/server/recovery-evidence-source.test.ts（a/b 未用参版本）落到临时路径重跑 eslint
+# cmd: git show 6c320ba:… > tests/unit/server/.lint-repro.ts && npx eslint tests/unit/server/.lint-repro.ts
+
+/home/yyj/ai/repos/pi-agent-ui/tests/unit/server/.lint-repro.ts
+  749:22  error  'a' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  749:25  error  'b' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+✖ 2 problems (2 errors, 0 warnings)
+
+# REPRO_LINT_EXIT=1（原件时间点同型：749:22/749:25 a,b 未用参）
