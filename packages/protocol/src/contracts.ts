@@ -263,7 +263,9 @@ export type ServerFrame =
   | ({ readonly t: "recovery"; readonly requestId: string; readonly file: string } & RecoveryInfo)
   | { readonly t: "resync-required"; readonly subscriptionId: SubscriptionId; readonly reason: ResyncReason }
   | { readonly t: "error"; readonly code: ErrorCode; readonly message: string; readonly retryable: boolean; readonly requestId?: string; readonly subscriptionId?: SubscriptionId }
-  | { readonly t: "pong"; readonly nonce: string };
+  | { readonly t: "pong"; readonly nonce: string }
+  | { readonly t: "write-ack"; readonly requestId: string; readonly file: string; readonly outcome: WriteSendOutcomeDTO }
+  | { readonly t: "write-stop-ack"; readonly requestId: string; readonly file: string; readonly outcome: WriteStopOutcomeDTO };
 
 export interface SessionSummaryDTO {
   readonly sessionId: string | null;
@@ -422,6 +424,82 @@ function cursorOf(raw: unknown): { ok: true; value: EventCursor } | { ok: false 
   if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 1) return { ok: false };
   return { ok: true, value: { streamId: sid, seq } };
 }
+
+// ---------------------------------------------------------------------------
+// 写侧帧（3c-1 扩展片）：仅 prompt/stop 开放；其余写类 t 维持 v1 冻结口径 4405。
+// v1 只读部署（网关未接 writeHost）行为不变——写类帧仍一律 4405+close 1008。
+// ---------------------------------------------------------------------------
+/** 本片开放的写类帧 t（WRITE_FRAME_TYPES 的子集）。 */
+export const WRITE_OPEN_FRAME_TYPES: readonly string[] = ["prompt", "stop"];
+/** prompt.text 上限（UTF-8 字节；frameMaxBytes 包络之内的显式域限）。 */
+export const WRITE_TEXT_MAX_BYTES = 65_536;
+
+export type WriteClientFrame =
+  | { readonly t: "prompt"; readonly requestId: string; readonly file: string; readonly text: string }
+  | { readonly t: "stop"; readonly requestId: string; readonly file: string };
+
+export type WriteFrameCheck =
+  | { readonly ok: true; readonly frame: WriteClientFrame }
+  | { readonly ok: false; readonly code: ErrorCode; readonly message: string };
+
+/** 写类帧校验（前置：t 已判属 WRITE_FRAME_TYPES 且网关已接写宿主）。
+ *  未开放写类 t→4405（v1 冻结口径不变）；字段违反→4404（§5.3 第 2 级同口径：先识别 t 后字段）。 */
+export function validateWriteFrame(raw: unknown): WriteFrameCheck {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return badWrite(4404, "帧必须是 JSON 对象");
+  const obj = raw as Record<string, unknown>;
+  const t = obj["t"];
+  if (typeof t !== "string") return badWrite(4404, "t 必须是字符串");
+  if (!WRITE_OPEN_FRAME_TYPES.includes(t)) return badWrite(4405, "写类帧未开放");
+  if (t === "prompt") {
+    const r0 = exactWrite(obj, ["t", "requestId", "file", "text"]); if (r0) return r0;
+    const rid = ridWrite(obj); if (typeof rid !== "string") return rid;
+    const file = fileWrite(obj); if (typeof file !== "string") return file;
+    const text = obj["text"];
+    if (typeof text !== "string" || text.length === 0) return badWrite(4404, "text 非法");
+    if (byteLength(text) > WRITE_TEXT_MAX_BYTES) return badWrite(4404, "text 超字节上限");
+    return okFrame({ t: "prompt", requestId: rid, file, text });
+  }
+  const r0 = exactWrite(obj, ["t", "requestId", "file"]); if (r0) return r0;
+  const rid = ridWrite(obj); if (typeof rid !== "string") return rid;
+  const file = fileWrite(obj); if (typeof file !== "string") return file;
+  return okFrame({ t: "stop", requestId: rid, file });
+}
+
+// 窄类型本地助手（不复用 validateClientFrame 的 FrameCheck 助手：返回联合不同型，避免侵入冻结校验器）
+function badWrite(code: ErrorCode, message: string): WriteFrameCheck { return { ok: false, code, message }; }
+function okFrame(frame: WriteClientFrame): WriteFrameCheck { return { ok: true, frame }; }
+function exactWrite(obj: Record<string, unknown>, expected: readonly string[]): WriteFrameCheck | null {
+  const got = Object.keys(obj).sort().join(",");
+  const want = [...expected].sort().join(",");
+  return got === want ? null : badWrite(4404, `帧字段集合非法（期望 ${want}）`);
+}
+function ridWrite(obj: Record<string, unknown>): string | WriteFrameCheck {
+  const v = obj["requestId"];
+  return typeof v === "string" && LIMITS.requestIdPattern.test(v) ? v : badWrite(4404, "requestId 非法");
+}
+function fileWrite(obj: Record<string, unknown>): string | WriteFrameCheck {
+  const v = obj["file"];
+  return typeof v === "string" && LIMITS.filePattern.test(v) ? v : badWrite(4404, "file 非法");
+}
+
+/** 写侧发送结果 DTO（write-ack.outcome）。宿主异常不跨此面——仅以 kind 表达。
+ *  与 runtime SessionSendResult 的映射在网关适配（error 细节留在服务端审计）。 */
+export type WriteSendOutcomeDTO =
+  | { readonly kind: "launched"; readonly intentId: string; readonly commandId: number }
+  | { readonly kind: "busy" }
+  | { readonly kind: "gate-rejected"; readonly reason: "busy" | "closed" }
+  | { readonly kind: "gate-failed"; readonly stage: "enqueue" | "sending" }
+  | { readonly kind: "invalidated"; readonly stage: "enqueue" | "sending" | "post-send" | "first-byte" }
+  | { readonly kind: "no-process" }
+  | { readonly kind: "not-ready"; readonly cause: string }
+  | { readonly kind: "rejected"; readonly reason: "not-idle" | "spawn-failed" | "spawn-exited" | "readiness-timeout" | "superseded" };
+
+/** 写侧停止结果 DTO（write-stop-ack.outcome）。 */
+export type WriteStopOutcomeDTO =
+  | { readonly kind: "confirmed"; readonly exit: { readonly code: number | null; readonly signal: string | null } }
+  | { readonly kind: "deadline-exceeded" }
+  | { readonly kind: "no-process" }
+  | { readonly kind: "stopping" };
 
 // 判别联合穷尽检查（编译期；新增 kind 时此处编译失败——防手写漂移）
 export function assertNeverHistory(_e: never): never { throw new Error("未穷尽 HistoryEvent"); }

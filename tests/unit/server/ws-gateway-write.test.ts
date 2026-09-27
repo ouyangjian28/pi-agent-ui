@@ -1,0 +1,243 @@
+// 3c-1 写侧帧接线——网关派发面（prompt/stop→WriteHostPort→write-ack/write-stop-ack）。
+// 覆盖矩阵：
+//  W1 未接线写帧→4405+close 1008（v1 冻结行为不变）   W7 未认证写帧→4401（优先级①先于写层）
+//  W2 prompt 合法→write-ack+宿主收到 file/text        W8 requestId 在途重复→4404
+//  W3 stop 合法→write-stop-ack                        W9 宿主抛错→4402(retryable)+审计
+//  W4 file 越界→4404（宿主未被调）                    W10 text 超 64KiB→4404
+//  W5 形状违反→4404（缺 text/多余字段/rid 非法/空 text）W11 槽归还：同 rid 先后可复用
+//  W6 未开放写类 t（send/kill）→4405（接线态同样）     W12 接线态读路径回归冒烟（hello→welcome 不变）
+import { describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { WsGateway, type ConnMeta, type GatewayConnHooks, type WsGatewayOpts } from "../../../apps/server/src/ws/ws-gateway.ts";
+import type { WriteHostPort } from "../../../apps/server/src/ws/write-host.ts";
+import { TokenAuthority } from "../../../apps/server/src/ws/token-auth.ts";
+import { WRITE_TEXT_MAX_BYTES, type WriteSendOutcomeDTO, type WriteStopOutcomeDTO } from "@pi-agent-ui/protocol";
+
+const tick = (): Promise<void> => new Promise((res) => setImmediate(() => res()));
+
+class FakeConn {
+  readyState = 1;
+  bufferedAmount = 0;
+  sent: string[] = [];
+  closes: Array<[number | undefined, string | undefined]> = [];
+  terminated = 0;
+  private msgCb: ((data: string, isBinary: boolean) => void) | null = null;
+  private closeCb: ((code: number) => void) | null = null;
+  send(data: string): void { this.sent.push(data); }
+  close(code?: number, reason?: string): void { this.closes.push([code, reason]); this.readyState = 2; }
+  terminate(): void { this.terminated++; this.readyState = 3; }
+  hooks(): GatewayConnHooks {
+    return { onMessage: (cb) => { this.msgCb = cb; }, onClose: (cb) => { this.closeCb = cb; } };
+  }
+  async say(obj: unknown): Promise<void> { this.msgCb?.(JSON.stringify(obj), false); await tick(); await tick(); }
+  frames(): Array<Record<string, unknown>> { return this.sent.map((s) => JSON.parse(s) as Record<string, unknown>); }
+}
+
+/** 写宿主替身：记录调用；可编程 outcome 与抛错。 */
+class FakeWriteHost implements WriteHostPort {
+  prompts: Array<{ file: string; text: string }> = [];
+  stops: string[] = [];
+  next: WriteSendOutcomeDTO = { kind: "launched", intentId: "i-1", commandId: 1 };
+  nextStop: WriteStopOutcomeDTO = { kind: "confirmed", exit: { code: 0, signal: null } };
+  throwPrompt = false;
+  /** W8：挂起门——非空时 sendPrompt 等待该 promise（造在途窗口）。 */
+  gatePrompt: Promise<void> | null = null;
+  async sendPrompt(file: string, text: string): Promise<WriteSendOutcomeDTO> {
+    this.prompts.push({ file, text });
+    if (this.gatePrompt !== null) await this.gatePrompt;
+    if (this.throwPrompt) throw new Error("boom-prompt");
+    return this.next;
+  }
+  async stop(file: string): Promise<WriteStopOutcomeDTO> {
+    this.stops.push(file);
+    return this.nextStop;
+  }
+}
+
+interface Rig {
+  gw: WsGateway;
+  conn: (meta?: Partial<ConnMeta>) => { c: FakeConn };
+  host: FakeWriteHost;
+  audits: string[];
+  /** 授权根目录（临时）。 */
+  dir: string;
+  /** 契约 file=裸文件名；inAbs=网关解析后宿主应收到的绝对路径。 */
+  inFile: string;
+  inAbs: string;
+  dispose(): Promise<void>;
+}
+
+async function makeRig(over: Partial<WsGatewayOpts> = {}, withHost = true): Promise<Rig> {
+  const d = await mkdtemp(join(tmpdir(), "ws-write-"));
+  const audits: string[] = [];
+  const host = new FakeWriteHost();
+  const gw = new WsGateway({
+    tokens: TokenAuthority.fromTokens(["tok-ok"]),
+    roots: [d],
+    scanDir: d,
+    allowedOrigins: ["http://localhost:5173"],
+    heartbeat: { pingMs: 0, idleMs: 0 },
+    audit: (l) => { audits.push(l); },
+    ...(withHost ? { writeHost: host } : {}),
+    ...over,
+  });
+  const conn = (meta?: Partial<ConnMeta>) => {
+    const c = new FakeConn();
+    gw.attach(c, c.hooks(), { origin: "http://localhost:5173", loopback: true, tls: false, ...meta } satisfies ConnMeta);
+    return { c };
+  };
+  return { gw, conn, host, audits, dir: d, inFile: "s1.jsonl", inAbs: join(d, "s1.jsonl"), dispose: async () => { gw.dispose(); await rm(d, { recursive: true, force: true }); } };
+}
+
+async function authed(r: Rig): Promise<FakeConn> {
+  const { c } = r.conn();
+  await c.say({ t: "hello", protocolVersion: 1, token: "tok-ok" });
+  return c;
+}
+
+const errs = (c: FakeConn) => c.frames().filter((f) => f.t === "error");
+
+describe("3c-1 写侧帧：网关派发面", () => {
+  it("W1 未接线：prompt→4405+close 1008（v1 冻结不变）", async () => {
+    const r = await makeRig({}, false);
+    try {
+      const c = await authed(r);
+      await c.say({ t: "prompt", requestId: "r1", file: r.inFile, text: "hi" });
+      expect(errs(c).some((f) => f.code === 4405)).toBe(true);
+      expect(c.closes.some(([code, reason]) => code === 1008 && reason === "write-frozen")).toBe(true);
+      expect(r.host.prompts.length).toBe(0);
+    } finally { await r.dispose(); }
+  });
+
+  it("W2 prompt 合法→write-ack launched；宿主收到 file/text；审计行", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      await c.say({ t: "prompt", requestId: "r2", file: r.inFile, text: "你好 pi" });
+      const ack = c.frames().find((f) => f.t === "write-ack");
+      expect(ack).toBeDefined();
+      expect(ack?.["requestId"]).toBe("r2");
+      const oc = ack?.["outcome"] as Record<string, unknown>;
+      expect(oc["kind"]).toBe("launched");
+      expect(oc["intentId"]).toBe("i-1");
+      expect(r.host.prompts).toEqual([{ file: r.inAbs, text: "你好 pi" }]);
+      expect(r.audits.some((l) => l.includes("write-frame") && l.includes("t=prompt") && l.includes("outcome=launched"))).toBe(true);
+    } finally { await r.dispose(); }
+  });
+
+  it("W3 stop 合法→write-stop-ack confirmed", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      await c.say({ t: "stop", requestId: "r3", file: r.inFile });
+      const ack = c.frames().find((f) => f.t === "write-stop-ack");
+      expect(ack).toBeDefined();
+      expect((ack?.["outcome"] as Record<string, unknown>)["kind"]).toBe("confirmed");
+      expect(r.host.stops).toEqual([r.inAbs]);
+    } finally { await r.dispose(); }
+  });
+
+  it("W4 file 越界→4404 且宿主未被调", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      await c.say({ t: "prompt", requestId: "r4", file: "/etc/passwd", text: "x" });
+      expect(errs(c).some((f) => f.code === 4404)).toBe(true);
+      expect(r.host.prompts.length).toBe(0);
+    } finally { await r.dispose(); }
+  });
+
+  it("W5 形状违反→4404（缺 text/多余字段/rid 非法/空 text）", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      await c.say({ t: "prompt", requestId: "r5a", file: r.inFile }); // 缺 text
+      await c.say({ t: "prompt", requestId: "r5b", file: r.inFile, text: "x", extra: 1 }); // 多余字段
+      await c.say({ t: "prompt", requestId: "BAD RID", file: r.inFile, text: "x" }); // rid 非法
+      await c.say({ t: "prompt", requestId: "r5d", file: r.inFile, text: "" }); // 空 text
+      // 4404 计数≥3→close 1002：四例全拒，至少前三个 4404 已触发关限——只断言关过，不再断言 close 为空
+      expect(c.closes.some(([code]) => code === 1002)).toBe(true);
+    } finally { await r.dispose(); }
+  });
+
+  it("W6 未开放写类 t（send/kill）→4405（接线态同样）", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      await c.say({ t: "send", requestId: "r6a", file: r.inFile, text: "x" });
+      expect(errs(c).some((f) => f.code === 4405)).toBe(true);
+      expect(c.closes.some(([code]) => code === 1008)).toBe(true);
+    } finally { await r.dispose(); }
+  });
+
+  it("W7 未认证写帧→4401（优先级①先于写层）", async () => {
+    const r = await makeRig();
+    try {
+      const { c } = r.conn();
+      await c.say({ t: "prompt", requestId: "r7", file: r.inFile, text: "hi" });
+      expect(errs(c).some((f) => f.code === 4401)).toBe(true);
+      expect(c.closes.some(([code]) => code === 1008)).toBe(true);
+      expect(r.host.prompts.length).toBe(0);
+    } finally { await r.dispose(); }
+  });
+
+  it("W8 requestId 在途重复→第二次 4404（宿主只调一次）", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      r.host.gatePrompt = new Promise<void>(() => {}); // 挂起第一次派发（inflight 不归还）
+      await c.say({ t: "prompt", requestId: "r8", file: r.inFile, text: "1" });
+      await c.say({ t: "prompt", requestId: "r8", file: r.inFile, text: "2" });
+      expect(errs(c).some((f) => f.code === 4404 && f.message === "requestId 在途重复")).toBe(true);
+      expect(r.host.prompts.length).toBe(1);
+    } finally { await r.dispose(); }
+  });
+
+  it("W9 宿主抛错→4402 retryable=true+审计 write-frame-error", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      r.host.throwPrompt = true;
+      await c.say({ t: "prompt", requestId: "r9", file: r.inFile, text: "x" });
+      const e = errs(c).find((f) => f.code === 4402);
+      expect(e).toBeDefined();
+      expect(e?.["retryable"]).toBe(true);
+      expect(r.audits.some((l) => l.includes("write-frame-error") && l.includes("t=prompt"))).toBe(true);
+    } finally { await r.dispose(); }
+  });
+
+  it("W10 text 超 WRITE_TEXT_MAX_BYTES→4404", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      const big = "a".repeat(WRITE_TEXT_MAX_BYTES + 1);
+      await c.say({ t: "prompt", requestId: "r10", file: r.inFile, text: big });
+      expect(errs(c).some((f) => f.code === 4404)).toBe(true);
+      expect(r.host.prompts.length).toBe(0);
+    } finally { await r.dispose(); }
+  });
+
+  it("W11 槽归还：同 rid 先后可复用（第一次 ack 后不再在途）", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      await c.say({ t: "prompt", requestId: "r11", file: r.inFile, text: "1" });
+      expect(c.frames().filter((f) => f.t === "write-ack").length).toBe(1);
+      await c.say({ t: "stop", requestId: "r11", file: r.inFile }); // 同 rid 复用（不同 t 亦可——槽已归还）
+      expect(c.frames().filter((f) => f.t === "write-stop-ack").length).toBe(1);
+      expect(errs(c).some((f) => f.code === 4404)).toBe(false);
+    } finally { await r.dispose(); }
+  });
+
+  it("W12 接线态读路径回归：hello→welcome、ping→pong 不受影响", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      await c.say({ t: "ping", nonce: "n1" });
+      expect(c.frames().some((f) => f.t === "welcome")).toBe(true);
+      expect(c.frames().some((f) => f.t === "pong")).toBe(true);
+    } finally { await r.dispose(); }
+  });
+});

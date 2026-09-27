@@ -1,0 +1,9 @@
+
+ RUN  v5.0.1 /home/yyj/ai/repos/pi-agent-ui
+
+
+ Test Files  48 passed (48)
+      Tests  907 passed | 7 skipped (914)
+   Start at  13:39:56
+   Duration  9.44s (tests 84%, transform 11%, import 4%, environment 1%)
+

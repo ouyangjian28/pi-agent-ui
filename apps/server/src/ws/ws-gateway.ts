@@ -21,7 +21,9 @@ import { createHash } from "node:crypto";
 import type {
   ClientFrame, LiveEvent, RecoveryBlockReason, SanitizedText, ServerFrame, SessionStatus,
 } from "@pi-agent-ui/protocol";
-import { LIMITS, SubscriptionEngine, validateClientFrame, defaultStreamId } from "@pi-agent-ui/protocol";
+import { LIMITS, SubscriptionEngine, validateClientFrame, validateWriteFrame, WRITE_FRAME_TYPES, defaultStreamId } from "@pi-agent-ui/protocol";
+import type { WriteClientFrame } from "@pi-agent-ui/protocol";
+import type { WriteHostPort } from "./write-host.ts";
 import type { ScanRow } from "@pi-agent-ui/protocol";
 import { ReadIndexRegistry, FileOverBudgetError } from "@pi-agent-ui/protocol";
 import type { ReadIndex } from "@pi-agent-ui/protocol";
@@ -96,6 +98,8 @@ export interface WsGatewayOpts {
   readonly semaphore?: ComputeSemaphore;
   /** 恢复证据快照提供者（file→快照|null；null→unavailable(no-evidence-snapshot)——B03：禁裸读盘面）。 */
   readonly recoveryEvidence?: (file: string, signal: AbortSignal) => RecoveryEvidenceResult | null | Promise<RecoveryEvidenceResult | null>;
+  /** 3c-1 写侧宿主（缺省=未接线：写类帧维持 v1 冻结拒绝 4405；接线后仅开放 prompt/stop）。 */
+  readonly writeHost?: WriteHostPort;
   /** 订阅数据入口（W1-04；缺省=订阅一律 4402 fail-closed，接线归宿主/3b）。 */
   readonly historySource?: HistorySourcePort;
   /** 每会话状态源（订阅帧冻结用；缺省=unknown 状态）。 */
@@ -332,6 +336,27 @@ export class WsGateway {
     const t = typeof msg === "object" && msg !== null && !Array.isArray(msg) ? (msg as Record<string, unknown>).t : undefined;
     if (typeof t !== "string") { this.errFrame(st, 4404, "帧必须是 JSON 对象", ""); return; }
     if (!st.authed && t !== "hello") { this.rejectAuth(st, "未认证"); return; }
+    // 写类层（3c-1）：t∈冻结写集且宿主已接线→写校验+派发；未接线→落入下方 v1 冻结校验器（4405 不变）。
+    // 认证优先级①在前：未认证写帧→4401（与读帧同口径）。
+    if (WRITE_FRAME_TYPES.includes(t) && this.opts.writeHost !== undefined) {
+      const wc = validateWriteFrame(msg);
+      if (!wc.ok) {
+        const wrid = typeof msg === "object" && msg !== null && "requestId" in msg
+          && typeof (msg as { requestId?: unknown }).requestId === "string"
+          && /^[\w-]{1,64}$/.test((msg as { requestId: string }).requestId)
+          ? (msg as { requestId: string }).requestId : "";
+        this.errFrame(st, wc.code as 4403 | 4404 | 4405, wc.message, wrid);
+        return;
+      }
+      const wf = wc.frame;
+      const rid = wf.requestId;
+      if (st.inflight.has(rid)) { this.errFrame(st, 4404, "requestId 在途重复", rid); return; }
+      if (st.inflight.size >= LIMITS.inFlightRequestsPerConn) { this.errFrame(st, 4404, "在途请求超限", rid); return; }
+      st.inflight.add(rid);
+      if (wf.t === "prompt") void this.handleWritePrompt(st, wf);
+      else void this.handleWriteStop(st, wf);
+      return;
+    }
     // W1-01：协议单入口=冻结校验器（格式层→版本层→写类层；固定消息不回显）
     const check = validateClientFrame(msg);
     if (!check.ok) {
@@ -359,6 +384,41 @@ export class WsGateway {
       case "unsubscribe": this.handleUnsubscribe(st, frame); return;
       case "list-sessions": void this.handleList(st, frame); return;
       case "get-recovery": void this.handleRecovery(st, frame); return;
+    }
+  }
+
+  // ---- 写侧帧（3c-1）：prompt/stop 派发写宿主；宿主异常→4402；requestId 槽在 finally 归还 ----
+  private async handleWritePrompt(st: ConnState, frame: Extract<WriteClientFrame, { t: "prompt" }>): Promise<void> {
+    const rid = frame.requestId;
+    const file = frame.file;
+    try {
+      const abs = resolveWithinRoots(file, this.opts.roots);
+      if (abs === null) { this.errFrame(st, 4404, "file 越界", rid); return; }
+      const outcome = await this.opts.writeHost!.sendPrompt(abs, frame.text);
+      this.audit(`write-frame conn=${st.id} t=prompt file=${file} outcome=${outcome.kind}`);
+      this.enqueue(st, { t: "write-ack", requestId: rid, file, outcome });
+    } catch (e: unknown) {
+      this.audit(`write-frame-error conn=${st.id} t=prompt file=${file} ${String(e instanceof Error ? e.message : e)}`);
+      this.errFrame(st, 4402, "写宿主不可用", rid);
+    } finally {
+      st.inflight.delete(rid);
+    }
+  }
+
+  private async handleWriteStop(st: ConnState, frame: Extract<WriteClientFrame, { t: "stop" }>): Promise<void> {
+    const rid = frame.requestId;
+    const file = frame.file;
+    try {
+      const abs = resolveWithinRoots(file, this.opts.roots);
+      if (abs === null) { this.errFrame(st, 4404, "file 越界", rid); return; }
+      const outcome = await this.opts.writeHost!.stop(abs);
+      this.audit(`write-frame conn=${st.id} t=stop file=${file} outcome=${outcome.kind}`);
+      this.enqueue(st, { t: "write-stop-ack", requestId: rid, file, outcome });
+    } catch (e: unknown) {
+      this.audit(`write-frame-error conn=${st.id} t=stop file=${file} ${String(e instanceof Error ? e.message : e)}`);
+      this.errFrame(st, 4402, "写宿主不可用", rid);
+    } finally {
+      st.inflight.delete(rid);
     }
   }
 

@@ -17,6 +17,7 @@ import { WsGateway } from "./ws/ws-gateway.ts";
 import { ComputeSemaphore } from "./ws/compute-semaphore.ts";
 import { DualHistorySource } from "./runtime/dual-history-source.ts";
 import { createRecoveryEvidenceProvider } from "./runtime/recovery-evidence-source.ts";
+import type { WriteHostPort } from "./ws/write-host.ts";
 import { isAbsolute, join } from "node:path";
 
 export interface ServerConfig {
@@ -52,6 +53,8 @@ export interface ServerConfig {
   readonly tokenPollMs?: number;
   /** 注册 SIGHUP 热轮换钩子（默认 false=库模式不碰进程信号；生产入口置 true）。 */
   readonly registerSighup?: boolean;
+  /** 写侧宿主（3c-1）：缺省=只读部署（写类帧 4405）；接入后网关开放 prompt/stop。 */
+  readonly writeHost?: WriteHostPort;
   readonly audit?: (line: string) => void;
 }
 
@@ -144,6 +147,7 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     semaphore,
     historySource: history,
     recoveryEvidence,
+    ...(config.writeHost !== undefined ? { writeHost: config.writeHost } : {}),
     audit,
   });
 
