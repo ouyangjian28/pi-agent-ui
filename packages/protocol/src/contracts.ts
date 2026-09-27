@@ -484,6 +484,9 @@ function fileWrite(obj: Record<string, unknown>): string | WriteFrameCheck {
 
 /** 写侧发送结果 DTO（write-ack.outcome）。宿主异常不跨此面——仅以 kind 表达。
  *  与 runtime SessionSendResult 的映射在网关适配（error 细节留在服务端审计）。 */
+// 3c-2 收窄（第18轮 GPT 勘正）：not-ready.cause 保持可选（同源 SessionSendResult.cause?）；
+// rejected 分支已删——send() 路径无此来源（启动失败一律 not-ready{cause:start失败kind}），
+// 无源不设枝（YAGNI；真实来源出现时再加=防手写漂移的穷尽检查会强制覆盖）。
 export type WriteSendOutcomeDTO =
   | { readonly kind: "launched"; readonly intentId: string; readonly commandId: number }
   | { readonly kind: "busy" }
@@ -491,8 +494,7 @@ export type WriteSendOutcomeDTO =
   | { readonly kind: "gate-failed"; readonly stage: "enqueue" | "sending" }
   | { readonly kind: "invalidated"; readonly stage: "enqueue" | "sending" | "post-send" | "first-byte" }
   | { readonly kind: "no-process" }
-  | { readonly kind: "not-ready"; readonly cause: string }
-  | { readonly kind: "rejected"; readonly reason: "not-idle" | "spawn-failed" | "spawn-exited" | "readiness-timeout" | "superseded" };
+  | { readonly kind: "not-ready"; readonly cause?: string };
 
 /** 写侧停止结果 DTO（write-stop-ack.outcome）。 */
 export type WriteStopOutcomeDTO =

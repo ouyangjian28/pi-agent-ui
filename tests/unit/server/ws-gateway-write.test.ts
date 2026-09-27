@@ -231,6 +231,82 @@ describe("3c-1 写侧帧：网关派发面", () => {
     } finally { await r.dispose(); }
   });
 
+  // ---- 3c-2 首批加固（第18轮 GPT 对抗推演要求的四案）----
+  it("W13 W5 分连接版：每坏帧独立连接→各自 4404（空 text 案现在可观测）", async () => {
+    const r = await makeRig();
+    try {
+      const bads: unknown[] = [
+        { t: "prompt", requestId: "b1", file: r.inFile }, // 缺 text
+        { t: "prompt", requestId: "b2", file: r.inFile, text: "x", extra: 1 }, // 多余字段
+        { t: "prompt", requestId: "BAD RID", file: r.inFile, text: "x" }, // rid 非法
+        { t: "prompt", requestId: "b4", file: r.inFile, text: "" }, // 空 text（原 W5 里被 close 遮蔽的第 4 案）
+      ];
+      for (const bad of bads) {
+        const c = await authed(r); // 每案新连接：前一连接的 close 不影响本连接
+        await c.say(bad);
+        expect(errs(c).some((f) => f.code === 4404)).toBe(true);
+      }
+      expect(r.host.prompts.length).toBe(0); // 四案全在格式层被拒
+    } finally { await r.dispose(); }
+  });
+
+  it("W14 容量门独立：4 个不同 rid 在途后第 5 个→4404 在途请求超限（非重复门）", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      r.host.gatePrompt = new Promise<void>(() => {}); // 全部挂起
+      for (let i = 1; i <= 4; i += 1) await c.say({ t: "prompt", requestId: `r14-${i}`, file: r.inFile, text: "x" });
+      await c.say({ t: "prompt", requestId: "r14-5", file: r.inFile, text: "x" }); // 第 5 个不同 rid
+      const e = errs(c).find((f) => f.code === 4404 && f.message === "在途请求超限");
+      expect(e).toBeDefined();
+      expect(r.host.prompts.length).toBe(4); // 第 5 个未达宿主
+    } finally { await r.dispose(); }
+  });
+
+  it("W15 失败路径槽归还：prompt 4402 后同 rid 可复用（stop→ack，再 prompt→ack）", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      r.host.throwPrompt = true;
+      await c.say({ t: "prompt", requestId: "r15", file: r.inFile, text: "x" });
+      expect(errs(c).some((f) => f.code === 4402)).toBe(true); // 失败路径 finally 已归还？
+      r.host.throwPrompt = false;
+      await c.say({ t: "stop", requestId: "r15", file: r.inFile }); // 同 rid 复用（若未归还应 4404）
+      expect(c.frames().some((f) => f.t === "write-stop-ack")).toBe(true);
+      await c.say({ t: "prompt", requestId: "r15", file: r.inFile, text: "y" }); // 再复用
+      expect(c.frames().some((f) => f.t === "write-ack")).toBe(true);
+      expect(errs(c).some((f) => f.code === 4404)).toBe(false);
+    } finally { await r.dispose(); }
+  });
+
+  it("W16 ack.file 显式回显契约裸名（W2/W3 的补强断言）", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      await c.say({ t: "prompt", requestId: "r16a", file: r.inFile, text: "x" });
+      await c.say({ t: "stop", requestId: "r16b", file: r.inFile });
+      expect(c.frames().find((f) => f.t === "write-ack")?.["file"]).toBe(r.inFile);
+      expect(c.frames().find((f) => f.t === "write-stop-ack")?.["file"]).toBe(r.inFile);
+      expect(r.host.prompts[0]?.file).toBe(r.inAbs); // 宿主面=abs（与 ack 回显=裸名成对照）
+    } finally { await r.dispose(); }
+  });
+
+  it("W17 UTF-8 字节边界：恰 65536B（含多字节）过；65538B（多字节）拒", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      const exact = "你".repeat(21845) + "a"; // 3*21845+1 = 65536 字节
+      expect(Buffer.byteLength(exact, "utf8")).toBe(WRITE_TEXT_MAX_BYTES);
+      await c.say({ t: "prompt", requestId: "r17a", file: r.inFile, text: exact });
+      expect(c.frames().some((f) => f.t === "write-ack")).toBe(true);
+      const over = "你".repeat(21846); // 65538 字节
+      expect(Buffer.byteLength(over, "utf8")).toBe(WRITE_TEXT_MAX_BYTES + 2);
+      await c.say({ t: "prompt", requestId: "r17b", file: r.inFile, text: over });
+      expect(errs(c).some((f) => f.code === 4404)).toBe(true);
+      expect(r.host.prompts.map((p) => p.text)).toEqual([exact]); // 超限案未达宿主
+    } finally { await r.dispose(); }
+  });
+
   it("W12 接线态读路径回归：hello→welcome、ping→pong 不受影响", async () => {
     const r = await makeRig();
     try {
