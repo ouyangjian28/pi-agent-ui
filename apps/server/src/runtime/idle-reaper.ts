@@ -98,7 +98,9 @@ export class IdleReaper {
   }
 
   /** 观测面（3c-3 statusFor 真源）：闲置判定快照，纯读不推进计时（起点吸收/触发仍归 tick）。
-   * eligible=true 而 idleElapsedMs=null=已满足双条件但计时尚未开起（下一 tick 起算）。 */
+   * eligible=true 而 idleElapsedMs=null=已满足双条件但计时尚未开起（下一 tick 起算）。
+   * 20轮尾项1：有效起点=max(idleSince, lastActivity)——noteActivity 后未及下 tick 吸收的窗口里，
+   * 新活动把闲置起点往后推，倒计时不田信（田值仅会偏短不会安全漂移）。 */
   stats(): { eligible: boolean; idleElapsedMs: number | null; idleRemainingMs: number | null; idleMs: number } {
     const eligible = !this.disposed && this.eligible();
     if (!eligible || this.idleSince === null || !Number.isFinite(this.idleSince)) {
@@ -106,7 +108,8 @@ export class IdleReaper {
     }
     const now = this.deps.now();
     if (!Number.isFinite(now)) return { eligible, idleElapsedMs: null, idleRemainingMs: null, idleMs: this.idleMs };
-    const elapsed = Math.max(0, now - this.idleSince);
+    const origin = Math.max(this.idleSince, this.lastActivity !== null && Number.isFinite(this.lastActivity) ? this.lastActivity : this.idleSince); // 20轮F：窗口吸收 noteActivity；isFinite 非 narrow 须显式判空
+    const elapsed = Math.max(0, now - origin);
     return { eligible, idleElapsedMs: elapsed, idleRemainingMs: Math.max(0, this.idleMs - elapsed), idleMs: this.idleMs };
   }
 

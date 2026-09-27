@@ -8,14 +8,16 @@ import { RpcSession } from "../../../apps/server/src/runtime/rpc-session.js";
 import type { DurabilityPort, ProcessHostPort } from "@pi-agent-ui/protocol";
 
 /** 假宿主：不 spawn（返哨兵句柄），记录 stop 调用序。 */
-function fakeHost(): ProcessHostPort & { stops: string[] } {
+function fakeHost(): ProcessHostPort & { stops: string[]; handlers: { onExit?: (code: number | null, signal: string | null) => void } | null } {
   const stops: string[] = [];
-  return {
+  const h: ProcessHostPort & { stops: string[]; handlers: { onExit?: (code: number | null, signal: string | null) => void } | null } = {
     stops,
+    handlers: null,
     spawn: () => ({ id: "h" }),
     writeStdin: () => Promise.resolve(),
-    stop: (h) => { stops.push(h.id); },
+    stop: (hd) => { stops.push(hd.id); h.handlers?.onExit?.(null, "SIGTERM"); }, // 信号停→补发退出事件（retire 等待口径）
   };
+  return h;
 }
 
 /** 假耐久：无盘 IO；记录 close。 */
@@ -112,13 +114,27 @@ describe("session-registry（3c-3）", () => {
     expect(() => r.sessionFor("/root/a.jsonl")).toThrow(/已销毁/);
   });
 
-  it("SR8 dispose 时进程在飞：stop 先行（宿主收到 stop 调用）再 dispose 本地", async () => {
+  it("SR8 dispose 时进程在飞（start 等待窗）：pending send 未决即 dispose→stop 先行真调宿主+优雅收尾完成", async () => {
+    const host = fakeHost();
+    host.spawn = (args, h) => { // 存 handlers：stop 时补发 exit 事件（假宿主无事件链→retire 会等退出）
+      host.handlers = h;
+      return { id: "h1" };
+    };
+    const r = createSessionRegistry({ host, sessionFor: (f) => `${f}.session`, readinessTimeoutMs: 10_000 });
+    const s = r.sessionFor("/root/a.jsonl");
+    const sent = s.send("in-flight prompt"); // 不等：驻留 start/readiness 等待窗
+    await new Promise((res) => setTimeout(res, 50));
+    await r.dispose(); // start-wait 中销毁
+    expect(host.stops.length).toBeGreaterThanOrEqual(1); // stop 先行真调宿主（20轮勘正：旧版标题称在飞却从未 send）
+    expect(r.files()).toEqual([]);
+    await expect(sent).resolves.toMatchObject({ kind: expect.stringMatching(/not-ready|invalidated|gate-rejected/) });
+  });
+  it("SR8b idle 会话 stop 不伪造：未起轮→dispose 宿主零 stop 调用（原 SR8 断言保留为独立面）", async () => {
     const host = fakeHost();
     const r = createSessionRegistry({ host, sessionFor: (f) => `${f}.session` });
     r.sessionFor("/root/a.jsonl");
     await r.dispose();
-    // idle 态 stop()=retireCurrent 无进程→no-process（不调宿主 stop）；宿主面不伪造
-    expect(host.stops).toEqual([]);
+    expect(host.stops).toEqual([]); // idle 态 stop()=retireCurrent 无进程→no-process（不调宿主 stop）
   });
 
   it("SR9 销毁健壮性：耐久 close 拒绝→RpcSession 层隔离（dispose 不 reject）→registry.dispose 照常收尾+审计可见；registry 自层 catch 为纵深防御（无注入口，不假测）", async () => {
@@ -158,4 +174,28 @@ describe("session-registry（3c-3）", () => {
     expect(() => r.sessionFor("/root/a.jsonl")).not.toThrow();
     await expect(r.dispose()).resolves.toBeUndefined();
   });
+});
+
+it("SR12（20轮F3）并发 dispose 共享收尾：受控挂起 close 放行前第二等待者不得完成；资源恰收一次；完成后重复调用仍成功", async () => {
+  const host = fakeHost();
+  let release: (() => void) | null = null;
+  const gate = new Promise<void>((r) => { release = r; });
+  let closes = 0;
+  const slow = { ...fakeDurability(), close: () => { closes += 1; return gate; } }; // 受控未决
+  const r = createSessionRegistry({ host, sessionFor: (f) => `${f}.session`, durabilityFor: () => slow, audit: () => {} });
+  r.sessionFor("/root/a.jsonl");
+  const p1 = r.dispose();
+  const p2 = r.dispose(); // 首个 stop/close 未完成即并发调用
+  await new Promise((res) => setTimeout(res, 30)); // 给收尾链时间走到 close
+  let done1 = false, done2 = false;
+  void p1.then(() => { done1 = true; }); void p2.then(() => { done2 = true; });
+  await new Promise((res) => setTimeout(res, 30));
+  expect(done1).toBe(false); // 旧缺陷：p2 提前 resolve
+  expect(done2).toBe(false);
+  release!();
+  await Promise.all([p1, p2]);
+  expect(closes).toBe(1); // 恰收一次
+  expect(r.files()).toEqual([]);
+  await expect(r.dispose()).resolves.toBeUndefined(); // 完成后重复调用仍成功
+  expect(() => r.sessionFor("/root/b.jsonl")).toThrow("已销毁"); // 销毁后拒建维持（message 原文断言）
 });

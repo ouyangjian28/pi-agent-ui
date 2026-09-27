@@ -197,7 +197,7 @@ describe("3c-1 写侧帧：网关派发面", () => {
       await c.say({ t: "prompt", requestId: "r8", file: r.inFile, text: "2" });
       expect(errs(c).some((f) => f.code === 4404 && f.message === "requestId 在途重复")).toBe(true);
       expect(r.host.prompts.length).toBe(1);
-      release8(); // 正常路径放门：write-ack 到达+槽归还（不是死门悬置到 dispose）
+      release8!(); // 正常路径放门：write-ack 到达+槽归还（不是死门悬置到 dispose）；构造已赋值（195 行门内同步）
       await tick(); await tick();
       expect(c.frames().filter((f) => f.t === "write-ack").length).toBe(1);
       await c.say({ t: "prompt", requestId: "r8", file: r.inFile, text: "3" }); // rid 复用成功=槽已归还
@@ -276,7 +276,7 @@ describe("3c-1 写侧帧：网关派发面", () => {
       const e = errs(c).find((f) => f.code === 4404 && f.message === "在途请求超限");
       expect(e).toBeDefined();
       expect(r.host.prompts.length).toBe(4); // 第 5 个未达宿主
-      release14(); // 释放四门：write-ack 全部到达+四槽归还
+      release14!(); // 释放四门：write-ack 全部到达+四槽归还；构造已赋值（273 行门内同步）
       await tick(); await tick();
       expect(c.frames().filter((f) => f.t === "write-ack").length).toBe(4);
       const errsBefore = errs(c).filter((f) => f.code === 4404).length;

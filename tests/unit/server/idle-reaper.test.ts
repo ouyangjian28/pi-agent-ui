@@ -283,3 +283,22 @@ describe("idle-reaper（闲置回收受控面）", () => {
     expect(h.retireCalls()).toBe(0);
   });
 });
+
+it("S5-R2 stats 活动窗口（20轮尾项1）：noteActivity 未及下 tick 吸收时，倒计时起点=活动时刻（不田信旧起点）", () => {
+  let now = 0, retired = 0;
+  const registry = new MapRegistry();
+  const r = new IdleReaper({
+    supervisor: { getState: () => ({ generation: 1, phase: "running" as const }), retireCurrentGraceful: async () => { retired += 1; return { kind: "confirmed" }; } },
+    isSessionIdle: () => true, registry, now: () => now, idleMs: 1_000,
+  });
+  r.tick(); // 闲置起点=0
+  now = 900; registry.register("short"); registry.complete("short"); r.noteActivity(); // 900 短活动，下 tick 才吸收
+  now = 950;
+  const st = r.stats();
+  expect(st.idleElapsedMs).toBe(50); // 旧版此=950（把新活动的窗口当已闲置）
+  expect(st.idleRemainingMs).toBe(950); // 旧版此=50（虚报临期）
+  now = 1_000; r.tick(); // 吸收活动，起点回退 900——安全性不变：不从旧起点回收
+  expect(retired).toBe(0);
+  now = 900 + 1_000; r.tick(); // 从活动时刻计满才回收
+  expect(retired).toBe(1);
+});

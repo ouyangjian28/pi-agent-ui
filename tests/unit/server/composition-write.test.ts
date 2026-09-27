@@ -34,7 +34,7 @@ async function mkCfg(extra: Record<string, unknown> = {}): Promise<{ dir: string
 }
 
 async function start(cfg: Record<string, unknown>): Promise<PiAgentUiServer> {
-  const s = await startServer(cfg as Parameters<typeof startServer>[0]);
+  const s = await startServer(cfg as unknown as Parameters<typeof startServer>[0]);
   CLEANUP.push(s);
   return s;
 }
@@ -76,12 +76,12 @@ afterEach(async () => {
 describe("3c-3 composition 写侧接线", () => {
   it("CW1 writeHost 与 write 同供 → 拒启（接线歧义门）", async () => {
     const { cfg } = await mkCfg({ writeHost: { sendPrompt: async () => ({ kind: "no-process" }), stop: async () => ({ kind: "no-process" }) }, write: CAT_WRITE });
-    await expect(startServer(cfg as Parameters<typeof startServer>[0])).rejects.toThrow(/writeHost 与 write 同供/);
+    await expect(startServer(cfg as unknown as Parameters<typeof startServer>[0])).rejects.toThrow(/writeHost 与 write 同供/);
   });
 
   it("CW2 write.sessionFor 缺失 → 拒启（写侧无从落地）", async () => {
     const { cfg } = await mkCfg({ write: { piBin: "/bin/cat" } });
-    await expect(startServer(cfg as Parameters<typeof startServer>[0])).rejects.toThrow(/sessionFor 缺失/);
+    await expect(startServer(cfg as unknown as Parameters<typeof startServer>[0])).rejects.toThrow(/sessionFor 缺失/);
   });
 
   it("CW3 真链失败面：prompt→cat 回声不答探针→not-ready(cause=readiness-timeout)+write-ack；审计含 spawn/registry/readiness 链", async () => {
@@ -129,14 +129,14 @@ describe("3c-3 composition 写侧接线", () => {
       await c.next("write-ack", (f) => f.requestId === "r1");
       c.ws.send(JSON.stringify({ t: "stop", requestId: "r2", file: "s1.jsonl" }));
       const ack = await c.next("write-stop-ack", (f) => f.requestId === "r2");
-      expect(ack.outcome.kind).toBe("no-process"); // readiness 失败已退役→idle 无进程
+      expect((ack.outcome as { kind: string }).kind).toBe("no-process"); // readiness 失败已退役→idle 无进程（20轮：Frame[k:string]:unknown 窄化）
     } finally {
       c.close();
     }
   });
 
   it("CW6 dispose 在途：readiness 等待期 server.dispose()→resolve 有限时间内+审计含 registry disposed（统一销毁面）", async () => {
-    const { cfg } = await mkCfg({ write: { ...CAT_WRITE, readinessTimeoutMs: 60_000 } }); // 长窗：必在等待期 dispose
+    const { cfg, audits } = await mkCfg({ write: { ...CAT_WRITE, readinessTimeoutMs: 60_000 } }); // 长窗：必在等待期 dispose
     const s = await start(cfg);
     const c = await connect(s.port);
     c.ws.send(JSON.stringify({ t: "prompt", requestId: "r1", file: "s1.jsonl", text: "hi" }));
@@ -144,6 +144,7 @@ describe("3c-3 composition 写侧接线", () => {
     const t0 = Date.now();
     await s.dispose();
     expect(Date.now() - t0).toBeLessThan(15_000); // 退出确认预算内（SIGTERM 链杀 cat）
+    expect(audits.some((l) => l.includes("session-registry disposed"))).toBe(true); // 20轮勘正：标题既称审计序，正文须读
     c.close();
   });
 
@@ -163,7 +164,7 @@ describe("3c-3 composition 写侧接线", () => {
     }
   });
 
-  it("CW8 statusFor 构造后：prompt 失败退 idle 后快照 process.phase 仍 idle+bg known（注册表观测面贯通）", async () => {
+  it("CW8 statusFor 构造后：prompt 退役后快照 process.phase∈{idle,running,stopping}+bg known（注册表观测面贯通）", async () => {
     const { dir, cfg } = await mkCfg({ write: CAT_WRITE });
     await writeFile(join(dir, "s1.jsonl"), `${JSON.stringify({ t: "session-init", sessionId: "sid-1", leafId: "l0", ts: 1, cwd: dir })}\n`, "utf8");
     const s = await start(cfg);

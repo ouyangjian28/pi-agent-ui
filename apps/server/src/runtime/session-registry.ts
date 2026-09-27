@@ -52,6 +52,7 @@ export function createSessionRegistry(opts: SessionRegistryOpts): SessionRegistr
   const sessions = new Map<string, RpcSession>();
   const idleMs = opts.idleMs ?? 30 * 60_000;
   let disposed = false;
+  let disposeP: Promise<void> | null = null;
   const safeAudit = (line: string): void => {
     try { opts.audit?.(line); } catch { /* 审计异常不阻断 */ }
   };
@@ -147,11 +148,11 @@ export function createSessionRegistry(opts: SessionRegistryOpts): SessionRegistr
       };
     },
     dispose(): Promise<void> {
-      if (disposed) return Promise.resolve();
-      disposed = true;
+      if (disposeP !== null) return disposeP; // 20轮F3：共享收尾 Promise——并发第二等待者不得提前完成
+      disposed = true; // 同步置位：销毁后拒建立即生效（发布 Promise 先于可能重入的外部回调）
       const all = [...sessions.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
       sessions.clear();
-      return (async () => {
+      disposeP = (async () => {
         for (const [file, s] of all) {
           try {
             await s.stop();
@@ -166,6 +167,7 @@ export function createSessionRegistry(opts: SessionRegistryOpts): SessionRegistr
         }
         safeAudit("session-registry disposed");
       })();
+      return disposeP;
     },
   };
 }

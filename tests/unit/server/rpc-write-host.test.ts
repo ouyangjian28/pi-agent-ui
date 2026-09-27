@@ -33,7 +33,7 @@ describe("3c-2 编码器：SessionSendResult→WriteSendOutcomeDTO", () => {
     const exit = { code: 1, signal: "SIGTERM" };
     const out = encodeStopOutcome({ kind: "confirmed", exit });
     expect(out).toEqual({ kind: "confirmed", exit: { code: 1, signal: "SIGTERM" } });
-    expect(out.exit).not.toBe(exit); // 引用独立：复制而非携引用（第19轮补强）
+    expect((out as { exit: unknown }).exit).not.toBe(exit); // 引用独立：复制而非携引用（第19轮补强；20轮：DTO 联合窄化须 cast）
     exit.code = 99; // 改原对象不影响已编码 DTO
     expect(out).toEqual({ kind: "confirmed", exit: { code: 1, signal: "SIGTERM" } });
     expect(encodeStopOutcome({ kind: "deadline-exceeded" })).toEqual({ kind: "deadline-exceeded" });

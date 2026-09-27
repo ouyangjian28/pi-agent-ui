@@ -1,0 +1,13 @@
+
+ RUN  v5.0.1 /home/yyj/ai/repos/pi-agent-ui
+
+ ✓ |integration| tests/integration/ws-write-e2e.test.ts > 3c-3 真进程写/停 E2E > E1 基本写回路：prompt→launched→本轮三行硬序落盘（enqueue→sending→settled 同 intentId 索引递增） 8524ms
+ ✓ |integration| tests/integration/ws-write-e2e.test.ts > 3c-3 真进程写/停 E2E > E2 stop：settled 后暖进程驻留→stop 驱动退役→confirmed.exit={code,signal} 形状+该 stop 的真进程退出证据 252ms
+ ✓ |integration| tests/integration/ws-write-e2e.test.ts > 3c-3 真进程写/停 E2E > E3 退役后冷启动：同会话文件新轮次独有终态（journal 边界+新 intentId+enqueue 代次严格递增） 11527ms
+ ✓ |integration| tests/integration/ws-write-e2e.test.ts > 3c-3 真进程写/停 E2E > E4 在飞销毁：launched+sending 检查点后 dispose→目标进程退出证据+审计序 stop<exit<registry<composition 2098ms
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  16:04:44
+   Duration  23.20s (tests 99%, transform 1%)
+
