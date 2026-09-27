@@ -1,0 +1,13 @@
+diff --git a/apps/server/src/runtime/evidence-migration.ts b/apps/server/src/runtime/evidence-migration.ts
+index e4e144a..ed7a738 100644
+--- a/apps/server/src/runtime/evidence-migration.ts
++++ b/apps/server/src/runtime/evidence-migration.ts
+@@ -156,7 +156,7 @@ export async function migrateLegacyEvidence(
+     writeFile: (p, d, e) => realFs.writeFile(p, d, e),
+     rename: async (from, to) => {
+       await realFs.rename(from, to);
+-      if (to === seenTarget) seenCommitted = true;
++      // MUTATION M-3B5-IDEMPOT：幂等判据删（seen.json 归位观测移除，seenCommitted 恒 false）
+     },
+     rm: (p, o) => realFs.rm(p, o),
+   };
