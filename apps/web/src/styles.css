@@ -366,6 +366,24 @@ hr {
   line-height: 1.8;
   margin-bottom: 20px;
 }
+/* A1d 真模式：三客户端连接状态条（aria-live 受控文案；按钮=重建三件套重试） */
+.connbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 24px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+.connbar button {
+  margin-left: auto;
+}
+/* A1d 真模式双栏（列表+详情，无 inspector） */
+.workspace.two-col {
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+}
 @media (max-width: 767px) {
   .topbar {
     padding: 8px 16px;
