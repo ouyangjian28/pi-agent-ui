@@ -617,13 +617,14 @@
 
 ## 3b-4 fix14（GPT 第 14 轮 88/100 GO 后 Y14 非阻断收尾；2026-10-03）
 
-- 源（v4.1）：persistSeenLike 接缝（默认=tmp+rename+失败清 tmp；测试注入真实写故障）+锚/seen 写失败 tmp 尽力清理（Y14-1「源码 catch 没有 unlink」收口）。
-- 测试：R32=真实 seen-store 写故障全链（首调抛错→read-failed detail=seen-store+锚已留+登记缺→清障重试→补登记→快照；calls [1,2]）；Y14-2 fixture 去强转×6——`repaired:[]`→`false`、弃双重强转，揪出并修复两类潜伏假 fixture（snapOf 的 {raw,parsed} 假 JournalLine→真字面量；lines 数组 widening→`JournalLine[]` 直约束）；composition 轮询矩阵 readonly 面走可变别名。
+- 源（v4.1）：persistSeenLike 接缝（默认=tmp+rename+失败清 tmp；测试注入端口拒绝）+锚/seen 写失败 tmp 尽力清理（Y14-1「源码 catch 没有 unlink」收口；fix14b 勘正：清理=实现成立、测试证明不足——仅覆盖 rename 前抛错，崩溃窗不承诺）。
+- 测试：R32=persistSeenLike 端口拒绝全链（首调抛错→read-failed detail=seen-store+锚已留+登记缺→清障重试→补登记→快照；calls [1,2]；fix14b 勘正：非默认 write/rename 的 OS 级故障实证）；Y14-2 fixture 去强转×6——`repaired:[]`→`false`、弃双重强转，揪出并修复两类潜伏假 fixture（snapOf 的 {raw,parsed} 假 JournalLine→真字面量；lines 数组 widening→`JournalLine[]` 直约束）；composition 轮询矩阵 readonly 面走可变别名。
 - 变异二连（3b4-fix14.md+patches/3b4-fix14/，全裸跑直录退出码）：BACKFILL-RERUN 全禁登记→五杀 R21+R22+R28+R29+R32（EXIT=1；证实第 14 轮静态推演+R32 增杀）；NARROWBACKFILL 只删有锚补登记→双杀 R29+R32（首捕登记不受累——补登记分支独占杀伤窄面证明）。
 - 披露就地勘正×4（Y14-3）：TEST-MAP:620 锚 schema 实字段 sha；fix11 退出码仅 ANCHOR 裸码实证；fix12 LRU「次败」=推演非实录；fix13 BACKFILL 三杀→五杀（R28 首败实为 :593 读 seen ENOENT 非并集断言）。
 - fix13「tsc 0」断言不实勘正（composition delete-readonly 两错被管线吞）——fix14 起 tsc 一律裸跑直录 TSC_EXIT。
 - 过程失误实录：BACKFILL 首次重放在未提交态上做，checkout 还原吞掉 v4.1 源改动——重放+先提交再变异（M-240 同型教训再确认：变异前基线必须已提交）。
 - 终态：tsc 0（裸码）/lint 0/vitest 47 files 886 passed+7 skipped=893（基线 892，+1=R32）。
+- **fix14b（第 15 轮 90/100 确认 GO 后尾项窄清）**：D20 补 diskBlocked=true 断言（repaired []→false 翻转=正确性修正非等价）；tsc/lint 原始输出入仓（run-records/3b4-fix14b-tsc.log/-lint.log，TSC_EXIT=0/LINT_EXIT=0）；变异档补可复制命令实录；上述四处措辞收窄原位落档；PROJECT 补真实 fix14/fix14b 段（第 15 轮指出的过称项）。
 
 
 ## 3b-4 fix11（GPT 第 11 轮五阻断修复：安全读 v2+证据链；2026-10-03）
@@ -632,5 +633,5 @@
 - **读窗双复核（B11-3）**：stat 层合计早拒（零读独占面）→读后字节复核 raw.byteLength>allowed→oversized-grew→读后 session 复核（二次 open size s2，raw+s2>max→oversized-grew）；缩/消失=已披露残余不回退（P06）。R19 补 P07 session 复核独占杀（seam 定序开：预检 400/复核 500）。
 - **工厂自防御（B11-4）**：composition 预算校验移出 tokenPollMs 分支+provider 工厂自验（非法/超 1GiB/相对 evidenceDir/相对 roots 即抛）；R18 六非法值矩阵。sessionFor 映射非法（绝对/越界）→file-unreadable 响亮失败不静默 journal-only（P10；R13，嵌套合法）。
 - **4402 映射（B11-5）**：ws-gateway file-unreadable→{t:error,code:4402,message:恢复读取失败,retryable:true,requestId}；审计带逻辑 file/detail 不带绝对 path（P12）。T2 改标；I3 真集成同断。
-- 测试面：R1-R19（18→19 it）+T1-T5+I1-I4；变异五连（3b4-fix11.md+patches/3b4-fix11/）：ANCHOR→R11+R12 / SESRECHECK→R19 / SAFEFLAGS→R5+R16 / FACTORY→R18 / 4402→T2，退出码=1（fix13 勘正披露口径：当时的管道捕获曾混入 grep 码，事后 ANCHOR 裸跑实证 VITEST_EXIT=1）+首败断言+还原 sha 27632e0d…（fix13 勘正：字段名实为 sha，原记 sha256）。
-- 终态：46 files **861 passed+7 skipped**（JSON=tests/fixtures/run-records/3b4-fix11-vitest.json）+tsc0+lint0；基线提交 132ee3f。
+- 测试面：R1-R19（18→19 it）+T1-T5+I1-I4；变异五连（3b4-fix11.md+patches/3b4-fix11/）：ANCHOR→R11+R12 / SESRECHECK→R19 / SAFEFLAGS→R5+R16 / FACTORY→R18 / 4402→T2，退出码=1（fix13 勘正披露口径：当时的管道捕获曾混入 grep 码，事后 ANCHOR 裸跑实证 VITEST_EXIT=1；fix14 勘正：仅 ANCHOR 裸码实证，其余四例=约定推断非逐例实录）+首败断言+还原 sha 27632e0d…（fix13 勘正：字段名实为 sha，原记 sha256）。
+- 终态：46 files **861 passed+7 skipped**（JSON=tests/fixtures/run-records/3b4-fix11-vitest.json）+tsc0+lint0（fix14 勘正：本轮 tsc/lint 为摘要口径无原始输出附件，fix13 已实证管线吞码一例；fix14b 起一律裸跑+原始输出入 run-records）；基线提交 132ee3f。

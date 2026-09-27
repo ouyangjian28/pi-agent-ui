@@ -753,7 +753,7 @@ describe("ws-gateway w1：D 恢复与列表（W1-06/07/11）", () => {
     }
   });
 
-  it("D20 恢复帧含阻断理由映射（torn-tail→blockedReasons）", async () => {
+  it("D20 恢复帧含阻断理由映射（torn-tail→blockedReasons；fix14b 补 diskBlocked=true 断言——repaired 旧 fixture [] 真值掩蔽未修复态，改 false 后本测试行为非等价而是修正）", async () => {
     const r = await makeRig();
     try {
       const snap = snapOf();
@@ -761,9 +761,10 @@ describe("ws-gateway w1：D 恢复与列表（W1-06/07/11）", () => {
       r.evidence.set("bt.jsonl", snap);
       const c = await authed(r);
       await c.say({ t: "get-recovery", requestId: "rec-1", file: "bt.jsonl" });
-      const f = c.frames().find((x) => x.t === "recovery" && x.availability === "available") as { blockedReasons?: Array<{ kind: string }> };
+      const f = c.frames().find((x) => x.t === "recovery" && x.availability === "available") as { blockedReasons?: Array<{ kind: string }>; diskBlocked?: boolean };
       expect(Array.isArray(f.blockedReasons)).toBe(true);
       expect(f.blockedReasons?.some((b) => b.kind === "torn-tail")).toBe(true);
+      expect(f.diskBlocked).toBe(true); // fix14b：未裁决坏行+repaired=false→diskBlocked（旧 [] fixture 曾假模拟已修复）
     } finally {
       await r.dispose();
     }
