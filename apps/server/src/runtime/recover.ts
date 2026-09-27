@@ -25,7 +25,6 @@
 //   宿主必须呈现 unavailable(no-evidence-snapshot)，不得以 resumable 假安全替代。
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-const sha256Hex = (b: string): string => createHash("sha256").update(b).digest("hex");
 import { journalLineSchemaError, replayIntents, type IntentId, type IntentRecord, type JournalLine, type RecoverySummary, type SessionId } from "@pi-agent-ui/protocol";
 
 /** 坏行/撕裂尾记录：raw=原始文本（撕裂尾可能是不完整 UTF-8→以 utf8 读入后含替换符，字节面由宿主另行核对）。 */
@@ -101,6 +100,9 @@ export interface RecoverReport {
   readonly perIntent: readonly PerIntentRow[];
   /** 本报告实际消耗的残片归因修订（快照证据域成分；evidenceHash 输入）。 */
   readonly attributedFragments: readonly FragmentAttribution[];
+  /** P0-1b v2：journal 持久裁决派生面（四元组短键+归因目标+verdict；无 raw）——宿主 UI 呈现用。
+ *  效果已作用于 abandonedIds/resendIds/配对解锁；stale/冲突组不在此呈现（保留阻断）。 */
+  readonly derivedAdjudications: readonly { kind: "fragment" | "repair"; repairKey: string; intentId: IntentId | null; verdict: "resend" | "abandon"; at: string }[];
   /** P0-1a 持久修复事实（盘面 repair 行派生；顺序=盘面序）：宿主显式撕裂尾截断修复的留痕。
  *  与快照内存标记 repaired 互补——本表=耐久事实（跨重启），内存标记=同靴修复中过渡态。 */
   readonly repairLog: readonly RepairFact[];
@@ -382,27 +384,40 @@ export function buildRecoverReport(lines: readonly JournalLine[], sessionId: Ses
   // 覆盖合并集）；abandon 裁决=归因后终局放弃（证据消耗但意图不进 resumable）；repair 裁决=配对解锁
   // 修复事务（身份四元组逐字段匹配——旧裁决不作用于新证据，不匹配=在场但不计解锁）。
   const adjudications = lines.filter((l): l is Extract<JournalLine, { t: "adjudicate" }> => l.t === "adjudicate");
-  const fragAdj = adjudications.filter(
-    (l): l is Extract<JournalLine, { t: "adjudicate" }> & { subject: { kind: "fragment"; raw: string; intentId: IntentId } } =>
-      l.subject.kind === "fragment",
-  );
-  const repairAdj = adjudications.filter(
-    (l): l is Extract<JournalLine, { t: "adjudicate" }> &
-      { subject: { kind: "repair"; removedSha256: string; byteStart: number; byteEnd: number; at: string } } =>
-      l.subject.kind === "repair",
-  );
-  const derivedVerdicts: FragmentAttribution[] = fragAdj.map((l) => ({ raw: l.subject.raw, intentId: l.subject.intentId }));
-  const abandonedIds = new Set<IntentId>(fragAdj.filter((l) => l.verdict === "abandon").map((l) => l.subject.intentId));
-  const resendIds = new Set<IntentId>(fragAdj.filter((l) => l.verdict === "resend").map((l) => l.subject.intentId)); // P0-1b：resend=授权重发，覆盖 unknown 排除进 resumable
   const repairKey = (s: { removedSha256: string; byteStart: number; byteEnd: number; at: string }) =>
     `${s.removedSha256}|${s.byteStart}|${s.byteEnd}|${s.at}`;
-  const adjudicatedRepairs = new Set<string>(repairAdj.map((l) => repairKey(l.subject)));
-  // P0-1b：fragment 裁决身份锚在修复事务（sha256(raw)===removedSha256）——同样解锁该事务阴影。
-  const fragAdjudicatedShas = new Set(fragAdj.map((l) => sha256Hex(l.subject.raw)));
-  for (const rf of repairLog) {
-    if (adjudicatedRepairs.has(repairKey(rf))) continue;
-    if (fragAdjudicatedShas.has(rf.removedSha256)) adjudicatedRepairs.add(repairKey(rf));
+  const repairKeys = new Set(repairLog.map((rf) => repairKey(rf)));
+  // P0-1b v2（GPT r1 B1/B3/L3）：裁决身份锢在修复事务四元组。有效裁决=四元组在场当前 repairLog
+  // （stale 淘汰——旧裁决不作用于新事务/已消失事务）；同四元组多 intentId=冲突组整组无效
+  // （写面已拒换目标，读面防御手写盘面/崩溃残局：阴影保留不派生）。
+  const validAdjudications = adjudications.filter((l) => repairKeys.has(repairKey(l.subject)));
+  const fragAdj = validAdjudications.filter((l): l is Extract<JournalLine, { t: "adjudicate" }> & { subject: { kind: "fragment"; intentId: IntentId } } => l.subject.kind === "fragment");
+  const repairAdj = validAdjudications.filter((l): l is Extract<JournalLine, { t: "adjudicate" }> & { subject: { kind: "repair" } } => l.subject.kind === "repair");
+  const conflictKeys = new Set<string>();
+  {
+    const targetsByKey = new Map<string, Set<IntentId>>();
+    for (const l of validAdjudications) {
+      if (l.subject.kind !== "fragment") continue;
+      const k = repairKey(l.subject);
+      const set = targetsByKey.get(k) ?? new Set<IntentId>();
+      set.add(l.subject.intentId);
+      targetsByKey.set(k, set);
+    }
+    for (const [k, t] of targetsByKey) if (t.size > 1) conflictKeys.add(k);
   }
+  const effectiveFragAdj = fragAdj.filter((l) => !conflictKeys.has(repairKey(l.subject)));
+  const abandonedIds = new Set<IntentId>(effectiveFragAdj.filter((l) => l.verdict === "abandon").map((l) => l.subject.intentId));
+  const resendIds = new Set<IntentId>(effectiveFragAdj.filter((l) => l.verdict === "resend").map((l) => l.subject.intentId)); // P0-1b：resend=授权重发，覆盖 unknown 排除进 resumable
+  // 配对解锁：repair 裁决四元组 ∪ 有效 fragment 裁决四元组（fragment 隐含修复事务已知）。
+  const adjudicatedRepairs = new Set<string>([...repairAdj, ...effectiveFragAdj].map((l) => repairKey(l.subject)));
+  // journal 派生裁决呈现（宿主 UI 面）：无 raw（v2 身份模型），以四元组短哈希+目标+裁决呈现。
+  const derivedAdjudications = [...repairAdj, ...effectiveFragAdj].map((l) => ({
+    kind: l.subject.kind,
+    repairKey: repairKey(l.subject),
+    intentId: l.subject.kind === "fragment" ? l.subject.intentId : null,
+    verdict: l.verdict,
+    at: l.at,
+  }));
   const map = replayIntents(lines, sessionId);
   const intents = [...map.values()];
   const unknown = new Set(intents.filter(isUnknownEffect).map((r) => r.intentId));
@@ -411,7 +426,7 @@ export function buildRecoverReport(lines: readonly JournalLine[], sessionId: Ses
   // G2 裁决（s4h H2 整批冲突校验）：同一 raw 的有效目标集>1=冲突裁决——两条都不是重复，整条证据
   // 保留阻断（消费前预检，两种顺序结果恒定）；相同目标重复合并（幂等）。裁决有效消耗条件：
   // ①raw 与恰一条残片全等（多条同文本=歧义拒绝）②目标在重放范围内③该 raw 无冲突裁决集。
-  const verdicts = [...new Map([...(opts.attributedFragments ?? []), ...derivedVerdicts].map((a) => [`${a.raw}|${a.intentId}`, a])).values()]; // 注入+派生合并去重（R3 幂等：重复裁决单计）
+  const verdicts = [...new Map([...(opts.attributedFragments ?? [])].map((a) => [`${a.raw}|${a.intentId}`, a])).values()]; // 快照人工裁决（有 raw；journal 派生裁决无 raw，不参与 G2 raw 匹配，效果经 abandonedIds/resendIds 通道）
   const targetsByRaw = new Map<string, Set<IntentId>>();
   for (const a of verdicts) {
     if (!map.has(a.intentId)) continue; // 目标不在重放范围→结构性无效（不参与冲突集）
@@ -462,6 +477,7 @@ export function buildRecoverReport(lines: readonly JournalLine[], sessionId: Ses
     unattributableFragments: unattributed,
     perIntent,
     attributedFragments: verdicts,
+    derivedAdjudications,
     repairLog,
   };
 }

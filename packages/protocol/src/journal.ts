@@ -76,8 +76,21 @@ export interface RepairLine {
  *  幂等：同 subject+verdict 重复落行由读面配对去重（R3）。 */
 export interface AdjudicateLine {
   readonly t: "adjudicate";
+  // v2 身份模型（GPT r1 B1/B3/B5）：两种 subject 都锢在修复事务四元组（与 repair 行同构）。
+  // fragment=四元组+归因目标 intentId（归因终局：abandon 排除重发/resend 授权重发）；
+  // repair=纯四元组（只解修复阴影，无归因语义）。raw 全文不进裁决行（撕裂字节重编码 SHA
+  // 不可复原 P7；同内容新事务误解锁 P3；膨胀 L2）——原字节证据由 repair 行 removedSha256 持有。
   readonly subject:
-    | { readonly kind: "fragment"; readonly raw: string; readonly intentId: IntentId }
+    | {
+        readonly kind: "fragment";
+        readonly removedSha256: string;
+        readonly byteStart: number;
+        readonly byteEnd: number;
+        /** 目标修复事务 startedAt（与 repair 行/RepairFact.at 同源）。 */
+        readonly at: string;
+        /** 归因目标：裁决绑定的意图（不可静默更换——同事务换目标=conflicting-verdict）。 */
+        readonly intentId: IntentId;
+      }
     | {
         readonly kind: "repair";
         readonly removedSha256: string;
