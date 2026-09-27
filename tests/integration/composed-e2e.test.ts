@@ -1,7 +1,8 @@
 // ⑤C：真组合根 E2E——生产形态单端口（staticDir 静态面+同源 WS+token+write 接线+真 pi 0.86.1）。
 // 守卫：默认 skip（真调一轮 LLM，成本面=一次小 prompt+一次 stop）；显式跑=PI_E2E=1 npx vitest run tests/integration/composed-e2e.test.ts。
 // 与 ws-write-e2e 的分工：那里证写/停/退役/在飞销毁全深度（E1-E4）；这里证**组合根生产形态共存面**：
-// 静态 GET 与 WS 同端口同源、token 门贯穿静态/订阅/写三面、订阅投影与写 journal 同组合联动、资源收口。
+// 公开静态资源与受 token 认证的 WS 订阅/写面同端口共存（静态 GET 不携 token——N1 口径，GPT 5C r1）、
+// 订阅投影与写 journal 同组合联动、资源收口。
 // 不重复：深写链路硬序细节（E1 已证）——这里 journal 三行只做一致性收口断言。
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { spawnSync } from "node:child_process";
@@ -69,6 +70,7 @@ const d = describe.skipIf(!RUN)("⑤C 真组合根 E2E（生产形态单端口�
         responseTimeoutMs: 60_000,
         turnTimeoutMs: 120_000,
         readinessTimeoutMs: 20_000,
+        idleMs: 1_800_000, // N4：显式固定 30min 闲置窗（C3 stop 在 settled 后立即发，远早于回收）
       },
       audit: (l) => audits.push(l),
     });
@@ -108,13 +110,15 @@ const d = describe.skipIf(!RUN)("⑤C 真组合根 E2E（生产形态单端口�
     const bad = new WebSocket(`ws://127.0.0.1:${PORT}`, { origin: ORIGIN });
     const badFrames: Frame[] = [];
     bad.on("message", (m) => badFrames.push(JSON.parse(String(m))));
-    const badClose = await new Promise<{ code: number | undefined }>((res) => {
+    const badClose = await new Promise<{ code: number | undefined }>((res, rej) => {
+      const deadline = setTimeout(() => rej(new Error(`坏 token 连接未按时关闭（已收帧类型：${badFrames.map((f) => String(f.t)).join(",") || "无"}）`)), 10_000);
       bad.on("open", () => bad.send(JSON.stringify({ t: "hello", protocolVersion: 1, token: "wrong" })));
-      bad.on("close", (code) => res({ code }));
+      bad.on("close", (code) => { clearTimeout(deadline); res({ code }); });
       bad.on("error", () => { /* close 会跟随 */ });
-    });
+    }).finally(() => { try { bad.terminate(); } catch { /* 已关 */ } });
     expect(badFrames.some((f) => f.t === "error" && f.code === 4401)).toBe(true);
     expect(badClose.code).toBe(1008);
+    expect(badFrames.some((f) => f.t === "welcome")).toBe(false); // N3 负向：坏 token 不得混入欢迎
     // 好 token → welcome
     await connectAndHello();
     expect(frames.some((f) => f.t === "welcome")).toBe(true);
@@ -126,11 +130,17 @@ const d = describe.skipIf(!RUN)("⑤C 真组合根 E2E（生产形态单端口�
     const snap = await next("snapshot", (f) => f.requestId === "c2-sub");
     expect(typeof snap.subscriptionId).toBe("string");
     const subId = snap.subscriptionId!;
+    expect(Array.isArray(snap.page) ? snap.page.length : -1).toBe(0); // N2：空文件初始快照恰空页
+    expect(snap.hasMore).toBe(false);
+    expect(typeof snap.streamId).toBe("string");
+    const iBefore = frames.length; // prompt 前边界：新事件只认此后到达的帧
     // 写面：小 prompt（成本面=一轮 LLM）
     send({ t: "prompt", requestId: "c2", file: "s1.jsonl", text: "只回复两个字：收到" });
     const ack = await next("write-ack", (f) => f.requestId === "c2");
     expect(ack.outcome!.kind).toBe("launched");
     const intentId = ack.outcome!.intentId!;
+    expect(typeof intentId).toBe("string");
+    expect(intentId.length).toBeGreaterThan(0); // N2：非空字符串运行时检查
     // journal 三行一致收口（硬序细节归 ws-write-e2e E1；这里只锁同组合下成立）
     await until(async () => {
       const ls = await readJournal("s1.jsonl");
@@ -146,11 +156,12 @@ const d = describe.skipIf(!RUN)("⑤C 真组合根 E2E（生产形态单端口�
     };
     expect(tr.enqueue).toBeLessThan(tr.sending);
     expect(tr.sending).toBeLessThan(tr.settled);
-    expect(Number(ls[tr.enqueue].generation)).toBeGreaterThanOrEqual(1);
+    const gen = Number(ls[tr.enqueue].generation); // N2：正安全整数（拒字符串数字/非有限值）
+    expect(Number.isSafeInteger(gen) && gen >= 1).toBe(true);
     // 订阅面投影：同文件被写宿主追加 → 该订阅收到 events 帧且 seq 单调（组合根内 watch→投影→推送真链路）
-    await until(() => frames.some((f) => f.t === "events" && f.subscriptionId === subId
-      && Array.isArray(f.events) && (f.events as Array<{ seq?: number }>).some((e) => typeof e.seq === "number")), "订阅面 events");
-    const evFrames = frames.filter((f) => f.t === "events" && f.subscriptionId === subId);
+    await until(() => frames.slice(iBefore).some((f) => f.t === "events" && f.subscriptionId === subId
+      && Array.isArray(f.events) && (f.events as Array<{ seq?: number }>).some((e) => Number.isSafeInteger(e.seq) && Number(e.seq) > 0)), "订阅面 events");
+    const evFrames = frames.slice(iBefore).filter((f) => f.t === "events" && f.subscriptionId === subId); // 只数边界后新到帧
     for (const ef of evFrames) {
       const seqs = (ef.events as Array<{ seq?: number }>).map((e) => Number(e.seq));
       for (let i = 1; i < seqs.length; i += 1) expect(seqs[i]).toBeGreaterThan(seqs[i - 1]);
@@ -168,16 +179,16 @@ const d = describe.skipIf(!RUN)("⑤C 真组合根 E2E（生产形态单端口�
       const stop = audits.slice(a0).find((l) => stopHandleOf(l) !== null);
       if (stop === undefined) return false;
       return audits.slice(a0).some((l) => exitLineFor(stopHandleOf(stop)!).test(l));
-    }, "stop→exit 证据");
+    }, "stop→exit 证据", 20_000); // N4：内部等待 < 用例 60s 预算，留出具体失败信息空间
     const stop = audits.slice(a0).find((l) => stopHandleOf(l) !== null)!;
     const iStop = audits.indexOf(stop);
     const iExit = audits.findIndex((l, i) => i > iStop && exitLineFor(stopHandleOf(stop)!).test(l));
     expect(iExit).toBeGreaterThan(iStop);
     // dispose 有界（同 ws-write 口径）
-    const t0 = Date.now();
+    const t0 = performance.now(); // N4：单调钟防墙钟跳变
     await server!.dispose();
     server = null; // afterAll 不再重复 dispose
-    expect(Date.now() - t0).toBeLessThan(30_000);
+    expect(performance.now() - t0).toBeLessThan(30_000);
   });
 });
 

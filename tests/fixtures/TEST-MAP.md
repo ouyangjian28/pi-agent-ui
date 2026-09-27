@@ -736,9 +736,18 @@
 
 ## ⑤C 真组合根 E2E（2026-10-05；repo fe0bc07；GPT r2 88 GO 放行后落）
 
-- 范围与分工：**生产形态单端口共存面**——staticDir 静态+同源 WS+token 门+write 接线+真 pi 0.86.1 全组合。与 ws-write-e2e 分工明确：深写链路（退役/在飞销毁/代次）归 E1-E4 已证；本批只证**组合根共存与联动**：静态 GET 与 WS 同端口、token 门贯穿三面、订阅投影与写 journal 同组合联动、资源收口。PI_E2E=1 门控（默认 skip；真调一轮 LLM=一次小 prompt+一次 stop，成本面显式声明）。
+- 范围与分工：**生产形态单端口共存面**——staticDir 静态+同源 WS+token 门+write 接线+真 pi 0.86.1 全组合。与 ws-write-e2e 分工明确：深写链路（退役/在飞销毁/代次）归 E1-E4 已证；本批只证**组合根共存与联动**：公开静态资源与受 token 认证的 WS 订阅/写面同端口共存（静态 GET 不携 token；GPT 5C r1 N1 口径）、订阅投影与写 journal 同组合联动、资源收口PI_E2E=1 门控（默认 skip；真调一轮 LLM=一次小 prompt+一次 stop，成本面显式声明）。
 - C-1 同端口静态+WS+token（无 LLM）：GET /index.html 200+MARKER+GET /app.js 200+GET /nope.html 404；审计行 static-hit/static-miss 前缀断言（⑤B 面在组合根真实接线证据）；坏 token→**4401 错误帧先行+close 1008**（契约 §5.6 口径——首版断言 close=4401 写反已修，e2e 级契约再校验）；好 token→welcome。
 - C-2 订阅+写全链（真 pi 一轮）：预置空 s1.jsonl→subscribe→snapshot（subscriptionId）→prompt（"只回复两个字：收到"）→write-ack launched→journal 三行（enqueue<sending<settled 同 intentId 索引递增+generation≥1）→订阅面 events 帧投影（同 subscriptionId、events[].seq 帧内单调递增≥1 帧）——**watch→投影→推送在组合根内的真链路证据**。
 - C-3 stop+dispose 收口：write-stop-ack confirmed+assertExitShape 严格形状；stop→exit 同 handle 审计索引硬序（e2e-evidence 助手复用）；dispose<30s。
 - 运行证据：PI_E2E=1 3 passed（13.86s）；默认面 60 文件 1158 passed+2 skipped（integration 3 skipped 在内）；tsc 三档+eslint 0。固定端口=COMPOSED_E2E_PORT 默认 4319（staticDir 模式要求固定 port，同源 origin 预知）。
 - 残余披露：①订阅面 events 断言只锁「有投影且 seq 单调」，不断言 evidence 事件与 journal 行一一对应（投影语义归 3b-2 单测面）；②真浏览器面（fetch+WS 来自页面脚本）未起 Playwright——前端联调批（⑤D/UI 接线）归口；③gateway 层 origin 快照独立变异（N3-④）挂写侧收线批。
+
+### ⑤C r1 后清理批（2026-10-05；GPT 89 GO 后 N1-N5 落地）
+
+- N1：口径改「公开静态资源与受 token 认证的 WS 订阅/写面同端口共存」（静态 GET 不携 token）；运行统计单位改准=60 文件 passed/2 skipped+1158 用例 passed/14 skipped（跳过含本组 3 it）。
+- N2：C-2 强化=初始 snapshot.page 空+hasMore=false+streamId string；prompt 前帧边界（events 只数边界后新到帧）；intentId 非空字符串运行时检查；generation 正安全整数（拒字符串数字）；events 谓词 seq=正安全整数。
+- N3：坏 token 负向=零 welcome 断言+10s 有界关闭等待（超时报已收帧类型）+finally terminate 兜底。
+- N4：write.idleMs 显式 1_800_000（30min 固定）；C-3 until 降 20s（<用例 60s 预算）；dispose 计时改 performance.now 单调钟。
+- N5：真跑记录=tests/fixtures/run-records/5c-composed-e2e.log；类型检查边界披露：npm run typecheck=根/protocol/server 三档，不含 tests/integration 与 unit/web（integration 类型面由 vitest transform 兜底，lint 覆盖之）。
+- N6（不销案）：gateway 层 origin 快照独立变异仍挂**写侧收线批（⑤D 后）**；⑤D 须接顶层 sessionFor（读侧双源：write.sessionFor 不自动配置读面——C-2 实为 journal-only 投影，assistant 正文双源显示未证，GPT r1 N2 明示）。

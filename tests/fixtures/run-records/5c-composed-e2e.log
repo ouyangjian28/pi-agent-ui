@@ -1,0 +1,7 @@
+# ⑤C composed-e2e 真跑记录（N5，GPT 5C r1）
+命令：PI_E2E=1 npx vitest run tests/integration/composed-e2e.test.ts
+锚：清理批提交后（fe0bc07→本批，见 git log）
+时间：2026-09-27T20:56:07+08:00（环境钟；文件名沿用送审日期 2026-10-05）
+Node：v24.18.0；pi：0.86.1（PI_BIN 全路径锁）
+结果：Test Files 1 passed；Tests 3 passed；Duration 12.89s；exit=0
+成本面：真调 LLM 一轮（一次小 prompt「只回复两个字：收到」+一次 stop）
