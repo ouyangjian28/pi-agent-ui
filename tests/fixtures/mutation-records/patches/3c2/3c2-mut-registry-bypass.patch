@@ -1,0 +1,15 @@
+diff --git a/apps/server/src/ws/rpc-write-host.ts b/apps/server/src/ws/rpc-write-host.ts
+index 44224ed..6d6d0dc 100644
+--- a/apps/server/src/ws/rpc-write-host.ts
++++ b/apps/server/src/ws/rpc-write-host.ts
+@@ -58,9 +58,7 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
+   const cache = new Map<string, RpcLikeSession>();
+   const auditSafe = (line: string): void => { try { opts.audit?.(line); } catch { /* 审计异常隔离 */ } };
+   const sessionOf = async (file: string): Promise<RpcLikeSession> => {
+-    const hit = cache.get(file);
+-    if (hit !== undefined) return hit;
+-    const s = await opts.sessionFor(file);
++    const s = await opts.sessionFor(file); // MUTATION REGISTRY-BYPASS
+     cache.set(file, s);
+     return s;
+   };

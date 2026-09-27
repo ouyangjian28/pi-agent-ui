@@ -1,0 +1,65 @@
+
+ RUN  v5.0.1 /home/yyj/ai/repos/pi-agent-ui
+
+ ❯ |unit| tests/unit/server/rpc-write-host.test.ts (16 tests | 3 failed) 12ms
+   ❯ 3c-2 宿主适配：createRpcWriteHost (8)
+     × H5 工厂抛错→审计留细节+剥离重抛（无内部串外泄） 6ms
+     × H6 会话 send 抛错同面：审计+剥离重抛（W9 的 4402 通道来源） 1ms
+     × H7 审计回调自身抛错被隔离（不影响重抛语义） 0ms
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 13 passed (16)
+   Start at  14:16:31
+   Duration  127ms (transform 48%, tests 27%, import 18%, worker 6%)
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H5 工厂抛错→审计留细节+剥离重抛（无内部串外泄）
+AssertionError: expected [Function] to throw error including 'write-host-internal: prompt' but got 'SEKRET /root/path'
+
+Expected: "write-host-internal: prompt"
+Received: "SEKRET /root/path"
+
+ ❯ tests/unit/server/rpc-write-host.test.ts:95:55
+     93|     const audits: string[] = [];
+     94|     const host = createRpcWriteHost({ sessionFor: () => { throw new Er…
+     95|     await expect(host.sendPrompt("/abs/s.jsonl", "x")).rejects.toThrow…
+       |                                                       ^
+     96|     await expect(host.stop("/abs/s.jsonl")).rejects.toThrow("write-hos…
+     97|     expect(audits.some((l) => l.includes("write-host-error") && l.incl…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H6 会话 send 抛错同面：审计+剥离重抛（W9 的 4402 通道来源）
+AssertionError: expected [Function] to throw error including 'write-host-internal: prompt' but got 'rpc-boom'
+
+Expected: "write-host-internal: prompt"
+Received: "rpc-boom"
+
+ ❯ tests/unit/server/rpc-write-host.test.ts:104:55
+    102|     const bad = { ...mkSession(), send: async () => { throw new Error(…
+    103|     const host = createRpcWriteHost({ sessionFor: () => bad, audit: (l…
+    104|     await expect(host.sendPrompt("/abs/s.jsonl", "x")).rejects.toThrow…
+       |                                                       ^
+    105|     expect(audits.some((l) => l.includes("rpc-boom"))).toBe(true);
+    106|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H7 审计回调自身抛错被隔离（不影响重抛语义）
+AssertionError: expected [Function] to throw error including 'write-host-internal: prompt' but got 'x'
+
+Expected: "write-host-internal: prompt"
+Received: "x"
+
+ ❯ tests/unit/server/rpc-write-host.test.ts:109:55
+    107|   it("H7 审计回调自身抛错被隔离（不影响重抛语义）", async () => {
+    108|     const host = createRpcWriteHost({ sessionFor: () => { throw new Er…
+    109|     await expect(host.sendPrompt("/abs/s.jsonl", "x")).rejects.toThrow…
+       |                                                       ^
+    110|   });
+    111|   it("H8 异步工厂（Promise 返回）可用", async () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+

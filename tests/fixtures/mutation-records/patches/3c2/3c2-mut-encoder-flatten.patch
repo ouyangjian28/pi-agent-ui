@@ -1,0 +1,13 @@
+diff --git a/apps/server/src/ws/rpc-write-host.ts b/apps/server/src/ws/rpc-write-host.ts
+index 44224ed..c17ad1f 100644
+--- a/apps/server/src/ws/rpc-write-host.ts
++++ b/apps/server/src/ws/rpc-write-host.ts
+@@ -28,7 +28,7 @@ export interface RpcWriteHostOpts {
+ /** SessionSendResult→WriteSendOutcomeDTO（穷尽映射；error/generation 在此截断）。 */
+ export function encodeSendOutcome(r: SessionSendResult): WriteSendOutcomeDTO {
+   switch (r.kind) {
+-    case "launched": return { kind: "launched", intentId: r.key.intentId, commandId: r.key.commandId };
++    case "launched": return { kind: "launched", intentId: r.key.intentId, commandId: r.key.commandId + 1 }; // MUTATION ENCODER
+     case "busy":
+     case "gate-rejected":
+       return r;

@@ -1,0 +1,13 @@
+diff --git a/apps/server/src/ws/rpc-write-host.ts b/apps/server/src/ws/rpc-write-host.ts
+index 44224ed..19db8a2 100644
+--- a/apps/server/src/ws/rpc-write-host.ts
++++ b/apps/server/src/ws/rpc-write-host.ts
+@@ -70,7 +70,7 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
+         return encodeSendOutcome(await (await sessionOf(file)).send(text));
+       } catch (e: unknown) {
+         auditSafe(`write-host-error op=prompt file=${file} ${e instanceof Error ? e.message : String(e)}`);
+-        throw stripped("prompt");
++        throw e; // MUTATION STRIP-RETHROW
+       }
+     },
+     async stop(file: string): Promise<WriteStopOutcomeDTO> {

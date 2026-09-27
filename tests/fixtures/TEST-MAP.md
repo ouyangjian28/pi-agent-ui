@@ -637,6 +637,16 @@
 - SERIAL 完整输出复跑+首败归属勘正（R37=bOpens 侵入；并集断言属 R28；教训=首败必须从 FAIL 块归属，不得跨块摘句）。
 - provider 接口注释 B15⑥ 分拆同步（:26-29 接缝契约注释+FsLike JSDoc；异步拒绝契约特化=仅 Promise 型原语，trustFirstCapture 允许同步 boolean）。注释级改动，逻辑未动。
 
+## 3c-2（RpcSession→WriteHostPort 适配首片：编码器收窄+注册表+W13-W17 加固；2026-10-03）
+- 编码器（apps/server/src/ws/rpc-write-host.ts）：encodeSendOutcome 穷尽映射 SessionSendResult→WriteSendOutcomeDTO——launched.key{intentId,commandId,generation} 扁平化（**generation 不跨面**）；gate-failed.error:unknown 截断（细节留宿主审计）；not-ready.cause 可选透传；encodeStopOutcome 四分支同构（confirmed 复制 exit 不携引用）。
+- DTO 收窄（contracts.ts，第18轮 GPT 勘正落定）：not-ready.cause 改可选（同源 SessionSendResult.cause?）；**rejected 分支删除**——send() 路径无此来源（启动失败一律 not-ready{cause:start失败kind}），无源不设枝。
+- 宿主适配：createRpcWriteHost{sessionFor,audit?}——同 file 缓存=注册表语义（工厂只调一次）；内部异常=审计留细节+**剥离重抛** stripped Error（"write-host-internal: prompt|stop"）→网关 4402 retryable 通道（W9 已锁）；不吞错不造 kind；审计回调自身抛错被隔离。
+- 测试 E1-E8+H1-H8（tests/unit/server/rpc-write-host.test.ts）：E=编码矩阵全分支；H=注册表缓存/分桶/工厂抛错/会话抛错/审计隔离/异步工厂。
+- W13-W17（ws-gateway-write.test.ts，第18轮对抗推演四案）：W13=W5 分连接版（四坏帧各自 4404，空 text 第 4 案首次可观测+宿主零调用）；W14=容量门独立（4 不同 rid 在途→第 5 个 4404"在途请求超限"，非重复门）；W15=失败路径槽归还（prompt 4402 后同 rid 复用 stop/prompt 均成功）；W16=ack.file 显式回显裸名（与宿主面 abs 成对照）；W17=UTF-8 字节边界（恰 65536B 含多字节过；"你"×21846=65538B 拒且未达宿主）。
+- 变异三连（3c2.md+patches/3c2/，基线先提交=752aed6 后变异；logs=run-records/3c2-mut-*.log）：ENCODER-FLATTEN（commandId+1）→2 败首败 E1；REGISTRY-BYPASS（缓存删）→1 败首败 H3；STRIP-RETHROW（剥离删，原错直抛）→3 败首败 H5。还原 hash 复核 OK×3。
+- 证据：run-records/3c2-full-vitest.log=939 passed+7 skipped（925+16 新增）；tsc 两包 0+lint 0（当轮终端实录）。
+- 诚实披露：①strip-rethrow 只变异了 prompt 通道（stop 通道同型代码，H5 的 stop 断言覆盖同路径）；②编码器对 error:unknown 的截断是设计而非缺陷（E3 断言 stage 保留+error 字段缺失）；③createRpcWriteHost 的 sessionFor 接缝=结构化依赖（RpcLikeSession 两方法最小面），真实 RpcSession 实例构造与 composition 接线（writeHost=createRpcWriteHost(...)+sessionFor 闭包）属下一片（3c-3），本片不含真进程 E2E。
+
 ## 3c-1（写侧帧接线：契约扩展+网关派发面+WriteHostPort；2026-10-03）
 - 契约面（packages/protocol/src/contracts.ts）：WRITE_OPEN_FRAME_TYPES=["prompt","stop"]（冻结写集 9-t 中仅开放此二；其余仍 4405）；WRITE_TEXT_MAX_BYTES=65_536；WriteClientFrame=prompt{requestId,file,text}/stop{requestId,file}；validateWriteFrame（exactWrite 字段集全等+ridWrite /^[-\w]{1,64}$/+fileWrite=LIMITS.filePattern 裸名+text 非空+字节上限；不侵冻结校验器）；WriteSendOutcomeDTO（launched{intentId,commandId}/busy/gate-rejected/gate-failed/invalidated{stage}/no-process/not-ready{cause}/rejected{reason}——SessionSendResult 契约化映射，error:unknown 不跨面）；WriteStopOutcomeDTO（confirmed{exit}/deadline-exceeded/no-process/stopping）；ServerFrame 增 write-ack/write-stop-ack（回显原 file 裸名+requestId）。
 - 网关面（ws-gateway.ts）：入站管线认证门后写类层分支（t∈WRITE_FRAME_TYPES&&writeHost!==undefined→validateWriteFrame→在途门→派发；未接线→原路径 4405+close1008 字节级不变）；handleWritePrompt/handleWriteStop：resolveWithinRoots 解析→宿主收绝对路径（宿主不重做根数学）→ack 回显裸名；宿主抛错→4402 retryable=true+审计 write-frame-error；rid 槽 finally 归还。审计行 write-frame conn=… t=… file=… outcome=…。

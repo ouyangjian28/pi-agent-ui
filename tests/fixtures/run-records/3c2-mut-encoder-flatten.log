@@ -1,0 +1,63 @@
+
+ RUN  v5.0.1 /home/yyj/ai/repos/pi-agent-ui
+
+ ❯ |unit| tests/unit/server/rpc-write-host.test.ts (16 tests | 2 failed) 11ms
+   ❯ 3c-2 编码器：SessionSendResult→WriteSendOutcomeDTO (8)
+     × E1 launched：key 扁平化（intentId/commandId 保留，generation 不跨面） 5ms
+   ❯ 3c-2 宿主适配：createRpcWriteHost (8)
+     × H1 sendPrompt：file 交工厂、text 交会话、DTO 回 launched 扁平形 1ms
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 14 passed (16)
+   Start at  14:16:30
+   Duration  125ms (transform 51%, tests 23%, import 21%, worker 5%)
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 编码器：SessionSendResult→WriteSendOutcomeDTO > E1 launched：key 扁平化（intentId/commandId 保留，generation 不跨面）
+AssertionError: expected { kind: 'launched', …(2) } to deeply equal { kind: 'launched', …(2) }
+
+- Expected
++ Received
+
+  {
+-   "commandId": 42,
++   "commandId": 43,
+    "intentId": "i-7",
+    "kind": "launched",
+  }
+
+ ❯ tests/unit/server/rpc-write-host.test.ts:12:62
+     10| describe("3c-2 编码器：SessionSendResult→WriteSendOutcomeDTO", () => {
+     11|   it("E1 launched：key 扁平化（intentId/commandId 保留，generation 不跨面）", () =…
+     12|     expect(encodeSendOutcome({ kind: "launched", key: TK })).toEqual({…
+       |                                                              ^
+     13|   });
+     14|   it("E2 busy/gate-rejected 透传", () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H1 sendPrompt：file 交工厂、text 交会话、DTO 回 launched 扁平形
+AssertionError: expected { kind: 'launched', …(2) } to deeply equal { kind: 'launched', …(2) }
+
+- Expected
++ Received
+
+  {
+-   "commandId": 42,
++   "commandId": 43,
+    "intentId": "i-7",
+    "kind": "launched",
+  }
+
+ ❯ tests/unit/server/rpc-write-host.test.ts:67:57
+     65|     const s = mkSession();
+     66|     const host = createRpcWriteHost({ sessionFor: (f) => { expect(f).t…
+     67|     expect(await host.sendPrompt("/abs/s.jsonl", "你好")).toEqual({ kind…
+       |                                                         ^
+     68|     expect(s.sent).toEqual(["你好"]);
+     69|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
