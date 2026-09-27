@@ -1,0 +1,13 @@
+diff --git a/apps/server/src/runtime/recovery-evidence-source.ts b/apps/server/src/runtime/recovery-evidence-source.ts
+index 34c7325..06ef570 100644
+--- a/apps/server/src/runtime/recovery-evidence-source.ts
++++ b/apps/server/src/runtime/recovery-evidence-source.ts
+@@ -100,7 +100,7 @@ const defaultPersistSeenLike = (fsx: FsLike, evidenceDir: string, next: { versio
+       await fsx.writeFile(stmp, JSON.stringify(next), "utf8");
+       await fsx.rename(stmp, seenPath(evidenceDir));
+     } catch (err) {
+-      await fsx.rm(stmp, { force: true }).catch(() => {}); // fix14/Y14-1：失败 tmp 卫生（尽力而为，不掩盖原错）
++      // MUTATION M-3B5-CLEANUP：失败 tmp 卫生移除
+       throw err;
+     }
+   })();

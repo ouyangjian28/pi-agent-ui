@@ -1,0 +1,13 @@
+diff --git a/apps/server/src/runtime/recovery-evidence-source.ts b/apps/server/src/runtime/recovery-evidence-source.ts
+index 34c7325..f5bf845 100644
+--- a/apps/server/src/runtime/recovery-evidence-source.ts
++++ b/apps/server/src/runtime/recovery-evidence-source.ts
+@@ -400,7 +400,7 @@ export function createRecoveryEvidenceProvider(
+         } catch {
+           if (anchorTmp !== null) await fsx.rm(anchorTmp, { force: true }).catch(() => {}); // fix14/Y14-1：失败 tmp 卫生
+           audit(`recovery-evidence-store-failed file=${file} detail=store`);
+-          return unavailable("read-failed");
++          // MUTATION M-3B5-ANCHORSWALLOW：吞存储失败继续发结论
+         }
+         // B13-2 登记不变量：成功返回快照前 seen 登记已建立。未登记而至此=首捕（bless 已过）或
+         // B13-2 残局（锚写成+seen 写败）或 fix11 旧锚迁移——一律补登记再返回（失败=fail-closed：

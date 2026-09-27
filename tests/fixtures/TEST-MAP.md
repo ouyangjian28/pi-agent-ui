@@ -624,6 +624,11 @@
 - fix13「tsc 0」断言不实勘正（composition delete-readonly 两错被管线吞）——fix14 起 tsc 一律裸跑直录 TSC_EXIT。
 - 过程失误实录：BACKFILL 首次重放在未提交态上做，checkout 还原吞掉 v4.1 源改动——重放+先提交再变异（M-240 同型教训再确认：变异前基线必须已提交）。
 - 终态：tsc 0（裸码）/lint 0/vitest 47 files 886 passed+7 skipped=893（基线 892，+1=R32）。
+## 3b5-1（第15轮 §六②③④：确定性故障回归+受控并发+接缝契约；2026-10-03）
+- 源（v4.2）：fsLike 低层原语接缝（writeFile/rename/rm）贯穿锚点写+默认 seen 持久化（默认=真 fs/promises；生产 composition 不注入——受信任宿主边界契约随 persistSeenLike 文档同步收口：resolve=完整提交）。语义无变化（默认路径与 v4.1 逐操作一致）。
+- 测试 R33-R38（38 例文件）：R33 seen tmp 写拒→read-failed+锚留+tmp 尽力清+重试收敛；R34 rename 拒（tmp 已建）同面；R35 清理 rm 自身失败→仍 read-failed 不洗白+残留=披露边界+成功不受阻；R36 锚写拒（首写）→read-failed+零落盘+bless 已消耗；R37 受控并发闸门（A 持链阻塞于 seen 提交时 B 连 journal 都未开——bOpens==0+persists==[1]；释放后双快照+seen 并集 [a,b]）；R38 有锚无登记+非法前缀（截断/同长改写）→concurrent-modification+不补登记+bless 不耗+锚原文不动。
+- 变异二连（3b5-1.md+patches/3b5-1/）：M-3B5-CLEANUP（清理行移除）→R33+R34 双杀（BARE_EXIT=1）；M-3B5-ANCHORSWALLOW（锚吞错）→R35 杀——R36 未杀=纵深防御实录（seen-store 第二道门独立兜住，双 tmp 断言=告警面），非缺口。
+- 还原 sha=26086490878e1c96；run-record 3b5-1-vitest.json=899/892/7/0；tsc/lint 裸码 0（3b5-1-tsc.log/-lint.log 原始输出附档；lint 首跑抓 R35 未用参自纠实录）。
 - **fix14b（第 15 轮 90/100 确认 GO 后尾项窄清）**：D20 补 diskBlocked=true 断言（repaired []→false 翻转=正确性修正非等价）；tsc/lint 原始输出入仓（run-records/3b4-fix14b-tsc.log/-lint.log，TSC_EXIT=0/LINT_EXIT=0）；变异档补可复制命令实录；上述四处措辞收窄原位落档；PROJECT 补真实 fix14/fix14b 段（第 15 轮指出的过称项）。
 
 

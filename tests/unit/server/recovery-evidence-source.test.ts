@@ -746,7 +746,7 @@ describe("recovery-evidence-source（fix13 v4：+仓级串行/登记不变量）
     const { jRoot, evDir, cleanup } = await mkRig("r35-");
     const fsx: FsLike = {
       writeFile: async (path, data, enc) => writeFile(path, data, enc),
-      rename: async (a, b) => { throw new Error("EBUSY: rename denied"); },
+      rename: async (_a, _b) => { throw new Error("EBUSY: rename denied"); },
       rm: async () => { throw new Error("EACCES: rm denied"); }, // 清理原语也坏
     };
     try {
