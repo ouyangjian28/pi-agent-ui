@@ -849,7 +849,7 @@
   - B6-r3【中】三支非等价变异存活（M-H canonical 删 pendingRepair/M-R expectedRow=builtRow 重构造/M-P 删前缀 equals）→仓内专杀：RT41 hash 身份（仅 pendingRepair 或 repairUndecided 不同即 hash 不同）/RT38 跨 build 已补行（reconciled via marker-reconcile+盘面 b1 行原文逐字节保留）/RT37 非匹配前缀（「NOT…」短尾→conflict 拒+盘面不动）。
 - 测试扩展 RT35-RT41（7 例）+RT39b：RT35-B3a 四态循环（5/14/40/100 前缀全收敛 marker-complete+removedSha256/at=marker 事实）；RT36-B3b 锚写穿脏态（手工重写锚文件 len=233 模拟旧版 provider）→aborted anchor-stale+盘面 equals 原文+marker 保留；RT37/RT38（B6 专杀，见上）；RT39-B3b 死结解全链（部分补行 20 字节→pending 捕获锚保持 213/旧 sha→重试 repaired→复捕获锚推进到新长度+pending=false+repairLog 阴影阻断）；RT39b 截断形含尾锚（含尾首捕→crash 截断→pending 捕获不判 concurrent-modification+锚不动→带授权重试仍 aborted anchor-stale=保守面守护：授权出口只领回「行已落盘锚未转移」形，锚覆盖被移除字节不可证删除面只在尾段→宿主走迁移面）；RT40-B1 组合（pending 快照→withRepair→repairUndecided=true→仍阻断；修复后新捕获 repairLog 阻断；二次 withRepair 幂等保留；对照二正当解锁）；RT41-B6 哈希身份。
 - 变异八连全杀（基线 5d6b311 提交后逐支 python 注入→定向红→git checkout 还原→复绿）：Mu-r3B1（withRepair undecided 置位删；RT40 杀）/Mu-r3B3a（前缀 equals 删=M-P 同型；RT37 杀）/Mu-r3B3b（回截前锚检查删；RT36 杀）/Mu-r3BH（canonical 删 pendingRepair=M-H 同型；RT41 杀）/Mu-r3BR（expectedRow=builtRow=M-R 同型；RT38 杀）/Mu-r3B3b2（provider pending 写穿条件删；RT39 杀）/Mu-r2B3-replay（冲突门恒假——判定重排后的新块；RT31 杀）/Mu-r2B1-replay（marker 检测删——检测块移位后的新位置；RT27 杀）。r2 六连中 Mu-r2B2a/B2b/B2c/B4 注入点未动，上批结论保留。
-- 运行证据：repair-tail 34 绿+recover 36 绿+recovery-evidence-source 45 绿（新增 8 例：repair-tail 4+recover 2+provider 2）；全仓 1261 绿（64 文件 passed+2 skipped+15 测试 skipped）；apps/server tsc --noEmit exit0；eslint 0。
+- 运行证据（r5 勘误）：repair-tail 34 绿+recover 36 绿+recovery-evidence-source 45 绿（新增 8 例：repair-tail 4+recover 2+provider 2）；全仓 1261 绿（64 文件 passed+2 skipped+15 测试 skipped）+eslint 0 属实；但当时宣称 tsc exit0 失实——GPT r5 实跑 exit 2/TS2345（新 reason 未进类型联合，见 B1-r5），由 r5 修复批（0db291e）闭合。
 - 遗留披露：①rt38-debug 构造教训=测试 helper legalRepairRow 不带换行，已补行形 append 必须拼 "\n"（否则成撕裂尾落有尾分支）；②r3 审低项 L1（readBack 后仍有锚 tmp 写入窗=Q16 修复期禁写前提内）/L2（marker 哈希披露措辞限缩——removedSha256 无独立认证，截断形原尾已消失只能信任宿主 marker）/L4（无真实断电实测）——不阻断，下批吸收或部署前兑现。
 
 
@@ -917,3 +917,11 @@
 - **N1（建议转必做，观察者清理锁死）**：固化复审探针两例——subscribe-client.test.ts「观察者清理锁死」describe（退订闭包后状态推进零触达被移除者+在册者正对照）；use-session-detail.test.ts 真实链「观察者清理锁死」（hook 卸载即移除 store listener、卸载后推进零触达、重挂后一次推进恰一份通知）。两者均可被「删 `listeners.delete(listener)`」窄变异击红。
 - **N2（过称收窄五处）**：①工厂抛错例补 subscribe 拒绝断言（标题「connect/subscribe 全拒绝」现有据）；②live 追加例补「空帧后重发同号带事件仍吸收」+形状合法回退序号例（水位推进现有据，原 seq=0 形状门先挡例移除）；③12 矩阵「旧信封×无活动流」补已退订分支（标题「首包前/已退订」现双覆盖）；④C4 例补 streamNote 与 errorMessage 同场断言（优先级锁定现有据）；⑤全链例补中间态断言（subscribing→loading 面、页1 后分页提示在场），不再只在末页后断言。另收窄：两测试文件头注「断言等价或更强」删除、「正常终局=end 帧路径」标题改为快照末页口径。
 - **验证数字**（本机亲跑，cwd=仓根，PATH=node v24.18.0；vitest 均带 `--no-cache --configLoader runner`）：两目标文件 `npx vitest run tests/unit/web/subscribe-client.test.ts tests/unit/web/use-session-detail.test.ts`=**2 files/99 passed**；web 全集 `npx vitest run tests/unit/web`=**12 files/260 passed**；`npx tsc -p apps/web --noEmit`=exit 0；`npx eslint apps/web/src tests/unit/web`=exit 0 零输出。提交后 `git status` 净。
+
+### P0-1a GPT r5 修复批（B1-r5+L1，0db291e，2026-10-06）
+
+- **B1-r5【中】新 reason 未进类型/冻结协议**（r5 审 T3/P6 实证：tsc exit2 TS2345+真网关 get-recovery 出帧 reason=repair-pending-first-capture 越出协议 v1 四值）→修法=对外映射进冻结契约既有值 `no-evidence-snapshot`（协议四值零新增；与「盘面曾修复且无权威快照不得裸读出结论」的 B03 语义同构）；具体成因留审计行 `recovery-pending-no-anchor`（recovery-evidence-source.ts:409-413 注释披露映射语义）。未动 contracts.ts/docs（对外契约面零变化）。
+- **L1 RT43 零副作用断言虚空通过**（查错文件名 evidence-seen.json；生产 seenPath()=seen.json；GPT 变异实证：门内插 persistSeenLike 写 seen.json 原 RT43 不红）→修法=断言改正确路径 seen.json ENOENT+目录级强断言（拒绝前后 evidenceDir 全量文件名+逐文件字节快照全等——覆盖「不建、不重写、不留 tmp」三态）；审计行断言 recovery-pending-no-anchor 在场（区分普通 no-evidence-snapshot 拒绝）。
+- 变异实证：Mu-r5L1（GPT 原 seen 副作用变异重放：门内拒绝前插 persistSeenLike 写 seen.json）→RT43 红（目录快照杀点）→还原绿。
+- 事故披露：M-245 第三次同型（checkout 还原变异吞未提交修复块）→重打后立即提交再跑全门；教训已入 MISTAKES。
+- 运行证据：recovery-evidence-source 46 绿；全仓 1370 绿（69 文件 passed+2 skipped+15 skipped）；apps/server tsc --noEmit exit0（亲证）；eslint 0。
