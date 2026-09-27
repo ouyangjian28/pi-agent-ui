@@ -1,0 +1,17 @@
+# cmd: npx vitest run tests/unit/server/rpc-write-host.test.ts (mut=r19-pending-share-delete)
+# date=2026-09-27T14:36:30.841161
+# exit=1
+
+ RUN  v5.0.1 /home/yyj/ai/repos/pi-agent-ui
+
+ ❯ |unit| tests/unit/server/rpc-write-host.test.ts (22 tests | 3 failed) 5016ms
+   ❯ 3c-2 宿主适配：createRpcWriteHost (14)
+     × H9 同步工厂首次并发 prompt+stop：恰建一次、两操作落同实例、后续仍缓存 4ms
+     × H10 可控异步工厂并发 prompt/prompt：deferred 释放后仍恰建一次、两 text 落同实例 5003ms
+     × H11 工厂失败（并发共享同一失败）后健康重试：占位已清、重试恰再建一次 1ms
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 19 passed (22)
+   Start at  14:36:25
+   Duration  5.14s (tests 99%, transform 1%)
+

@@ -482,7 +482,8 @@ function fileWrite(obj: Record<string, unknown>): string | WriteFrameCheck {
   return typeof v === "string" && LIMITS.filePattern.test(v) ? v : badWrite(4404, "file 非法");
 }
 
-/** 写侧发送结果 DTO（write-ack.outcome）。宿主异常不跨此面——仅以 kind 表达。
+/** 写侧发送结果 DTO（write-ack.outcome）。可预期业务结果仅以 kind 表达；
+ * 宿主内部意外异常不走 DTO——由适配器剥离重抛（固定 write-host-internal Error）→网关 4402。
  *  与 runtime SessionSendResult 的映射在网关适配（error 细节留在服务端审计）。 */
 // 3c-2 收窄（第18轮 GPT 勘正）：not-ready.cause 保持可选（同源 SessionSendResult.cause?）；
 // rejected 分支已删——send() 路径无此来源（启动失败一律 not-ready{cause:start失败kind}），

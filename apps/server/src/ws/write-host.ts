@@ -1,7 +1,9 @@
 // 写侧宿主端口（3c-1）：网关唯一的写通道接缝。
 // 设计约束（与读侧 HistorySourcePort 同风格）：
-// - 宿主**不得抛错**——不可用/失败一律以 outcome kind 表达；网关对抛错按 4402（会话不可用，
-//   retryable=true）处置并留审计（异常细节不跨此面，防内部路径/错误串泄入客户端帧）。
+// - 两层契约（第19轮 GPT 审后统一，与 rpc-write-host.ts/contracts.ts 同口径）：
+//   ①可预期业务结果（busy/gate-rejected/not-ready…）→ outcome kind 表达，不抛错；
+//   ②内部意外异常（宿主崩溃级）→ **剥离细节重抛**（RpcWriteHost 产 stripped Error，
+//     无 cause 无内部字段）→网关 4402（retryable=true）处置并留审计。异常细节不跨此面。
 // - file 即 journal 文件路径（与读侧订阅 file 同一命名域——写哪个会话=订阅哪个会话）。
 // - 生产实现=RpcSession 注册表适配（3c-2 接线：file→懒建 RpcSession，journalPath=file，
 //   sessionFile=sessionFor(file)）；本片（3c-1）网关侧只依赖此接口，测试用假宿主。

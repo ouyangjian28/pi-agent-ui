@@ -1,0 +1,18 @@
+# cmd: npx vitest run tests/unit/server/rpc-write-host.test.ts (mut=r19-audit-escape)
+# date=2026-09-27T14:36:31.365993
+# exit=1
+
+ RUN  v5.0.1 /home/yyj/ai/repos/pi-agent-ui
+
+ ❯ |unit| tests/unit/server/rpc-write-host.test.ts (22 tests | 4 failed) 11ms
+   ❯ 3c-2 宿主适配：createRpcWriteHost (14)
+     × H5 工厂抛错→审计留细节+剥离重抛（无内部串外泄） 3ms
+     × H6 会话 send 抛错同面：审计+剥离重抛（W9 的 4402 通道来源） 0ms
+     × H13 会话 stop 自身拒绝→同样剥离（write-host-internal: stop）+审计留细节 1ms
+     × H14 gate-failed 细节截断前落审计：audit 行含 stage+detail，DTO 仍无 error 0ms
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 18 passed (22)
+   Start at  14:36:31
+   Duration  131ms (transform 53%, import 23%, tests 20%, worker 4%)
+

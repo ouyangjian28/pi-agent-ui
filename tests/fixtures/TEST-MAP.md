@@ -637,7 +637,7 @@
 - SERIAL 完整输出复跑+首败归属勘正（R37=bOpens 侵入；并集断言属 R28；教训=首败必须从 FAIL 块归属，不得跨块摘句）。
 - provider 接口注释 B15⑥ 分拆同步（:26-29 接缝契约注释+FsLike JSDoc；异步拒绝契约特化=仅 Promise 型原语，trustFirstCapture 允许同步 boolean）。注释级改动，逻辑未动。
 
-## 3c-2（RpcSession→WriteHostPort 适配首片：编码器收窄+注册表+W13-W17 加固；2026-10-03）
+## 3c-2（RpcSession→WriteHostPort 适配首片：编码器收窄+注册表+W13-W17 加固；第19轮 78 NO-GO→r19 修复批；2026-10-04）
 - 编码器（apps/server/src/ws/rpc-write-host.ts）：encodeSendOutcome 穷尽映射 SessionSendResult→WriteSendOutcomeDTO——launched.key{intentId,commandId,generation} 扁平化（**generation 不跨面**）；gate-failed.error:unknown 截断（细节留宿主审计）；not-ready.cause 可选透传；encodeStopOutcome 四分支同构（confirmed 复制 exit 不携引用）。
 - DTO 收窄（contracts.ts，第18轮 GPT 勘正落定）：not-ready.cause 改可选（同源 SessionSendResult.cause?）；**rejected 分支删除**——send() 路径无此来源（启动失败一律 not-ready{cause:start失败kind}），无源不设枝。
 - 宿主适配：createRpcWriteHost{sessionFor,audit?}——同 file 缓存=注册表语义（工厂只调一次）；内部异常=审计留细节+**剥离重抛** stripped Error（"write-host-internal: prompt|stop"）→网关 4402 retryable 通道（W9 已锁）；不吞错不造 kind；审计回调自身抛错被隔离。
@@ -646,6 +646,14 @@
 - 变异三连（3c2.md+patches/3c2/，基线先提交=752aed6 后变异；logs=run-records/3c2-mut-*.log）：ENCODER-FLATTEN（commandId+1）→2 败首败 E1；REGISTRY-BYPASS（缓存删）→1 败首败 H3；STRIP-RETHROW（剥离删，原错直抛）→3 败首败 H5。还原 hash 复核 OK×3。
 - 证据：run-records/3c2-full-vitest.log=939 passed+7 skipped（925+16 新增）；tsc 两包 0+lint 0（当轮终端实录）。
 - 诚实披露：①strip-rethrow 只变异了 prompt 通道（stop 通道同型代码，H5 的 stop 断言覆盖同路径）；②编码器对 error:unknown 的截断是设计而非缺陷（E3 断言 stage 保留+error 字段缺失）；③createRpcWriteHost 的 sessionFor 接缝=结构化依赖（RpcLikeSession 两方法最小面），真实 RpcSession 实例构造与 composition 接线（writeHost=createRpcWriteHost(...)+sessionFor 闭包）属下一片（3c-3），本片不含真进程 E2E。
+
+### 3c-2 r19 修复批（第19轮 78 NO-GO 三阻断+异常边界；基线 6e5f12c；953 绿）
+- **F1 注册表 single-flight**：sessionOf 双 Map（settled+pending）——首次并发（含同步工厂重入）共享同一次创建；工厂调用压微任务后执行（pending.set 必先于工厂——同步 throw 也正确走身份删除，防 TDZ/陈旧占位）；失败清占位带 slot.p 身份校验→健康重试。新增 H9（同步并发 prompt+stop 恰建一次+同实例+后续缓存）/H10（异步工厂并发 deferred 共享）/H11（失败共享+重试恰再建一次）。槽对象持引用绕开 tsc 赋前使用与 eslint prefer-const 两难。
+- **F2 证据**：全量 run-records/3c2-r19-full-vitest.log=946 passed+7 skipped（953；r1 批 +21=16 H/E+5 W，r19 批 +7=6 H+1 W15b，两批共 +28）；tsc 两包 0/lint 0 有原始输出与裸退出码（3c2-r19-tsc.log/-lint.log）；时钟漂移注记（宿主 date=2026-09-27 与档名 10-04 序列不一致，git 提交时间随宿主钟）；M1 次败勘正 E8→H1（3c2.md 原位注记）；增量口径勘正 +16→+21。
+- **异常边界**：auditSafe 收 thunk（格式化纳入隔离域——恶意 toString/message getter 再抛不逃逸，H12 三例：恶意对象/恶意 message getter/附带字段零断言）；gateFailedDetail()=gate-failed 细节**截断前**落宿主审计（H14：audit 行含 stage+detail，DTO 仍无 error）；H13=会话 stop 自身拒绝剥离面；W15b=stop 失败槽归还复用（FakeWriteHost.throwStop）；W8/W14 死门改可释放 deferred+收束断言（释放后 write-ack 到齐+rid 复用）；E7 补 out.exit!==exit 引用独立；E8 定位勘正为 kind 集合冒烟（值断言在 E1/H1）；W5 头注勘正（空 text 案本连接曾被遮蔽，W13 分连接补齐）。
+- **F3 契约文档统一**（两层契约三处同口径）：可预期业务结果→DTO kind；内部意外异常→剥离重抛固定 Error（无 cause 无内部字段）→网关 4402 retryable。write-host.ts:3-4 端口注/contracts.ts DTO 注/rpc-write-host.ts 头注。TECH B16 同步见 ~/ai 档。
+- **变异 M4/M5/M5b**（3c2.md r19 段+patches/3c2/）：PENDING-SHARE-DELETE→3 败 H9/H10/H11（single-flight 三案正杀）；AUDIT-ESCAPE（thunk 原样传）→4 败 H5/H6/H13/H14（审计观察面）；AUDIT-FORMAT-ESCAPE（急切格式化）→3 败 H5/H6/**H12**（恶意逃逸面正杀）。双面锁死：不求值→观察案杀；求值越域→逃逸案杀。
+- **披露**：①失败占位身份删除分支未单独变异（H11 间接覆盖）；②stop 通道格式化未单独变异（同构代码，H13/H12-stop 断言覆盖）；③composition 接线+真 RpcSession+统一销毁=3c-3（GPT 裁决：恰建一次是本片承诺，无失效 API 首片可接受，寿命绑定 3c-3 定清）。
 
 ## 3c-1（写侧帧接线：契约扩展+网关派发面+WriteHostPort；2026-10-03）
 - 契约面（packages/protocol/src/contracts.ts）：WRITE_OPEN_FRAME_TYPES=["prompt","stop"]（冻结写集 9-t 中仅开放此二；其余仍 4405）；WRITE_TEXT_MAX_BYTES=65_536；WriteClientFrame=prompt{requestId,file,text}/stop{requestId,file}；validateWriteFrame（exactWrite 字段集全等+ridWrite /^[-\w]{1,64}$/+fileWrite=LIMITS.filePattern 裸名+text 非空+字节上限；不侵冻结校验器）；WriteSendOutcomeDTO（launched{intentId,commandId}/busy/gate-rejected/gate-failed/invalidated{stage}/no-process/not-ready{cause}/rejected{reason}——SessionSendResult 契约化映射，error:unknown 不跨面）；WriteStopOutcomeDTO（confirmed{exit}/deadline-exceeded/no-process/stopping）；ServerFrame 增 write-ack/write-stop-ack（回显原 file 裸名+requestId）。

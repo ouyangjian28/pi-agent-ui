@@ -1,0 +1,13 @@
+diff --git a/apps/server/src/ws/rpc-write-host.ts b/apps/server/src/ws/rpc-write-host.ts
+index 4aafae7..6722fcb 100644
+--- a/apps/server/src/ws/rpc-write-host.ts
++++ b/apps/server/src/ws/rpc-write-host.ts
+@@ -75,7 +75,7 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
+   const pending = new Map<string, Promise<RpcLikeSession>>();
+   // 第19轮加固：收 thunk——字符串化/格式化（含恶意 toString/message getter 再抛）也在隔离域内，
+   // 最后无条件抛固定 stripped Error（剥离承诺不依赖被拒绝值的行为）。
+-  const auditSafe = (make: () => string): void => { try { opts.audit?.(make()); } catch { /* 审计+格式化异常隔离 */ } };
++  const auditSafe = (make: () => string): void => { try { opts.audit?.(make); } catch { /* MUTATION r19 AUDIT-ESCAPE：格式化逃出隔离域 */ } };
+   const sessionOf = (file: string): Promise<RpcLikeSession> => {
+     const hit = settled.get(file);
+     if (hit !== undefined) return Promise.resolve(hit);
