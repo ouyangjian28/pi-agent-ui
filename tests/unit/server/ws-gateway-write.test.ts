@@ -189,21 +189,25 @@ describe("3c-1 写侧帧：网关派发面", () => {
 
   it("W8 requestId 在途重复→第二次 4404（宿主只调一次）", async () => {
     const r = await makeRig();
+    let release8: (() => void) | undefined; // 19b：声明提级——finally 释放兜底可用
     try {
       const c = await authed(r);
-      let release8!: () => void;
       r.host.gatePrompt = new Promise<void>((res) => { release8 = res; }); // 可释放挂起门（第19轮：清理前收束）
       await c.say({ t: "prompt", requestId: "r8", file: r.inFile, text: "1" });
       await c.say({ t: "prompt", requestId: "r8", file: r.inFile, text: "2" });
       expect(errs(c).some((f) => f.code === 4404 && f.message === "requestId 在途重复")).toBe(true);
       expect(r.host.prompts.length).toBe(1);
-      release8(); // 释放首个派发：write-ack 到达+槽归还（不是死门悬置到 dispose）
+      release8(); // 正常路径放门：write-ack 到达+槽归还（不是死门悬置到 dispose）
       await tick(); await tick();
       expect(c.frames().filter((f) => f.t === "write-ack").length).toBe(1);
       await c.say({ t: "prompt", requestId: "r8", file: r.inFile, text: "3" }); // rid 复用成功=槽已归还
       expect(c.frames().filter((f) => f.t === "write-ack").length).toBe(2);
       expect(r.host.prompts.length).toBe(2);
-    } finally { await r.dispose(); }
+    } finally {
+      release8?.(); // 幂等兜底（19b）：前置断言失败也不遗留挂起门；Promise 二次 resolve 无害
+      await tick(); await tick();
+      await r.dispose();
+    }
   });
 
   it("W9 宿主抛错→4402 retryable=true+审计 write-frame-error", async () => {
@@ -263,19 +267,29 @@ describe("3c-1 写侧帧：网关派发面", () => {
 
   it("W14 容量门独立：4 个不同 rid 在途后第 5 个→4404 在途请求超限（非重复门）", async () => {
     const r = await makeRig();
+    let release14: (() => void) | undefined; // 19b：声明提级——finally 释放兜底可用
     try {
       const c = await authed(r);
-      let release14!: () => void;
       r.host.gatePrompt = new Promise<void>((res) => { release14 = res; }); // 可释放挂起门（第19轮：清理前收束）
       for (let i = 1; i <= 4; i += 1) await c.say({ t: "prompt", requestId: `r14-${i}`, file: r.inFile, text: "x" });
       await c.say({ t: "prompt", requestId: "r14-5", file: r.inFile, text: "x" }); // 第 5 个不同 rid
       const e = errs(c).find((f) => f.code === 4404 && f.message === "在途请求超限");
       expect(e).toBeDefined();
       expect(r.host.prompts.length).toBe(4); // 第 5 个未达宿主
-      release14(); // 释放四门：四个 write-ack 全部到达+四槽归还
+      release14(); // 释放四门：write-ack 全部到达+四槽归还
       await tick(); await tick();
       expect(c.frames().filter((f) => f.t === "write-ack").length).toBe(4);
-    } finally { await r.dispose(); }
+      const errsBefore = errs(c).filter((f) => f.code === 4404).length;
+      await c.say({ t: "prompt", requestId: "r14-1", file: r.inFile, text: "y" }); // rid 复用=四槽真归还（19b 补）
+      await tick();
+      expect(errs(c).filter((f) => f.code === 4404).length).toBe(errsBefore); // 无新增 4404（旧 r14-5 超限帧仍在，按计数）
+      expect(c.frames().filter((f) => f.t === "write-ack").length).toBe(5);
+      expect(r.host.prompts.length).toBe(5);
+    } finally {
+      release14?.(); // 幂等兜底（19b）：前置断言失败也不遗留挂起门
+      await tick(); await tick();
+      await r.dispose();
+    }
   });
 
   it("W15 失败路径槽归还：prompt 4402 后同 rid 可复用（stop→ack，再 prompt→ack）", async () => {

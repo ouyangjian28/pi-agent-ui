@@ -644,7 +644,7 @@
 - 测试 E1-E8+H1-H8（tests/unit/server/rpc-write-host.test.ts）：E=编码矩阵全分支；H=注册表缓存/分桶/工厂抛错/会话抛错/审计隔离/异步工厂。
 - W13-W17（ws-gateway-write.test.ts，第18轮对抗推演四案）：W13=W5 分连接版（四坏帧各自 4404，空 text 第 4 案首次可观测+宿主零调用）；W14=容量门独立（4 不同 rid 在途→第 5 个 4404"在途请求超限"，非重复门）；W15=失败路径槽归还（prompt 4402 后同 rid 复用 stop/prompt 均成功）；W16=ack.file 显式回显裸名（与宿主面 abs 成对照）；W17=UTF-8 字节边界（恰 65536B 含多字节过；"你"×21846=65538B 拒且未达宿主）。
 - 变异三连（3c2.md+patches/3c2/，基线先提交=752aed6 后变异；logs=run-records/3c2-mut-*.log）：ENCODER-FLATTEN（commandId+1）→2 败首败 E1；REGISTRY-BYPASS（缓存删）→1 败首败 H3；STRIP-RETHROW（剥离删，原错直抛）→3 败首败 H5。还原 hash 复核 OK×3。
-- 证据：run-records/3c2-full-vitest.log=939 passed+7 skipped（925+16 新增）；tsc 两包 0+lint 0（当轮终端实录）。
+- 证据：run-records/3c2-full-vitest.log=939 passed+7 skipped（~~925+16 新增~~ **历史错句：实为 +21（16 H/E+5 W），见下方 r19 段勘正与 19b 轮 GPT 核对（it( 计数 H/E 12→16→22 / W 12→17→18）**）；tsc 两包 0+lint 0（当轮终端实录——**lint 无档，19b 轮确认提交档为 0 字节空件，补跑见 3c2-19b-lint.log**）。
 - 诚实披露：①strip-rethrow 只变异了 prompt 通道（stop 通道同型代码，H5 的 stop 断言覆盖同路径）；②编码器对 error:unknown 的截断是设计而非缺陷（E3 断言 stage 保留+error 字段缺失）；③createRpcWriteHost 的 sessionFor 接缝=结构化依赖（RpcLikeSession 两方法最小面），真实 RpcSession 实例构造与 composition 接线（writeHost=createRpcWriteHost(...)+sessionFor 闭包）属下一片（3c-3），本片不含真进程 E2E。
 
 ### 3c-2 r19 修复批（第19轮 78 NO-GO 三阻断+异常边界；基线 6e5f12c；953 绿）
@@ -654,6 +654,7 @@
 - **F3 契约文档统一**（两层契约三处同口径）：可预期业务结果→DTO kind；内部意外异常→剥离重抛固定 Error（无 cause 无内部字段）→网关 4402 retryable。write-host.ts:3-4 端口注/contracts.ts DTO 注/rpc-write-host.ts 头注。TECH B16 同步见 ~/ai 档。
 - **变异 M4/M5/M5b**（3c2.md r19 段+patches/3c2/）：PENDING-SHARE-DELETE→3 败 H9/H10/H11（single-flight 三案正杀）；AUDIT-ESCAPE（thunk 原样传）→4 败 H5/H6/H13/H14（审计观察面）；AUDIT-FORMAT-ESCAPE（急切格式化）→3 败 H5/H6/**H12**（恶意逃逸面正杀）。双面锁死：不求值→观察案杀；求值越域→逃逸案杀。
 - **披露**：①失败占位身份删除分支未单独变异（H11 间接覆盖）；②stop 通道格式化未单独变异（同构代码，H13/H12-stop 断言覆盖）；③composition 接线+真 RpcSession+统一销毁=3c-3（GPT 裁决：恰建一次是本片承诺，无失效 API 首片可接受，寿命绑定 3c-3 定清）。
+- **19b 轮（84 NO-GO，仅 F2 证据门阻断）修复批**：①H12 getter 空覆盖修复——host2 补 audit 回调+getter 触发计数断言（getterReads>0 证格式化确实读取；audits2.length=0 证中途抛错整行隔离不半写入；旧断言方向写反已勘正）；②W8/W14 释放兜底挪 finally（幂等二放无害）+W14 补 rid 复用断言（errsBefore 计数法——旧 4404 帧仍在连接，按新增计数非存在性）；③W5 头注遗留错句勘正（本连接只证前三案，空 text 在 W13 分连接）；④M5c AUDIT-ESCAPE-VALID 类型合法变异（隔离域外急切求值+thunk 传已求值串，只改求值位置）——杀 H12 定向逃逸面，替代原 M5/M5b 的类型不合法混杂；⑤全量 vitest/lint 补跑落档（--reporter=verbose 完整输出+命令头+裸退出码+精确 SHA 标注，补跑不冒充历史实录）；⑥TEST-MAP 647 历史错句指针化。
 
 ## 3c-1（写侧帧接线：契约扩展+网关派发面+WriteHostPort；2026-10-03）
 - 契约面（packages/protocol/src/contracts.ts）：WRITE_OPEN_FRAME_TYPES=["prompt","stop"]（冻结写集 9-t 中仅开放此二；其余仍 4405）；WRITE_TEXT_MAX_BYTES=65_536；WriteClientFrame=prompt{requestId,file,text}/stop{requestId,file}；validateWriteFrame（exactWrite 字段集全等+ridWrite /^[-\w]{1,64}$/+fileWrite=LIMITS.filePattern 裸名+text 非空+字节上限；不侵冻结校验器）；WriteSendOutcomeDTO（launched{intentId,commandId}/busy/gate-rejected/gate-failed/invalidated{stage}/no-process/not-ready{cause}/rejected{reason}——SessionSendResult 契约化映射，error:unknown 不跨面）；WriteStopOutcomeDTO（confirmed{exit}/deadline-exceeded/no-process/stopping）；ServerFrame 增 write-ack/write-stop-ack（回显原 file 裸名+requestId）。

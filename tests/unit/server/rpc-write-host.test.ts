@@ -173,7 +173,6 @@ describe("3c-2 宿主适配：createRpcWriteHost", () => {
   // ---- 第19轮异常边界补强：格式化隔离+固定剥离 ----
   it("H12 恶意不可字符串化拒绝值×两 op：仍固定 message、无内部附带字段（格式化不逃逸）", async () => {
     const hostile: unknown = { toString() { throw new Error("TOASTRING-BOOM"); } }; // String() 路径炸
-    const hostileErr = Object.defineProperty(new Error("x"), "message", { get() { throw new Error("GETTER-BOOM"); } }); // message getter 炸
     const audits: string[] = [];
     const host = createRpcWriteHost({
       sessionFor: () => { throw hostile; },
@@ -185,10 +184,18 @@ describe("3c-2 宿主适配：createRpcWriteHost", () => {
     expect(e1!.message).not.toContain("BOOM");
     const e2 = await host.stop("/abs/s.jsonl").then(() => null, (e: unknown) => e as Error);
     expect(e2!.message).toBe("write-host-internal: stop");
-    const badSend = { ...mkSession(), send: async () => { throw hostileErr; } } as RpcLikeSession;
-    const host2 = createRpcWriteHost({ sessionFor: () => badSend });
+    let getterReads = 0;
+    const hostileErr2 = Object.defineProperty(new Error("x"), "message", {
+      get() { getterReads += 1; throw new Error("GETTER-BOOM-2"); },
+    });
+    const audits2: string[] = [];
+    const badSend2 = { ...mkSession(), send: async () => { throw hostileErr2; } } as RpcLikeSession;
+    const host2 = createRpcWriteHost({ sessionFor: () => badSend2, audit: (l) => audits2.push(l) });
     const e3 = await host2.sendPrompt("/abs/s.jsonl", "y").then(() => null, (e: unknown) => e as Error);
     expect(e3!.message).toBe("write-host-internal: prompt");
+    expect(getterReads).toBeGreaterThan(0); // getter 确实被格式化读取（非可选链短路空覆盖）
+    expect(audits2.length).toBe(0); // getter 中途抛错→该审计行被整体隔离丢弃，不半写入
+    expect(e3!.message).not.toContain("GETTER-BOOM-2");
     for (const e of [e1!, e2!, e3!]) {
       expect((e as { cause?: unknown }).cause).toBeUndefined();
       expect(Object.keys(e).length).toBe(0); // 无附带内部字段
