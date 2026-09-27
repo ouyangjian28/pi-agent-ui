@@ -1,0 +1,22 @@
+# S1-DOTSEG-GATE-OFF  2026-09-27T20:16:51.163444  repo@103e726（实时 git rev-parse）
+# 锚点文件=apps/server/src/ws/static-serve.ts 基线sha256[:16]=b981be3a2b481de7
+# stderr 已并入本档（3c2-19c/d 证据口径）
+
+$ npx vitest run tests/unit/server/static-serve.test.ts   (exit=0)
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.1 [39m[90m/home/yyj/ai/repos/pi-agent-ui[39m
+
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/static-serve.test.ts [2m([22m[2m20 tests[22m[2m)[22m[33m 1452[2mms[22m[39m
+   [32m✓[39m ⑤B SM：main.ts CLI 冒烟 [2m(5)[22m
+     [33m[2m✓[22m[39m SM3 非法 port（0/越界/非整数）→ 退出 1+端口门提示（真 token/真 root：排际 token/root 门先触发偷换杀点）[33m 543[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m20 passed[39m[22m[90m (20)[39m
+[2m   Start at [22m 20:16:51
+[2m   Duration [22m 1.83s[2m (tests 83%, transform 13%, import 4%)[22m
+
+
+
+# 失败测试计数(FAIL/× 行)=0  判据=exit≠0 且 n_fail>0
+# restore 后 sha256[:16]=b981be3a2b481de7  与基线一致=OK
+# git status --porcelain（排除 mut 日志）原始输出：''  树净=OK

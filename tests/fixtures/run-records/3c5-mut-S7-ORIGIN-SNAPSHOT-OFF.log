@@ -1,0 +1,61 @@
+# S7-ORIGIN-SNAPSHOT-OFF  2026-09-27T20:19:11.300395  repo@e21a569（实时 git rev-parse）
+# 锚点文件=apps/server/src/ws/ws-transport.ts 基线sha256[:16]=b6aee0a28e5cd4fd
+# stderr 已并入本档（3c2-19c/d 证据口径）
+
+$ npx vitest run tests/unit/server/static-serve.test.ts   (exit=1)
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.1 [39m[90m/home/yyj/ai/repos/pi-agent-ui[39m
+
+ [31m❯[39m [30m[42m unit [49m[39m tests/unit/server/static-serve.test.ts [2m([22m[2m20 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 1509[2mms[22m[39m
+   [32m✓[39m ⑤B SS：resolveStaticPath 纯函数 [2m(2)[22m
+     [32m✓[39m SS1 根内普通路径 → 绝对文件路径；/ → index.html；query 分手；空段/尾斜杠/非 origin-form → null[32m 1[2mms[22m[39m
+     [32m✓[39m SS2 穿越/编码逃逸/点文件/畸形解码 → null（fail-closed）[32m 0[2mms[22m[39m
+   [32m✓[39m ⑤B SS：createStaticHandler（真 http server） [2m(7)[22m
+     [32m✓[39m SS3 GET / → index.html 200 + text/html + no-store[32m 26[2mms[22m[39m
+     [32m✓[39m SS4 MIME 表（js/css/json/svg）+未知扩展回退 octet-stream[32m 10[2mms[22m[39m
+     [32m✓[39m SS5 HEAD → 头全、body 空[32m 3[2mms[22m[39m
+     [32m✓[39m SS6 非法方法 → 405 + Allow[32m 3[2mms[22m[39m
+     [32m✓[39m SS7 缺失文件/点文件/目录 → 404；审计行落 static-*[32m 12[2mms[22m[39m
+     [32m✓[39m SS8 原始 request-target 点段族 → 全 404（B2：不经 fetch/URL 预归一化；对照=根内同名文件真实存在）[32m 9[2mms[22m[39m
+     [32m✓[39m SS9 symlink 真实边界（B1）：根内链接指向根外文件/目录 → 404；根自身为 symlink → 口径一致可服务[32m 5[2mms[22m[39m
+   [31m❯[39m ⑤B ST：composition staticDir 集成（同端口 HTTP+WS） [2m(6)[22m
+     [32m✓[39m ST1 staticDir+port 0 → 拒启（同源 origin 需固定端口）[32m 4[2mms[22m[39m
+     [32m✓[39m ST2 HTTP fetch：/ → 200 html；missing → 404；审计含 static-hit/static-miss[32m 6[2mms[22m[39m
+     [32m✓[39m ST3 WS 同端口共存：hello→welcome→list-sessions→sessions（读链不受静态托管影响）[32m 56[2mms[22m[39m
+     [32m✓[39m ST4 dispose 有界（正常快速路径；半截请求头的可区分证据在 ST6——不据本例声称守卫被验证）[32m 3[2mms[22m[39m
+[31m     [31m×[31m ST5 Origin 白名单=构造期快照（B3）：startServer 后对原数组 push 新 origin → 不扩大授权面[39m[32m 30[2mms[22m[39m
+     [32m✓[39m ST6 半截请求头连接：dispose 被 closeAllConnections 截断（B4 可区分变异点；基线即时，拔除后落 5s 守卫）[32m 3[2mms[22m[39m
+   [32m✓[39m ⑤B SM：main.ts CLI 冒烟 [2m(5)[22m
+     [32m✓[39m SM1 --help → 用法文本+退出 0[32m 191[2mms[22m[39m
+     [32m✓[39m SM2 缺 token-file → 退出 1+必填提示[32m 189[2mms[22m[39m
+     [33m[2m✓[22m[39m SM3 非法 port（0/越界/非整数）→ 退出 1+端口门提示（真 token/真 root：排际 token/root 门先触发偷换杀点）[33m 574[2mms[22m[39m
+     [32m✓[39m SM4 root 不存在 → 退出 1+目录提示[32m 186[2mms[22m[39m
+     [32m✓[39m SM5 全参数起服→ready 审计行→SIGTERM 优雅退出 0（静态托管真跑）[32m 198[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m tests/unit/server/static-serve.test.ts[2m > [22m⑤B ST：composition staticDir 集成（同端口 HTTP+WS）[2m > [22mST5 Origin 白名单=构造期快照（B3）：startServer 后对原数组 push 新 origin → 不扩大授权面
+[31m[1mError[22m: 后推 origin 竟握手成功：快照门失效[39m
+[36m [2m❯[22m WebSocket.<anonymous> tests/unit/server/static-serve.test.ts:[2m290:70[22m[39m
+    [90m288|[39m       const ws = new WebSocket(`ws://127.0.0.1:${port}`, { origin: "ht…
+    [90m289|[39m       const timer = setTimeout(() => { ws.terminate(); rej(new Error("…
+    [90m290|[39m       ws.on("open", () => { clearTimeout(timer); ws.terminate(); rej(n…
+    [90m   |[39m                                                                      [31m^[39m
+    [90m291|[39m       ws.on("unexpected-response", (_req, res2) => { clearTimeout(time…
+    [90m292|[39m       ws.on("error", () => { /* unexpected-response 路径后 socket 关闭的余波；断…
+[90m [2m❯[22m WebSocket.setSocket node_modules/ws/lib/websocket.js:[2m258:10[22m[39m
+[90m [2m❯[22m ClientRequest.<anonymous> node_modules/ws/lib/websocket.js:[2m1029:15[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m19 passed[39m[22m[90m (20)[39m
+[2m   Start at [22m 20:19:11
+[2m   Duration [22m 1.89s[2m (tests 84%, transform 12%, import 4%)[22m
+
+
+
+# 失败测试计数(FAIL/× 行)=1  判据=exit≠0 且 n_fail>0
+# restore 后 sha256[:16]=b6aee0a28e5cd4fd  与基线一致=OK
+# git status --porcelain（排除 mut 日志）原始输出：''  树净=OK
