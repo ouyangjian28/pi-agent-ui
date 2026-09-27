@@ -161,7 +161,7 @@ describe("3c-1 写侧帧：网关派发面", () => {
       await c.say({ t: "prompt", requestId: "r5b", file: r.inFile, text: "x", extra: 1 }); // 多余字段
       await c.say({ t: "prompt", requestId: "BAD RID", file: r.inFile, text: "x" }); // rid 非法
       await c.say({ t: "prompt", requestId: "r5d", file: r.inFile, text: "" }); // 空 text
-      // 4404 计数≥3→close 1002：四例全拒，至少前三个 4404 已触发关限——只断言关过，不再断言 close 为空
+      // 4404 计数≥3→close 1002：本连接只证前三个 4404 触发关限；空 text 案在 W13 分连接单独证（19c 勘正旧注）
       expect(c.closes.some(([code]) => code === 1002)).toBe(true);
     } finally { await r.dispose(); }
   });
