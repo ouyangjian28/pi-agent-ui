@@ -6,7 +6,7 @@
 // 路径未验：客户端无尾页重试公共入口）⑤同 file 至多一个
 // 活动订阅+在途 4404 不崩 ⑥cursor 严格透传服务端值 ⑦R1 消费帧运行时校验（坏帧零副作用可续收）⑧R2 受控
 // 文案（error.message 不进快照）⑨R3 close 停止屏障简版 ⑩B2 首页在途取消留痕补退订 ⑪C2 跨字段/续页绑定
-// 一致性拒绝后可恢复 ⑫C5 连接级错误码（无 requestId）映射。快照断言用身份比较（toBe）。
+// 一致性拒绝后可恢复 ⑫C5 连接级错误码（无 requestId）映射⑬K3-B1 终局帧结构化路由（新信封 df0e576：subscriptionId 指认所停流+requestId 恒空）与旧信封兼容（无 subscriptionId 空 requestId 的 4409/4431/4402 按活动流终局）。快照断言用身份比较（toBe）。
 import { describe, expect, it } from "vitest";
 import { SubscribeClient, type WebSocketLike } from "../../../apps/web/src/ws/subscribe-client";
 import type { EventCursor, HistoryEvent, LiveEvent } from "@pi-agent-ui/protocol/src/contracts";
@@ -336,7 +336,7 @@ describe("订阅终局语义", () => {
   });
 
   it("4431 非活动订阅 id：忽略零副作用", () => {
-    const { client, ws, subscriptionId } = livePhase();
+    const { client, ws } = livePhase();
     const before = client.getSnapshot();
     ws.receive({ t: "error", code: 4431, subscriptionId: "sub-ghost", message: "x", retryable: false });
     expect(client.getSnapshot()).toBe(before);
@@ -422,7 +422,6 @@ describe("订阅终局语义", () => {
     handshake(ws);
     client.subscribeSession("a.jsonl");
     const requestId = (ws.sentFrames()[1] as { requestId: string }).requestId;
-    const before = client.getSnapshot();
     ws.receive({ t: "error", code: 4404, requestId, message: "duplicate requestId", retryable: false });
     const snap = client.getSnapshot();
     expect(snap.phase).toBe("closed");
@@ -805,5 +804,301 @@ describe("C5 连接级错误映射（ready 后无 requestId 的连接级码）",
     ws.receive({ t: "error", code: 4431, subscriptionId, message: "预算", retryable: false });
     expect(client.getSnapshot().errorKind).toBe("stream-terminal"); // 活动订阅 4431=订阅级终局
     expect(client.getSnapshot().connState).toBe("ready"); // 连接保持（既有语义不变）
+  });
+});
+
+// ---------------------------------------------------------------------------
+// K3-B1（新错误信封 df0e576）：终局帧按结构化身份路由——subscriptionId 指认所停流，requestId 恒空串。
+// 终局是流的事件：不得冒充在途请求失败（K3 P1：旧 4409 误携新 requestId → 新快照被丢）；也不解析 message 文本。
+// ---------------------------------------------------------------------------
+describe("K3-B1 终局帧结构化路由（新信封）", () => {
+  /** 新信封终局帧：subscriptionId=所停流，requestId 恒空串（服务端 df0e576 形态；message 含 id 文本但前端不解析）。 */
+  function terminalError(
+    code: 4409 | 4431 | 4402,
+    subscriptionId: string,
+    message = `stream-replaced:${subscriptionId}`,
+  ): unknown {
+    return { t: "error", code, message, retryable: code !== 4431, requestId: "", subscriptionId };
+  }
+
+  it("K3 P1 回归：同 file 重订阅时退旧终局 4409{subscriptionId=旧, requestId=\"\"} 不冒充新请求失败，随后新 snapshot 正常落地", () => {
+    const { client, ws, subscriptionId } = livePhase();
+    client.subscribeSession("a.jsonl"); // 同 file 重订阅：本地先退旧 sub-1 + 新 init 在途
+    const newRequestId = (ws.sentFrames().at(-1) as { requestId: string }).requestId;
+    ws.receive(terminalError(4409, subscriptionId)); // 服务端退旧终局：指认旧流
+    let snap = client.getSnapshot();
+    expect(snap.phase).toBe("subscribing"); // 新建订未被终局误伤（不落 subscribe-failed）
+    expect(snap.errorKind).toBeNull();
+    expect(snap.errorMessage).toBeNull();
+    ws.receive(
+      pageFrame({
+        requestId: newRequestId,
+        subscriptionId: "sub-2",
+        barrier: 9,
+        page: [msg(9)],
+        historyNext: null,
+        liveFrom: { streamId: "stream-1", seq: 10 },
+      }),
+    );
+    snap = client.getSnapshot();
+    expect(snap.phase).toBe("live"); // K3 P1：合法新 snapshot 不再被丢
+    expect(snap.subscriptionId).toBe("sub-2");
+    expect(snap.events.map((e) => e.seq)).toEqual([9]);
+    const frozen = client.getSnapshot();
+    ws.receive(historyEvents(subscriptionId, 4, [msg(4)])); // 旧流终局后帧零受理
+    expect(client.getSnapshot()).toBe(frozen);
+  });
+
+  it("4431 终局（新信封全形态 requestId=\"\"）：该流终局视图（stream-terminal+内容保留），连接 ready 非连接错误，可再订阅", () => {
+    const { client, ws, subscriptionId } = livePhase();
+    const eventsBefore = client.getSnapshot().events;
+    ws.receive(terminalError(4431, subscriptionId, "订阅积压超限"));
+    const snap = client.getSnapshot();
+    expect(snap.phase).toBe("closed");
+    expect(snap.errorKind).toBe("stream-terminal");
+    expect(snap.errorMessage).toContain("4431");
+    expect(snap.connState).toBe("ready"); // 终局≠连接错误
+    expect(snap.events).toBe(eventsBefore); // 内容保留
+    const frozen = client.getSnapshot();
+    ws.receive(liveEvents(subscriptionId, 9, [liveProgress()]));
+    expect(client.getSnapshot()).toBe(frozen); // 已停流帧零受理
+    client.subscribeSession("b.jsonl"); // 连接可继续服务新订阅
+    expect((ws.sentFrames().at(-1) as { t: string }).t).toBe("subscribe");
+  });
+
+  it("4402 流终局容量出口（带 subscriptionId）：按流终局路由（stream-terminal）而非请求级「会话不存在」——内容保留、连接 ready", () => {
+    const { client, ws, subscriptionId } = livePhase();
+    ws.receive(terminalError(4402, subscriptionId, "watcher 预算超限"));
+    const snap = client.getSnapshot();
+    expect(snap.phase).toBe("closed");
+    expect(snap.errorKind).toBe("stream-terminal"); // 不是 subscribe-failed
+    expect(snap.errorMessage).toContain("4402");
+    expect(snap.connState).toBe("ready");
+    expect(snap.events.map((e) => e.seq)).toEqual([1, 2, 3]);
+  });
+
+  it("请求级 error（requestId 无 subscriptionId）：不误清活动流——无关 requestId 忽略；被顶替旧请求的失败不误伤新建订", () => {
+    // ① 活动流期间收到无关 requestId 的请求级错误：忽略，流继续
+    const live = livePhase();
+    const before = live.client.getSnapshot();
+    live.ws.receive({ t: "error", code: 4404, requestId: "req-ghost", message: "dup", retryable: false });
+    expect(live.client.getSnapshot()).toBe(before);
+    live.ws.receive(liveEvents(live.subscriptionId, 2, [liveProgress()]));
+    expect(live.client.getSnapshot().liveEvents).toHaveLength(1); // 流未被清
+    // ② 同 file 重订阅后，被顶替旧 init 收到请求级错误（requestId=旧）：不归属新请求，新 snapshot 照常落地
+    const { client, ws, initRequestId } = livePhase();
+    client.subscribeSession("a.jsonl");
+    const newRequestId = (ws.sentFrames().at(-1) as { requestId: string }).requestId;
+    ws.receive({ t: "error", code: 4404, requestId: initRequestId, message: "duplicate", retryable: false });
+    expect(client.getSnapshot().phase).toBe("subscribing"); // 新 init 未被旧请求失败误伤
+    ws.receive(
+      pageFrame({
+        requestId: newRequestId,
+        subscriptionId: "sub-2",
+        barrier: 9,
+        page: [msg(9)],
+        historyNext: null,
+        liveFrom: { streamId: "stream-1", seq: 10 },
+      }),
+    );
+    expect(client.getSnapshot().phase).toBe("live");
+  });
+
+  it("未知/非活动 subscriptionId 的终局帧：忽略零副作用（防串流——绝不清理当前活动流）", () => {
+    const { client, ws, subscriptionId } = livePhase();
+    const before = client.getSnapshot();
+    ws.receive(terminalError(4409, "sub-ghost"));
+    ws.receive(terminalError(4402, "sub-ghost"));
+    ws.receive(terminalError(4431, "sub-ghost"));
+    expect(client.getSnapshot()).toBe(before);
+    expect(before.phase).toBe("live");
+    ws.receive(liveEvents(subscriptionId, 2, [liveProgress()])); // 活动流不受影响
+    expect(client.getSnapshot().liveEvents).toHaveLength(1);
+  });
+
+  it("A→B→A 切换（新信封）：每次换流的服务端退旧终局 4409 均被本地先行退役吸收（不伤新在途），三段订阅各自正确落地", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    // A1：订阅 a → live（sub-a1）
+    client.subscribeSession("a.jsonl");
+    const a1 = (ws.sentFrames()[1] as { requestId: string }).requestId;
+    ws.receive(
+      pageFrame({
+        requestId: a1,
+        subscriptionId: "sub-a1",
+        streamId: "stream-a",
+        barrier: 1,
+        page: [msg(1)],
+        historyNext: null,
+        liveFrom: { streamId: "stream-a", seq: 2 },
+      }),
+    );
+    expect(client.getSnapshot().subscriptionId).toBe("sub-a1");
+    // 切 B：退旧 sub-a1（本地退役+退订帧）+ init-b 在途；服务端退旧终局 4409{sub-a1}——已退役，忽略
+    client.subscribeSession("b.jsonl");
+    const bInit = (ws.sentFrames().at(-1) as { requestId: string }).requestId;
+    ws.receive(terminalError(4409, "sub-a1"));
+    expect(client.getSnapshot().phase).toBe("subscribing"); // init-b 未被终局误伤
+    ws.receive(
+      pageFrame({
+        requestId: bInit,
+        subscriptionId: "sub-b1",
+        streamId: "stream-b",
+        barrier: 7,
+        page: [msg(7)],
+        historyNext: null,
+        liveFrom: { streamId: "stream-b", seq: 8 },
+      }),
+    );
+    expect(client.getSnapshot().subscriptionId).toBe("sub-b1");
+    expect(client.getSnapshot().events.map((e) => e.seq)).toEqual([7]);
+    // 切回 A：退旧 sub-b1；终局 4409{sub-b1} 忽略；A2 首页落地
+    client.subscribeSession("a.jsonl");
+    const a2 = (ws.sentFrames().at(-1) as { requestId: string }).requestId;
+    ws.receive(terminalError(4409, "sub-b1"));
+    ws.receive(
+      pageFrame({
+        requestId: a2,
+        subscriptionId: "sub-a2",
+        streamId: "stream-a",
+        barrier: 1,
+        page: [msg(1)],
+        historyNext: null,
+        liveFrom: { streamId: "stream-a", seq: 2 },
+      }),
+    );
+    const snap = client.getSnapshot();
+    expect(snap.subscriptionId).toBe("sub-a2");
+    expect(snap.events.map((e) => e.seq)).toEqual([1]);
+    // 两代旧流帧均零受理
+    const frozen = client.getSnapshot();
+    ws.receive(historyEvents("sub-a1", 2, [msg(2)]));
+    ws.receive(historyEvents("sub-b1", 9, [msg(9)]));
+    expect(client.getSnapshot()).toBe(frozen);
+  });
+
+  it("终局 4409 落当前活动流（observe-missed/磁盘换流）：置 resync-needed 保留快照+cursor，旧流帧零受理；手动续读按 cursor 建新流", () => {
+    const { client, ws, subscriptionId } = livePhase();
+    ws.receive(terminalError(4409, subscriptionId));
+    const snap = client.getSnapshot();
+    expect(snap.phase).toBe("resync-needed");
+    expect(snap.subscriptionId).toBe("sub-1"); // 快照字段保留（与服务端间隙 resync-required 同口径）；内部 activeSub 已退役（下证：旧流帧零受理）
+    expect(snap.events.map((e) => e.seq)).toEqual([1, 2, 3]);
+    expect(snap.cursor).toEqual({ streamId: "stream-1", seq: 4 });
+    expect(snap.errorKind).toBeNull(); // 流终局≠请求失败
+    const frozen = client.getSnapshot();
+    ws.receive(liveEvents(subscriptionId, 9, [liveProgress()]));
+    expect(client.getSnapshot()).toBe(frozen);
+    client.resyncFromCursor(); // 可手动续读
+    const resyncRequestId = (ws.sentFrames().at(-1) as { requestId: string }).requestId;
+    ws.receive(
+      pageFrame({
+        requestId: resyncRequestId,
+        subscriptionId: "sub-3",
+        barrier: 4,
+        page: [msg(4)],
+        historyNext: null,
+        liveFrom: { streamId: "stream-1", seq: 5 },
+      }),
+    );
+    const done = client.getSnapshot();
+    expect(done.phase).toBe("live");
+    expect(done.events.map((e) => e.seq)).toEqual([1, 2, 3, 4]); // 续读不重建
+  });
+
+  it("message 文本不参与路由：终局帧 message 里的 id 与结构化字段不一致时，路由仍按 subscriptionId 字段", () => {
+    const { client, ws, subscriptionId } = livePhase();
+    ws.receive({
+      t: "error",
+      code: 4409,
+      message: "stream-replaced:sub-DECOY", // 文本诱饵：与字段不一致
+      retryable: true,
+      requestId: "",
+      subscriptionId,
+    });
+    expect(client.getSnapshot().phase).toBe("resync-needed"); // 按 subscriptionId 字段命中活动流，不被文本带偏
+  });
+
+  it("B2 兼容：终局帧不豁免迟到首页补退订——已取消建订的流先收终局（忽略），迟到首页仍补发 unsubscribe", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    client.subscribeSession("a.jsonl");
+    const initRequestId = (ws.sentFrames()[1] as { requestId: string }).requestId;
+    client.unsubscribeSession(); // 首包前退订：init 留痕
+    ws.receive(terminalError(4409, "sub-late")); // 客户端无活动订阅→忽略
+    expect(client.getSnapshot().phase).toBe("idle");
+    ws.receive(
+      pageFrame({
+        requestId: initRequestId,
+        subscriptionId: "sub-late",
+        streamId: "stream-1",
+        barrier: 1,
+        page: [msg(1)],
+        historyNext: null,
+        liveFrom: { streamId: "stream-1", seq: 2 },
+      }),
+    );
+    expect(ws.sentFrames().at(-1)).toEqual({
+      t: "unsubscribe",
+      requestId: expect.any(String),
+      subscriptionId: "sub-late",
+    }); // 补退订义务仍在
+    expect(client.getSnapshot().events).toHaveLength(0); // 迟到首页仍不写快照
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 旧信封兼容（df0e576 前网关形态：终局无 subscriptionId、requestId 空串/缺省）。选型：按当前活动流终局
+// 处理——单 file 面至多一个活动订阅，归属无歧义；无活动订阅则忽略（零副作用）。连接级发送队列超限的
+// 4431 同形，但服务端随后必 close(4431)（connState 由 onClose 覆盖），不致误呈「连接可用」。
+// ---------------------------------------------------------------------------
+describe("K3-B1 旧信封兼容（无 subscriptionId 的终局）", () => {
+  it("旧形态 4431（requestId=\"\" 无流身份）：按当前活动流终局（stream-terminal，连接 ready）；requestId 缺省同判", () => {
+    const first = livePhase();
+    first.ws.receive({ t: "error", code: 4431, message: "预算", retryable: false, requestId: "" });
+    let snap = first.client.getSnapshot();
+    expect(snap.phase).toBe("closed");
+    expect(snap.errorKind).toBe("stream-terminal");
+    expect(snap.connState).toBe("ready");
+    // requestId 整体缺省（更旧网关形态）同路径
+    const second = livePhase();
+    second.ws.receive({ t: "error", code: 4431, message: "预算", retryable: false });
+    snap = second.client.getSnapshot();
+    expect(snap.errorKind).toBe("stream-terminal");
+    expect(second.client.getSnapshot().connState).toBe("ready");
+  });
+
+  it("旧形态 4409（requestId=\"\"）：活动流置 resync-needed（快照+cursor 保留）可手动续读；旧形态 4402 同判 closed", () => {
+    const { client, ws, subscriptionId } = livePhase();
+    ws.receive({
+      t: "error",
+      code: 4409,
+      message: `stream-replaced:${subscriptionId}`,
+      retryable: true,
+      requestId: "",
+    });
+    let snap = client.getSnapshot();
+    expect(snap.phase).toBe("resync-needed");
+    expect(snap.events.map((e) => e.seq)).toEqual([1, 2, 3]);
+    expect(snap.cursor).toEqual({ streamId: "stream-1", seq: 4 });
+    client.resyncFromCursor(); // 可手动续读
+    expect((ws.sentFrames().at(-1) as { t: string }).t).toBe("subscribe");
+    // 旧形态 4402
+    const second = livePhase();
+    second.ws.receive({ t: "error", code: 4402, message: "容量", retryable: true, requestId: "" });
+    snap = second.client.getSnapshot();
+    expect(snap.phase).toBe("closed");
+    expect(snap.errorKind).toBe("stream-terminal");
+  });
+
+  it("旧形态终局无活动订阅（首包前/已退订）：忽略零副作用，不误伤在途 init", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    client.subscribeSession("a.jsonl");
+    const before = client.getSnapshot();
+    ws.receive({ t: "error", code: 4431, message: "x", retryable: false, requestId: "" });
+    ws.receive({ t: "error", code: 4409, message: "x", retryable: true, requestId: "" });
+    expect(client.getSnapshot()).toBe(before); // subscribing 期无活动流
+    expect(before.phase).toBe("subscribing");
   });
 });

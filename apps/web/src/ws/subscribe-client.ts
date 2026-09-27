@@ -15,8 +15,13 @@
 //   服务端已建立的订阅并补发 unsubscribe（绝不写当前快照、绝不清当前 file 订阅）；本地终局的活动订阅补发退订帧；
 // ⑨续页实例绑定与跨字段一致性（C2）：page 类续页帧的 subscriptionId/snapshotId/streamId/barrier 必须与当前
 //   快照实例一致；hasMore⟺historyNext、页游标 streamId 必须绑本帧流——矛盾帧整帧拒绝（零消费，合法帧可恢复续读）；
-// ⑩ready 后无 requestId 的连接级错误码（4403/4405/4432/无订阅域 4431）进连接级失败映射（C5；受控文案按 code，
-//   4432 心跳原因不丢）；4413/4429 契约定为请求级，无关联时不升级为连接级。
+// ⑩ready 后无 requestId 的连接级错误码（4403/4405/4432）进连接级失败映射（C5；受控文案按 code，
+//   4432 心跳原因不丢）；4413/4429 契约定为请求级，无关联时不升级为连接级；
+// ⑪K3-B1 错误帧身份路由（df0e576 §3.6「错误帧路由语义」修订）：带 subscriptionId=流终局通知（4409
+//   stream-replaced/observe-missed/磁盘换流、4431 订阅积压、4402 流终局容量出口；requestId 恒空串）——
+//   按 subscriptionId 路由清理该流，绝不冒充在途请求失败（旧信封 4409 误携新 requestId 曾致合法新
+//   snapshot 被丢，K3 P1）、绝不解析 message 文本里的 id；仅带 requestId=请求级失败；无流身份且 requestId
+//   空缺的 4409/4431/4402=旧信封终局，按当前活动流兼容处理（本面单 file 至多一个活动订阅，身份无歧义）。
 
 // 同 ws-client：绕开 barrel 直引自包含 contracts 模块（浏览器安全、零 Node 依赖）。
 // LIMITS 为值导入（filePattern/idPattern 冻结源，避免本地复制漂移；contracts.ts 无副作用可入浏览器包）。
@@ -812,16 +817,23 @@ export class SubscribeClient {
       this.failConn("handshake-failed", controlledErrorText(frame.code));
       return;
     }
-    // 4431 订阅级终局（§5.3）：该订阅 close；连接与其余（后续）订阅不受影响
-    if (frame.code === 4431 && frame.subscriptionId !== undefined) {
-      if (this.activeSub !== null && frame.subscriptionId === this.activeSub) {
-        this.retiredSubs.add(this.activeSub);
-        this.activeSub = null;
-        this.pageBinding = null;
-        this.inflight = null;
-        this.transition({ phase: "closed", errorKind: "stream-terminal", errorMessage: controlledErrorText(4431) });
-      }
-      return; // 未知/已退役订阅的 4431 忽略
+    // K3-B1 身份优先路由（§3.6 修订）：带 subscriptionId=流终局通知——先于一切请求级匹配。
+    // 终局是【流】的事件：requestId 恒空串（asErrorFrame 已验形），不冒充任何在途请求失败；
+    // 也不解析 message 文本里的 id（如 stream-replaced:sub-x）——只按结构化字段路由。
+    if (frame.subscriptionId !== undefined) {
+      this.onStreamTerminal(frame.subscriptionId, frame.code);
+      return;
+    }
+    // 向后兼容（df0e576 前旧信封：终局无 subscriptionId、requestId 空串/缺省）：空 requestId 的
+    // 4409/4431/4402 按当前活动流终局处理——本面单 file 至多一个活动订阅，按 code+空 requestId 归属无歧义；
+    // 无活动订阅则忽略（零副作用）。连接级发送队列超限的 4431 同形（connection-queue），但服务端随后必
+    // close(4431)——connState 由 onClose 覆盖为 closed，本分支的流终局相位不致误呈「连接可用」。
+    if (
+      (frame.code === 4409 || frame.code === 4431 || frame.code === 4402) &&
+      (frame.requestId === undefined || frame.requestId === "")
+    ) {
+      if (this.activeSub !== null) this.onStreamTerminal(this.activeSub, frame.code);
+      return;
     }
     const inflight = this.inflight;
     if (inflight !== null && frame.requestId === inflight.requestId) {
@@ -838,16 +850,36 @@ export class SubscribeClient {
       return;
     }
     // C5：ready 后无 requestId 关联的连接级错误码进连接级失败映射（受控文案按 code——4432 心跳原因不丢）。
-    // 边界：4413/4429 契约定为请求级，无关联时不升级为连接级；4431 带 subscriptionId 的既有分支语义不变（B1 批另行接线）。
+    // 边界：4413/4429 契约定为请求级，无关联时不升级为连接级；空 requestId 的 4409/4431/4402 已由上方
+    // K3-B1 终局分支（结构化/旧信封兼容）接走，此处不再重叠接 4431。
     if (
       frame.requestId === undefined &&
-      (frame.code === 4403 || frame.code === 4405 || frame.code === 4432 ||
-        (frame.code === 4431 && frame.subscriptionId === undefined))
+      (frame.code === 4403 || frame.code === 4405 || frame.code === 4432)
     ) {
       this.failConn("transport", controlledErrorText(frame.code));
       return;
     }
     // 其余无关联请求/订阅的 error 帧安全忽略
+  }
+
+  /**
+   * K3-B1 流终局路由（结构化身份）：sub=所停流；code 决定终局相位——4409=续读终局（快照+cursor 保留，
+   * 等用户显式续读）；4431 订阅积压/4402 流终局容量出口=订阅终局 closed（内容保留，视图呈 stopped 横幅）。
+   * 非活动流（未知/已退役——含本地先行退役的换流旧流）一律忽略：终局不得误伤同 file 新快照请求（K3 P1）。
+   * 清理不触碰 canceledInits（B2：迟到首页补退订义务不因终局豁免——服务端可能仍为已取消建订建了订阅）；
+   * 也不发退订帧——终局即服务端已停该流，退订属冗余写。
+   */
+  private onStreamTerminal(sub: SubscriptionId, code: ErrorCode): void {
+    if (this.activeSub === null || sub !== this.activeSub) return;
+    this.retiredSubs.add(sub);
+    this.activeSub = null;
+    this.pageBinding = null;
+    this.inflight = null; // 该流在途请求不再期待回包——清理属流终局，不置请求失败文案（新信封不指认请求）
+    if (code === 4409) {
+      this.transition({ phase: "resync-needed", streamNote: controlledErrorText(4409) });
+      return;
+    }
+    this.transition({ phase: "closed", errorKind: "stream-terminal", errorMessage: controlledErrorText(code) });
   }
 
   private onClose(code: number): void {
