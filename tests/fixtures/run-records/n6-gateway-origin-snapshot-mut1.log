@@ -1,0 +1,34 @@
+
+ RUN  v5.0.1 /home/yyj/ai/repos/pi-agent-ui
+
+ ❯ |unit| tests/unit/server/ws-gateway.test.ts (103 tests | 1 failed | 102 skipped) 19ms
+   ❯ ws-gateway w1：A 认证入站（W1-01/02） (14)
+     × B3 快照①：构造后向调用方数组热插白名单→仍拒（hello-origin-rejected）；热删→原白名单仍过 16ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：A 认证入站（W1-01/02） > B3 快照①：构造后向调用方数组热插白名单→仍拒（hello-origin-rejected）；热删→原白名单仍过
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ tests/unit/server/ws-gateway.test.ts:252:56
+    250|       r.gw.attach(c1, c1.hooks(), { origin: "http://evil.example", loo…
+    251|       await c1.say({ t: "hello", protocolVersion: 1, token: "tok-ok" }…
+    252|       expect(c1.frames().some((f) => f.code === 4401)).toBe(true);
+       |                                                        ^
+    253|       expect(lastClose(c1)?.[0]).toBe(1008);
+    254|       expect(r.audits.some((l) => l.includes("hello-origin-rejected"))…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 102 skipped (103)
+   Start at  23:36:52
+   Duration  402ms (transform 77%, import 16%, tests 6%, worker 1%)
+

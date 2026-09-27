@@ -758,3 +758,10 @@
 - N4：write.idleMs 显式 1_800_000（30min 固定）；C-3 until 降 20s（<用例 60s 预算）；dispose 计时改 performance.now 单调钟。
 - N5：真跑记录=tests/fixtures/run-records/5c-composed-e2e.log；类型检查边界披露：npm run typecheck=根/protocol/server 三档，不含 tests/integration 与 unit/web（integration 类型面由 vitest transform 兜底，lint 覆盖之）。
 - N6（不销案）：gateway 层 origin 快照独立变异仍挂**写侧收线批（⑤D 后）**；⑤D 须接顶层 sessionFor（读侧双源：write.sessionFor 不自动配置读面——C-2 实为 journal-only 投影，assistant 正文双源显示未证，GPT r1 N2 明示）。
+
+### 写侧收线 N6 销案：gateway origin 快照独立变异（2026-10-05；GPT r2 N3-④ 收口）
+
+- 回归例：ws-gateway.test.ts「B3 快照①」——构造后向调用方 allowedOrigins 热插 `http://evil.example`→hello 仍 4401+close1008+审计 hello-origin-rejected；热删原白名单→原 origin 仍 welcome（双向）。
+- 变异：M1 NOSNAPSHOT（`Object.freeze([...opts.allowedOrigins])`→直绑调用方数组）→定向 1 failed（首败 :252 expected false to be true，热插端被放行）；还原 RESTORE_OK（hash 复核）；还绿 103/103+全仓 1159 passed。档=mutation-records/n6-gateway-origin-snapshot.md+run-records 同名 log。
+- 诚实披露：只去 freeze 不去复制=无行为差异不可观测，单变异单杀面；history-source.test.ts 偶发首败（21 轮审⑦）与本档无关（两轮复跑全绿）。
+- N6 自此销案；「写侧收线批」其余=⑤D 前端联调（等 A1c 重写）。
