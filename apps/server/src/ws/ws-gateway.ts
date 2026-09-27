@@ -210,10 +210,15 @@ export class WsGateway {
 
   private listVersion = 0;
   private listFingerprint = ""; // 目录内容指纹（W1-11）
+  /** B3(r1)：Origin 白名单构造期快照（freeze 副本；opts 原数组不绑定运行时鉴权）。 */
+  private readonly originSnapshot: readonly string[];
+
   private disposed = false;
 
   constructor(private readonly opts: WsGatewayOpts) {
     this.sem = opts.semaphore ?? new ComputeSemaphore();
+    // B3(r1)：Origin 白名单=构造期快照（复制+freeze）——与 transport 同口径，两层都不认外部数组热变更
+    this.originSnapshot = Object.freeze([...opts.allowedOrigins]);
     this.auditFn = opts.audit ?? (() => {});
     // W1-02：默认单调时钟（performance.now 单调；缺失环境回落 Date.now——墙钟回拨仅影响相对间隔的下界）
     this.now = opts.now ?? (typeof performance !== "undefined" && typeof performance.now === "function" ? () => performance.now() : () => Date.now());
@@ -437,7 +442,7 @@ export class WsGateway {
     if (st.preAuthFrames > (this.opts.helloMaxFrames ?? 3)) { this.rejectAuth(st, "认证窗口帧数超限"); return; }
     // Origin 门：精确集合（缺失默认拒；全等匹配）
     const origin = st.meta.origin;
-    if (origin === undefined || !this.opts.allowedOrigins.includes(origin)) {
+    if (origin === undefined || !this.originSnapshot.includes(origin)) {
       this.audit(`hello-origin-rejected conn=${st.id}`);
       this.rejectAuth(st, "Origin 不在白名单");
       return;

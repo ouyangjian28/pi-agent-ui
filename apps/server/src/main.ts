@@ -58,8 +58,9 @@ function parseArgs(argv: readonly string[]): CliArgs {
 }
 
 async function assertDir(path: string, label: string): Promise<string> {
+  // r1（审清理项）：绝对性检查在 resolve 之前对原始输入做——resolve 的返回值恒为绝对路径，先 resolve 再查=恒真
+  if (!isAbsolute(path)) throw new Error(`${label} 须绝对路径：${path}`);
   const abs = resolve(path);
-  if (!isAbsolute(abs)) throw new Error(`${label} 须绝对路径：${path}`);
   const st = await stat(abs).catch(() => { throw new Error(`${label} 不存在：${abs}`); });
   if (!st.isDirectory()) throw new Error(`${label} 不是目录：${abs}`);
   return abs;

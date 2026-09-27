@@ -267,6 +267,9 @@ export class WsServerAdapter implements WsTransportPort {
   private readonly trustedProxies: readonly string[];
   private readonly requireTlsOffLoopback: boolean;
   private readonly closeHandshakeMs: number;
+  /** B3(r1)：Origin 白名单构造期快照（freeze 副本；opts 原数组不绑定运行时鉴权）。 */
+  private readonly originSnapshot: readonly string[];
+
   private disposePromise: Promise<void> | null = null;
   /** B3（3b1b）：启动中的 listen 结算钩子——dispose 同轮交错时显式拒绝，防悬空启动 Promise。 */
   private pendingListen: { settle: () => void } | null = null;
@@ -277,6 +280,8 @@ export class WsServerAdapter implements WsTransportPort {
 
   constructor(private readonly opts: WsServerAdapterOpts) {
     this.audit = (l) => { try { opts.audit?.(l); } catch { /* 审计异常不阻断 */ } };
+    // B3(r1)：Origin 白名单=构造期快照（复制+freeze）——调用方事后改原数组不扩大授权面
+    this.originSnapshot = Object.freeze([...opts.allowedOrigins]);
     this.trustedProxies = opts.trustedProxies ?? [];
     this.requireTlsOffLoopback = opts.requireTlsOffLoopback ?? true;
     this.closeHandshakeMs = opts.closeHandshakeMs ?? DEFAULT_CLOSE_HANDSHAKE_MS;
@@ -394,7 +399,7 @@ export class WsServerAdapter implements WsTransportPort {
     if (this.disposed) { this.rejectHttp(socket, 503, "shutting-down"); return; }
     const meta = deriveConnMeta(req, socket, this.trustedProxies);
     // upgrade 前安全门（§IV.B）：拒绝=HTTP 403，无 WS close 无应用帧
-    if (meta.origin === null || !this.opts.allowedOrigins.includes(meta.origin)) {
+    if (meta.origin === null || !this.originSnapshot.includes(meta.origin)) {
       this.audit(`upgrade-rejected origin=${meta.origin ?? "<missing>"} remote=${meta.remoteAddress} clientIp=${meta.clientIp} rule=origin`);
       this.rejectHttp(socket, 403, "origin-not-allowed");
       return;

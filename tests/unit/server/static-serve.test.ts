@@ -4,12 +4,14 @@
 // SM 面=main.ts CLI 冒烟（--help/参数校验/起停+SIGTERM 优雅退出）。
 // 真实 pi 全链归 ⑤C（PI_E2E=1 门控，不在本档）。
 import { afterEach, describe, expect, it } from "vitest";
-import { chmod, mkdtemp, writeFile } from "node:fs/promises";
-import { createServer, type Server } from "node:http";
+import { chmod, mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { createServer, request as httpRequest, type Server } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
+import { connect } from "node:net";
+import { once } from "node:events";
 import WebSocket from "ws";
 import { createStaticHandler, resolveStaticPath } from "../../../apps/server/src/ws/static-serve.ts";
 import { startServer, type PiAgentUiServer } from "../../../apps/server/src/composition.ts";
@@ -43,10 +45,28 @@ async function mkDist(): Promise<string> {
   await writeFile(join(dir, "data.json"), JSON.stringify({ ok: true }));
   await writeFile(join(dir, ".hidden"), "secret");
   await writeFile(join(dir, "logo.svg"), "<svg xmlns='http://www.w3.org/2000/svg'/>");
+  await writeFile(join(dir, "package.json"), JSON.stringify({ name: "dist-fixture" }));
+  await writeFile(join(dir, "blob.bin"), "\0BIN");
+  await mkdir(join(dir, "subdir"));
+  await writeFile(join(dir, "subdir", "sub.txt"), "sub");
   return dir;
 }
 
 interface ResInfo { status: number; headers: Record<string, string | string[] | undefined>; body: string }
+
+/** 原始 request-target 探针：不经 fetch/URL 预归一化（B2 语义：服务端收到的就是原样字节）。 */
+function rawReq(server: Server, target: string): Promise<{ status: number; body: string }> {
+  const { port } = server.address() as { port: number };
+  return new Promise((res, rej) => {
+    const q = httpRequest({ host: "127.0.0.1", port, path: target }, (r) => {
+      const chunks: Buffer[] = [];
+      r.on("data", (c: Buffer) => chunks.push(c));
+      r.on("end", () => res({ status: r.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") }));
+    });
+    q.on("error", rej);
+    q.end();
+  });
+}
 
 async function req(server: Server, pathName: string, method = "GET"): Promise<ResInfo> {
   const { port } = server.address() as { port: number };
@@ -55,11 +75,14 @@ async function req(server: Server, pathName: string, method = "GET"): Promise<Re
 }
 
 describe("⑤B SS：resolveStaticPath 纯函数", () => {
-  it("SS1 根内普通路径 → 绝对文件路径；尾斜杠与裸根 → null（归一职责在 handler 的 /→/index.html）", () => {
+  it("SS1 根内普通路径 → 绝对文件路径；/ → index.html；query 分手；空段/尾斜杠/非 origin-form → null", () => {
     expect(resolveStaticPath("/srv/dist", "/app.js")).toBe("/srv/dist/app.js");
     expect(resolveStaticPath("/srv/dist", "/a/b.js")).toBe("/srv/dist/a/b.js");
-    expect(resolveStaticPath("/srv/dist", "/")).toBeNull();
-    expect(resolveStaticPath("/srv/dist", "/a/")).toBe("/srv/dist/a"); // join 归一尾斜杠；目录命中由 stat 404 兑现
+    expect(resolveStaticPath("/srv/dist", "/")).toBe("/srv/dist/index.html");
+    expect(resolveStaticPath("/srv/dist", "/app.js?v=3&x=1")).toBe("/srv/dist/app.js");
+    expect(resolveStaticPath("/srv/dist", "/a/")).toBeNull(); // 尾斜杠=空段
+    expect(resolveStaticPath("/srv/dist", "/a//b")).toBeNull(); // 空段
+    expect(resolveStaticPath("/srv/dist", "app.js")).toBeNull(); // 非 origin-form（无前导 /）
   });
   it("SS2 穿越/编码逃逸/点文件/畸形解码 → null（fail-closed）", () => {
     expect(resolveStaticPath("/srv/dist", "/../etc/passwd")).toBeNull();
@@ -69,6 +92,12 @@ describe("⑤B SS：resolveStaticPath 纯函数", () => {
     expect(resolveStaticPath("/srv/dist", "/a/.env")).toBeNull();
     expect(resolveStaticPath("/srv/dist", "/%")).toBeNull(); // 畸形百分号
     expect(resolveStaticPath("/srv/dist", "/%00")).toBeNull(); // NUL
+    expect(resolveStaticPath("/srv/dist", "/a/./b")).toBeNull(); // 点段
+    expect(resolveStaticPath("/srv/dist", "/x/%2e%2e/y")).toBeNull(); // 编码点段（r1：逐段解码后拒）
+    expect(resolveStaticPath("/srv/dist", "/x%2f..%2fy")).toBeNull(); // 段内编码分隔符：解码后留在段内=拒
+    expect(resolveStaticPath("/srv/dist", "/a#b")).toBeNull(); // # 不进 request-target
+    // 单次解码策略（诚实边界）：%252e 解码一次=字面 "%2e"，非点段→按字面文件名解析，存在性由 handler stat 判
+    expect(resolveStaticPath("/srv/dist", "/%252e%252e")).toBe("/srv/dist/%2e%2e");
   });
 });
 
@@ -93,6 +122,7 @@ describe("⑤B SS：createStaticHandler（真 http server）", () => {
     expect((await req(server, "/style.css")).headers["content-type"]).toBe("text/css; charset=utf-8");
     expect((await req(server, "/data.json")).headers["content-type"]).toBe("application/json; charset=utf-8");
     expect((await req(server, "/logo.svg")).headers["content-type"]).toBe("image/svg+xml");
+    expect((await req(server, "/blob.bin")).headers["content-type"]).toBe("application/octet-stream"); // 未知扩展回退
   });
   it("SS5 HEAD → 头全、body 空", async () => {
     const dist = await mkDist();
@@ -122,8 +152,50 @@ describe("⑤B SS：createStaticHandler（真 http server）", () => {
     expect((await req(server, "/missing.js")).status).toBe(404);
     expect((await req(server, "/.hidden")).status).toBe(404);
     expect((await req(server, "/%2e%2e/etc/passwd")).status).toBe(404);
+    expect((await req(server, "/subdir")).status).toBe(404); // 目录命中：stat 非文件
+    expect((await req(server, "/subdir/")).status).toBe(404); // 尾斜杠=空段
     expect(lines.some((l) => l.startsWith("static-miss"))).toBe(true);
     expect(lines.some((l) => l.startsWith("static-reject"))).toBe(true);
+  });
+
+  it("SS8 原始 request-target 点段族 → 全 404（B2：不经 fetch/URL 预归一化；对照=根内同名文件真实存在）", async () => {
+    const dist = await mkDist(); // mkDist 含 package.json：排除「缺文件碰巧 404」
+    const server = createServer(createStaticHandler(dist));
+    CLEANUP_HTTP.push(server);
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    expect((await rawReq(server, "/package.json")).status).toBe(200); // 对照：目标真实存在且可取
+    for (const t of [
+      "/../package.json",
+      "/%2e%2e/package.json",
+      "/.x/../package.json",
+      "/x/%2e%2e/package.json",
+      "/x%2f..%2fpackage.json",
+    ]) {
+      expect((await rawReq(server, t)).status, `target=${t}`).toBe(404);
+    }
+  });
+
+  it("SS9 symlink 真实边界（B1）：根内链接指向根外文件/目录 → 404；根自身为 symlink → 口径一致可服务", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "static-out-3c5-"));
+    await writeFile(join(outside, "secret.txt"), "TOPSECRET");
+    const dist = await mkDist();
+    await symlink(join(outside, "secret.txt"), join(dist, "leak.txt")); // 文件链接
+    await symlink(outside, join(dist, "leakdir")); // 目录链接
+    const server = createServer(createStaticHandler(dist));
+    CLEANUP_HTTP.push(server);
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    expect((await rawReq(server, "/index.html")).status).toBe(200); // 对照
+    expect((await rawReq(server, "/leak.txt")).status).toBe(404); // 文件链接→根外
+    expect((await rawReq(server, "/leakdir/secret.txt")).status).toBe(404); // 目录链接→根外
+    // 根自身是 symlink：realRoot=解析后真实根，根内正常文件仍可服务（口径一致）
+    const linkHome = await mkdtemp(join(tmpdir(), "static-rootlink-3c5-"));
+    const rootLink = join(linkHome, "root-link");
+    await symlink(dist, rootLink);
+    const server2 = createServer(createStaticHandler(rootLink));
+    CLEANUP_HTTP.push(server2);
+    await new Promise<void>((r) => server2.listen(0, "127.0.0.1", r));
+    expect((await rawReq(server2, "/index.html")).status).toBe(200);
+    expect((await rawReq(server2, "/leak.txt")).status).toBe(404); // 根 symlink 不放松真实边界
   });
 });
 
@@ -185,7 +257,7 @@ describe("⑤B ST：composition staticDir 集成（同端口 HTTP+WS）", () => 
     await next("sessions");
     ws.close();
   });
-  it("ST4 dispose 有界（keep-alive 连接被 closeAllConnections 截断，不挂 5s 守卫上限）", async () => {
+  it("ST4 dispose 有界（正常快速路径；半截请求头的可区分证据在 ST6——不据本例声称守卫被验证）", async () => {
     const dist = await mkDist();
     const port = await freePort();
     const { cfg } = await mkStaticCfg(dist, port);
@@ -195,7 +267,62 @@ describe("⑤B ST：composition staticDir 集成（同端口 HTTP+WS）", () => 
     expect(keep.status).toBe(200);
     const t0 = Date.now();
     await s.dispose();
-    expect(Date.now() - t0).toBeLessThan(4_500); // 5s 守卫之下即视为有界（CI 抖动余量 0.5s）
+    expect(Date.now() - t0).toBeLessThan(4_500); // 正常路径应即时；本例不构成对 closeAllConnections 的区分证据
+  });
+
+  it("ST5 Origin 白名单=构造期快照（B3）：startServer 后对原数组 push 新 origin → 不扩大授权面", async () => {
+    const dist = await mkDist();
+    const port = await freePort();
+    const dir = await mkdtemp(join(tmpdir(), "st5-3c5-"));
+    const tokenFile = join(dir, "tokens.json");
+    await writeFile(tokenFile, JSON.stringify({ version: 1, tokens: [TOKEN] }), { mode: 0o600 });
+    await chmod(tokenFile, 0o600);
+    const origins = [`http://127.0.0.1:${port}`]; // 保留引用：事后热变更
+    const s = await startServer({
+      tokenFile, allowedOrigins: origins, roots: [dir], scanDir: dir,
+      staticDir: dist, port, host: "127.0.0.1", tokenPollMs: 0,
+    } as unknown as Parameters<typeof startServer>[0]);
+    CLEANUP_SERVERS.push(s);
+    origins.push("http://late.test"); // 热变更原数组（变异注入面）
+    await new Promise<void>((res, rej) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}`, { origin: "http://late.test" });
+      const timer = setTimeout(() => { ws.terminate(); rej(new Error("后推 origin 未被拒（5s 内无响应）")); }, 5_000);
+      ws.on("open", () => { clearTimeout(timer); ws.terminate(); rej(new Error("后推 origin 竟握手成功：快照门失效")); });
+      ws.on("unexpected-response", (_req, res2) => { clearTimeout(timer); expect(res2.statusCode).toBe(403); res2.resume(); ws.terminate(); res(); });
+      ws.on("error", () => { /* unexpected-response 路径后 socket 关闭的余波；断言已在上面完成 */ });
+    });
+    // 对照：白名单内 origin 仍可正常握手
+    await new Promise<void>((res, rej) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}`, { origin: `http://127.0.0.1:${port}` });
+      ws.on("open", () => { ws.close(); res(); });
+      ws.on("error", (e) => rej(e as Error));
+      setTimeout(() => { ws.terminate(); rej(new Error("对照 origin 握手超时")); }, 5_000);
+    });
+  });
+
+  it("ST6 半截请求头连接：dispose 被 closeAllConnections 截断（B4 可区分变异点；基线即时，拔除后落 5s 守卫）", async () => {
+    const dist = await mkDist();
+    const port = await freePort();
+    const dir = await mkdtemp(join(tmpdir(), "st6-3c5-"));
+    const tokenFile = join(dir, "tokens.json");
+    await writeFile(tokenFile, JSON.stringify({ version: 1, tokens: [TOKEN] }), { mode: 0o600 });
+    await chmod(tokenFile, 0o600);
+    const s = await startServer({
+      tokenFile, allowedOrigins: [`http://127.0.0.1:${port}`], roots: [dir], scanDir: dir,
+      staticDir: dist, port, host: "127.0.0.1", tokenPollMs: 0,
+    } as unknown as Parameters<typeof startServer>[0]);
+    CLEANUP_SERVERS.push(s);
+    const sock = connect(port, "127.0.0.1");
+    await once(sock, "connect");
+    sock.write("GET / HTTP/1.1\r\nHost: localhost\r\n"); // 只发部分请求头——不进 handler，不受 Connection:close 保护
+    await new Promise((r) => setImmediate(r));
+    const closed = once(sock, "close");
+    const t0 = Date.now();
+    await s.dispose();
+    const elapsed = Date.now() - t0;
+    expect(elapsed).toBeLessThan(4_500); // 基线≈即时；拔 closeAllConnections 变异→落 5s 守卫=本断言杀点
+    sock.destroy();
+    await closed; // 连接被真正终结（closeAllConnections 兜底面）
   });
 });
 
