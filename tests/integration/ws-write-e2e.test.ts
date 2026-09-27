@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
 import { startServer, type PiAgentUiServer } from "../../apps/server/src/composition.ts";
-import { assertExitShape, disposeChain, findSpawnFor, inFlightAt, type SpawnRecord } from "../../tests/helpers/e2e-evidence.js";
+import { assertExitShape, disposeChain, exitLineFor, findSpawnFor, inFlightAt, stopHandleOf, type SpawnRecord } from "../../tests/helpers/e2e-evidence.js";
 
 const PI_BIN = "/home/yyj/.nvm/versions/node/v24.18.0/bin/pi";
 const PI_VERSION = "0.86.1"; // 与 pi-e2e.test.ts 同锁（升级须显式改并复跑）
@@ -128,20 +128,24 @@ const d = describe.skipIf(!RUN)("3c-3 真进程写/停 E2E", () => {
     } else {
       // no-process（进程已被闲置回收）：诚实口径——边界后不得出现任何 stop 行（无进程可停不伪造）
       expect(kind).toBe("no-process");
-      expect(audits.slice(a0).some((l) => l.startsWith("stop handle="))).toBe(false);
+      expect(audits.slice(a0).some((l) => stopHandleOf(l) !== null)).toBe(false);
       return;
     }
     // 退役链真退出证据：边界后 stop handle=X 之后有同 X 的 exit 行（绑定 handle 的索引比较，非最后一条反推）
-    await until(() => {
-      const stop = audits.slice(a0).find((l) => l.startsWith("stop handle="));
-      if (stop === undefined) return false;
-      const handle = /stop handle=([\w.-]+)/.exec(stop)![1];
-      return audits.slice(a0).some((l) => l.startsWith(`exit handle=${handle} `) || l === `exit handle=${handle}`);
-    }, "stop→exit 证据", 30_000);
-    const stop = audits.slice(a0).find((l) => l.startsWith("stop handle="))!;
-    const handle = /stop handle=([\w.-]+)/.exec(stop)![1];
+    try {
+      await until(() => {
+        const stop = audits.slice(a0).find((l) => stopHandleOf(l) !== null);
+        if (stop === undefined) return false;
+        const handle = stopHandleOf(stop)!;
+        return audits.slice(a0).some((l) => exitLineFor(handle).test(l));
+      }, "stop→exit 证据", 30_000);
+    } catch (e) {
+      throw new Error(`E2 失败：${e instanceof Error ? e.message : String(e)}｜审计尾部：${audits.slice(-30).join("｜")}`);
+    }
+    const stop = audits.slice(a0).find((l) => stopHandleOf(l) !== null)!;
+    const handle = stopHandleOf(stop)!;
     const iStop = audits.indexOf(stop);
-    const iExit = audits.findIndex((l, i) => i > iStop && (l.startsWith(`exit handle=${handle} `) || l === `exit handle=${handle}`));
+    const iExit = audits.findIndex((l, i) => i > iStop && exitLineFor(handle).test(l));
     expect(iExit).toBeGreaterThan(iStop); // 同 handle 索引硬序
   });
 
@@ -205,7 +209,11 @@ const d = describe.skipIf(!RUN)("3c-3 真进程写/停 E2E", () => {
         continue;
       }
       // 销毁链：绑定 rec.id 的 stop→exit→registry→composition（token 级比较，借不到其他 handle）
-      await until(() => audits.some((l, i) => i >= a0 && l.startsWith(`exit handle=${rec.id} `)), "目标 exit 证据", 30_000);
+      try {
+        await until(() => audits.some((l, i) => i >= a0 && exitLineFor(rec.id).test(l)), "目标 exit 证据", 30_000);
+      } catch (e) {
+        throw new Error(`E4 失败：${e instanceof Error ? e.message : String(e)}｜rec=${JSON.stringify(rec)}｜审计尾部：${audits.slice(-30).join("｜")}`);
+      }
       const chain = disposeChain(audits, rec.id, a0);
       expect(chain.stop).toBeGreaterThanOrEqual(a0);
       expect(chain.composition).toBeGreaterThan(chain.registry);

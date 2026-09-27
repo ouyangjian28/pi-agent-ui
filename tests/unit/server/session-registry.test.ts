@@ -97,7 +97,7 @@ describe("session-registry（3c-3）", () => {
     expect(st.process.ready).toBe(false); // idle 态 readyGeneration=null
   });
 
-  it("SR7 dispose：全量 stop+dispose 串行（审计序可见）+幂等+files 清空+销毁后拒绝构造", async () => {
+  it("SR7 dispose：全量 stop+dispose 串行（两耐久均收）+幂等+files 清空+销毁后拒绝构造（审计序断言不在本用例——头注）", async () => {
     const host = fakeHost();
     const durabilities: Array<DurabilityPort & { closed: boolean }> = [];
     const r = createSessionRegistry({

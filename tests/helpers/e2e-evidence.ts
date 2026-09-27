@@ -41,12 +41,23 @@ export interface DisposeChainIdx {
   readonly composition: number;
 }
 
+/** 审计行 token 匹配：行内（含模块前缀，如 `process-host stop handle=proc-1 signal=SIGTERM`）
+ * 以空白为界的完整 token `stop handle=X`/`exit handle=X`——前缀无关、proc-1 不误配 proc-11（token 边界）。 */
+const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+export const stopLineFor = (handle: string): RegExp => new RegExp(`(?:^|\\s)stop handle=${esc(handle)}(?=\\s|$)`);
+export const exitLineFor = (handle: string): RegExp => new RegExp(`(?:^|\\s)exit handle=${esc(handle)}(?=\\s|$)`);
+/** 取行内 stop handle 身份（无则 null）——绑定 stop 的 handle 提取，容忍任意模块前缀。 */
+export function stopHandleOf(line: string): string | null {
+  const m = /(?:^|\s)stop handle=([\w.-]+)(?=\s|$)/.exec(line);
+  return m === null ? null : m[1]!;
+}
+
 /** 销毁链断言（绑定身份的结构化比较）：fromIdx 之后须有
  * stop handle=X → exit handle=X → session-registry disposed → composition disposed（索引递增）。
- * 全部 token 级匹配（`handle=X ` 或行尾），不做子串冒充；exit 先于 stop=自退/借用 → 抛错。 */
+ * 全部 token 级匹配（前缀无关+token 边界），不做子串冒充；exit 先于 stop=自退/借用 → 抛错。 */
 export function disposeChain(audits: readonly string[], handle: string, fromIdx: number): DisposeChainIdx {
-  const stop = audits.findIndex((l, i) => i >= fromIdx && (l === `stop handle=${handle}` || l.startsWith(`stop handle=${handle} `)));
-  const exit = audits.findIndex((l, i) => i >= fromIdx && (l === `exit handle=${handle}` || l.startsWith(`exit handle=${handle} `)));
+  const stop = audits.findIndex((l, i) => i >= fromIdx && stopLineFor(handle).test(l));
+  const exit = audits.findIndex((l, i) => i >= fromIdx && exitLineFor(handle).test(l));
   if (stop < 0) throw new Error(`disposeChain：fromIdx=${fromIdx} 后无 stop handle=${handle}（目标进程未被停）`);
   if (exit < 0) throw new Error(`disposeChain：无 exit handle=${handle}（目标进程退出证据缺失）`);
   if (exit < stop) throw new Error(`disposeChain：handle=${handle} 的 exit(${exit}) 先于 stop(${stop})——自退或借用，不算在飞击杀`);

@@ -1,24 +1,25 @@
-# M8-COMPOSE-DISPOSE-SKIP  2026-09-27T16:06:36.473255  baseline=pi-agent-ui@ce9e4c8
-# 锚点文件=apps/server/src/composition.ts 基线sha256[:16]=d478e69ab507d9d3
+# M8-COMPOSE-DISPOSE-SKIP  2026-09-27T17:33:16.167748  repo@b416997（实时 git rev-parse，20b 尾项）
+# 锚点文件=apps/server/src/composition.ts 基线sha256[:16]=8430a1aae5f78e9d
 # stderr 已并入本档（第19c/19d轮证据口径）
 
 $ npx vitest run tests/unit/server/session-registry.test.ts tests/unit/server/composition-write.test.ts   (exit=1)
 
 [1m[30m[46m RUN [49m[39m[22m [36mv5.0.1 [39m[90m/home/yyj/ai/repos/pi-agent-ui[39m
 
- [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/session-registry.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 121[2mms[22m[39m
- [31m❯[39m [30m[42m unit [49m[39m tests/unit/server/composition-write.test.ts [2m([22m[2m10 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[33m 2314[2mms[22m[39m
-   [31m❯[39m 3c-3 composition 写侧接线 [2m(10)[22m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/session-registry.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 187[2mms[22m[39m
+ [31m❯[39m [30m[42m unit [49m[39m tests/unit/server/composition-write.test.ts [2m([22m[2m11 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[33m 2746[2mms[22m[39m
+   [31m❯[39m 3c-3 composition 写侧接线 [2m(11)[22m
      [32m✓[39m CW1 writeHost 与 write 同供 → 拒启（接线歧义门）[32m 3[2mms[22m[39m
      [32m✓[39m CW2 write.sessionFor 缺失 → 拒启（写侧无从落地）[32m 1[2mms[22m[39m
-     [32m✓[39m CW3 真链失败面：prompt→cat 回声不答探针→not-ready(cause=readiness-timeout)+write-ack；审计含 spawn/registry/readiness 链[32m 101[2mms[22m[39m
-     [33m[2m✓[22m[39m CW4 会话缓存：两次 prompt 同 file→registry 恰建一次（audit 计数）[33m 851[2mms[22m[39m
-     [33m[2m✓[22m[39m CW5 stop on idle 会话：write-stop-ack {kind:no-process}（不伪造进程死活）[33m 358[2mms[22m[39m
-[31m     [31m×[31m CW6 dispose 在途：readiness 等待期 server.dispose()→resolve 有限时间内+审计含 registry disposed（统一销毁面）[39m[32m 193[2mms[22m[39m
-     [32m✓[39m CW7 statusFor 真源接线：订阅快照 status.process.phase=idle（未构造会话）+sessionId 确定性派生[32m 50[2mms[22m[39m
-     [33m[2m✓[22m[39m CW8 statusFor 构造后：prompt 退役后快照 process.phase∈{idle,running,stopping}+bg known（注册表观测面贯通）[33m 357[2mms[22m[39m
-[31m     [31m×[31m CW9 dispose 审计序：session-registry disposed 先于 composition disposed（统一销毁挂在收尾链）[39m[33m 350[2mms[22m[39m
+     [32m✓[39m CW3 真链失败面：prompt→cat 回声不答探针→not-ready(cause=readiness-timeout)+write-ack；审计含 spawn/registry/readiness 链[32m 103[2mms[22m[39m
+     [33m[2m✓[22m[39m CW4 会话缓存：两次 prompt 同 file→registry 恰建一次（audit 计数）[33m 864[2mms[22m[39m
+     [33m[2m✓[22m[39m CW5 stop on idle 会话：write-stop-ack {kind:no-process}（不伪造进程死活）[33m 364[2mms[22m[39m
+[31m     [31m×[31m CW6 dispose 在途：readiness 等待期 server.dispose()→resolve 有限时间内+审计含 registry disposed（统一销毁面）[39m[32m 192[2mms[22m[39m
+     [32m✓[39m CW7 statusFor 真源接线：订阅快照 status.process.phase=idle（未构造会话）+sessionId 确定性派生[32m 48[2mms[22m[39m
+     [33m[2m✓[22m[39m CW8 statusFor 构造后：prompt 退役后快照 process.phase∈{idle,running,stopping}+bg known（注册表观测面贯通）[33m 364[2mms[22m[39m
+[31m     [31m×[31m CW9 dispose 审计序：session-registry disposed 先于 composition disposed（统一销毁挂在收尾链）[39m[33m 353[2mms[22m[39m
      [32m✓[39m CW10 越界 file 照旧 4404（写侧接线不放宽读侧授权域）：prompt file=/etc/hosts.jsonl[32m 50[2mms[22m[39m
+     [33m[2m✓[22m[39m CW11（20b B2）onSpawned 观测面：spawn 即时回调 file+handle+generation（身份在 spawn 时记录，非事后反推）[33m 404[2mms[22m[39m
 
 [31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 2 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
 
@@ -55,11 +56,12 @@ $ npx vitest run tests/unit/server/session-registry.test.ts tests/unit/server/co
 
 
 [2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m1 passed[39m[22m[90m (2)[39m
-[2m      Tests [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m21 passed[39m[22m[90m (23)[39m
-[2m   Start at [22m 16:06:36
-[2m   Duration [22m 2.65s[2m (tests 85%, transform 11%, import 3%)[22m
+[2m      Tests [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m24 passed[39m[22m[90m (26)[39m
+[2m   Start at [22m 17:33:16
+[2m   Duration [22m 3.08s[2m (tests 87%, transform 10%, import 3%)[22m
 
 
 
 # 失败测试计数(FAIL/× 行)=2  期望>0
-# restore 后 sha256[:16]=d478e69ab507d9d3  与基线一致=OK
+# restore 后 sha256[:16]=8430a1aae5f78e9d  与基线一致=OK
+# git status --porcelain（排除 mut 日志）原始输出：''  树净=OK

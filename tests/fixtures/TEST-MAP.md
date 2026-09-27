@@ -639,6 +639,14 @@
 
 ## 3c-3（composition 写侧接线：session-registry+statusFor 真源+统一销毁；19d 轮 92 GO 放行；r20 修复批 2026-10-04）
 
+### r21 修复批（20b 裁决 83 NO-GO：B1 dispose 同步重入窗口+B2 E4 身份反推/在飞不成立；基线 6125e52→b416997）
+- B1（中）：session-registry dispose 收尾体压微任务（`disposeP = Promise.resolve().then(async () => {…})`——先发布后执行，IIFE 同步段先跑会把 disposeP=null 暴露给 host.stop 同步重入→空表捷径提前完成）。SR13=受控信号下 host.stop 同步重入（发布已先于外部回调，重入共享同收尾不提前完成/不提前 disposed 审计）；SR14=审计回调同步重入（含空表，恰一次 disposed 不无限递归）。M10 变异（恢复直接 IIFE）双杀 SR13+SR14。
+- B2①观测面：SessionRegistryOpts.onSpawned?(file,handle,generation)（file=journal 绝对路径闭包包装）→RpcSession opts 透传；composition WriteWiringOpts.onSpawned 透传。CW11=CAT_WRITE+onSpawned 收 spawns[]，断言 {file:join(dir,"s1.jsonl"), id 非空, generation:1}。M11 变异（透传短路）单杀 CW11。
+- B2②E2E 重写：E4=LONG 提示词拉长在飞窗→launched→等 onSpawned 身份（findSpawnFor，不事后反推）→snapshot 判活 inFlightAt（sending 已现且 settled 未现；false=continue 换文件重试）→dispose<30s→窗口处理（post 出现 settled=窗口内收口 continue；server 已 dispose 下轮循环顶部重启）→exit handle=rec.id→disposeChain(audits,rec.id,a0) 全序断言；E2=审计边界 a0+assertExitShape（{}/[]/缺字段/双空拒）+绑定 handle 索引比较+no-process 分支零 stop 行；E3=新 intentId 显式+三索引含 sending≥before.length+Number.isSafeInteger(generation)。
+- **r21 批内根因修（E2E 首败）**：真实审计行带模块前缀（`process-host stop handle=proc-1 signal=SIGTERM`），旧 startsWith 匹配漏前缀行致 E2/E4 假败两轮；e2e-evidence.ts 改 token 级正则 stopLineFor/exitLineFor/stopHandleOf（前缀无关+token 边界 proc-1≠proc-11），E2/E4 失败自带审计尾部诊断，H15-N5 锁根因（带前缀链命中+边界诱饵）。E2E 三跑：两败（根因）→修后 4/4 双档。
+- 证据（r21 档）：全量 verbose=1010 passed+11 skipped（1034 行 3c3-r21-full-vitest.log；r20=970+11，增量 40=A1a 前端 31+SR13/14 2+CW11 1+H15-N1..N4 5+N5 1）；tsc 全仓 exit 0+eslint 全仓 exit 0（含 E2E 档）；E2E 双档 4/4（3c3-r21-e2e-vitest-{1,2}.log）；六变异全杀（3c3.md r21 段+run-records/3c3-mut-*.log r21 复跑覆盖）。
+- mutate 脚本升级：HEAD 实时 rev-parse（弃硬编码）；每变 git status 原始输出入档；M10 两锚点成对替换结构（MUTS 改替换对列表）。
+
 ### r20 修复批（20 轮 79 NO-GO 三阻断+尾项；基线 beede1f）
 - F3（registry 并发 dispose 第二等待者提前 resolve）：session-registry.ts 增 `disposeP` 共享收尾 Promise——首调用者起异步收尾，并发第二等待者复用同一 Promise；SR12=受控挂起 close gate→p1/p2 均未决→release→均完成+closes==1+完成后重复 dispose 仍成功+拒建 throw"已销毁"；M9 对应变异单杀 SR12。
 - stats 活动窗口旧值：idle-reaper stats() origin=Math.max(idleSince, lastActivity??idleSince)（吸收 noteActivity 后 lastActivity；S5-R2=900 活动 950 读=elapsed 50 非 950；isFinite 非 narrow 须显式判 null）。
@@ -651,7 +659,7 @@
 - 测试 CW1-CW10（tests/unit/server/composition-write.test.ts，真链=/bin/cat 回声不答探针→确定性 readiness-timeout，无 LLM）：CW1/2 拒启两案/CW3 prompt→not-ready(readiness-timeout)+审计 created+readiness+**process-host exit（退役链真进程退出证据，改原无意义断言）**/CW4 两 prompt 恰建一次/CW5 stop idle→no-process/CW6 readiness 等待期 dispose 15s 内/CW7 订阅快照 sess- 派生+phase idle/CW8 构造后快照 bg known 0（**靠 resolveWithinRoots 归一修复——两面 file 形态不同则 key 不命中**）/CW9 审计序 session-registry disposed 先于 composition disposed/CW10 越界 4404 不放宽。
 - E2E（tests/integration/ws-write-e2e.test.ts，PI_E2E=1 门控默认 skip）：E1 prompt→launched→journal 意图+settled（真 pi 0.86.1 锁死，升级须显式改）/E2 stop 暖进程驻留→retire→confirmed{exit}+process-host exit 证据（已回收则 no-process，exit 证据仍须在场）——**首跑败因=错误假设 settled 后进程即退（实际暖进程驻留等闲置回收），修为 stop 驱动退役链**/E3 退役后冷启动新代次同会话文件（恢复验证）/E4 在飞轮次 dispose→30s 内+审计序。r20 硬化：版本=stdout.trim() 全等 0.86.1（旧 includes 弱断言弃）；journal=逐行 JSON.parse 结构化断言（非 substring）；E3=新 intentId 三行均落 before.length 边界后+enqueue.generation 严格递增（E1 gen1<E3 gen2，E2 已退役=冷启动代次证据；恢复面口径=同文件追加+代次连续，回答文本不在本仓 journal——诚实断言）；E4=只认 launched+s2 journal 出现该轮 sending 行（在飞检查点）后 dispose，审计序四点 stop handle=X<exit handle=X<session-registry disposed<composition disposed（X=最后一条 stop 的句柄）；E2=confirmed.exit={code,signal} 形状断言（code/signal 至一非空）。**已跑两轮双档 4/4（3c3-r20-e2e-vitest-{1,2}.log）**。
 - 证据（r20 复跑档）：全套 verbose vitest=970 passed+11 skipped（993 行全档 3c3-r20-full-vitest.log，非旧摘要档）；tsc 全仓 exit 0（3c3-r20-tsc.log 空档）；eslint 全仓 0 含 E2E 档（3c3-r20-eslint.log 空档；npm 前置 export PATH=/home/yyj/.nvm/versions/node/v24.18.0/bin:$PATH）。E2E 两轮各自成档=3c3-r20-e2e-vitest-1.log+2.log（旧 3c3-e2e-vitest.log=单档双跑说明，r20 起双档）。
-- r20 勘正：旧文全量日志标 969 行，实档 993 行（r20 重跑后；旧档=仅摘要的 27 行版本已弃用）。
+- r20 勘正：旧文全量日志标 969 行，实档初版 3c3-full-vitest.log=994 行（全档非摘要；r20 复核）；r20 重跑档 3c3-r20-full-vitest.log=993 行（970 passed+11 skipped）。旧勘正句「旧档=仅摘要的 27 行版本已弃用」作废——初版全量档实存且为完整档。
 - 变异四连（3c3.md+patches/3c3/，r20 基线 beede1f；logs=run-records/3c3-mut-*.log 含 stderr+FAIL 块）：M6 REGISTRY-CACHE-BYPASS→2 败 SR1+SR10（**CW4 不杀：rpc-write-host 自带上层缓存把 sessionFor 调用收敛，registry 内层被绕过时组合面无感——两层独立缓存互为纵深，各自直测面正杀**）；M7 STATUSFOR-BASE-ONLY→2 败 SR5+CW8；M8 COMPOSE-DISPOSE-SKIP→2 败 CW6+CW9（r20 起 CW6 读审计；SR7 不在场：变异在 composition 层不触 registry.dispose 本体——旧文误写 SR10，勘正）；M9 DISPOSE-SHARE-DELETE→1 败 SR12（20轮F3 对应变异）。还原 hash 复核 OK×4，脚本=tools/mutate-3c3.py（try/finally 保还原）。
 
 ## 3c-2（RpcSession→WriteHostPort 适配首片：编码器收窄+注册表+W13-W17 加固；第19轮 78 NO-GO→r19 修复批；2026-10-04）

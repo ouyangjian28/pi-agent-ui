@@ -1,32 +1,34 @@
-# M6-REGISTRY-CACHE-BYPASS  2026-09-27T16:06:27.899237  baseline=pi-agent-ui@ce9e4c8
-# 锚点文件=apps/server/src/runtime/session-registry.ts 基线sha256[:16]=90739da4568056b9
+# M6-REGISTRY-CACHE-BYPASS  2026-09-27T17:32:31.550756  repo@b416997（实时 git rev-parse，20b 尾项）
+# 锚点文件=apps/server/src/runtime/session-registry.ts 基线sha256[:16]=f173148330b5a56d
 # stderr 已并入本档（第19c/19d轮证据口径）
 
 $ npx vitest run tests/unit/server/session-registry.test.ts tests/unit/server/composition-write.test.ts   (exit=1)
 
 [1m[30m[46m RUN [49m[39m[22m [36mv5.0.1 [39m[90m/home/yyj/ai/repos/pi-agent-ui[39m
 
- [31m❯[39m [30m[42m unit [49m[39m tests/unit/server/session-registry.test.ts [2m([22m[2m13 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[32m 131[2mms[22m[39m
+ [31m❯[39m [30m[42m unit [49m[39m tests/unit/server/session-registry.test.ts [2m([22m[2m15 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[32m 206[2mms[22m[39m
    [31m❯[39m session-registry（3c-3） [2m(12)[22m
-[31m     [31m×[31m SR1 同 file 同实例（缓存幂等）；不同 file 不同实例；files() 排序快照[39m[32m 11[2mms[22m[39m
+[31m     [31m×[31m SR1 同 file 同实例（缓存幂等）；不同 file 不同实例；files() 排序快照[39m[32m 13[2mms[22m[39m
      [32m✓[39m SR2 映射非法拒建：相对路径/空串/工厂抛错→描述性 Error（含 file 与实值）[32m 1[2mms[22m[39m
      [32m✓[39m SR3 statusFor 未构造：进程 idle 真值+其余 unknown 语义（bg unknown/reap idleMs 配置真值/recovery 不声称）[32m 1[2mms[22m[39m
      [32m✓[39m SR4 sessionId 确定性：同 file 跨注册表实例同 id（sha256Hex12 派生，重启稳定）[32m 0[2mms[22m[39m
      [32m✓[39m SR5 statusFor 已构造（idle 初态）：进程真值 idle+ready false+bg known（计数 0）+reap 未计时[32m 1[2mms[22m[39m
      [32m✓[39m SR6 statusFor 进程段随监管器真值走：构造后 send 面由上层驱动（本测用内部观测对照）——注册表只透传[32m 0[2mms[22m[39m
-     [32m✓[39m SR7 dispose：全量 stop+dispose 串行（审计序可见）+幂等+files 清空+销毁后拒绝构造[32m 1[2mms[22m[39m
-     [32m✓[39m SR8 dispose 时进程在飞（start 等待窗）：pending send 未决即 dispose→stop 先行真调宿主+优雅收尾完成[32m 52[2mms[22m[39m
+     [32m✓[39m SR7 dispose：全量 stop+dispose 串行（两耐久均收）+幂等+files 清空+销毁后拒绝构造（审计序断言不在本用例——头注）[32m 1[2mms[22m[39m
+     [32m✓[39m SR8 dispose 时进程在飞（start 等待窗）：pending send 未决即 dispose→stop 先行真调宿主+优雅收尾完成[32m 53[2mms[22m[39m
      [32m✓[39m SR8b idle 会话 stop 不伪造：未起轮→dispose 宿主零 stop 调用（原 SR8 断言保留为独立面）[32m 0[2mms[22m[39m
-     [32m✓[39m SR9 销毁健壮性：耐久 close 拒绝→RpcSession 层隔离（dispose 不 reject）→registry.dispose 照常收尾+审计可见；registry 自层 catch 为纵深防御（无注入口，不假测）[32m 0[2mms[22m[39m
-[31m     [31m×[31m SR10 durabilityFor 注入生效（默认面=FileDurability 由 composition-write 真链覆盖）[39m[32m 1[2mms[22m[39m
+     [32m✓[39m SR9 销毁健壮性：耐久 close 拒绝→RpcSession 层隔离（dispose 不 reject）→registry.dispose 照常收尾+审计可见；registry 自层 catch 为纵深防御（无注入口，不假测）[32m 1[2mms[22m[39m
+[31m     [31m×[31m SR10 durabilityFor 注入生效（默认面=FileDurability 由 composition-write 真链覆盖）[39m[32m 2[2mms[22m[39m
      [32m✓[39m SR11 审计隔离：audit 回调抛错不影响构造/销毁[32m 0[2mms[22m[39m
    [32m✓[39m SR12（20轮F3）并发 dispose 共享收尾：受控挂起 close 放行前第二等待者不得完成；资源恰收一次；完成后重复调用仍成功[32m 61[2mms[22m[39m
- [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/composition-write.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 2024[2mms[22m[39m
-   [32m✓[39m 3c-3 composition 写侧接线 [2m(10)[22m
-     [33m[2m✓[22m[39m CW4 会话缓存：两次 prompt 同 file→registry 恰建一次（audit 计数）[33m 560[2mms[22m[39m
-     [33m[2m✓[22m[39m CW5 stop on idle 会话：write-stop-ack {kind:no-process}（不伪造进程死活）[33m 359[2mms[22m[39m
-     [33m[2m✓[22m[39m CW8 statusFor 构造后：prompt 退役后快照 process.phase∈{idle,running,stopping}+bg known（注册表观测面贯通）[33m 359[2mms[22m[39m
-     [33m[2m✓[22m[39m CW9 dispose 审计序：session-registry disposed 先于 composition disposed（统一销毁挂在收尾链）[33m 346[2mms[22m[39m
+   [32m✓[39m SR13（20b B1）host.stop 同步重入 dispose：发布已先于外部回调——重入共享同一收尾，不提前完成/不提前 disposed 审计（受控信号驱动）[32m 64[2mms[22m[39m
+   [32m✓[39m SR14（20b B1）审计回调同步重入 dispose（含空表）：共享收尾/恰一次 disposed 审计/不无限递归[32m 1[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/composition-write.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 2432[2mms[22m[39m
+   [32m✓[39m 3c-3 composition 写侧接线 [2m(11)[22m
+     [33m[2m✓[22m[39m CW4 会话缓存：两次 prompt 同 file→registry 恰建一次（audit 计数）[33m 853[2mms[22m[39m
+     [33m[2m✓[22m[39m CW5 stop on idle 会话：write-stop-ack {kind:no-process}（不伪造进程死活）[33m 353[2mms[22m[39m
+     [33m[2m✓[22m[39m CW9 dispose 审计序：session-registry disposed 先于 composition disposed（统一销毁挂在收尾链）[33m 350[2mms[22m[39m
+     [33m[2m✓[22m[39m CW11（20b B2）onSpawned 观测面：spawn 即时回调 file+handle+generation（身份在 spawn 时记录，非事后反推）[33m 405[2mms[22m[39m
 
 [31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 2 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
 
@@ -147,13 +149,13 @@ $ npx vitest run tests/unit/server/session-registry.test.ts tests/unit/server/co
 [2m    "readiness": Map {},[22m
 [2m    "readinessCancels": Map {},[22m
 
-[36m [2m❯[22m tests/unit/server/session-registry.test.ts:[2m40:16[22m[39m
-    [90m 38|[39m     const a2 = r.sessionFor("/root/a.jsonl");
-    [90m 39|[39m     const b = r.sessionFor("/root/b.jsonl");
-    [90m 40|[39m     expect(a1).toBe(a2);
+[36m [2m❯[22m tests/unit/server/session-registry.test.ts:[2m41:16[22m[39m
+    [90m 39|[39m     const a2 = r.sessionFor("/root/a.jsonl");
+    [90m 40|[39m     const b = r.sessionFor("/root/b.jsonl");
+    [90m 41|[39m     expect(a1).toBe(a2);
     [90m   |[39m                [31m^[39m
-    [90m 41|[39m     expect(a1).not.toBe(b);
-    [90m 42|[39m     expect(r.files()).toEqual(["/root/a.jsonl", "/root/b.jsonl"]);
+    [90m 42|[39m     expect(a1).not.toBe(b);
+    [90m 43|[39m     expect(r.files()).toEqual(["/root/a.jsonl", "/root/b.jsonl"]);
 
 [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯[22m[39m
 
@@ -168,23 +170,24 @@ $ npx vitest run tests/unit/server/session-registry.test.ts tests/unit/server/co
 [31m+   "/root/a.jsonl",[39m
 [2m  ][22m
 
-[36m [2m❯[22m tests/unit/server/session-registry.test.ts:[2m165:18[22m[39m
-    [90m163|[39m     r.sessionFor("/root/a.jsonl");
-    [90m164|[39m     r.sessionFor("/root/a.jsonl"); // 缓存命中：不再构造耐久
-    [90m165|[39m     expect(seen).toEqual(["/root/a.jsonl"]);
+[36m [2m❯[22m tests/unit/server/session-registry.test.ts:[2m166:18[22m[39m
+    [90m164|[39m     r.sessionFor("/root/a.jsonl");
+    [90m165|[39m     r.sessionFor("/root/a.jsonl"); // 缓存命中：不再构造耐久
+    [90m166|[39m     expect(seen).toEqual(["/root/a.jsonl"]);
     [90m   |[39m                  [31m^[39m
-    [90m166|[39m   });
-    [90m167|[39m
+    [90m167|[39m   });
+    [90m168|[39m
 
 [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯[22m[39m
 
 
 [2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m1 passed[39m[22m[90m (2)[39m
-[2m      Tests [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m21 passed[39m[22m[90m (23)[39m
-[2m   Start at [22m 16:06:28
-[2m   Duration [22m 2.36s[2m (tests 83%, transform 13%, import 4%)[22m
+[2m      Tests [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m24 passed[39m[22m[90m (26)[39m
+[2m   Start at [22m 17:32:31
+[2m   Duration [22m 2.78s[2m (tests 85%, transform 11%, import 3%)[22m
 
 
 
 # 失败测试计数(FAIL/× 行)=2  期望>0
-# restore 后 sha256[:16]=90739da4568056b9  与基线一致=OK
+# restore 后 sha256[:16]=f173148330b5a56d  与基线一致=OK
+# git status --porcelain（排除 mut 日志）原始输出：''  树净=OK
