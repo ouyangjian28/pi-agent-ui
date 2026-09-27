@@ -321,3 +321,228 @@ describe("SessionDetail 集成写面", () => {
     expect(screen.queryByRole("button", { name: "发送" })).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// K5 修复批回归：B1 草稿身份门 / B2 composer 稳定挂载 / B3 瞬态错误身份门
+// ---------------------------------------------------------------------------
+
+/** 可控结算存根（B3 迟到失败面）：sendPrompt 不立即结算，由测试驱动 resolve/reject。 */
+class DeferringStubClient extends StubWriteClient {
+  readonly pending: Array<{ resolve: (value: unknown) => void; reject: (error: unknown) => void }> = [];
+  override sendPrompt(file: string, text: string): Promise<unknown> {
+    this.calls.push(`prompt:${file}:${text}`);
+    return new Promise((resolve, reject) => {
+      this.pending.push({ resolve, reject });
+    });
+  }
+}
+
+describe("K5 B1：草稿身份门（ack 清空仅限本次发送对应的未编辑草稿）", () => {
+  it("同 file 在途编辑新草稿→旧 ack 到达：新草稿保留（不被吞）+结果文案照常呈现", async () => {
+    const { client, ws } = writeHarness();
+    render(React.createElement(WriteComposer, { client, file: "a.jsonl" }));
+    const textarea = screen.getByLabelText("写入消息内容") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "sent A" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.change(textarea, { target: { value: "new unsent draft" } }); // 在途编辑：草稿已被替换
+    await act(async () => {
+      ws.receive({ t: "write-ack", requestId: "wr-p-1", file: "a.jsonl", outcome: LAUNCHED });
+    });
+    expect(textarea.value).toBe("new unsent draft"); // B1：ack 只清本次发送对应草稿，不吞在途新输入
+    expect(screen.getAllByRole("status").map((n) => n.textContent).join()).toContain("已入队（intentId=i-1）");
+  });
+
+  it("在途改回同文本（A→B→A）=版本已替换：ack 不清空（版本边界，不做字符串比较）", async () => {
+    const { client, ws } = writeHarness();
+    render(React.createElement(WriteComposer, { client, file: "a.jsonl" }));
+    const textarea = screen.getByLabelText("写入消息内容") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "A" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    fireEvent.change(textarea, { target: { value: "B" } });
+    fireEvent.change(textarea, { target: { value: "A" } }); // 改回同文本：版本号已变
+    await act(async () => {
+      ws.receive({ t: "write-ack", requestId: "wr-p-1", file: "a.jsonl", outcome: LAUNCHED });
+    });
+    expect(textarea.value).toBe("A"); // 不清空：发生过编辑=草稿已替换（即便文本相等）
+  });
+
+  it("file A→B 后 A 的旧 ack：B 新会话草稿不受影响（key=file 换会话即新草稿）", async () => {
+    const { client, ws } = writeHarness();
+    const view = render(React.createElement(WriteComposer, { client, file: "a.jsonl" }));
+    const textareaA = screen.getByLabelText("写入消息内容") as HTMLTextAreaElement;
+    fireEvent.change(textareaA, { target: { value: "draft A" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" })); // A 在途
+    view.rerender(React.createElement(WriteComposer, { client, file: "b.jsonl" }));
+    const textareaB = screen.getByLabelText("写入消息内容") as HTMLTextAreaElement;
+    expect(textareaB.value).toBe(""); // 换会话=新草稿（key=file）
+    fireEvent.change(textareaB, { target: { value: "draft B" } });
+    await act(async () => {
+      ws.receive({ t: "write-ack", requestId: "wr-p-1", file: "a.jsonl", outcome: LAUNCHED }); // A 的迟到 ack
+    });
+    expect(textareaB.value).toBe("draft B"); // 旧会话 ack 不清 B 草稿
+  });
+
+  it("client 替换后旧连接的 ack：当前草稿保留（同 file 跨连接身份门）", async () => {
+    const oldHarness = writeHarness();
+    const view = render(React.createElement(WriteComposer, { client: oldHarness.client, file: "a.jsonl" }));
+    const textarea = screen.getByLabelText("写入消息内容") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "draft A" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" })); // 在旧连接在途
+    const fresh = writeHarness();
+    view.rerender(React.createElement(WriteComposer, { client: fresh.client, file: "a.jsonl" }));
+    await act(async () => {
+      oldHarness.ws.receive({ t: "write-ack", requestId: "wr-p-1", file: "a.jsonl", outcome: LAUNCHED });
+    });
+    expect(textarea.value).toBe("draft A"); // 旧连接 ack 不清新连接会话草稿
+  });
+});
+
+describe("K5 B2：composer 稳定挂载（空态↔内容态不丢草稿/在途/结果）", () => {
+  it("空→内容（在途 prompt 期间首条事件到达）：同一 DOM 节点+草稿保留+在途禁用态一致+ack 后结果文案呈现", async () => {
+    const sub = new StubSubscribeClient();
+    sub.push(detailSnap({ phase: "live", events: [], liveEvents: [] })); // 空会话
+    const { client: writeClient, ws } = writeHarness();
+    render(
+      React.createElement(SessionDetail, {
+        client: sub as unknown as SubscribeClientSurface,
+        file: "a.jsonl",
+        writeClient,
+      }),
+    );
+    const textarea = screen.getByLabelText("写入消息内容") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "在途草稿" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    expect((screen.getByRole("button", { name: "发送" }) as HTMLButtonElement).disabled).toBe(true); // 在途
+    sub.push(detailSnap({ phase: "live", events: [msg(1)], liveEvents: [] })); // 首条内容：空→streaming
+    expect(screen.getByLabelText("写入消息内容")).toBe(textarea); // 同一 DOM 节点：未卸载重建
+    expect(textarea.value).toBe("在途草稿"); // 草稿保留
+    expect((screen.getByRole("button", { name: "发送" }) as HTMLButtonElement).disabled).toBe(true); // 在途态一致（非仅按钮存在）
+    await act(async () => {
+      ws.receive({ t: "write-ack", requestId: "wr-p-1", file: "a.jsonl", outcome: LAUNCHED });
+    });
+    expect(textarea.value).toBe(""); // ack 清空（无在途编辑）
+    expect(screen.getByText(/#1 消息/)).toBeTruthy(); // 内容呈现
+    expect(screen.getAllByRole("status").map((n) => n.textContent).join()).toContain("已入队（intentId=i-1）");
+  });
+
+  it("内容→空回切：草稿保留（双向稳定）", () => {
+    const sub = new StubSubscribeClient();
+    sub.push(detailSnap({ phase: "live", events: [msg(1)], liveEvents: [] })); // 内容视图
+    const { client: writeClient } = writeHarness();
+    render(
+      React.createElement(SessionDetail, {
+        client: sub as unknown as SubscribeClientSurface,
+        file: "a.jsonl",
+        writeClient,
+      }),
+    );
+    const textarea = screen.getByLabelText("写入消息内容") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "回切草稿" } });
+    sub.push(detailSnap({ phase: "live", events: [], liveEvents: [] })); // 内容→空
+    expect(screen.getByLabelText("写入消息内容")).toBe(textarea); // 未重建
+    expect(textarea.value).toBe("回切草稿"); // 草稿保留
+    expect(screen.getByRole("heading", { name: "空会话" })).toBeTruthy(); // 确已切到空态视图
+  });
+
+  it("换 file=新草稿（key=file）；loading/auth-failed/error/closed/unsubscribed 视图不挂 composer（既有行为）", () => {
+    const sub = new StubSubscribeClient();
+    sub.push(detailSnap({ phase: "live", events: [msg(1)], liveEvents: [] }));
+    const { client: writeClient } = writeHarness();
+    const view = render(
+      React.createElement(SessionDetail, {
+        client: sub as unknown as SubscribeClientSurface,
+        file: "a.jsonl",
+        writeClient,
+      }),
+    );
+    const textareaA = screen.getByLabelText("写入消息内容") as HTMLTextAreaElement;
+    fireEvent.change(textareaA, { target: { value: "A 草稿" } });
+    sub.push(detailSnap({ file: "b.jsonl", phase: "live", events: [msg(1)], liveEvents: [] }));
+    view.rerender(
+      React.createElement(SessionDetail, {
+        client: sub as unknown as SubscribeClientSurface,
+        file: "b.jsonl",
+        writeClient,
+      }),
+    );
+    const textareaB = screen.getByLabelText("写入消息内容") as HTMLTextAreaElement;
+    expect(textareaB).not.toBe(textareaA); // key=file：换会话新实例
+    expect(textareaB.value).toBe(""); // 新草稿，旧草稿不泄漏
+    sub.push(detailSnap({ file: "b.jsonl", connState: "connecting", phase: "idle" })); // loading
+    expect(screen.queryByLabelText("写入消息内容")).toBeNull(); // loading 不挂 composer（既有行为）
+    sub.push(detailSnap({ file: "b.jsonl", connState: "error", errorKind: "auth-failed", phase: "idle" }));
+    expect(screen.queryByLabelText("写入消息内容")).toBeNull(); // auth-failed 同
+  });
+});
+
+describe("K5 B3：瞬态错误身份门（client×file 绑定+动作序号迟到门）", () => {
+  let probeB3: { view: WriteView; send: (text: string) => Promise<boolean> } | null = null;
+  function ProbeB3({ client, file }: { client: StubWriteClient; file: string | null }): React.ReactElement {
+    const { view, send } = useWrite(client, file);
+    probeB3 = { view, send };
+    return React.createElement("div");
+  }
+
+  it("A 失败→file=null：错误全隐（未选会话不呈现旧会话错误）", async () => {
+    const client = new StubWriteClient();
+    client.rejectWith = new WriteSendError("in-flight", "该会话已有发送中的消息，请等待结果");
+    const view = render(React.createElement(ProbeB3, { client, file: "a.jsonl" }));
+    await act(async () => {
+      await probeB3!.send("hi");
+    });
+    expect(probeB3?.view.phase).toBe("error"); // A 会话内可见
+    view.rerender(React.createElement(ProbeB3, { client, file: null }));
+    expect(probeB3?.view.phase).toBe("idle"); // file=null：全隐
+    expect(probeB3?.view.errorMessage).toBeNull();
+  });
+
+  it("A 失败→切 B 不污染；切回 A 错误重现（与 lastResult 的 file 身份门同语义）", async () => {
+    const client = new StubWriteClient();
+    client.rejectWith = new WriteSendError("in-flight", "该会话已有发送中的消息，请等待结果");
+    const view = render(React.createElement(ProbeB3, { client, file: "a.jsonl" }));
+    await act(async () => {
+      await probeB3!.send("hi");
+    });
+    view.rerender(React.createElement(ProbeB3, { client, file: "b.jsonl" }));
+    expect(probeB3?.view.phase).toBe("idle"); // B 会话不受 A 失败污染
+    expect(probeB3?.view.errorMessage).toBeNull();
+    view.rerender(React.createElement(ProbeB3, { client, file: "a.jsonl" }));
+    expect(probeB3?.view.phase).toBe("error"); // 回 A：错误重现（属 A 身份）
+  });
+
+  it("client 替换：旧 client 的错误不透出到新 client", async () => {
+    const oldClient = new StubWriteClient();
+    oldClient.rejectWith = new WriteSendError("in-flight", "该会话已有发送中的消息，请等待结果");
+    const view = render(React.createElement(ProbeB3, { client: oldClient, file: "a.jsonl" }));
+    await act(async () => {
+      await probeB3!.send("hi");
+    });
+    expect(probeB3?.view.phase).toBe("error");
+    const freshClient = new StubWriteClient();
+    view.rerender(React.createElement(ProbeB3, { client: freshClient, file: "a.jsonl" }));
+    expect(probeB3?.view.phase).toBe("idle"); // 新连接无此错误
+  });
+
+  it("迟到失败：新动作发出后旧请求才失败→不落账（视图保持新动作态，旧失败不得覆盖）", async () => {
+    const client = new DeferringStubClient();
+    const view = render(React.createElement(ProbeB3, { client, file: "a.jsonl" }));
+    await act(async () => {
+      void probeB3!.send("A"); // 动作1：悬置
+    });
+    view.rerender(React.createElement(ProbeB3, { client, file: "b.jsonl" }));
+    await act(async () => {
+      void probeB3!.send("B"); // 动作2（最新）
+    });
+    await act(async () => {
+      client.pending[1]!.resolve(LAUNCHED); // 动作2 成功结算
+    });
+    expect(probeB3?.view.phase).toBe("idle");
+    await act(async () => {
+      client.pending[0]!.reject(new WriteSendError("in-flight", "该会话已有发送中的消息，请等待结果")); // 动作1 迟到失败
+    });
+    expect(probeB3?.view.phase).toBe("idle"); // 未落账：不覆盖新动作后的状态
+    expect(probeB3?.view.errorMessage).toBeNull();
+    view.rerender(React.createElement(ProbeB3, { client, file: "a.jsonl" }));
+    expect(probeB3?.view.phase).toBe("idle"); // 回 A 也不出现（根本未落账）
+  });
+});

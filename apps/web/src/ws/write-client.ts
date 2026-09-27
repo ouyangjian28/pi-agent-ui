@@ -363,10 +363,23 @@ export class WriteClient {
       // 占位先于发帧（同步占位防同刻重入漏判在途重复）；快照 inflight 视图随 transition 通知
       this.inflight.set(requestId, { file, kind, resolve: resolve as (outcome: never) => void, reject });
       this.transition({ inflight: [...this.snapshot.inflight, { file, kind }] });
-      if (kind === "prompt") {
-        this.sendFrame({ t: "prompt", requestId, file, text: text as string });
-      } else {
-        this.sendFrame({ t: "stop", requestId, file });
+      try {
+        if (kind === "prompt") {
+          this.sendFrame({ t: "prompt", requestId, file, text: text as string });
+        } else {
+          this.sendFrame({ t: "stop", requestId, file });
+        }
+      } catch {
+        // C2：socket.send 同步抛错（传输层损坏/注入面异常）→受控结算：出表+快照 inflight/lastResult
+        // 同步清理（两份账一致，同 file 后续发送不被在途重复门卡死），promise 以受控 transport 错误拒绝
+        //（不让 Promise executor 的裸异常成为未受控 reject 值）。
+        this.inflight.delete(requestId);
+        const error = new WriteSendError("transport", "发送失败：连接传输异常");
+        this.transition({
+          inflight: this.snapshot.inflight.filter((e) => !(e.file === file && e.kind === kind)),
+          lastResult: { ok: false, kind, file, message: error.message },
+        });
+        reject(error);
       }
     });
   }
@@ -458,8 +471,12 @@ export class WriteClient {
       this.failConn("transport", writeFaceErrorText(frame.code));
       return;
     }
-    // 请求级路由：requestId 匹配在途写请求→仅结算该请求（连接保持，其余请求/后续发送不受影响）
-    if (frame.requestId !== undefined) {
+    // 请求级路由：requestId 匹配在途写请求→仅结算该请求（连接保持，其余请求/后续发送不受影响）。
+    // 关联判定口径（对齐 K4 subscribe-client 已修语义）：undefined 或空串""均视为「不关联任何请求」——
+    // 现役网关对连接级码（4403/4405/4432 心跳终局等）统一发 requestId:""（ws-gateway 心跳出口）；
+    // 非空陌生 requestId（迟到/已结算/无关）仍不升格连接错误，落入末尾安全忽略。
+    const connEnvelope = frame.requestId === undefined || frame.requestId === "";
+    if (!connEnvelope) {
       const record = this.inflight.get(frame.requestId);
       if (record !== undefined) {
         const message = writeFaceErrorText(frame.code);
@@ -475,7 +492,7 @@ export class WriteClient {
     }
     // C5 同口径：ready 后无 requestId 关联的连接级码（4403/4405/4432）→连接级失败（受控文案按 code）。
     // 注：写面 4405（未开放写 t）服务端随后 close 1008——在途已由本分支或下一分支拒绝，onClose 只收尾连接态。
-    if (frame.requestId === undefined && (frame.code === 4403 || frame.code === 4405 || frame.code === 4432)) {
+    if (connEnvelope && (frame.code === 4403 || frame.code === 4405 || frame.code === 4432)) {
       this.failConn("transport", writeFaceErrorText(frame.code));
       return;
     }
@@ -508,17 +525,13 @@ export class WriteClient {
   }
 }
 
-/** UTF-8 字节数（与 contracts.ts byteLength 同算法：无需 Buffer，浏览器安全）。 */
+/** UTF-8 字节数（B4：标准 TextEncoder 计数）。WHATWG 编码流会把孤立代理项按 U+FFFD 落 3 字节，
+ * 与 TextEncoder.encode 的线上真实字节数一致；此前手写循环把一切高代理项当合法代理对计 4 字节并吞掉
+ * 下一 code unit，超限文本可漏拒。与 contracts.ts byteLength 的旧快算法有意分歧：写面预校验以真实
+ * 线上字节为准（协议侧同形算法不在本片回改范围）。 */
+const utf8Encoder = new TextEncoder();
 function utf8Bytes(s: string): number {
-  let n = 0;
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    if (c < 0x80) n += 1;
-    else if (c < 0x800) n += 2;
-    else if (c >= 0xd800 && c <= 0xdbff) { n += 4; i++; } // 代理对
-    else n += 3;
-  }
-  return n;
+  return utf8Encoder.encode(s).length;
 }
 
 /** 组件/hook 所需客户端面（subscribe/getSnapshot 对齐 useSyncExternalStore；sendPrompt/sendStop 为写动作）。 */

@@ -362,3 +362,112 @@ describe("A1c WriteClient：断开与关闭", () => {
     expect(client.getSnapshot().errorKind).toBe("auth-failed");
   });
 });
+
+// ---------------------------------------------------------------------------
+// K5 修复批回归：B4 UTF-8 字节计数 / C1 空串信封 / C2 send 同步抛错
+// ---------------------------------------------------------------------------
+
+/** send() 对 prompt/stop 帧同步抛错的假 socket（C2：传输层损坏面；hello 照常放行以完成握手）。 */
+class ThrowingSendSocket extends FakeWebSocket {
+  override send(data: string): void {
+    if (data.includes('"prompt"') || data.includes('"stop"')) throw new Error("injected transport failure");
+    super.send(data);
+  }
+}
+
+describe("K5 B4：UTF-8 字节数=TextEncoder 实际编码口径", () => {
+  it("合法 emoji 代理对边界：恰 65536 字节（16384 个😀）放行；+1 字节（65537）零帧本地拒", async () => {
+    const { client, ws } = ready();
+    void client.sendPrompt("a.jsonl", "😀".repeat(16_384)); // 16384×4=65536
+    expect(ws.sent.length).toBe(2); // hello+prompt（放行）
+    const error = await rejectionOf(client.sendPrompt("a.jsonl", "😀".repeat(16_384) + "a")); // 65537>65536
+    expect(error.kind).toBe("local-invalid");
+    expect(ws.sent.length).toBe(2); // 零帧
+  });
+
+  it("孤立高代理项按 U+FFFD 实际 3 字节计：旧算法误计 65536 的输入实为 98304 字节→零帧本地拒", async () => {
+    const { client, ws } = ready();
+    // "\ud800\ud800" 16384 组：旧算法=16384 对×4=65536 放行；TextEncoder=32768 个 U+FFFD×3=98304
+    const loneHigh = "\ud800\ud800".repeat(16_384);
+    const error = await rejectionOf(client.sendPrompt("a.jsonl", loneHigh));
+    expect(error.kind).toBe("local-invalid");
+    expect(error.message).toContain("64KiB");
+    expect(ws.sent.length).toBe(1); // 零帧（仅 hello）
+  });
+
+  it("孤立低代理项同口径 3 字节：21845 个=65535 放行；21846 个=65538 拒", async () => {
+    const { client, ws } = ready();
+    void client.sendPrompt("a.jsonl", "\udc00".repeat(21_845)); // 65535≤65536
+    expect(ws.sent.length).toBe(2);
+    const error = await rejectionOf(client.sendPrompt("a.jsonl", "\udc00".repeat(21_846))); // 65538>65536
+    expect(error.kind).toBe("local-invalid");
+    expect(ws.sent.length).toBe(2);
+  });
+
+  it("混合文本边界：16383😀+1 孤立高代理项+1a=恰 65536 放行；+1a=65537 零帧拒", async () => {
+    const { client, ws } = ready();
+    const boundary = "😀".repeat(16_383) + "\ud800" + "a"; // 65532+3+1=65536
+    void client.sendPrompt("a.jsonl", boundary);
+    expect(ws.sent.length).toBe(2);
+    const error = await rejectionOf(client.sendPrompt("a.jsonl", boundary + "a")); // 65537
+    expect(error.kind).toBe("local-invalid");
+    expect(ws.sent.length).toBe(2);
+  });
+});
+
+describe("K5 C1：连接级错误信封认空串 requestId（对齐 subscribe-client 语义）", () => {
+  it("4432 心跳终局 requestId:\"\"（现役网关惯例）→连接级失败+在途全拒+受控文案", async () => {
+    const { client, ws } = ready();
+    const promise = client.sendPrompt("a.jsonl", "hi");
+    ws.receive({ t: "error", code: 4432, message: "heartbeat deadline", retryable: false, requestId: "" });
+    const error = await rejectionOf(promise);
+    expect(error.message).toContain("4432");
+    const snap = client.getSnapshot();
+    expect(snap.connState).toBe("error");
+    expect(snap.errorKind).toBe("transport");
+    expect(snap.inflight).toEqual([]);
+  });
+
+  it("非空陌生 requestId 的连接级码（4403）不升格：连接存活、在途保留、后续合法 ack 照常结算", async () => {
+    const { client, ws } = ready();
+    const promise = client.sendPrompt("a.jsonl", "hi");
+    const rid = requestIdOf(ws, 1);
+    ws.receive({ t: "error", code: 4403, message: "version", retryable: false, requestId: "wr-p-999" }); // 陌生 id
+    expect(client.getSnapshot().connState).toBe("ready"); // 不升格连接错误
+    ws.receive({ t: "write-ack", requestId: rid, file: "a.jsonl", outcome: LAUNCHED });
+    await expect(promise).resolves.toEqual(LAUNCHED); // 原在途照常结算
+  });
+});
+
+describe("K5 C2：socket.send 同步抛错→受控结算（两份账同步清理）", () => {
+  function throwingReady(): { client: WriteClient; ws: ThrowingSendSocket } {
+    FakeWebSocket.reset();
+    const client = new WriteClient("ws://x/ws", "t", () => new ThrowingSendSocket());
+    client.connect();
+    const ws = FakeWebSocket.instances[0] as ThrowingSendSocket;
+    ws.open();
+    ws.receive(WELCOME);
+    return { client, ws };
+  }
+
+  it("prompt 发帧抛错：promise 受控拒（transport）+Map/快照两账清零+lastResult 落账；同 file 再发不被在途门卡死", async () => {
+    const { client } = throwingReady();
+    const error = await rejectionOf(client.sendPrompt("a.jsonl", "hi"));
+    expect(error.kind).toBe("transport");
+    expect(error.message).toContain("发送失败");
+    const snap = client.getSnapshot();
+    expect(snap.inflight).toEqual([]); // 快照账清零
+    expect(snap.lastResult).toMatchObject({ ok: false, kind: "prompt", file: "a.jsonl" });
+    expect(snap.connState).toBe("ready"); // 发送失败≠连接终局（不自动升级）
+    const again = await rejectionOf(client.sendPrompt("a.jsonl", "hi")); // 再发：不被在途重复门卡死
+    expect(again.kind).toBe("transport"); // 仍受控拒（socket 仍坏），而非 in-flight
+  });
+
+  it("stop 发帧抛错：同受控结算（kind=stop）", async () => {
+    const { client } = throwingReady();
+    const error = await rejectionOf(client.sendStop("a.jsonl"));
+    expect(error.kind).toBe("transport");
+    expect(client.getSnapshot().inflight).toEqual([]);
+    expect(client.getSnapshot().lastResult).toMatchObject({ ok: false, kind: "stop", file: "a.jsonl" });
+  });
+});
