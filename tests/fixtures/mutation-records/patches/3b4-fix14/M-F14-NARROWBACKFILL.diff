@@ -1,5 +1,5 @@
 diff --git a/apps/server/src/runtime/recovery-evidence-source.ts b/apps/server/src/runtime/recovery-evidence-source.ts
-index 5394587..ff96807 100644
+index 5394587..972153f 100644
 --- a/apps/server/src/runtime/recovery-evidence-source.ts
 +++ b/apps/server/src/runtime/recovery-evidence-source.ts
 @@ -383,7 +383,7 @@ export function createRecoveryEvidenceProvider(
@@ -7,7 +7,7 @@ index 5394587..ff96807 100644
          // B13-2 残局（锚写成+seen 写败）或 fix11 旧锚迁移——一律补登记再返回（失败=fail-closed：
          // 仓登记不落盘不得发结论，杜绝重试绕登记直通快照）。Q03 防锚点丢失洗白同源。
 -        if (!seen.has(file)) {
-+        if (false && !seen.has(file)) { // MUTATION: 全禁登记（fix13 BACKFILL 等价重放）
++        if (!seen.has(file) && anchor === null) { // MUTATION: 只删有锚补登记（窄）
            // fix14/Y14-1：seen-store 走 persistSeenLike 接缝（默认真路径；测试可注入真实写故障→重试收敛）
            try {
              const nextSeen = { version: 1, files: [...new Set([...seen, file])].sort() } satisfies EvidenceSeen;

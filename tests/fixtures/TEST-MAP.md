@@ -610,14 +610,25 @@
 
 - 源：recovery-evidence-source.ts v4——①serialize 仓级单链（同实例全 file 串行，seen 读改写事务化，跨 file 并行首捕不丢登记；O(1) 单链尾，Q14 随之消解）②seen 恒读（有锚也读；损坏/不可读→read-failed fail-closed）③登记不变量：成功返回快照前 seen 登记已建立——有锚未登记（B13-2 残局/fix11 旧锚迁移）验证纯追加后补登记再返回 ④tmp 名加 randomBytes(6) 独占量。
 - 测试：R28（双首捕并发→登记并集+丢锚拒）/R29（残局补登记全链+占位目录 fail-closed+零 tmp 残留）/R30（损坏仓恒读拒）/R31（bless 抛错→read-failed+锚/登记零落盘）；composition 轮询×预算笛卡尔（tokenPollMs 省略/0/50 × 非法七态拒/合法三态收——B13-3① 补 0 与 1）；T5c（迟到成功快照：零帧+死连接 recoveryPages 空+槽归零）/T4b（公开关闭入口 r.dispose 也触发 abort，dispose 幂等）/T6 补帧增量断言（e9 续页=第二帧）。
-- 变异三连（3b4-fix13.md+patches/3b4-fix13/）：SERIAL→R28 / BACKFILL→R21+R22+R28 / SEENALWAYS→R29+R30；还原 sha b5304a6324e6c245；tmp 独占名无变异（如实记卫生面观察）。
+- 变异三连（3b4-fix13.md+patches/3b4-fix13/）：SERIAL→R28 / BACKFILL→fix14 重跑勘正=五杀 R21+R22+R28+R29+R32（裸跑 EXIT=1；R28 实际首败=:593 读 seen ENOENT 而非并集断言）/ SEENALWAYS→R29+R30；还原 sha b5304a6324e6c245；tmp 独占名无变异（如实记卫生面观察）。
 - 披露就地收口（B13-4）：集成文件头 4402 勘正/3b4-fix11.md「三态矩阵既有例」勘正/TEST-MAP fix11 节 sha 字段名+退出码口径勘正/T5、T5b 标题限定（成功面=T5c）/3b4-fix12.md LRU 首败顺序勘正/provider 头 v4 部署前提（evidenceDir 可信目录+Q12 提交时点）。
 - 终态：tsc 0/lint 0/vitest 47 files 885 passed+7 skipped=892（基线 886，+6）。
 
 
+## 3b-4 fix14（GPT 第 14 轮 88/100 GO 后 Y14 非阻断收尾；2026-10-03）
+
+- 源（v4.1）：persistSeenLike 接缝（默认=tmp+rename+失败清 tmp；测试注入真实写故障）+锚/seen 写失败 tmp 尽力清理（Y14-1「源码 catch 没有 unlink」收口）。
+- 测试：R32=真实 seen-store 写故障全链（首调抛错→read-failed detail=seen-store+锚已留+登记缺→清障重试→补登记→快照；calls [1,2]）；Y14-2 fixture 去强转×6——`repaired:[]`→`false`、弃双重强转，揪出并修复两类潜伏假 fixture（snapOf 的 {raw,parsed} 假 JournalLine→真字面量；lines 数组 widening→`JournalLine[]` 直约束）；composition 轮询矩阵 readonly 面走可变别名。
+- 变异二连（3b4-fix14.md+patches/3b4-fix14/，全裸跑直录退出码）：BACKFILL-RERUN 全禁登记→五杀 R21+R22+R28+R29+R32（EXIT=1；证实第 14 轮静态推演+R32 增杀）；NARROWBACKFILL 只删有锚补登记→双杀 R29+R32（首捕登记不受累——补登记分支独占杀伤窄面证明）。
+- 披露就地勘正×4（Y14-3）：TEST-MAP:620 锚 schema 实字段 sha；fix11 退出码仅 ANCHOR 裸码实证；fix12 LRU「次败」=推演非实录；fix13 BACKFILL 三杀→五杀（R28 首败实为 :593 读 seen ENOENT 非并集断言）。
+- fix13「tsc 0」断言不实勘正（composition delete-readonly 两错被管线吞）——fix14 起 tsc 一律裸跑直录 TSC_EXIT。
+- 过程失误实录：BACKFILL 首次重放在未提交态上做，checkout 还原吞掉 v4.1 源改动——重放+先提交再变异（M-240 同型教训再确认：变异前基线必须已提交）。
+- 终态：tsc 0（裸码）/lint 0/vitest 47 files 886 passed+7 skipped=893（基线 892，+1=R32）。
+
+
 ## 3b-4 fix11（GPT 第 11 轮五阻断修复：安全读 v2+证据链；2026-10-03）
 - **v2 重构**：recovery-evidence-source.ts 接缝改 openLike（OpenLike=(abs)=>{size,read(maxBytes),close}；默认=safe-open 真路径：openSafeFile=O_NOFOLLOW|O_NONBLOCK+同 fd fstat isFile；readBounded=64KB 流式循环，n===0 EOF 止、累计超限即抛 too-large）——journal+session 双源全走安全打开。旧 statLike/readLike 删除。
-- **证据链 sidecar（B11-2）**：evidenceDir 锚点 <encodeURIComponent(file)>.evidence.json={version:1,file,len,sha256}；纯追加扩展才过（新 raw 前 len 字节 sha 相符+新长≥旧长）；缩/重写→unavailable(concurrent-modification)；锚点损坏→concurrent-modification；锚点不可写→read-failed；同 file 捕获 serialize 串行化；原子 tmp+rename 写穿。跨实例（重启/驱逐）续链。
+- **证据链 sidecar（B11-2）**：evidenceDir 锚点 <encodeURIComponent(file)>.evidence.json={version:1,file,len,sha}（fix14 勘正：实字段名 sha，旧句写 sha256 不实）；纯追加扩展才过（新 raw 前 len 字节 sha 相符+新长≥旧长）；缩/重写→unavailable(concurrent-modification)；锚点损坏→concurrent-modification；锚点不可写→read-failed；同 file 捕获 serialize 串行化；原子 tmp+rename 写穿。跨实例（重启/驱逐）续链。
 - **读窗双复核（B11-3）**：stat 层合计早拒（零读独占面）→读后字节复核 raw.byteLength>allowed→oversized-grew→读后 session 复核（二次 open size s2，raw+s2>max→oversized-grew）；缩/消失=已披露残余不回退（P06）。R19 补 P07 session 复核独占杀（seam 定序开：预检 400/复核 500）。
 - **工厂自防御（B11-4）**：composition 预算校验移出 tokenPollMs 分支+provider 工厂自验（非法/超 1GiB/相对 evidenceDir/相对 roots 即抛）；R18 六非法值矩阵。sessionFor 映射非法（绝对/越界）→file-unreadable 响亮失败不静默 journal-only（P10；R13，嵌套合法）。
 - **4402 映射（B11-5）**：ws-gateway file-unreadable→{t:error,code:4402,message:恢复读取失败,retryable:true,requestId}；审计带逻辑 file/detail 不带绝对 path（P12）。T2 改标；I3 真集成同断。
