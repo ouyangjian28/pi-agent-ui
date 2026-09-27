@@ -17,3 +17,4 @@ packages/protocol/src/*.d.ts.map
 *.tsbuildinfo
 apps/*/dist/
 .pi/
+worktrees/
