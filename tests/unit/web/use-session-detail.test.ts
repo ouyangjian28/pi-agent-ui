@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// A1b 详情 hook+组件测试（归属整改重写：Kimi 亲手重写；覆盖=旧版 25 例全部语义面+新增，断言等价或更强）。
+// A1b 详情 hook+组件测试（归属整改重写：Kimi 亲手重写；覆盖=旧版 25 例语义面逐条对照保留+新增；A1b 复审修复批固化观察者清理锁死探针）。
 // 模式：StubClient（快照由测试推进）测纯派生与组件渲染；真实链=SubscribeClient+注入式假 socket（无真网络），
 // act 驱动。覆盖：sessionDetailViewOf 派生全相（连接级优先/相位映射/C4 终局/B3 身份门）；组件空态族+流态渲染；
 // hook 生命周期（挂载订阅/卸载退订/换 file 退旧订新）；真实链（受控文案不泄漏 token/幂等不重复渲染/
@@ -187,6 +187,17 @@ describe("sessionDetailViewOf 派生（纯函数）", () => {
     expect(view.status).toBe("stopped");
     expect(view.banner).toContain("旧流已停止");
     expect(view.canResync).toBe(false);
+    // streamNote 与 errorMessage 同场：横幅取 streamNote（优先级锁定，不被 errorMessage 覆盖）
+    const both = sessionDetailViewOf(
+      detailSnap({
+        phase: "closed",
+        errorMessage: "服务端出帧预算超限（4431）",
+        streamNote: "订阅已被新订阅替换，旧流已停止",
+        events: [msg(1)],
+      }),
+    );
+    expect(both.status).toBe("stopped");
+    expect(both.banner).toBe("订阅已被新订阅替换，旧流已停止");
     const empty = sessionDetailViewOf(
       detailSnap({ phase: "closed", streamNote: "订阅已被新订阅替换，旧流已停止", events: [], liveEvents: [] }),
     );
@@ -435,10 +446,52 @@ describe("真实链：SubscribeClient→SessionDetail DOM（假 socket 注入，
   }
 
   it("全链：loading→分页（加载提示）→末页直播追加→重复直播帧不重复渲染→历史幂等去重→历史与直播并列呈现", () => {
-    const { ws, subscriptionId } = liveReal();
-    expect(screen.queryByText("正在加载更多历史…")).toBeNull(); // 末页后分页提示消失
+    const { client, ws } = setupReal();
+    mount(client);
+    act(() => {
+      ws.open();
+      ws.receive(WELCOME);
+    });
+    // 中间态①：首页在途（subscribing 无内容）→loading 面
+    expect(screen.getByRole("status").textContent).toContain("正在加载会话详情");
+    const initRequestId = (ws.sentFrames()[1] as { requestId: string }).requestId;
+    act(() => {
+      ws.receive({
+        t: "snapshot",
+        requestId: initRequestId,
+        subscriptionId: "sub-1",
+        streamId: "stream-1",
+        snapshotId: "snap-1",
+        barrier: 3,
+        status: STATUS,
+        page: [msg(1)],
+        historyNext: { streamId: "stream-1", seq: 2 },
+        liveFrom: null,
+        hasMore: true,
+      });
+    });
+    // 中间态②：分页中首条内容已可见 + 分页加载提示在场（断言落在中间态而非末页后）
     expect(screen.getByText(/#1 消息/)).toBeTruthy();
+    expect(screen.getByText("正在加载更多历史…")).toBeTruthy();
+    const pageRequestId = (ws.sentFrames()[2] as { requestId: string }).requestId;
+    act(() => {
+      ws.receive({
+        t: "snapshot",
+        requestId: pageRequestId,
+        subscriptionId: "sub-1",
+        streamId: "stream-1",
+        snapshotId: "snap-1",
+        barrier: 3,
+        status: STATUS,
+        page: [msg(2), msg(3)],
+        historyNext: null,
+        liveFrom: { streamId: "stream-1", seq: 4 },
+        hasMore: false,
+      });
+    });
+    expect(screen.queryByText("正在加载更多历史…")).toBeNull(); // 末页后分页提示消失
     expect(screen.getByText(/#3 消息/)).toBeTruthy();
+    const subscriptionId = "sub-1";
     act(() => {
       ws.receive({ t: "events", subscriptionId, origin: "live", liveSeq: 1, refSeq: null, events: [progress] });
     });
@@ -555,6 +608,45 @@ describe("真实链：SubscribeClient→SessionDetail DOM（假 socket 注入，
     expect(client.getSnapshot().phase).toBe("idle");
     expect(ws.sentFrames().length).toBe(sentBefore + 1);
     expect(ws.sentFrames().at(-1)).toEqual({ t: "unsubscribe", requestId: expect.any(String), subscriptionId });
+  });
+
+  it("观察者清理锁死（A1b 复审 N1 探针固化）：hook 卸载即移除 store listener——卸载后状态推进零触达；重挂后仅新实例在册（一次推进恰一份通知）", () => {
+    const { client, ws } = setupReal();
+    let notifications = 0;
+    const surface: SubscribeClientSurface = {
+      subscribe: (fn: () => void) =>
+        client.subscribe(() => {
+          notifications++;
+          fn();
+        }),
+      getSnapshot: () => client.getSnapshot(),
+      subscribeSession: (file: string) => client.subscribeSession(file),
+      unsubscribeSession: () => client.unsubscribeSession(),
+      resyncFromCursor: () => client.resyncFromCursor(),
+    };
+    function Probe(): null {
+      useSessionDetail(surface, "a.jsonl");
+      return null;
+    }
+    const first = render(React.createElement(Probe));
+    act(() => {
+      ws.open();
+      ws.receive(WELCOME); // 握手→自动订阅：相位推进产生通知
+    });
+    expect(notifications).toBeGreaterThan(0);
+    first.unmount();
+    const afterUnmount = notifications;
+    act(() => {
+      client.subscribeSession("b.jsonl"); // 相位推进：已卸载实例的 listener 不得再被触达
+    });
+    expect(notifications).toBe(afterUnmount); // 删 listeners.delete 的窄变异在此转红
+    const second = render(React.createElement(Probe));
+    const beforeNext = notifications;
+    act(() => {
+      client.unsubscribeSession(); // 再推进：仅新实例在册→恰 +1 份通知（旧 listener 泄漏则 +2）
+    });
+    expect(notifications).toBe(beforeNext + 1);
+    second.unmount();
   });
 
   it("C4 真实链：直播中 stream-replaced→视图=stopped（非 streaming），横幅含受控提示+恢复入口=重选文件（无重建按钮、无分页提示）", () => {

@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-// A1b 订阅客户端测试（归属整改重写：Kimi 亲手重写；覆盖=旧版 51 例全部语义面+新增，断言等价或更强）。
+// A1b 订阅客户端测试（归属整改重写：Kimi 亲手重写；覆盖=旧版 51 例语义面逐条对照保留+新增；A1b 复审修复批补回父版「旧 init 4404 不误伤新 init」回归分支并锁死观察者清理）。
 // 模式：FakeWebSocket 注入记录帧（无真网络）；快照断言用身份比较（toBe）锁零副作用。
 // 覆盖面（对照契约 docs/ws-ui-contracts-v1.md + K3/K4 审报）：
 //  握手与初始化（排队/直发/非法文件名/工厂抛错）；subscribe 三分支与游标透传；分页聚合与幂等去重；
-//  终局三分支语义（end 末页/error 帧终局/连接级 onclose）；K3-B1/K4 结构化身份路由（终局按
+//  终局三分支语义（快照末页转 live/error 帧流终局/连接级 onclose；本协议无 t:"end" 消费分支）；K3-B1/K4 结构化身份路由（终局按
 //  subscriptionId+requestId 空串路由，不解析 message 文本）+旧信封兼容；drain 出口 4431 信封专测
 //  （K4 发现1 d0de86b 的客户端对应面）；终局信封 12 组合矩阵（4409/4431/4402 × 新/旧信封 × 活动/非活动）；
 //  K3-B2 首页在途取消留痕补退订；K3-C2 跨字段/续页绑定一致性；C5 空串 requestId 连接级口径；
@@ -237,6 +237,8 @@ describe("握手与初始化订阅", () => {
     expect(snap.errorMessage).toContain("连接创建失败");
     client.connect(); // 已停止：幂等拒绝
     expect(client.getSnapshot()).toBe(snap);
+    client.subscribeSession("a.jsonl"); // 已停止：subscribe 同样拒绝（零新帧、快照零变化）
+    expect(client.getSnapshot()).toBe(snap);
   });
 
   it("重复 connect 幂等（单连接面）；迟到/重复 open 不重发 hello", () => {
@@ -279,7 +281,7 @@ describe("subscribe 三分支与游标透传", () => {
     expect(client.getSnapshot().cursor).toEqual({ streamId: "stream-9", seq: 41 });
   });
 
-  it("分页聚合到末页（正常终局=end 帧路径）：事件按页累积，末页（historyNext=null+liveFrom）转 live，cursor=liveFrom", () => {
+  it("分页聚合到末页（正常终局=快照末页：historyNext=null+liveFrom 转 live）：事件按页累积，cursor=liveFrom", () => {
     const { client } = livePhase();
     const snap = client.getSnapshot();
     expect(snap.phase).toBe("live");
@@ -348,10 +350,13 @@ describe("流式帧：history/live 追加与幂等去重", () => {
     ws.receive(liveEvents(subscriptionId, 1, [liveProgress("thinking"), liveProgress("message-start")]));
     expect(client.getSnapshot().liveEvents).toHaveLength(2);
     const before = client.getSnapshot();
-    ws.receive(liveEvents(subscriptionId, 1, [liveProgress()])); // 重复序号
-    ws.receive(liveEvents(subscriptionId, 0, [liveProgress()])); // 回退序号（形状门外 but 幂等吸收）
+    ws.receive(liveEvents(subscriptionId, 1, [liveProgress()])); // 重复序号（幂等吸收）
     expect(client.getSnapshot()).toBe(before);
-    ws.receive(liveEvents(subscriptionId, 2, [])); // 空帧：序号推进但不通知
+    ws.receive(liveEvents(subscriptionId, 2, [])); // 空帧：水位推进到 2 但不通知
+    expect(client.getSnapshot()).toBe(before);
+    ws.receive(liveEvents(subscriptionId, 2, [liveProgress()])); // 重发同号带事件：水位已推进→幂等吸收（证空帧确实推进水位）
+    expect(client.getSnapshot()).toBe(before);
+    ws.receive(liveEvents(subscriptionId, 1, [liveProgress()])); // 形状合法的回退序号（<水位）：幂等吸收
     expect(client.getSnapshot()).toBe(before);
     ws.receive(liveEvents(subscriptionId, 3, [liveProgress("message-end")]));
     const snap = client.getSnapshot();
@@ -530,13 +535,36 @@ describe("订阅终局语义（三分支之 error 帧路径）", () => {
     expect((ws.sentFrames().at(-1) as { file: string }).file).toBe("ok.jsonl");
   });
 
-  it("无关 requestId 的请求级错误：忽略零副作用，活动流继续", () => {
-    const { client, ws, subscriptionId } = livePhase();
-    const before = client.getSnapshot();
-    ws.receive({ t: "error", code: 4404, requestId: "req-ghost", message: "dup", retryable: false });
-    expect(client.getSnapshot()).toBe(before);
-    ws.receive(liveEvents(subscriptionId, 2, [liveProgress()]));
-    expect(client.getSnapshot().liveEvents).toHaveLength(1);
+  it("请求级 error（requestId 无 subscriptionId）：①live 时无关 requestId 忽略零副作用；②同 file 重订阅时旧 init 的 4404 不误伤新 init，新 snapshot 随后落地", () => {
+    // ① 活动流期间收到无关 requestId 的请求级错误：忽略，流继续
+    const live = livePhase();
+    const before = live.client.getSnapshot();
+    live.ws.receive({ t: "error", code: 4404, requestId: "req-ghost", message: "dup", retryable: false });
+    expect(live.client.getSnapshot()).toBe(before);
+    live.ws.receive(liveEvents(live.subscriptionId, 2, [liveProgress()]));
+    expect(live.client.getSnapshot().liveEvents).toHaveLength(1); // 流未被清
+    // ② 同 file 重订阅后，被顶替旧 init 收到请求级错误（requestId=旧）：不归属新请求，新 snapshot 照常落地
+    //    （A1b 复审 B1：本分支杀「pending 在场且 requestId 非空即命中」窄变异——旧 id≠新在途 id 时必须忽略）
+    const { client, ws, initRequestId } = livePhase();
+    client.subscribeSession("a.jsonl");
+    const newRequestId = (ws.sentFrames().at(-1) as { requestId: string }).requestId;
+    ws.receive({ t: "error", code: 4404, requestId: initRequestId, message: "duplicate", retryable: false });
+    expect(client.getSnapshot().phase).toBe("subscribing"); // 新 init 未被旧请求失败误伤
+    expect(client.getSnapshot().errorKind).toBeNull();
+    ws.receive(
+      pageFrame({
+        requestId: newRequestId,
+        subscriptionId: "sub-2",
+        barrier: 9,
+        page: [msg(9)],
+        historyNext: null,
+        liveFrom: { streamId: "stream-1", seq: 10 },
+      }),
+    );
+    const snap = client.getSnapshot();
+    expect(snap.phase).toBe("live"); // 新 snapshot 落地
+    expect(snap.subscriptionId).toBe("sub-2");
+    expect(snap.events.map((e) => e.seq)).toEqual([9]);
   });
 });
 
@@ -1392,6 +1420,7 @@ describe("终局信封 12 组合矩阵（4409/4431/4402 × 新信封/旧信封 �
     });
 
     it(`${code} 旧信封×无活动流（首包前/已退订）：忽略零副作用，不误伤在途 init`, () => {
+      // 首包前：建订在途不得被旧信封终局误伤
       const { client, ws } = setup();
       handshake(ws);
       client.subscribeSession("a.jsonl");
@@ -1399,6 +1428,38 @@ describe("终局信封 12 组合矩阵（4409/4431/4402 × 新信封/旧信封 �
       ws.receive({ t: "error", code, message: "x", retryable: code !== 4431, requestId: "" });
       expect(client.getSnapshot()).toBe(before);
       expect(before.phase).toBe("subscribing");
+      // 已退订：live→unsubscribe 后无活动流，旧信封终局同样零副作用
+      const done = livePhase();
+      done.client.unsubscribeSession();
+      const frozen = done.client.getSnapshot();
+      done.ws.receive({ t: "error", code, message: "x", retryable: code !== 4431, requestId: "" });
+      expect(done.client.getSnapshot()).toBe(frozen);
+      expect(frozen.phase).toBe("idle");
     });
   }
+});
+
+describe("观察者清理锁死（external-store listener 移除即停通知；A1b 复审 N1）", () => {
+  it("退订闭包移除 listener：退订后状态推进零触达被移除者；在册观察者正对照仍收通知", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    let kept = 0;
+    let removed = 0;
+    client.subscribe(() => {
+      kept++;
+    });
+    const off = client.subscribe(() => {
+      removed++;
+    });
+    client.subscribeSession("a.jsonl"); // 相位推进：两观察者均收到
+    expect(kept).toBeGreaterThan(0);
+    expect(removed).toBeGreaterThan(0);
+    off();
+    off(); // 重复退订幂等
+    const keptAt = kept;
+    const removedAt = removed;
+    client.unsubscribeSession(); // 再推进（phase→idle）
+    expect(removed).toBe(removedAt); // 被移除者零新通知（删 listeners.delete 的窄变异在此转红）
+    expect(kept).toBeGreaterThan(keptAt); // 在册者仍收通知（正对照：确有状态推进发生）
+  });
 });
