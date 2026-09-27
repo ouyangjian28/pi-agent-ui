@@ -62,6 +62,9 @@ const d = describe.skipIf(!RUN)("⑤C 真组合根 E2E（生产形态单端口�
       tokenFile: join(dir, "tokens.json"),
       allowedOrigins: [ORIGIN],
       roots: [dir],
+      // ⑤D 前置（GPT 5C r1 N2）：顶层 sessionFor=读侧双源接线（与 write.sessionFor 同映射）——
+      // session 子源由此读 pi 转录（--session 文件），无它则 journal-only（composition:180-188 分叉）。
+      sessionFor: (f) => join(dir, "sessions", `${f.split("/").pop()}.session`),
       scanDir: dir,
       tokenPollMs: 0,
       write: {
@@ -169,7 +172,40 @@ const d = describe.skipIf(!RUN)("⑤C 真组合根 E2E（生产形态单端口�
     expect(evFrames.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("C-3 stop+dispose 收口：write-stop-ack confirmed+exit 形状+stop→exit 同 handle 硬序+dispose 有界", { timeout: 60_000 }, async () => {
+  it("C-3 双源读面（⑤D 前置）：口令轮→assistant 正文经 session 子源入投影（message/role=assistant/textPreview 含口令），同页并存 journal 行=双源合序", { timeout: 180_000 }, async () => {
+    // 口令化（同 pi-e2e e2e-3 TOKEN=PENGUIN-42 手法）：assistant 正文只存在于 pi 转录（--session 文件），
+    // journal 只有 enqueue/sending/settled 等结构行（TECH B17）——message 事件出现即双源接线真证据。
+    const TOKEN2 = "PENGUIN-43";
+    send({ t: "prompt", requestId: "c3", file: "s1.jsonl", text: `请只回复这串字符，不要其他内容：${TOKEN2}` });
+    const ack = await next("write-ack", (f) => f.requestId === "c3");
+    expect(ack.outcome!.kind).toBe("launched");
+    const intentId = ack.outcome!.intentId!;
+    await until(async () => {
+      const ls = await readJournal("s1.jsonl");
+      return ls.some((l) => l.t === "settled" && l.intentId === intentId);
+    }, "C-3 settled");
+    // pi 转录异步 flush：轮询重订阅取快照，直到 assistant 正文带口令出现（有界 60s）
+    interface Ev { kind?: string; role?: string; textPreview?: { text?: string }; intentId?: string | null; seq?: number }
+    let found: Ev | null = null;
+    let n = 0;
+    await until(async () => {
+      n += 1;
+      send({ t: "subscribe", requestId: `c3-poll-${n}`, file: "s1.jsonl" });
+      const snap2 = await next("snapshot", (f) => f.requestId === `c3-poll-${n}`);
+      const page = (snap2.page ?? []) as Ev[];
+      found = page.find((e) => e.kind === "message" && e.role === "assistant"
+        && typeof e.textPreview === "object" && e.textPreview !== null
+        && typeof e.textPreview.text === "string" && e.textPreview.text.includes(TOKEN2)) ?? null;
+      return found !== null;
+    }, "assistant 正文带口令入投影", 60_000);
+    expect(found).not.toBeNull();
+    // 双源合序：同一快照页并存 journal 源行（本轮 turn-enqueued/该 intentId）——同页双源共存证据
+    const snapLast = frames.filter((f) => f.t === "snapshot" && String(f.requestId ?? "").startsWith("c3-poll-")).pop()!;
+    const page = (snapLast.page ?? []) as Ev[];
+    expect(page.some((e) => e.kind === "turn-enqueued" && e.intentId === intentId)).toBe(true);
+  });
+
+  it("C-4 stop+dispose 收口：write-stop-ack confirmed+exit 形状+stop→exit 同 handle 硬序+dispose 有界", { timeout: 60_000 }, async () => {
     const a0 = audits.length;
     send({ t: "stop", requestId: "c3", file: "s1.jsonl" });
     const ack = await next("write-stop-ack", (f) => f.requestId === "c3");
