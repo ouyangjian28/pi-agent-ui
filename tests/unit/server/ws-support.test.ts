@@ -516,17 +516,17 @@ describe("R2-B2：适配器 trustedProxies 快照冻结", () => {
 
 describe("gatewayMetaFrom（3b-2 clientIp 接线）", () => {
   it("直连元数据全链映射（origin/loopback/tls/clientIp）", () => {
-    const m = gatewayMetaFrom({ origin: "http://localhost:5173", loopback: true, tls: false, clientIp: "::1", remoteAddress: "::1", proxied: false });
-    expect(m).toEqual({ origin: "http://localhost:5173", loopback: true, tls: false, clientIp: "::1" });
+    const m = gatewayMetaFrom({ origin: "http://localhost:5173", loopback: true, tls: false, clientIp: "::1", remoteAddress: "::1", proxied: false, sessionAuthed: false, sessionDigest: null });
+    expect(m).toEqual({ origin: "http://localhost:5173", loopback: true, tls: false, clientIp: "::1", sessionAuthed: false, sessionDigest: null });
   });
   it("可信代理派生的 clientIp 原样透传（不退 unknown）", () => {
-    const m = gatewayMetaFrom({ origin: "https://app.example", loopback: false, tls: true, clientIp: "203.0.113.9", remoteAddress: "10.0.0.7", proxied: true });
+    const m = gatewayMetaFrom({ origin: "https://app.example", loopback: false, tls: true, clientIp: "203.0.113.9", remoteAddress: "10.0.0.7", proxied: true, sessionAuthed: false, sessionDigest: null });
     expect(m.clientIp).toBe("203.0.113.9");
     expect(m.tls).toBe(true);
     expect(m.loopback).toBe(false);
   });
   it("origin 缺失（非浏览器入口被拒前）→undefined（网关默认拒路径）", () => {
-    const m = gatewayMetaFrom({ origin: null, loopback: true, tls: false, clientIp: "127.0.0.1", remoteAddress: "127.0.0.1", proxied: false });
+    const m = gatewayMetaFrom({ origin: null, loopback: true, tls: false, clientIp: "127.0.0.1", remoteAddress: "127.0.0.1", proxied: false, sessionAuthed: false, sessionDigest: null });
     expect(m.origin).toBeUndefined();
   });
 });

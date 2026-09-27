@@ -3,7 +3,7 @@
 // 坏体（非 JSON/JSON null/超体/超时）/sid 身份（B2 sessionIdentityOf=摘要 hex）/parseSessionCookie（B3 同名重复拒）/
 // B1 代理矩阵（XFF/XFP 采信与拒绝、Secure 派生、TLS 门、限速隔离、loopback 代理豁免陷阱）/
 // B5 来源门（异源 403/缺 Origin 仅 loopback/非 JSON 媒体 415/异源 logout 403）。
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { TLSSocket } from "node:tls";
 import { Socket } from "node:net";
@@ -19,7 +19,7 @@ class FakeReq extends EventEmitter {
   url: string;
   method: string;
   headers: Record<string, string | string[]>; // r3-Y2：真实 IncomingMessage 头可为数组（Node 合并/重复头），替身同面
-  socket: { remoteAddress: string };
+  socket: { remoteAddress?: string | undefined }; // r4-B2：可选对端（真 Socket 可 undefined；exactOptionalPropertyTypes 下显式含 undefined）
   paused = false; // R3-B1：生产读体面调 req.pause()（真 IncomingMessage 内建），替身必须跟随流接口
   constructor(method: string, url: string, body: string, over: { tls?: boolean; headers?: Record<string, string | string[]>; remote?: string; autoBody?: boolean } = {}) {
     super();
@@ -329,7 +329,7 @@ describe("login-route r1-B4：并发在途预算+读后复核", () => {
     expect(a?.code).toBe(200); // r3-Y2：A（被逐户）封锁史确已删除可再登录（Mu-eviction-no-delete 杀点：只审计不删则仍 429）
   });
 
-  it("B4c3 混合表保封锁户（r3-Y2）：A 封锁+B 未封锁满表→插 C 逐 B（非封锁优先）；A 仍 429，B 史清可 200", async () => {
+  it("B4c3 混合表保封锁户（r3-Y2+r4-Y2）：A 封锁+B 未封锁满表→插 C 逐 B（非封锁优先）；A 仍 429，B 史清（再错一次 401 未封锁+好令牌 200）", async () => {
     let t = 0;
     const { route, audits } = makeRoute({ rateMapMax: 2, rateMaxFailures: 2, rateBaseBlockMs: 60_000, trustedProxies: ["127.0.0.1"], now: () => t });
     const hdr = (ip: string) => ({ headers: { origin: ORIGIN, "x-forwarded-for": ip, "x-forwarded-proto": "https" } });
@@ -343,7 +343,9 @@ describe("login-route r1-B4：并发在途预算+读后复核", () => {
     t = 4;
     expect((await callRoute(route, "POST", "/login", JSON.stringify({ token: "tok-ok" }), hdr("203.0.113.11")))?.code).toBe(429); // A（封锁户）被保留仍拒
     t = 5;
-    expect((await callRoute(route, "POST", "/login", JSON.stringify({ token: "tok-ok" }), hdr("203.0.113.12")))?.code).toBe(200); // B 被逐，史清可再登录
+    expect((await callRoute(route, "POST", "/login", bad, hdr("203.0.113.12")))?.code).toBe(401); // r4-Y2 杀点：B 被逐史清→再错=401 未封锁（若非封锁 victim 未删→B 存 2 败=429）
+    t = 6;
+    expect((await callRoute(route, "POST", "/login", JSON.stringify({ token: "tok-ok" }), hdr("203.0.113.12")))?.code).toBe(200); // B 未封锁好令牌成功（若历史残留→429）
   });
 
   it("B4c2 优先逐非封锁项（r2）：满表含未封锁户时插入新户不逐封锁户", async () => {
@@ -429,5 +431,83 @@ describe("login-route r1-B5：HTTP 来源门+媒体类型门", () => {
     const { route } = makeRoute();
     const out = await callRoute(route, "POST", "/logout", "", { headers: { origin: "https://evil.invalid" } });
     expect(out?.code).toBe(403);
+  });
+});
+
+// ── R4-B1：关停器生命周期（fake timers）──
+// TDZ/安装序回归：closeAfterReply 必须真建立 25ms/1s 兜底并注册监听；删除 closeAfterReply 调用或重演 TDZ 时以下全红。
+describe("R4-B1 closeAfterReply 生命周期（fake timers）", () => {
+  interface Life { res: FakeRes; req: FakeReq; destroys: number; }
+  const flush = async (): Promise<void> => { for (let i = 0; i < 20; i++) await Promise.resolve(); }; // 微任务泵
+  // 走 408 超时路径（closeAfterReply 唯一调用面）：autoBody=false+推进 10s 读体超时。
+  // noFinish=true 时压掉 FakeRes.end 的自动 finish（模拟对端永不读完，只剩硬封顶）。
+  const arm = async (route: ReturnType<typeof createLoginRoute>, over: { noFinish?: boolean } = {}): Promise<Life> => {
+    const req = new FakeReq("POST", "/login", "", { autoBody: false });
+    const res = new FakeRes();
+    if (over.noFinish === true) {
+      (res as { end: (p?: string) => void }).end = (payload?: string): void => { res.headersSent = true; if (payload !== undefined) res.body = payload; }; // 只记账不发 finish（模拟对端永不读完）
+    }
+    let destroys = 0;
+    const origDestroy = req.destroy.bind(req);
+    (req as { destroy: () => void }).destroy = (): void => { destroys += 1; origDestroy(); };
+    route.handle(req as never, res as never);
+    await flush();
+    await vi.advanceTimersByTimeAsync(10_000); // bodyTimeout 默认 10s → 408+closeAfterReply
+    expect(res.code).toBe(408); // 前置：错误响应已写、关停器已装
+    return { res, req, get destroys() { return destroys; } }; // getter：闭包计数不快照
+  };
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("L1 finish 路径：25ms 软关停恰一次销毁+hard 撤销（timer 表空）", async () => {
+    vi.useFakeTimers();
+    const { route } = makeRoute();
+    const l = await arm(route);
+    await flush(); // res.end 排队的 finish 自然触发（软 timer 已装）
+    expect(l.destroys).toBe(0); // 25ms 缓冲未到不提前
+    await vi.advanceTimersByTimeAsync(25);
+    expect(l.destroys).toBe(1);
+    expect(vi.getTimerCount()).toBe(0); // hard(1s) 已撤销——悬挂 timer=0
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(l.destroys).toBe(1); // 不二次销毁
+  });
+
+  it("L2 无 finish 硬截止：1s 恰一次销毁；随后迟到 finish 不再新建 timer", async () => {
+    vi.useFakeTimers();
+    const { route } = makeRoute();
+    const l = await arm(route, { noFinish: true });
+    await vi.advanceTimersByTimeAsync(25);
+    expect(l.destroys).toBe(0);
+    await vi.advanceTimersByTimeAsync(1_000 - 25);
+    expect(l.destroys).toBe(1); // 硬封顶生效（关停器真实存在的直接证据）
+    l.res.emit("finish"); // 迟到 finish
+    await vi.advanceTimersByTimeAsync(50);
+    expect(l.destroys).toBe(1);
+    expect(vi.getTimerCount()).toBe(0); // R4-Y1：killed 后 finish 分支不新建 timer
+  });
+
+  it("L3 res close 先到：同步收口恰一次；重入（close/aborted/error 连发）仍一次", async () => {
+    vi.useFakeTimers();
+    const { route } = makeRoute();
+    const l = await arm(route);
+    l.res.emit("close");
+    expect(l.destroys).toBe(1);
+    l.req.emit("aborted"); l.req.emit("error"); l.res.emit("close"); l.res.emit("finish");
+    await vi.advanceTimersByTimeAsync(1_100);
+    expect(l.destroys).toBe(1); // 幂等重入安全
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("L4 req aborted / req error 各自独立收口", async () => {
+    for (const ev of ["aborted", "error"] as const) {
+      vi.useFakeTimers();
+      const { route } = makeRoute();
+      const l = await arm(route);
+      l.req.emit(ev);
+      expect(l.destroys).toBe(1);
+      await vi.advanceTimersByTimeAsync(1_100);
+      expect(l.destroys).toBe(1);
+      expect(vi.getTimerCount()).toBe(0);
+      vi.useRealTimers();
+    }
   });
 });

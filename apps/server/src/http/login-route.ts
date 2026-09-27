@@ -193,12 +193,12 @@ export function createLoginRoute(opts: LoginRouteOpts): LoginRoute {
     res.end(payload);
   };
 
-  // R2-B3+R3-Y1：有界关停——响应写完即销毁流（25ms 缓冲，不被慢发送方拖住），封顶 1s 强制；
+  // R2-B3+R3-Y1+R4-B1：有界关停——响应写完即销毁流（25ms 缓冲，不被慢发送方拖住），封顶 1s 强制；
   // 统一幂等 kill：finish/客户端放弃/错误任一路径先到先收口，并撤销全部兜底 timer（不悬挂）。
+  // 声明序=先 kill 后 timer（R4-B1：setTimeout(kill) 传参即读 kill，置于声明前=同步 TDZ 抛错、关停器全不建立）。
   const closeAfterReply = (req: IncomingMessage, res: ServerResponse): void => {
     let killed = false;
     let soft: NodeJS.Timeout | undefined;
-    const hard: NodeJS.Timeout = setTimeout(kill, 1_000); hard.unref?.();
     const kill = (): void => {
       if (killed) return;
       killed = true;
@@ -206,8 +206,9 @@ export function createLoginRoute(opts: LoginRouteOpts): LoginRoute {
       if (hard !== undefined) clearTimeout(hard);
       req.destroy();
     };
-    res.once("finish", () => { soft = setTimeout(kill, 25); soft.unref?.(); });
-    res.once("close", () => kill()); // 响应面提前断开（对端 RST/挂断）也收口
+    const hard: NodeJS.Timeout = setTimeout(kill, 1_000); hard.unref?.();
+    res.once("finish", () => { if (!killed) { soft = setTimeout(kill, 25); soft.unref?.(); } }); // 迟到 finish 不再新建 timer（R4-Y1）
+    res.once("close", () => kill()); // 响应面 close：正常响应结束或对端提前断开皆收口（R4-Y1 勘正：非仅 RST）
     req.once("aborted", () => kill()); // B4a：未完成请求的主动清理
     req.once("error", () => kill());
   };

@@ -96,7 +96,7 @@ function fullPost(port: number, body: string): Promise<WireOut> {
 }
 
 /** r3-Y2 BF4：读完整响应（精确 Content-Length 字节）+等服务端主动 FIN——不精客户端先断，证真交付与有界关停。 */
-function slowBodyFullClose(port: number, contentLength: number, chunks: string[]): Promise<WireOut & { serverFin: boolean }> {
+function slowBodyFullClose(port: number, contentLength: number, chunks: string[]): Promise<WireOut & { serverFin: boolean; head: string; declared: number; bodyBytes: number }> {
   return new Promise((resolve, reject) => {
     const s = new Socket();
     const to = setTimeout(() => { s.destroy(); reject(new Error("slowBodyFullClose 超时")); }, 5_000);
@@ -113,15 +113,19 @@ function slowBodyFullClose(port: number, contentLength: number, chunks: string[]
       clearTimeout(to);
       const idx = buf.indexOf(CRLF + CRLF);
       const head = buf.subarray(0, idx).toString("latin1");
+      const m = /content-length:\s*(\d+)/i.exec(head);
+      const declared = m === null ? -1 : Number(m[1]);
+      const bodyBytes = buf.byteLength - (idx + 4);
       s.destroy();
-      resolve({ status: head.split(CRLF)[0] ?? "", bytes: buf.byteLength, body: buf.toString("utf8"), serverFin });
+      // r4-Y2：头内声明长度与实收字节双双返回（调用方断言精确等值，>= 不再放过长度错误）
+      resolve({ status: head.split(CRLF)[0] ?? "", bytes: buf.byteLength, body: buf.subarray(idx + 4).toString("utf8"), head, declared, bodyBytes, serverFin });
     };
     s.on("data", (d: Buffer) => {
       buf = Buffer.concat([buf, d]);
       const idx = buf.indexOf(CRLF + CRLF);
       if (idx < 0) return;
       const m = /content-length:\s*(\d+)/i.exec(buf.subarray(0, idx).toString("latin1"));
-      if (buf.byteLength >= idx + 4 + Number(m?.[1] ?? "0")) bodyComplete = true; // 完整 Content-Length 字节到齐（但不结早——等服务端 FIN）
+      if (buf.byteLength === idx + 4 + Number(m?.[1] ?? "-1")) bodyComplete = true; // r4-Y2：恰等（声明与实收严格一致才算完整；>= 放过长度错误）
     });
     s.once("end", () => { serverFin = true; if (bodyComplete) finish(); }); // 服务端 FIN（有界关停 destroy）
     s.once("close", () => { if (serverFin && bodyComplete) finish(); });
@@ -161,7 +165,12 @@ describe("N4 r2-B3：体流错误面真网络（408/413 字节在网）", () => 
       const out = await slowBodyFullClose(r.port, 100, ['{"token":"']);
       expect(out.status).toContain("408");
       expect(out.serverFin).toBe(true); // 服务端写完即关（closeAfterReply 有界关停面）
-      expect(out.body.toLowerCase()).toContain("content-length:"); // 头内声明与字节实收一致（完整交付）
+      expect(out.declared).toBe(out.bodyBytes); // r4-Y2：头声明=实收（精确长度；Mu-BF4-length-one 杀点）
+      expect(out.bodyBytes).toBeGreaterThan(0); // r4-Y2：非空响应体（Mu-BF4-empty-payload 杀点）
+      expect(out.head.toLowerCase()).toContain("content-type: application/json"); // 媒体门
+      const parsed = JSON.parse(out.body) as { ok?: unknown; error?: unknown };
+      expect(parsed.ok).toBe(false); // JSON 语义正确（非 0 字节/截断体）
+      expect(parsed.error).toBe("请求体不可用");
     } finally {
       await r.dispose();
     }

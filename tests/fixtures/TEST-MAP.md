@@ -793,7 +793,7 @@
 ### N4 登录面 r3 修复批（2026-10-05；对应审报 gpt-n4-login-r3-review-2026-10-05.md 91.43 NO-GO）
 
 - 范围：R3-B1（放行阻断）+R3-Y1/Y2/Y3（低项一并收口）。生产改动仅 login-route.ts closeAfterReply 一处；其余为测试替身升级、行为例补强、契约/档勘误。
-- **R3-B1 测试替身跟随流接口（中）**：FakeReq 补 `pause()/resume()`（生产读体面 408/413 调 `req.pause()`，替身缺方法→2 unhandled TypeError+全仓 exit1）+destroy 时发 close；FakeRes 改 EventEmitter 且 end() 后异步发 finish（生产 closeAfterReply 监听 finish/close）。修复后定向 5 文件 110 绿+全仓 1217 绿，**exit0 零 unhandled**（GPT /tmp 诊断补丁同结论：纯替身即可，产线无需动）。
+- **R3-B1 测试替身跟随流接口（中）**：FakeReq 补 `pause()/resume()`（生产读体面 408/413 调 `req.pause()`，替身缺方法→2 unhandled TypeError+全仓 exit1）+destroy 时发 close；FakeRes 改 EventEmitter 且 end() 后异步发 finish（生产 closeAfterReply 监听 finish/close）。修复后定向 5 文件 110 绿+全仓 1217 绿（r4 勘误：同 HEAD 复测=定向 113 绿/login-route 33 例；当时根 typecheck 实为 exit2（四条 r1 遗留测试类型错，非本批新增）——r5 已闭合），**exit0 零 unhandled**（GPT /tmp 诊断补丁同结论：纯替身即可，产线无需动）。
 - **R3-Y1 有界关停统一幂等清理**：closeAfterReply 重写——killed 旗标+kill 时 clearTimeout 全部兜底 timer；新增 res close（对端 RST）、req aborted（B4a 未完成请求主动清理）、req error 三路收口。finish→25ms 软关停+1s 硬封顶保留（受控探针口径：finish 后 1s 不再二次 destroy）。
 - **R3-Y2 行为例补强（两存活变异锁死）**：
   - B4c 增被逐户 A 断言（t=2_200 好令牌→200——封锁史确已删除；**Mu-eviction-no-delete r3 存活变异杀点**：只审计不删则 A 仍 429）；B4c3 新增混合表例（A 封锁+B 未封锁满表→插 C 逐 B；A 仍 429、B 史清 200——非封锁优先路径行为锁）。
@@ -802,4 +802,15 @@
   - L7 题收窄（"另一 authority 使用新令牌集"非"旧 authority 失效"；同 authority 真实轮换证据归 S4/S5）。
 - **R3-Y3 契约/档原位勘误**：contracts §5.5+TEST-MAP 旧段六处——Cookie 歧义"login 侧→400"改 login 面不解析 Cookie（400 属 body 解析路径）+"均审计 ambiguous"收窄为仅原始头数>1；"不丢活动封锁"条件化（有非封锁项时；全封锁逐最早到期）；"审计标记=真实摘要"改撤销链内部身份（审计不输出摘要）；bearer 残余风险口径收窄（登出只清浏览器侧/HttpOnly 不防本站 XSS 借权/SameSite 站点级）；"origin 截断 64"改仅显式非法值。旧段保留历史+括注 r3 勘误，不整段重写。
 - 变异验证（/tmp/mut-n4r3.py）：Mu-eviction-no-delete（B4c 杀）/Mu-WS-live-options-bypass（net r3-Y2 杀）双红，还原后基线 69 绿；Y1 timer 清理无仓内杀点（幂等 kill 下二次 destroy 不可观测），以 GPT 受控探针+代码审查收口。
-- 运行证据：全仓 **1217 passed**|15 skipped（exit0 零 unhandled——R3-B1 关闭口径）；定向 login-route 36 例+body-flow 4 例+net 36 例；tsc apps/server 0 错；eslint server/src+unit+integration 0。
+- 运行证据：全仓 **1217 passed**|15 skipped（exit0 零 unhandled——R3-B1 关闭口径）；定向 login-route 36 例+body-flow 4 例+net 36 例；tsc apps/server 0 错；eslint server/src+unit+integration 0。（r4 勘误：定向 login-route 实为 33 例；apps/server tsc 单包绿≠根 typecheck 绿——当时根 exit2，r5 闭合；「无仓内 timer 杀点」判断已由 r5 fake-timer 生命周期例取代）
+
+### N4 登录面 r5 修复批（2026-10-05；对应审报 gpt-n4-login-r4-review-2026-10-05.md 88.57 NO-GO）
+
+- 范围：R4-B1（TDZ 放行阻断）+R4-B2（根 typecheck 四错）+R4-Y1/Y2/Y3 一并收口。生产改动=login-route.ts 关停器安装序一处+两行守卫；其余=测试面（生命周期四例+B4c3 延伸+BF4 收紧+类型补全）+档勘误。
+- **R4-B1 关停器 TDZ（中）**：r3 修复批为顺 eslint prefer-const 将 `const hard=setTimeout(kill,1s)` 前移到 `const kill` 声明前——`setTimeout(kill)` 传参即读 kill（TDZ 同步抛 ReferenceError），外层 catch 吞错→25ms/1s 兜底全部未建立且表面全绿。修复=声明序恢复先 kill 后 timer（kill 体内引用 hard 属运行时读值，无 TDZ）+迟 finish 守卫。**新测试族 R4-B1 生命周期四例（vi.useFakeTimers）**：L1 finish→25ms 软关停恰一次+hard 撤销（vi.getTimerCount()=0）+1s 后不二次销毁；L2 无 finish（压掉 res.end 自动 finish）→1s 硬封顶恰一次销毁+迟到 finish 不新建 timer（R4-Y1）；L3 res close 同步收口+重入（close/aborted/error 连发）恰一次；L4 req aborted/error 独立收口。走 408 超时路径（closeAfterReply 唯一调用面），arm 内微任务泵 20 跳冲刷全链+408 前置断言；destroys 用 getter（闭包计数不快照）。
+- **R4-B2 根 typecheck 四错（中）**：①login-route.test.ts FakeReq.socket 类型改 `{remoteAddress?: string|undefined}`（exactOptionalPropertyTypes 下显式含 undefined；真 Socket remoteAddress 可 undefined，生产面 deriveConnMeta 读时自碰 "unknown" 回退）②ws-support.test.ts 三处 gatewayMetaFrom 输入补 `sessionAuthed:false, sessionDigest:null`（r1-B2 扩字段后测试输入未跟）③直连例 toEqual 期望补同两字段。根/protocol/server 三包 typecheck 逐项 exit0。
+- **R4-Y2 行为盲区收口**：①B4c3 延伸两步（t=5 B 再错→401 未封锁+史清证明；t=6 B 好令牌→200）——**Mu-nonblocked-eviction-no-delete（只删封锁 victim）杀点**；②BF4 收紧：bodyComplete 判据 `>=`→`===`（声明与实收严格一致）+返回 declared/bodyBytes 双值+断言 declared===bodyBytes>0+content-type application/json+JSON.parse 语义（ok=false+error 文案）——**Mu-BF4-payload-gutted/Mu-CL-off-by-one 杀点**；③Mu-close-noop/Mu-tdz-regression 由 R4-B1 生命周期例覆盖（关停器拆除或 TDZ 重演→L1-L4 全红）。
+- **R4-Y3 档勘误**：r3 节三处数字原位勘误（定向 113/login-route 33 例/根 typecheck 当时 exit2——旧文以单包绿冒称全绿，r5 闭合）。
+- 变异验证（/tmp/mut-n4r5.py）：Mu-nonblocked-eviction-no-delete（B4c3 1红）/Mu-close-noop（L1-L4 4红）/Mu-tdz-regression（L1-L4 4红）/Mu-BF4-payload-gutted（BF4 1红）/Mu-CL-off-by-one（BF4 1红）五连全杀，还原后基线 41 绿。
+- 运行证据：全仓 **1221 passed**|15 skipped exit0（两次连跑均绿）；根/protocol/server typecheck 三包 exit0；eslint server/src+unit+integration 0。
+- 错题落账方向：修 lint 后只跑 eslint+定向测试不重跑 tsc（TDZ 漏网根因）——改动后验证面必须覆盖被改面的全部门（tsc 属编译面门）。
