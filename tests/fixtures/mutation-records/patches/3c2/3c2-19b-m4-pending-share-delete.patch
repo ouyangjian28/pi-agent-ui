@@ -1,0 +1,13 @@
+diff --git a/apps/server/src/ws/rpc-write-host.ts b/apps/server/src/ws/rpc-write-host.ts
+index 4aafae7..cfba936 100644
+--- a/apps/server/src/ws/rpc-write-host.ts
++++ b/apps/server/src/ws/rpc-write-host.ts
+@@ -79,8 +79,6 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
+   const sessionOf = (file: string): Promise<RpcLikeSession> => {
+     const hit = settled.get(file);
+     if (hit !== undefined) return Promise.resolve(hit);
+-    const inflight = pending.get(file);
+-    if (inflight !== undefined) return inflight; // single-flight：首次并发共享同一次创建
+     // 槽对象持引用：身份校验不自引用 let/const（tsc 赋前使用与 eslint prefer-const 两难）；
+     // 工厂压微任务后 pending.set 必先于工厂执行——同步 throw 也能正确走身份删除（防陈旧占位）。
+     const slot: { p?: Promise<RpcLikeSession> } = {};

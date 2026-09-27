@@ -1,0 +1,4 @@
+# cmd: npx eslint apps/server/src/ws/rpc-write-host.ts apps/server/src/ws/write-host.ts packages/protocol/src/contracts.ts tests/unit/server/rpc-write-host.test.ts tests/unit/server/ws-gateway-write.test.ts
+# tree: c11c312278c905d8fac125dd68b8066aab20e586
+# date: 2026-09-27T14:54:52+08:00（宿主钟漂移注记同上）
+exit=0（eslint 成功=静默无输出，这是工具原生行为——原 3c2-r19-lint.log 0 字节即此因，无命令头/退出码才是不合规）
