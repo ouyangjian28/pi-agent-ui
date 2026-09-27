@@ -722,3 +722,13 @@
 - 终态：1010 passed+11 skipped（55 文件）+tsc 0+eslint 0；基线/交付提交 df0e576（含契约档增补）。
 
 - **K4 后续批（发现1 收口，repo 本提交）**：drain 出口整帧超预算 4431（subscription-engine.ts overBudget）补 subscriptionId（与 close() 终局信封统一；servePage :244/:256 请求级出口携页 requestId=既有正确语义不改）。⑲b 新例专测 drain 出口信封；⑲ 原例头注指明其帧出自 servePage 请求级出口（非 drain）。变异 MB4（drain 出口去 subscriptionId）→⑲b 单杀。1087 passed+11 skipped。
+
+## 3c-5 ⑤B（静态托管+生产 CLI：static-serve/composition staticDir/main.ts；2026-10-05）
+
+- 目标：自举里程碑第一块——同端口 HTTP 静态托管（web 构建产物）+零依赖 CLI 入口（参数/信号/优雅退出）。
+- 生产文件：apps/server/src/ws/static-serve.ts（resolveStaticPath fail-closed：解码失败/NUL/根外/点段→null；createStaticHandler：GET/HEAD only+405/`/`→index.html/stat 目录→404/MIME 表/no-store+Connection:close/审计 static-hit|miss|reject）；apps/server/src/main.ts（parseArgs 重复 --root/--origin、assertDir、origins 默认推导 127.0.0.1+localhost:P、SIGHUP 热轮换、SIGINT/SIGTERM 优雅 dispose）；composition.ts 增 ServerConfig.staticDir→外部 http server 模式（adapter 挂 upgrade；listen 固定 port 校验+address 解构；dispose 补 httpServer.close+closeAllConnections+5s 守卫）。
+- 运行方式拍板：`node --experimental-transform-types apps/server/src/main.ts …`（仓内 ws-transport 等 17 处参数属性=非纯 erasable，strip-only 拒跑；transform-types 承担）。为此把 4 文件 7 处 `.js` 导入符归一 `.ts`（process-host/pi-child/rpc-session/session-registry），server 树自此原生可直跑。零新依赖。
+- 测试面 SS/ST/SM 16 例（tests/unit/server/static-serve.test.ts）：SS1-SS7 纯函数+真 http server（MIME/HEAD/405/穿越/点文件/审计行）；ST1-ST4 composition 集成（port 0 拒启/fetch 200+404+审计/WS 同端口 hello→welcome→list-sessions(requestId)→sessions/dispose 有界<4.5s）；SM1-SM5 CLI 子进程冒烟（--help/缺 token/非法 port 真钉端口门/root 不存在/全参数起服→ready→SIGTERM→exit 0+端口释放）。
+- 变异四连（tools/mutate-3c5.py，try/finally 保还原+树净断言，基线先提交）：S1 穿越门关→SS2 杀（expected '/srv/etc/passwd' to be null）；S2 点段门收窄仅 .. →SS1+SS2+SS7 三杀；S3 composition 固定端口门关→ST1 杀；S4 CLI 端口门关→SM3 杀（真 token+stderr 断言防 token 门偷杀）。全杀全还原，日志=tests/fixtures/run-records/3c5-mut-*.log。
+- 诚实披露：①曾试 S3'=dispose 拔 closeAllConnections→设计上不可杀（handler 恒发 Connection:close，无 keep-alive 残留可截；closeAllConnections=纵深带非首道闸），弃之非掩盖——测试不因它红；②SM3 两轮强化过程（root 门/ token 门先后偷换杀点）见提交链 4de316a→e1a3f15；③ST4 时限断言（<4.5s）依赖 5s 守卫存在性而非 closeAllConnections 路径。
+- 终态：1154 passed+11 skipped（60 文件）+tsc 0+eslint 0；提交链 af119ea→4de316a→e1a3f15→f928f59。
