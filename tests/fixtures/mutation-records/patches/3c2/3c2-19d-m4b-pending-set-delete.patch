@@ -1,0 +1,15 @@
+diff --git a/apps/server/src/ws/rpc-write-host.ts b/apps/server/src/ws/rpc-write-host.ts
+index 4aafae7..75f57ba 100644
+--- a/apps/server/src/ws/rpc-write-host.ts
++++ b/apps/server/src/ws/rpc-write-host.ts
+@@ -94,9 +94,7 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
+         if (slot.p !== undefined && pending.get(file) === slot.p) pending.delete(file);
+       }
+     })();
+-    const creating = slot.p;
+-    pending.set(file, creating);
+-    return creating;
++    return slot.p; // MUTATION 19d PENDING-SET-DELETE（不登记占位，并发各自建）
+   };
+   return {
+     async sendPrompt(file: string, text: string): Promise<WriteSendOutcomeDTO> {

@@ -1,0 +1,14 @@
+diff --git a/apps/server/src/ws/rpc-write-host.ts b/apps/server/src/ws/rpc-write-host.ts
+index 4aafae7..35835b4 100644
+--- a/apps/server/src/ws/rpc-write-host.ts
++++ b/apps/server/src/ws/rpc-write-host.ts
+@@ -106,7 +106,8 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
+         if (g !== null) auditSafe(() => g);
+         return encodeSendOutcome(raw);
+       } catch (e: unknown) {
+-        auditSafe(() => `write-host-error op=prompt file=${file} ${errText(e)}`);
++        const line = `write-host-error op=prompt file=${file} ${errText(e)}`; // MUTATION 19d AUDIT-ESCAPE-VALID（隔离域外求值，类型合法）
++        auditSafe(() => line);
+         throw stripped("prompt");
+       }
+     },

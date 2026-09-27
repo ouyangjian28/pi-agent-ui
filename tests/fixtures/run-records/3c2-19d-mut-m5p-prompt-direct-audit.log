@@ -1,0 +1,97 @@
+# cmd: npx vitest run tests/unit/server/rpc-write-host.test.ts --reporter=verbose 2>&1（stderr 已并入——19c 指出 FAIL 块在 stderr，原 verbose 档只捕了 stdout）
+# mut=m5p-prompt-direct-audit 基线=485fe2f218577205（19d 补跑新运行；19b 原档保留不覆盖）
+# date=2026-09-27T15:06:39.307028
+# exit=1
+# restore: 变异→跑→回写后 git hash-object=4aafae7fe7a4c3c9 == HEAD blob 4aafae7fe7a4c3c9 -> OK
+
+ RUN  v5.0.1 /home/yyj/ai/repos/pi-agent-ui
+
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 编码器：SessionSendResult→WriteSendOutcomeDTO > E1 launched：key 扁平化（intentId/commandId 保留，generation 不跨面） 1ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 编码器：SessionSendResult→WriteSendOutcomeDTO > E2 busy/gate-rejected 透传 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 编码器：SessionSendResult→WriteSendOutcomeDTO > E3 gate-failed：stage 保留、error 截断（unknown 不跨面） 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 编码器：SessionSendResult→WriteSendOutcomeDTO > E4 invalidated 四 stage 全透传（enqueue/sending/post-send/first-byte） 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 编码器：SessionSendResult→WriteSendOutcomeDTO > E5 no-process 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 编码器：SessionSendResult→WriteSendOutcomeDTO > E6 not-ready：cause 有/无两形（源可选→DTO 可选） 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 编码器：SessionSendResult→WriteSendOutcomeDTO > E7 stop 四分支同构（confirmed 复制 exit，不携引用） 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 编码器：SessionSendResult→WriteSendOutcomeDTO > E8 kind 集合冒烟（值正确性由 E1/E6 等完整对象断言负责；对值失真盲=E1/H1 才是杀伤面） 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H1 sendPrompt：file 交工厂、text 交会话、DTO 回 launched 扁平形 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H2 stop：RetireOutcome 同构回传 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H3 注册表缓存：同 file 工厂只调一次（send+stop 共享实例） 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H4 不同 file 不同实例（缓存按 file 分桶） 0ms
+ × |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H5 工厂抛错→审计留细节+剥离重抛（无内部串外泄） 3ms
+   → l.includes is not a function
+ × |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H6 会话 send 抛错同面：审计+剥离重抛（W9 的 4402 通道来源） 0ms
+   → l.includes is not a function
+ × |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H7 审计回调自身抛错被隔离（不影响重抛语义） 3ms
+   → expected [Function] to throw error including 'write-host-internal: prompt' but got 'audit-down'
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H8 异步工厂（Promise 返回）可用 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H9 同步工厂首次并发 prompt+stop：恰建一次、两操作落同实例、后续仍缓存 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H10 可控异步工厂并发 prompt/prompt：deferred 释放后仍恰建一次、两 text 落同实例 1ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H11 工厂失败（并发共享同一失败）后健康重试：占位已清、重试恰再建一次 0ms
+ × |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H12 恶意不可字符串化拒绝值×两 op：仍固定 message、无内部附带字段（格式化不逃逸） 1ms
+   → expected 0 to be greater than 0
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H13 会话 stop 自身拒绝→同样剥离（write-host-internal: stop）+审计留细节 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H14 gate-failed 细节截断前落审计：audit 行含 stage+detail，DTO 仍无 error 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H5 工厂抛错→审计留细节+剥离重抛（无内部串外泄）
+TypeError: l.includes is not a function
+ ❯ tests/unit/server/rpc-write-host.test.ts:99:33
+     97|     await expect(host.sendPrompt("/abs/s.jsonl", "x")).rejects.toThrow…
+     98|     await expect(host.stop("/abs/s.jsonl")).rejects.toThrow("write-hos…
+     99|     expect(audits.some((l) => l.includes("write-host-error") && l.incl…
+       |                                 ^
+    100|     expect(audits.some((l) => l.includes("write-host-error") && l.incl…
+    101|   });
+ ❯ tests/unit/server/rpc-write-host.test.ts:99:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H6 会话 send 抛错同面：审计+剥离重抛（W9 的 4402 通道来源）
+TypeError: l.includes is not a function
+ ❯ tests/unit/server/rpc-write-host.test.ts:107:33
+    105|     const host = createRpcWriteHost({ sessionFor: () => bad, audit: (l…
+    106|     await expect(host.sendPrompt("/abs/s.jsonl", "x")).rejects.toThrow…
+    107|     expect(audits.some((l) => l.includes("rpc-boom"))).toBe(true);
+       |                                 ^
+    108|   });
+    109|   it("H7 审计回调自身抛错被隔离（不影响重抛语义）", async () => {
+ ❯ tests/unit/server/rpc-write-host.test.ts:107:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H7 审计回调自身抛错被隔离（不影响重抛语义）
+AssertionError: expected [Function] to throw error including 'write-host-internal: prompt' but got 'audit-down'
+
+Expected: "write-host-internal: prompt"
+Received: "audit-down"
+
+ ❯ tests/unit/server/rpc-write-host.test.ts:111:55
+    109|   it("H7 审计回调自身抛错被隔离（不影响重抛语义）", async () => {
+    110|     const host = createRpcWriteHost({ sessionFor: () => { throw new Er…
+    111|     await expect(host.sendPrompt("/abs/s.jsonl", "x")).rejects.toThrow…
+       |                                                       ^
+    112|   });
+    113|   it("H8 异步工厂（Promise 返回）可用", async () => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H12 恶意不可字符串化拒绝值×两 op：仍固定 message、无内部附带字段（格式化不逃逸）
+AssertionError: expected 0 to be greater than 0
+ ❯ tests/unit/server/rpc-write-host.test.ts:196:25
+    194|     const e3 = await host2.sendPrompt("/abs/s.jsonl", "y").then(() => …
+    195|     expect(e3!.message).toBe("write-host-internal: prompt");
+    196|     expect(getterReads).toBeGreaterThan(0); // getter 确实被格式化读取（非可选链短路空…
+       |                         ^
+    197|     expect(audits2.length).toBe(0); // getter 中途抛错→该审计行被整体隔离丢弃，不半写入
+    198|     expect(e3!.message).not.toContain("GETTER-BOOM-2");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 18 passed (22)
+   Start at  15:06:39
+   Duration  131ms (transform 51%, tests 26%, import 18%, worker 5%)
+
