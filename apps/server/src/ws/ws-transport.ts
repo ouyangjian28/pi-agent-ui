@@ -291,7 +291,7 @@ export class WsServerAdapter implements WsTransportPort {
     this.audit = (l) => { try { opts.audit?.(l); } catch { /* 审计异常不阻断 */ } };
     // B3(r1)：Origin 白名单=构造期快照（复制+freeze）——调用方事后改原数组不扩大授权面
     this.originSnapshot = Object.freeze([...opts.allowedOrigins]);
-    this.trustedProxies = opts.trustedProxies ?? [];
+    this.trustedProxies = Object.freeze([...(opts.trustedProxies ?? [])]); // R2-B2：快照冻结（构造后热变更不生效）
     this.requireTlsOffLoopback = opts.requireTlsOffLoopback ?? true;
     this.closeHandshakeMs = opts.closeHandshakeMs ?? DEFAULT_CLOSE_HANDSHAKE_MS;
     this.wss = new WebSocketServer({

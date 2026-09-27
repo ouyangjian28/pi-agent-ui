@@ -104,7 +104,9 @@ export function createLoginRoute(opts: LoginRouteOpts): LoginRoute {
   const mapMax = opts.rateMapMax ?? RATE_MAP_MAX;
   const inflightMax = opts.inflightBodies ?? DEFAULT_INFLIGHT_BODIES;
   const bodyTimeoutMs = opts.bodyTimeoutMs ?? DEFAULT_BODY_TIMEOUT_MS;
-  const trustedProxies = opts.trustedProxies ?? [];
+  // R2-B2：构造期快照冻结（调用方保留原数组引用也不可热变更授权面——与 WS 升级面 originSnapshot 同语义）。
+  const trustedProxies = Object.freeze([...(opts.trustedProxies ?? [])]);
+  const allowedOrigins = Object.freeze([...opts.allowedOrigins]);
   const now = opts.now ?? Date.now;
   const failures = new Map<string, RateEntry>();
   const inflight = new Map<string, number>();
@@ -172,22 +174,30 @@ export function createLoginRoute(opts: LoginRouteOpts): LoginRoute {
       let total = 0;
       let done = false;
       const finish = (v: BodyResult): void => { if (!done) { done = true; clearTimeout(timer); resolve(v); } };
-      const timer = setTimeout(() => { finish({ ok: false, code: 408, reason: "timeout" }); req.destroy(); }, bodyTimeoutMs);
+      const timer = setTimeout(() => { finish({ ok: false, code: 408, reason: "timeout" }); req.pause(); }, bodyTimeoutMs);
       req.on("data", (c: Buffer) => {
         total += c.byteLength;
-        if (total > maxBody) { finish({ ok: false, code: 413, reason: "oversize" }); req.destroy(); return; }
+        if (total > maxBody) { finish({ ok: false, code: 413, reason: "oversize" }); req.pause(); return; }
         chunks.push(c);
       });
       req.on("end", () => finish({ ok: true, body: Buffer.concat(chunks) }));
       req.on("error", () => finish({ ok: false, code: 400, reason: "error" }));
     });
 
-  const jsonReply = (res: ServerResponse, code: number, body: Record<string, unknown>, setCookie?: string): void => {
+  const jsonReply = (res: ServerResponse, code: number, body: Record<string, unknown>, setCookie?: string, close?: boolean): void => {
     const payload = Buffer.from(JSON.stringify(body), "utf8");
     const headers: Record<string, string> = { "Content-Type": "application/json", "Content-Length": String(payload.byteLength), "Cache-Control": "no-store" };
+    if (close === true) headers.Connection = "close"; // R2-B3：错误关停面不接 pipeline 复用
     if (setCookie !== undefined) headers["Set-Cookie"] = setCookie;
     res.writeHead(code, headers);
     res.end(payload);
+  };
+
+  // R2-B3：有界关停——响应写完即销毁流（不被慢发送方拖住），封顶 1s 强制。
+  const closeAfterReply = (req: IncomingMessage, res: ServerResponse): void => {
+    const kill = (): void => { req.destroy(); };
+    res.once("finish", () => { setTimeout(kill, 25).unref?.(); });
+    setTimeout(kill, 1_000).unref?.();
   };
 
   // B5：媒体类型门——application/json（可带 charset 参数；大小写不敏感媒体类型）。
@@ -202,14 +212,21 @@ export function createLoginRoute(opts: LoginRouteOpts): LoginRoute {
     if (req.method !== "POST" || (url !== "/login" && url !== "/logout")) return false;
     const sec = connSecurityOf(req, trustedProxies); // B1：与 WS 升级面同一派生（有效 IP/loopback/有效 TLS）
     const rawOrigin = req.headers.origin;
+    const originMissing = rawOrigin === undefined; // R2-B1：真缺失（无头）才可走 loopback 豁免
     const origin = typeof rawOrigin === "string" && rawOrigin.length > 0 && rawOrigin.toLowerCase() !== "null" ? rawOrigin : null;
+    const rejectOrigin = (o: string | null): void => {
+      audit(`login-origin-rejected origin=${o ?? "<missing>"} clientIp=${sec.ip} loopback=${sec.loopback}`);
+      jsonReply(res, 403, { ok: false, error: "来源不被允许" });
+    };
     void (async () => {
-      // B5：来源门先于一切状态消耗（异源→403；缺 Origin 仅 loopback 放行——本机 curl/开发面，非默认可信）。
-      if (origin === null ? !sec.loopback : !opts.allowedOrigins.includes(origin)) {
-        audit(`login-origin-rejected origin=${origin ?? "<missing>"} clientIp=${sec.ip} loopback=${sec.loopback}`);
-        jsonReply(res, 403, { ok: false, error: "来源不被允许" });
-        return;
-      }
+      // B5/R2-B1：来源门先于一切状态消耗。三态：白名单命中放行；真缺失仅 loopback 放行（本机 curl/开发面）；
+      // 显式异常值（"null"/空串/数组）一律 403——不折叠成“缺失”去蹭 loopback 豁免（opaque/sandbox 来源即此形态）。
+      if (origin !== null) {
+        if (!allowedOrigins.includes(origin)) { rejectOrigin(origin); return; }
+      } else if (originMissing) {
+        if (!sec.loopback) { rejectOrigin(null); return; }
+      } else { rejectOrigin(String(rawOrigin).slice(0, 64)); return; }
+      // 注：白名单查冻结快照 allowedOrigins（R2-B2），不再直绑 opts 原数组。
       // B1：非 loopback 有效明文→拒绝提交令牌（WS TLS 门同口径；loopback=开发面豁免）。
       if (!sec.loopback && !sec.tls) {
         audit(`login-tls-required clientIp=${sec.ip}`);
@@ -240,7 +257,13 @@ export function createLoginRoute(opts: LoginRouteOpts): LoginRoute {
       const bodyR = await readBody(req);
       inflight.set(sec.ip, Math.max(0, (inflight.get(sec.ip) ?? 1) - 1));
       if (inflight.get(sec.ip) === 0) inflight.delete(sec.ip);
-      if (!bodyR.ok) { jsonReply(res, bodyR.code, { ok: false, error: "请求体不可用" }); return; }
+      if (!bodyR.ok) {
+        // R2-B3：先写错误响应再关流（destroy 后写=真网 0 字节；有界关停：写完即关+封顶强制关）。
+        audit(`login-body-${bodyR.reason} clientIp=${sec.ip} code=${bodyR.code}`);
+        jsonReply(res, bodyR.code, { ok: false, error: "请求体不可用" }, undefined, true);
+        closeAfterReply(req, res);
+        return;
+      }
       if (rateLimited(sec.ip)) { // B4 门 2：body 后同步复核（复核→解析→校验→记账无 await 间隙）
         audit(`login-rate-limited clientIp=${sec.ip} phase=post-body`);
         jsonReply(res, 429, { ok: false, error: "尝试过于频繁，稍后再试" });

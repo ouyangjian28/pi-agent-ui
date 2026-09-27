@@ -252,6 +252,8 @@ describe("ws-gateway N4-v2（v1.1）：登录会话 cookie 免令票通道（r1-
       await c.say({ t: "hello", protocolVersion: 1 }); // hello 复核身份→失活→拒
       expect(c.frames().some((f) => f.code === 4401)).toBe(true);
       expect(r.audits.some((l) => l.includes("hello-session-missing"))).toBe(true);
+      await new Promise((res) => setTimeout(res, 50));
+      expect(c.closes.some(([code]) => code === 1008)).toBe(true); // r2 补：拒后连接以策略违规码关闭
     } finally {
       await r.dispose();
     }
@@ -290,6 +292,9 @@ describe("ws-gateway N4-v2（v1.1）：登录会话 cookie 免令票通道（r1-
       await new Promise((res) => setTimeout(res, 50));
       expect(c.closes.length).toBe(0); // 存活（不被误杀）
       expect(c.frames().some((f) => f.code === 4401)).toBe(false);
+      await c.say({ t: "ping", nonce: "s6" }); // r2 补：存活连接仍可交互（不只没关）
+      await new Promise((res) => setTimeout(res, 50));
+      expect(c.frames().some((f) => f.t === "pong" && (f as { nonce?: string }).nonce === "s6")).toBe(true);
     } finally {
       await r.dispose();
     }

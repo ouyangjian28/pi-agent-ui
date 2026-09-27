@@ -114,6 +114,28 @@ describe("login-route N4-v2（r1 修复批后）", () => {
     expect((await callRoute(route, "POST", "/login", JSON.stringify({ token: "tok-ok" })))?.code).toBe(200);
   });
 
+  it("L3c 成功清户区分例（r2）：错/对/错/错/对→401/200/401/401/429（阈 2）——清户失效变体（错史累计）第 4 次即 429，被本例杀", async () => {
+    let t = 0;
+    const { route } = makeRoute({ rateMaxFailures: 2, rateWindowMs: 10_000, rateBaseBlockMs: 5_000, now: () => t });
+    const codes: number[] = [];
+    for (const [tok, dt] of [["bad", 0], ["tok-ok", 1], ["bad", 1], ["bad", 1], ["tok-ok", 1]] as const) {
+      t += dt;
+      codes.push((await callRoute(route, "POST", "/login", JSON.stringify({ token: tok })))?.code ?? -1);
+    }
+    expect(codes.join(",")).toBe("401,200,401,401,429"); // 清户后仅 2 败（第 4 次达阈记账封锁）→ 第 5 次好令牌也 429
+  });
+
+  it("L3d 滑窗残留区分例（r2）：t=0/999/1000/1000/1000→401×4+429（阈 3）——t=0 败在 t=1000 出窗，固定窗整窗翻转变体第 5 次仍 401，被本例杀", async () => {
+    let t = 0;
+    const { route } = makeRoute({ rateMaxFailures: 3, rateWindowMs: 1_000, rateBaseBlockMs: 5_000, now: () => t });
+    const codes: number[] = [];
+    for (const at of [0, 999, 1000, 1000, 1000]) {
+      t = at;
+      codes.push((await callRoute(route, "POST", "/login", JSON.stringify({ token: "bad" })))?.code ?? -1);
+    }
+    expect(codes.join(",")).toBe("401,401,401,401,429"); // 滑窗：t=1000 时窗 [1,1000] 仍含 t=999/1000×3=4 败→封锁
+  });
+
   it("L3b 滑窗边界：t=0/999/999 三败→t=1000 第 4 次 429（旧固定窗会放行 1ms 内五次）", async () => {
     let t = 0;
     const { route } = makeRoute({ rateMaxFailures: 3, rateWindowMs: 1_000, rateBaseBlockMs: 5_000, now: () => t });
@@ -153,7 +175,7 @@ describe("login-route N4-v2（r1 修复批后）", () => {
     expect(resT.code).toBe(408);
   });
 
-  it("L7 sid 身份（r1-B2）：真 sid→token 摘要 hex；篡改/形态/未知派生→null；热轮换后旧 sid 失效+新 sid 生效", async () => {
+  it("L7 sid 身份（r1-B2）：真 sid→token 摘要 hex；篡改/形态/未知派生→null；换令牌集（旧 authority 失效）后旧 sid 失效+新 sid 生效", async () => {
     const { route } = makeRoute();
     const sid = sidOfToken("tok-ok");
     expect(route.sessionIdentityOf(sid)).toBe(digestOf("tok-ok"));
@@ -282,16 +304,35 @@ describe("login-route r1-B4：并发在途预算+读后复核", () => {
     expect(resB.code).toBe(429);
   });
 
-  it("B4c 满表淘汰：rateMapMax=2，表满后新 IP 仍可登录（有界不炸）+封锁审计落", async () => {
-    const { route, audits } = makeRoute({ rateMapMax: 2, rateMaxFailures: 1, rateBaseBlockMs: 60_000, trustedProxies: ["127.0.0.1"] });
-    for (const ip of ["203.0.113.1", "203.0.113.2"]) {
-      for (let i = 0; i < 2; i += 1) {
-        await callRoute(route, "POST", "/login", JSON.stringify({ token: "bad" }), { headers: { origin: ORIGIN, "x-forwarded-for": ip, "x-forwarded-proto": "https" } });
-      }
+  it("B4c 满表淘汰（r2 改真）：rateMapMax=2，双封锁户满表→第三 IP 失败插入触发淘汰最早到期户；幸存户仍 429+evict 审计落", async () => {
+    let t = 0;
+    const { route, audits } = makeRoute({ rateMapMax: 2, rateMaxFailures: 1, rateBaseBlockMs: 60_000, trustedProxies: ["127.0.0.1"], now: () => t });
+    // A 于 t=0 封锁（到期 60_000）；B 于 t=1_000 封锁（到期 61_000）——A=最早到期=满表时被逐
+    for (const [ip, at] of [["203.0.113.1", 0], ["203.0.113.2", 1_000]] as const) {
+      t = at;
+      await callRoute(route, "POST", "/login", JSON.stringify({ token: "bad" }), { headers: { origin: ORIGIN, "x-forwarded-for": ip, "x-forwarded-proto": "https" } });
     }
-    const out = await callRoute(route, "POST", "/login", JSON.stringify({ token: "tok-ok" }), { headers: { origin: ORIGIN, "x-forwarded-for": "203.0.113.3", "x-forwarded-proto": "https" } });
-    expect(out?.code).toBe(200); // 第三 IP 正常（表有界不炸）
-    expect(audits.some((l) => l.includes("login-rate-blocked"))).toBe(true);
+    t = 2_000;
+    const third = await callRoute(route, "POST", "/login", JSON.stringify({ token: "bad" }), { headers: { origin: ORIGIN, "x-forwarded-for": "203.0.113.3", "x-forwarded-proto": "https" } });
+    expect(third?.code).toBe(401); // 第三 IP 失败插入（触封锁=插表路径）
+    expect(audits.some((l) => l.includes("login-rate-table-evict-blocked"))).toBe(true); // 满表逐最早到期（非封锁优先路径无受害者时走封锁逐出）
+    t = 2_100;
+    const b = await callRoute(route, "POST", "/login", JSON.stringify({ token: "tok-ok" }), { headers: { origin: ORIGIN, "x-forwarded-for": "203.0.113.2", "x-forwarded-proto": "https" } });
+    expect(b?.code).toBe(429); // B（幸存封锁户）仍封锁——淘汰只逐 A
+  });
+
+  it("B4c2 优先逐非封锁项（r2）：满表含未封锁户时插入新户不逐封锁户", async () => {
+    let t = 0;
+    const { route, audits } = makeRoute({ rateMapMax: 2, rateMaxFailures: 2, trustedProxies: ["127.0.0.1"], now: () => t });
+    const hdr = (ip: string) => ({ headers: { origin: ORIGIN, "x-forwarded-for": ip, "x-forwarded-proto": "https" } });
+    t = 0; await callRoute(route, "POST", "/login", JSON.stringify({ token: "bad" }), hdr("203.0.113.9")); // A 未封锁（1/2 败）
+    t = 1; await callRoute(route, "POST", "/login", JSON.stringify({ token: "bad" }), hdr("203.0.113.8")); // B 未封锁（1/2 败）
+    t = 2; await callRoute(route, "POST", "/login", JSON.stringify({ token: "bad" }), hdr("203.0.113.7")); // C 失败插入→满表逐 A（最早非封锁）且自身 1/2
+    expect(audits.some((l) => l.includes("login-rate-table-evict-blocked"))).toBe(false); // 走非封锁优先路径（无封锁逐出审计）
+    t = 3;
+    expect((await callRoute(route, "POST", "/login", JSON.stringify({ token: "bad" }), hdr("203.0.113.7")))?.code).toBe(401); // C 二败达阈（当次 401，记账后封锁）
+    t = 4;
+    expect((await callRoute(route, "POST", "/login", JSON.stringify({ token: "bad" }), hdr("203.0.113.7")))?.code).toBe(429); // C 封锁期
   });
 });
 
@@ -312,10 +353,42 @@ describe("login-route r1-B5：HTTP 来源门+媒体类型门", () => {
     expect(outExt?.code).toBe(403);
   });
 
-  it("B5c Origin=null 字串（隐私强化浏览器）→非 loopback 拒", async () => {
+  it("B5c Origin=null 字串（R2-B1）：非 loopback 拒；**loopback 也拒**——显式异常值不折叠成缺失去蹭本机豁免", async () => {
     const { route } = makeRoute();
     const out = await callRoute(route, "POST", "/login", JSON.stringify({ token: "tok-ok" }), { remote: "192.168.1.5", headers: { origin: "null" } });
     expect(out?.code).toBe(403);
+    const local = await callRoute(route, "POST", "/login", JSON.stringify({ token: "tok-ok" }), { headers: { origin: "null" } }); // loopback 明文本可豁免
+    expect(local?.code).toBe(403); // r2 前旧代码：null 被折叠成“缺失”→loopback 200（GPT 真组合根复现）
+  });
+
+  it("B5c2 显式异常 Origin 变体（R2-B1）：空串/数组形态→一律 403（含 loopback）；logout 的 Origin:null 同拒", async () => {
+    const { route } = makeRoute();
+    expect((await callRoute(route, "POST", "/login", JSON.stringify({ token: "tok-ok" }), { headers: { origin: "" } }))?.code).toBe(403);
+    const arr = await callRoute(route, "POST", "/login", JSON.stringify({ token: "tok-ok" }), { headers: { origin: ORIGIN } as Record<string, string> });
+    expect(arr?.code).toBe(200); // 对照：白名单命中正常
+    const out = await callRoute(route, "POST", "/logout", "", { headers: { origin: "null" } });
+    expect(out?.code).toBe(403); // r2 前旧代码：logout Origin:null→200+清 cookie
+  });
+
+  it("B5f 白名单快照冻结（R2-B2）：构造后向原数组热插 evil 来源→仍 403（不可热变更授权面）", async () => {
+    const origins = [ORIGIN];
+    const { route } = makeRoute({ allowedOrigins: origins });
+    const before = await callRoute(route, "POST", "/login", JSON.stringify({ token: "tok-ok" }), { headers: { origin: "https://evil.invalid" } });
+    expect(before?.code).toBe(403);
+    origins.push("https://evil.invalid"); // 调用方保留原数组引用
+    const after = await callRoute(route, "POST", "/login", JSON.stringify({ token: "tok-ok" }), { headers: { origin: "https://evil.invalid" } });
+    expect(after?.code).toBe(403); // r2 前旧代码：直绑原数组→热插生效→200
+  });
+
+  it("B5g trustedProxies 快照冻结（R2-B2）：构造后热插代理源→XFF/XFP 不被采信", async () => {
+    const proxies: string[] = [];
+    const { route } = makeRoute({ trustedProxies: proxies });
+    const hdr = { origin: ORIGIN, "x-forwarded-for": "203.0.113.7", "x-forwarded-proto": "https" } as Record<string, string>;
+    const before = await callRoute(route, "POST", "/login", JSON.stringify({ token: "tok-ok" }), { remote: "10.0.0.9", headers: hdr });
+    expect(before?.code).toBe(403); // 未信任 10.0.0.9：XFP=https 不采信→非 loopback 明文拒
+    proxies.push("10.0.0.9"); // 热插
+    const after = await callRoute(route, "POST", "/login", JSON.stringify({ token: "tok-ok" }), { remote: "10.0.0.9", headers: hdr });
+    expect(after?.code).toBe(403); // r2 前旧代码：热插生效→200+Secure
   });
 
   it("B5d text/plain 媒体类型（跨站简单请求载体）→415", async () => {

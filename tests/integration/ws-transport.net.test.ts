@@ -18,7 +18,7 @@ import { WsServerAdapter, deriveConnMeta, type WsConnectionPort } from "../../ap
 import { WsGateway } from "../../apps/server/src/ws/ws-gateway.js";
 import { TokenAuthority } from "../../apps/server/src/ws/token-auth.js";
 import { LIMITS } from "@pi-agent-ui/protocol";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 const ORIGIN = "http://localhost:3000";
 const TOKEN = "test-token-a";
@@ -153,6 +153,50 @@ function raw101Headers(port: number, origin: string, headers: Record<string, str
     s.once("error", (e) => { clearTimeout(to); reject(e); });
     s.once("close", () => { clearTimeout(to); reject(new Error("提前关闭")); });
     s.once("data", (d) => { clearTimeout(to); s.destroy(); resolve(d.toString("latin1")); });
+  });
+}
+
+// r2：裸 Socket 手写 WS 握手+掩码客户端 hello 帧（ws 库会把数组头值合并成单头，无法造多条原始 Cookie 行）。
+function rawWsHello(port: number, origin: string, extraRawLines: string[], payload: string): Promise<{ head: string; texts: string[] }> {
+  return new Promise((resolve, reject) => {
+    const key = randomBytes(16).toString("base64");
+    const req = ["GET /ws HTTP/1.1", `Host: 127.0.0.1:${port}`, "Upgrade: websocket", "Connection: Upgrade",
+      `Sec-WebSocket-Key: ${key}`, "Sec-WebSocket-Version: 13", `Origin: ${origin}`, ...extraRawLines, "", ""].join("\r\n");
+    const mask = randomBytes(4);
+    const body = Buffer.from(payload, "utf8");
+    const frame = Buffer.alloc(2 + 4 + body.byteLength);
+    frame[0] = 0x81; frame[1] = 0x80 | body.byteLength; // FIN|text, MASK|len（len<126）
+    mask.copy(frame, 2);
+    for (let i = 0; i < body.byteLength; i += 1) frame[6 + i] = body[i] ^ mask[i % 4];
+    const s = new Socket();
+    const to = setTimeout(() => { s.destroy(); reject(new Error("rawWsHello 超时")); }, 5_000);
+    to.unref?.();
+    const texts: string[] = [];
+    let head = "";
+    let buf = Buffer.alloc(0);
+    let sent = false;
+    s.connect(port, "127.0.0.1", () => { s.write(req); });
+    s.on("data", (d: Buffer) => {
+      buf = Buffer.concat([buf, d]);
+      if (!sent && buf.includes("\r\n\r\n")) {
+        const idx = buf.indexOf("\r\n\r\n");
+        head = buf.subarray(0, idx).toString("latin1");
+        buf = buf.subarray(idx + 4);
+        if (!head.includes("101")) { clearTimeout(to); s.destroy(); resolve({ head, texts }); return; }
+        s.write(frame); sent = true;
+      }
+      // 解析服务端文本帧（无掩码；len<126 短帧足够）
+      while (sent && buf.byteLength >= 2) {
+        const op = buf[0] & 0x0f;
+        const lenByte = buf[1] & 0x7f;
+        if (buf.byteLength < 2 + lenByte) break;
+        const pay = buf.subarray(2, 2 + lenByte).toString("utf8");
+        if (op === 1) texts.push(pay);
+        buf = buf.subarray(2 + lenByte);
+        if (texts.length > 0) { clearTimeout(to); s.destroy(); resolve({ head, texts }); return; }
+      }
+    });
+    s.once("error", (e) => { clearTimeout(to); reject(e); });
   });
 }
 
@@ -743,7 +787,7 @@ describe("3b-1 真网络：⑦关闭竞态+无句柄悬挂", () => {
 describe("r1-B3 真网络：原始 Cookie 头歧义拒", () => {
   const SID = "3f".repeat(32);
   const DIGEST = createHash("sha256").update(TOKEN, "utf8").digest("hex"); // 会话身份=harness 令牌集内真摘要
-  it("两条原始 Cookie 头（同名）→ upgrade 仍 101 但会话作废：审计 upgrade-cookie-ambiguous+hello 4401（失败快照）", async () => {
+  it("两条原始 Cookie 头（同名）→ upgrade 仍 101 但会话作废：审计 upgrade-cookie-ambiguous count=2（本例只证 101+审计；执行门=下例）", async () => {
     const h = await makeHarness({ sessionSid: SID, sessionDigest: DIGEST });
     try {
       const head = await raw101Headers(h.port, ORIGIN, {}, [`Cookie: pi-agent-ui-session=${SID}`, "Cookie: pi-agent-ui-session=evil-dup"]);
@@ -766,6 +810,28 @@ describe("r1-B3 真网络：原始 Cookie 头歧义拒", () => {
       await until(() => c.frames.length > 0, 3000);
       expect((c.frames[0] as { code?: number }).code).toBe(4401);
       c.ws.close();
+    } finally {
+      await h.dispose();
+    }
+  });
+  it("r2 执行门独立例：两头中仅第一头含唯一有效 sid（第二头全无关）→ 免令牌 hello 4401（多头门独立于解析器同名防御）", async () => {
+    const h = await makeHarness({ sessionSid: SID, sessionDigest: DIGEST });
+    try {
+      const out = await rawWsHello(h.port, ORIGIN, [`Cookie: pi-agent-ui-session=${SID}`, "Cookie: other=1; irr=2"], JSON.stringify({ t: "hello", protocolVersion: 1 }));
+      expect(out.head).toContain("101");
+      const first = JSON.parse(out.texts[0] ?? "{}") as { t?: string; code?: number };
+      expect(first.t === "error" && first.code === 4401).toBe(true); // r2 窄变异（cookieHeaderCount>=1 放行）下本例 welcome→被杀
+      await until(() => h.audits.some((l) => l.includes("upgrade-cookie-ambiguous")), 2000);
+      expect(h.audits.some((l) => l.includes("upgrade-cookie-ambiguous") && l.includes("count=2"))).toBe(true);
+    } finally {
+      await h.dispose();
+    }
+  });
+  it("r2 双 Origin 头（数组形态）→ 升级面拒（403/无 101）——Origin 不走“缺失豁免”", async () => {
+    const h = await makeHarness();
+    try {
+      const head = await raw101Headers(h.port, null, {}, ["Origin: http://localhost:4173", "Origin: https://evil.invalid"]);
+      expect(head).not.toContain("101"); // 双 Origin=歧义拒（升级面 403），不是任选其一
     } finally {
       await h.dispose();
     }

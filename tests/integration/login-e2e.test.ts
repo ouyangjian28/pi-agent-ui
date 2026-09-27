@@ -1,7 +1,7 @@
 // N4-v2 E2E（2026-10-05 拍板：HttpOnly cookie 会话）：真 HTTP 登录面+真 WS 升级面全链。
 // 链路：startServer(staticDir 模式=外部 http server) → POST /login(fetch) → Set-Cookie(sid) →
 // WS 升级带 Cookie → 免令牌 hello → welcome。反例：篡改 sid→4401；cookie+错令牌→4401（不静默降级）；
-// 免令牌 hello 无 cookie→4401；登出→旧 sid 升级面失效；静态面不受 /login 占位影响。
+// 免令牌 hello 无 cookie→4401；登出=清浏览器侧 cookie（服务端撤销表=后续增强披露）；静态面不受 /login 占位影响。
 import { describe, expect, it } from "vitest";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -175,6 +175,20 @@ describe("N4-v2 登录面 E2E（真 HTTP+真 WS）", () => {
       expect(plain.status).toBe(415);
       const crossOut = await fetch(`${r.base}/logout`, { method: "POST", headers: { Origin: "https://evil.invalid" } });
       expect(crossOut.status).toBe(403);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("E8 r2-B1 组合根真例：Origin:null（login 与 logout）→ 403 不 Set-Cookie（null 不折叠成缺失蹭 loopback）", async () => {
+    const r = await makeRig();
+    try {
+      const login = await fetch(`${r.base}/login`, { method: "POST", headers: { "Content-Type": "application/json", Origin: "null" }, body: JSON.stringify({ token: TOKEN }) });
+      expect(login.status).toBe(403);
+      expect(login.headers.get("set-cookie")).toBeNull(); // 不发会话（GPT r2 真组合根复现：r2 前 200+清 cookie）
+      const out = await fetch(`${r.base}/logout`, { method: "POST", headers: { Origin: "null" } });
+      expect(out.status).toBe(403);
+      expect(r.audits.join("\n")).toContain("login-origin-rejected origin=null");
     } finally {
       await r.dispose();
     }
