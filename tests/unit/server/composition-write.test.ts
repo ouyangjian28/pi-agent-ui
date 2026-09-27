@@ -209,4 +209,29 @@ describe("3c-3 composition 写侧接线", () => {
       c.close();
     }
   });
+
+  it("CW11（20b B2）onSpawned 观测面：spawn 即时回调 file+handle+generation（身份在 spawn 时记录，非事后反推）", async () => {
+    const { dir, cfg } = await mkCfg({
+      write: {
+        ...CAT_WRITE,
+        onSpawned: (file, handle, generation) => { spawns.push({ file, id: handle.id, generation }); },
+      },
+    });
+    const spawns: { file: string; id: string; generation: number }[] = [];
+    const s = await start(cfg);
+    const c = await connect(s.port);
+    try {
+      c.ws.send(JSON.stringify({ t: "prompt", requestId: "r1", file: "s1.jsonl", text: "hi" }));
+      await c.next("write-ack", (f) => f.requestId === "r1");
+      await new Promise((res) => setTimeout(res, 50)); // spawn 同步于 prompt 冷启动；给观测回调一个宏任务窗口
+      expect(spawns.length).toBeGreaterThanOrEqual(1);
+      const first = spawns[0];
+      expect(first.file).toBe(join(dir, "s1.jsonl")); // journal 绝对路径（原样传递）
+      expect(typeof first.id).toBe("string");
+      expect(first.id.length).toBeGreaterThan(0);
+      expect(first.generation).toBe(1); // 首代
+    } finally {
+      c.close();
+    }
+  });
 });

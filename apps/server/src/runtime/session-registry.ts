@@ -11,7 +11,7 @@
 import { FileDurability } from "./file-durability.js";
 import { RpcSession } from "./rpc-session.js";
 import { sha256Hex12 } from "@pi-agent-ui/protocol";
-import type { DurabilityPort, ProcessHostPort, SessionStatus } from "@pi-agent-ui/protocol";
+import type { DurabilityPort, ProcessHandle, ProcessHostPort, SessionStatus } from "@pi-agent-ui/protocol";
 import { isAbsolute } from "node:path";
 
 export interface SessionRegistryOpts {
@@ -28,6 +28,9 @@ export interface SessionRegistryOpts {
   readonly timeoutPollMs?: number;
   readonly idleMs?: number;
   readonly eofGraceMs?: number;
+  /** 观测面（20b B2）：pi 进程 spawn 时回调（file+handle+generation）——E2E/宿主在 spawn 时即记录
+   * 句柄身份，不靠事后审计反推；纯观测不参与生命周期（RpcSessionOpts.onSpawned 同源）。 */
+  readonly onSpawned?: (file: string, handle: ProcessHandle, generation: number) => void;
   readonly audit?: (line: string) => void;
   readonly now?: () => string;
 }
@@ -114,6 +117,7 @@ export function createSessionRegistry(opts: SessionRegistryOpts): SessionRegistr
         ...(opts.timeoutPollMs !== undefined ? { timeoutPollMs: opts.timeoutPollMs } : {}),
         ...(opts.idleMs !== undefined ? { idleMs: opts.idleMs } : {}),
         ...(opts.eofGraceMs !== undefined ? { eofGraceMs: opts.eofGraceMs } : {}),
+        ...(opts.onSpawned !== undefined ? { onSpawned: (handle: ProcessHandle, generation: number) => opts.onSpawned!(file, handle, generation) } : {}),
         ...(opts.now !== undefined ? { now: opts.now } : {}),
         audit: (l: string) => safeAudit(`rpc-session ${sessionIdOf(file)} ${l}`),
       });

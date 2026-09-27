@@ -82,6 +82,9 @@ export interface WriteWiringOpts {
   readonly idleMs?: number;
   /** EOF 宽限（闲置回收优雅链）。 */
   readonly eofGraceMs?: number;
+  /** 观测面（20b B2）：pi spawn 即回调（journal 绝对路径 file+handle+generation）——
+   * E2E 拿句柄身份做销毁链断言，不靠审计事后反推；纯观测不参与生命周期。 */
+  readonly onSpawned?: (file: string, handle: { id: string }, generation: number) => void;
 }
 
 export interface PiAgentUiServer {
@@ -162,6 +165,7 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
       ...(config.write.timeoutPollMs !== undefined ? { timeoutPollMs: config.write.timeoutPollMs } : {}),
       ...(config.write.idleMs !== undefined ? { idleMs: config.write.idleMs } : {}),
       ...(config.write.eofGraceMs !== undefined ? { eofGraceMs: config.write.eofGraceMs } : {}),
+      ...(config.write.onSpawned !== undefined ? { onSpawned: config.write.onSpawned } : {}),
       audit,
     });
   }
