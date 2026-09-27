@@ -4,7 +4,8 @@
 //  W2 prompt 合法→write-ack+宿主收到 file/text        W8 requestId 在途重复→4404
 //  W3 stop 合法→write-stop-ack                        W9 宿主抛错→4402(retryable)+审计
 //  W4 file 越界→4404（宿主未被调）                    W10 text 超 64KiB→4404
-//  W5 形状违反→4404（缺 text/多余字段/rid 非法/空 text）W11 槽归还：同 rid 先后可复用
+//  W5 形状违反→4404（前三案独立可观测；空 text 案在本连接 W5 曾被 close 遮蔽，W13 分连接版补齐）
+//  W11 槽归还：同 rid 先后可复用（W15/W15b 补失败路径：prompt/stop 4402 后同 rid 复用）
 //  W6 未开放写类 t（send/kill）→4405（接线态同样）     W12 接线态读路径回归冒烟（hello→welcome 不变）
 import { describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -42,7 +43,9 @@ class FakeWriteHost implements WriteHostPort {
   next: WriteSendOutcomeDTO = { kind: "launched", intentId: "i-1", commandId: 1 };
   nextStop: WriteStopOutcomeDTO = { kind: "confirmed", exit: { code: 0, signal: null } };
   throwPrompt = false;
-  /** W8：挂起门——非空时 sendPrompt 等待该 promise（造在途窗口）。 */
+  /** W15b：stop 抛错开关。 */
+  throwStop = false;
+  /** W8/W14：挂起门——非空时 sendPrompt 等待该 promise（造在途窗口；用可释放 deferred）。 */
   gatePrompt: Promise<void> | null = null;
   async sendPrompt(file: string, text: string): Promise<WriteSendOutcomeDTO> {
     this.prompts.push({ file, text });
@@ -52,6 +55,7 @@ class FakeWriteHost implements WriteHostPort {
   }
   async stop(file: string): Promise<WriteStopOutcomeDTO> {
     this.stops.push(file);
+    if (this.throwStop) throw new Error("boom-stop");
     return this.nextStop;
   }
 }
@@ -187,11 +191,18 @@ describe("3c-1 写侧帧：网关派发面", () => {
     const r = await makeRig();
     try {
       const c = await authed(r);
-      r.host.gatePrompt = new Promise<void>(() => {}); // 挂起第一次派发（inflight 不归还）
+      let release8!: () => void;
+      r.host.gatePrompt = new Promise<void>((res) => { release8 = res; }); // 可释放挂起门（第19轮：清理前收束）
       await c.say({ t: "prompt", requestId: "r8", file: r.inFile, text: "1" });
       await c.say({ t: "prompt", requestId: "r8", file: r.inFile, text: "2" });
       expect(errs(c).some((f) => f.code === 4404 && f.message === "requestId 在途重复")).toBe(true);
       expect(r.host.prompts.length).toBe(1);
+      release8(); // 释放首个派发：write-ack 到达+槽归还（不是死门悬置到 dispose）
+      await tick(); await tick();
+      expect(c.frames().filter((f) => f.t === "write-ack").length).toBe(1);
+      await c.say({ t: "prompt", requestId: "r8", file: r.inFile, text: "3" }); // rid 复用成功=槽已归还
+      expect(c.frames().filter((f) => f.t === "write-ack").length).toBe(2);
+      expect(r.host.prompts.length).toBe(2);
     } finally { await r.dispose(); }
   });
 
@@ -254,12 +265,16 @@ describe("3c-1 写侧帧：网关派发面", () => {
     const r = await makeRig();
     try {
       const c = await authed(r);
-      r.host.gatePrompt = new Promise<void>(() => {}); // 全部挂起
+      let release14!: () => void;
+      r.host.gatePrompt = new Promise<void>((res) => { release14 = res; }); // 可释放挂起门（第19轮：清理前收束）
       for (let i = 1; i <= 4; i += 1) await c.say({ t: "prompt", requestId: `r14-${i}`, file: r.inFile, text: "x" });
       await c.say({ t: "prompt", requestId: "r14-5", file: r.inFile, text: "x" }); // 第 5 个不同 rid
       const e = errs(c).find((f) => f.code === 4404 && f.message === "在途请求超限");
       expect(e).toBeDefined();
       expect(r.host.prompts.length).toBe(4); // 第 5 个未达宿主
+      release14(); // 释放四门：四个 write-ack 全部到达+四槽归还
+      await tick(); await tick();
+      expect(c.frames().filter((f) => f.t === "write-ack").length).toBe(4);
     } finally { await r.dispose(); }
   });
 
@@ -274,6 +289,20 @@ describe("3c-1 写侧帧：网关派发面", () => {
       await c.say({ t: "stop", requestId: "r15", file: r.inFile }); // 同 rid 复用（若未归还应 4404）
       expect(c.frames().some((f) => f.t === "write-stop-ack")).toBe(true);
       await c.say({ t: "prompt", requestId: "r15", file: r.inFile, text: "y" }); // 再复用
+      expect(c.frames().some((f) => f.t === "write-ack")).toBe(true);
+      expect(errs(c).some((f) => f.code === 4404)).toBe(false);
+    } finally { await r.dispose(); }
+  });
+
+  it("W15b stop 失败路径槽归还：4402 后同 rid 可复用（prompt→ack）", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      r.host.throwStop = true;
+      await c.say({ t: "stop", requestId: "r15b", file: r.inFile });
+      expect(errs(c).some((f) => f.code === 4402)).toBe(true); // stop 失败路径 finally 已归还？
+      r.host.throwStop = false;
+      await c.say({ t: "prompt", requestId: "r15b", file: r.inFile, text: "y" }); // 同 rid 复用（若未归还应 4404）
       expect(c.frames().some((f) => f.t === "write-ack")).toBe(true);
       expect(errs(c).some((f) => f.code === 4404)).toBe(false);
     } finally { await r.dispose(); }
