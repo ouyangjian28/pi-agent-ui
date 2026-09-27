@@ -1,0 +1,2 @@
+# cmd: npx eslint apps packages tests --max-warnings=0
+# LINT_EXIT=0

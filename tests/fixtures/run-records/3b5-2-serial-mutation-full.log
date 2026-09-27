@@ -1,9 +1,9 @@
 
  RUN  v5.0.1 /home/yyj/ai/repos/pi-agent-ui
 
- ❯ |unit| tests/unit/server/recovery-evidence-source.test.ts (40 tests | 2 failed) 190ms
-   ❯ recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） (40)
-     × R28/B13-1 双首捕并发（同实例不同 file）：仓级串行→登记=并集不丢更新；随后 A 锚丢失→concurrent-modification（bless 不可重新授权） 6ms
+ ❯ |unit| tests/unit/server/recovery-evidence-source.test.ts (41 tests | 2 failed) 192ms
+   ❯ recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） (41)
+     × R28/B13-1 双首捕并发（同实例不同 file）：仓级串行→登记=并集不丢更新；随后 A 锚丢失→concurrent-modification（bless 不可重新授权） 7ms
      × R37/§六③ 受控并发闸门：A 持仓链阻塞在 seen 持久化时 B 未入读改写（连 journal 都未开）；释放后双快照+seen 并集 3ms
 
 ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
@@ -50,7 +50,7 @@ AssertionError: expected 1 to be +0 // Object.is equality
 
 
  Test Files  1 failed (1)
-      Tests  2 failed | 38 passed (40)
-   Start at  13:13:03
-   Duration  453ms (tests 50%, transform 39%, import 10%, worker 1%)
+      Tests  2 failed | 39 passed (41)
+   Start at  13:14:11
+   Duration  450ms (tests 52%, transform 39%, import 9%, worker 1%)
 

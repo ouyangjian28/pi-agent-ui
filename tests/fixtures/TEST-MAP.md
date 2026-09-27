@@ -624,10 +624,17 @@
 - fix13「tsc 0」断言不实勘正（composition delete-readonly 两错被管线吞）——fix14 起 tsc 一律裸跑直录 TSC_EXIT。
 - 过程失误实录：BACKFILL 首次重放在未提交态上做，checkout 还原吞掉 v4.1 源改动——重放+先提交再变异（M-240 同型教训再确认：变异前基线必须已提交）。
 - 终态：tsc 0（裸码）/lint 0/vitest 47 files 886 passed+7 skipped=893（基线 892，+1=R32）。
+## 3b5-2b（第17轮 92/100 GO 收口批：证据与措辞收口；2026-10-03）
+- 第17轮（审报=~/ai audits/gpt-adapter-3b5-2-review-2026-10-03.md）：92/100 GO——**不认可「尾项全清」**；未清项=证据（SERIAL 首败归属矛盾+变异完整输出缺）与措辞（旧档未原位撤回、注释未同步）。
+- R39b 默认持久化路径首杀配套（只拒首次 fsx.writeFile 且**不注入 persistSeenLike**）：吞锚错变异下默认 seen 算法照走（fsx 第 2+ 次写健康）→seen.json 落成→快照洗白→R39b 杀（首败 `expected { version: 1, file: 's.jsonl', …(6) } to deeply equal { kind: 'unavailable', …(1) }`）——堵「默认 persist 分支错误」盲区。
+- R40 加固：残留身份断言（唯一 tmp 以 `seen.json.tmp-` 开头，路径级不再靠序号推演）+重试成功不追溯清理孤儿（旧 tmp 仍在=无静默删除）。
+- SERIAL 完整输出复跑+首败归属勘正（R37=bOpens 侵入；并集断言属 R28；教训=首败必须从 FAIL 块归属，不得跨块摘句）。
+- provider 接口注释 B15⑥ 分拆同步（:26-29 接缝契约注释+FsLike JSDoc；异步拒绝契约特化=仅 Promise 型原语，trustFirstCapture 允许同步 boolean）。注释级改动，逻辑未动。
+
 ## 3b5-2（第16轮 92/100 GO 尾项：R36 独立首杀+seen 门残留面+R37/R38 加固；2026-10-03）
 - 测试 R39-R40（40 例文件）：R39 锚首写仅一次失败（后续原语健康）→read-failed+writes==1+seenPersists==0+零落盘——吞锚错变异独占首杀面（3b5-2 实证 R39 杀）；R40 seen 门 rename+清理 rm 双拒（锚已提交）→read-failed（detail=seen-store）+残留=seen tmp（锚在场区别于 R35 锚门残留）+默认重试收敛。
 - 加固：R37 entered 屏障（persist 入口即 resolve，await 5s 超时竞速，弃 50-tick 猜测）+finally 无条件放闸+allSettled 收束再删目录；R38 逐字节原文比对（seen/锚全文件内容，弃字段抽查——第16轮「原文不动」措辞兑现）。
-- 变异二连（3b5-2.md+patches/3b5-2/）：ANCHORSWALLOW2 复放→R39+R35 双杀（R39 独占首杀成立）；SERIAL（chain→per-file Map）→R28+R37 双杀（R37 首败 seen=['b.jsonl'] 丢 a 登记=丢更新实态）。
+- 变异二连（3b5-2.md+patches/3b5-2/）：ANCHORSWALLOW2 复放→R39+R35+R39b 三杀（完整输出=run-records/3b5-2-anchorswallow2-mutation-full.log）；SERIAL（chain→per-file Map）→R28+R37 双杀（完整输出=run-records/3b5-2-serial-mutation-full.log；**第17轮勘正：R37 真实首败=`expected 1 to be +0`（bOpens 侵入），并集断言属 R28**——初版摘句误挂 R37，已原位勘正）。
 - 证据：run-records/3b5-2-vitest.json=901/894/7/0；3b5-2-tsc.log/-lint.log 裸码 0；3b5-1-lint-firstfail-repro.log=首次 lint 失败诊断复现（6c320ba 版原文重跑，诊断文本原样保留）。
 ## 3b5-1（第15轮 §六②③④：确定性故障回归+受控并发+接缝契约；2026-10-03）
 - 源（v4.2）：fsLike 低层原语接缝（writeFile/rename/rm）贯穿锚点写+默认 seen 持久化（默认=真 fs/promises；生产 composition 不注入——受信任宿主边界契约随 persistSeenLike 文档同步收口：resolve=完整提交）。语义无变化（默认路径与 v4.1 逐操作一致）。
