@@ -22,6 +22,11 @@
 //    message；同 file 串行 Map 所有权条件清理（Q14）；工厂补 roots 非空+sessionRoots 绝对校验。
 //  披露边界：serialize=单实例内串行（跨进程无锁，部署禁重叠写者——Q16）；锚点 tmp+rename 原子
 //    ≠掉电耐久（无 fsync——Q13）；读块固定 64KiB 探测（越限块不进结果但已读入临时 buffer）。
+// v4.2（3b5-1：GPT 第15轮 90/100 §六②④）：
+//  fsLike 低层原语接缝（writeFile/rename/rm）贯穿锚点写与默认 seen 持久化——默认=真 fs/promises，
+//    生产 composition 不注入（第15轮接缝契约：受信任宿主边界，resolve=完整提交；确定性故障回归
+//    注入专用）；persistSeenLike 文档契约同步收口（resolve 必须表示完整登记已原子提交）。
+//  语义无变化：默认路径行为与 v4.1 逐操作一致（仅原语可注入）。
 // v4（fix13：GPT 第13轮 80/100 B13-1/B13-2）：
 //  B13-1 seen 丢更新闭合：捕获串行从 per-file Map 改为仓级单链（同实例内所有 file 串行——
 //    seen 读改写整体事务化，跨 file 并行首捕不再整体覆盖丢登记）；tmp 名加 randomBytes 独占量
@@ -77,16 +82,28 @@ const defaultOpenLike: OpenLike = async (abs) => {
 
 export type PersistSeenLike = (evidenceDir: string, next: { version: 1; files: string[] }) => Promise<void>;
 
-// fix14/Y14-1：seen 落盘接缝（默认=tmp+rename 独占名+失败清 tmp；测试注入真实写故障）
-const defaultPersistSeenLike: PersistSeenLike = async (evidenceDir, next) => {
+/** 3b5-1/第15轮§六②：默认持久化路径的低层原语接缝（受信任宿主边界，与 persistSeenLike 同类契约——
+ * 仅供确定性故障回归注入；生产 composition 不注入=真 fs/promises。resolve 语义=完整提交）。 */
+export interface FsLike {
+  writeFile(path: string, data: string, encoding: "utf8"): Promise<void>;
+  rename(from: string, to: string): Promise<void>;
+  rm(path: string, options: { force: true }): Promise<void>;
+}
+
+const realFs: FsLike = { writeFile, rename, rm };
+
+// fix14/Y14-1：seen 落盘接缝（默认=tmp+rename 独占名+失败清 tmp；测试可注入真实写故障）
+const defaultPersistSeenLike = (fsx: FsLike, evidenceDir: string, next: { version: 1; files: string[] }): Promise<void> => {
   const stmp = `${seenPath(evidenceDir)}.tmp-${process.pid}-${Date.now().toString(36)}-${randomBytes(6).toString("hex")}`;
-  try {
-    await writeFile(stmp, JSON.stringify(next), "utf8");
-    await rename(stmp, seenPath(evidenceDir));
-  } catch (err) {
-    await rm(stmp, { force: true }).catch(() => {}); // fix14/Y14-1：失败 tmp 卫生（尽力而为，不掩盖原错）
-    throw err;
-  }
+  return (async () => {
+    try {
+      await fsx.writeFile(stmp, JSON.stringify(next), "utf8");
+      await fsx.rename(stmp, seenPath(evidenceDir));
+    } catch (err) {
+      await fsx.rm(stmp, { force: true }).catch(() => {}); // fix14/Y14-1：失败 tmp 卫生（尽力而为，不掩盖原错）
+      throw err;
+    }
+  })();
 };
 
 export interface RecoveryEvidenceSourceOptions {
@@ -107,7 +124,11 @@ export interface RecoveryEvidenceSourceOptions {
   readonly audit?: (line: string) => void;
   /** 测试接缝：安全句柄注入（默认=safe-open 真路径）。 */
   readonly openLike?: OpenLike;
+  /** 测试接缝：seen 落盘持久化（受信任边界——resolve 必须表示完整登记已按约定原子提交；
+   * 仅可信测试/宿主实现可注入，生产不得无审查替换。默认=tmp+rename 独占名+失败清 tmp）。 */
   readonly persistSeenLike?: PersistSeenLike;
+  /** 测试接缝：默认路径低层原语（writeFile/rename/rm；受信任边界，同上契约。默认=真 fs/promises）。 */
+  readonly fsLike?: FsLike;
   /** 首捕授权（B12-1/Q02）：锚点缺失且仓未登记该 file 时，默认 no-evidence-snapshot（fail-closed）。
    * 仅宿主显式初始化路径（迁移/可信新建声明）返回 true 才建首锚；已登记 file 的锚点丢失
    * →concurrent-modification，本回调不可越（Q03）。抛错=read-failed（宿主面故障≠拒绝授权）。 */
@@ -189,7 +210,8 @@ export function createRecoveryEvidenceProvider(
   }
   const sessionIdFor = opts.sessionIdFor ?? ((f: string) => f.replace(/\.jsonl$/, ""));
   const openLike = opts.openLike ?? defaultOpenLike;
-  const persistSeenLike = opts.persistSeenLike ?? defaultPersistSeenLike;
+  const fsx = opts.fsLike ?? realFs;
+  const persistSeenLike: PersistSeenLike = opts.persistSeenLike ?? ((dir, next) => defaultPersistSeenLike(fsx, dir, next));
   const now = opts.now ?? (() => Date.now());
   const audit = opts.audit ?? (() => {});
   const sessionRoots = opts.sessionRoots ?? opts.roots;
@@ -372,11 +394,11 @@ export function createRecoveryEvidenceProvider(
         let anchorTmp: string | null = null;
         try {
           anchorTmp = `${apath}.tmp-${process.pid}-${now().toString(36)}-${randomBytes(6).toString("hex")}`;
-          await writeFile(anchorTmp, JSON.stringify({ version: 1, file, len: raw.byteLength, sha } satisfies EvidenceAnchor), "utf8");
-          await rename(anchorTmp, apath);
+          await fsx.writeFile(anchorTmp, JSON.stringify({ version: 1, file, len: raw.byteLength, sha } satisfies EvidenceAnchor), "utf8");
+          await fsx.rename(anchorTmp, apath);
           anchorTmp = null; // 已 rename 归位，不再属清理责任
         } catch {
-          if (anchorTmp !== null) await rm(anchorTmp, { force: true }).catch(() => {}); // fix14/Y14-1：失败 tmp 卫生
+          if (anchorTmp !== null) await fsx.rm(anchorTmp, { force: true }).catch(() => {}); // fix14/Y14-1：失败 tmp 卫生
           audit(`recovery-evidence-store-failed file=${file} detail=store`);
           return unavailable("read-failed");
         }
