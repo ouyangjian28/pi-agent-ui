@@ -739,3 +739,8 @@
 - **教训落档**（GPT N3）：静态字符串断言不足——CSS 级联/优先级只有真实引擎计算样式能证；静态断言保留为回归下限，浏览器实测为有效性上限。
 - **运行证据**（本机亲跑，cwd=仓根，PATH=node v24.18.0）：`npx vitest run tests/unit/web/`=12 files/230 passed；`npx tsc -p apps/web --noEmit`=exit 0；`npx eslint apps/web/src tests/unit/web`=exit 0 零输出；`npx vitest run` 全仓=64 files passed+1 skipped，1202 passed+11 skipped。
 - **自曝残余**：①B1 生产忽略语义只能在 resolveWsUrl 单元层（注入桩 dev=false）锁定——RealApp 走 import.meta.env.DEV，jsdom/vitest 下恒 true 无法翻转到生产构建值，接线正确性靠「组合根只经 resolveWsUrl 取 URL」代码事实+dev 下全链例；②跨源 dev 目标下用户手输令牌同样被绑定剥除（hello 恒空串）——即跨源开发服务器无法经本 UI 完成认证，这是「未受信目的地零携密」的刻意收紧，如需合法跨源开发须另设显式可信配置（本批未做）；③浏览器实测为最小 DOM 探针（非整页体感/逐帧验收），手机视口/键盘遍历/对比度仍属 N6 挂起面；④430px 以下等固定尺寸与 accent 族使用面（running badge/用户消息背景/welcome 标志）未在本批改动，N3 指出的机械断言面（rgb/hsl/命名色、秒单位）未升级为 CSS AST 检查。
+
+### r1 后拍板落地：跨源=不拨线+明白提示（选项 A；GLM 执行，2026-10-05 用户 ask_user_question 拍板）
+- **拍板**：开发模式遇跨源 `?server=` 目标时，上段「零携密 hello+connbar 提示」改为**选项 A：一根线都不接**（三件套不建、hello 永不发出），拒绝面 role=alert 明示「已拒绝连接：目标不是本站」+目标 URL+两出口：「改连本站默认」（清 ?server= 保留其余参数/hash/state 后重试同源建连）/「重新输入令牌」（清 localStorage 回输入面）。生产忽略 ?server= 与 isSameOriginWsTarget 判据不变。
+- **落点**：real-app.tsx（untrustedTarget/untrustedUrl 状态+拒绝面分支+connectDefaultTarget/restartWithFreshToken；ConnectedApp 去掉不可达的 untrustedTarget 提示行）；token-gate.test.ts B1 块改写：a) 零 socket+拒绝面+令牌零外带，a2) 改连本站默认（URL 清参+hash/state 保留+同源三件套+拒绝面退出），a3) 重新输入令牌（清存+回输入面+零 socket），c) dev 语义=拒绝面（生产语义仍在 app-clients 单元层锁定）；app-clients.test.ts 空 token 例改为「API 层防御能力」定位（组合根不再这样调用）。
+- **运行证据**（GLM 亲跑）：`npx vitest run tests/unit/web/`=12 files/232 passed；`npx tsc -p apps/web --noEmit`+eslint=exit 0；全仓 `npx vitest run`=1204 passed+11 skipped。提交在 afd18bd 之上（见 git log）。

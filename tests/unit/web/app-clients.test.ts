@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // A1d app-clients 测试：resolveWsUrl 纯函数推导（同源默认/?server=覆盖（仅 dev）/受控降级）+
-// B1 凭据目的地绑定（生产忽略 ?server=/isSameOriginWsTarget 同源判据/跨源零携密 hello）+
+// B1 凭据目的地绑定（生产忽略 ?server=/isSameOriginWsTarget 同源判据/token 置空串的零携密能力——组合根对跨源已改为不拨线，此例锁定 API 层防御能力）+
 // N2 fragment 拒绝 + createAppClients 三件套组装（三面独立连接、hello 带 token）与统一 dispose（幂等）。
 // 注入式假 socket，不起真网络；本文件不触 DOM。
 import { describe, expect, it } from "vitest";
@@ -150,7 +150,7 @@ describe("createAppClients", () => {
     clients.dispose();
   });
 
-  it("B1：token 置空串时 hello 零携密（跨源目的地由组合根如此调用，服务端按未认证拒）", () => {
+  it("B1：token 置空串时 hello 零携密（API 层防御能力；组合根对跨源目标已改为不拨线，不再这样调用）", () => {
     FakeWebSocket.reset();
     const clients = createAppClients({
       url: "wss://collector.example.invalid/ws",

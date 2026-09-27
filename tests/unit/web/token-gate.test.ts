@@ -3,7 +3,7 @@
 // localStorage 回退/URL 优先于 localStorage/受控输入面提交存储/空输入拒提交/
 // 4401 认证失败面→「清除 token 重输」回输入面/连接与错误面不回显令牌（N5 措辞收窄：
 // textContent 断言不支撑「DOM 任何位置/全程」，手输阶段 password input 的 value 本来就可被脚本读）。
-// B1 认证目的地绑定（RealApp 全链）：跨源 ?server= 零携密 hello/同源覆盖正常/生产忽略 ?server=。
+// B1 认证目的地绑定（RealApp 全链，用户拍板选项 A）：跨源 ?server= 不拨线（零 socket）+明白提示/
 // N1 清参边界：空值/重复键/编码值/hash 与 history.state 保留。
 // 注入式假 socket，不起真网络。
 import React from "react";
@@ -237,22 +237,45 @@ describe("N1：清参边界（readUrlToken/clearUrlToken 纯面）", () => {
   });
 });
 
-describe("B1：认证目的地绑定（RealApp 全链，假 socket 抓首帧）", () => {
-  it("a) 预存 token + 跨源 ?server=（不同端口也算跨源）→ 三客户端零 hello 携 token + UI 提示", () => {
+describe("B1：认证目的地绑定（RealApp 全链，选项 A=不拨线+明白提示）", () => {
+  it("a) 预存 token + 跨源 ?server=（不同端口也算跨源）→ 零 socket（hello 永不发出）+ 拒绝面", () => {
     window.localStorage.setItem(TOKEN_STORAGE_KEY, "stored-secret");
     const crossOrigin = `ws://${window.location.hostname}:1/ws`; // 同主机不同端口=跨源
     window.history.replaceState(null, "", `/?server=${encodeURIComponent(crossOrigin)}`);
     render(React.createElement(RealApp, { createSocket: factory }));
-    expect(FakeWebSocket.instances).toHaveLength(3);
-    for (const ws of FakeWebSocket.instances) expect(ws.url).toBe(crossOrigin); // dev 覆盖仍生效
-    act(() => {
-      for (const ws of FakeWebSocket.instances) ws.open();
-    });
-    for (const ws of FakeWebSocket.instances) {
-      expect(ws.sentFrames()).toEqual([{ t: "hello", protocolVersion: 1, token: "" }]); // 零携密
-      expect(ws.sent.join("")).not.toContain("stored-secret");
-    }
+    expect(FakeWebSocket.instances).toHaveLength(0); // 一根线都不接
+    expect(screen.getByRole("alert").textContent).toContain("已拒绝连接：目标不是本站");
     expect(screen.getByText(/跨源目标不支持凭据/)).toBeTruthy();
+    expect(screen.getByText(crossOrigin)).toBeTruthy(); // 目标可见
+    // 已存令牌绝不出本源：无任何连接/帧携带
+    expect(FakeWebSocket.instances.map((ws) => ws.sent.join("")).join("")).not.toContain("stored-secret");
+  });
+
+  it("a2) 拒绝面「改连本站默认」→ 清 ?server=（保留其余参数与 hash/state）→ 同源重建三件套", () => {
+    window.localStorage.setItem(TOKEN_STORAGE_KEY, "stored-secret");
+    const crossOrigin = `ws://${window.location.hostname}:1/ws`;
+    window.history.replaceState({ keep: 1 }, "", `/?server=${encodeURIComponent(crossOrigin)}&x=2#frag`);
+    render(React.createElement(RealApp, { createSocket: factory }));
+    expect(FakeWebSocket.instances).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "改连本站默认" }));
+    expect(window.location.search).toBe("?x=2");
+    expect(window.location.hash).toBe("#frag");
+    expect(window.history.state).toEqual({ keep: 1 });
+    expect(FakeWebSocket.instances).toHaveLength(3); // 同源目标建三件套
+    const expected = `ws://${window.location.host}/`;
+    for (const ws of FakeWebSocket.instances) expect(ws.url).toBe(expected);
+    expect(screen.queryByText(/已拒绝连接/)).toBeNull(); // 拒绝面退出
+  });
+
+  it("a3) 拒绝面「重新输入令牌」→ 清已存令牌回输入面（仍零 socket）", () => {
+    window.localStorage.setItem(TOKEN_STORAGE_KEY, "stored-secret");
+    const crossOrigin = `ws://${window.location.hostname}:1/ws`;
+    window.history.replaceState(null, "", `/?server=${encodeURIComponent(crossOrigin)}`);
+    render(React.createElement(RealApp, { createSocket: factory }));
+    fireEvent.click(screen.getByRole("button", { name: "重新输入令牌" }));
+    expect(window.localStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull();
+    expect(FakeWebSocket.instances).toHaveLength(0);
+    expect(screen.getByText(/请输入访问令牌/)).toBeTruthy(); // 回到输入面
   });
 
   it("b) 预存 token + 同源 ?server=（dev 语义）→ hello 正常携带令牌，无跨源提示", () => {
@@ -271,15 +294,12 @@ describe("B1：认证目的地绑定（RealApp 全链，假 socket 抓首帧）"
     expect(screen.queryByText(/跨源目标不支持凭据/)).toBeNull();
   });
 
-  it("c) 生产模式 ?server= 被忽略回退同源（resolveWsUrl 注入桩 dev=false；RealApp 依赖 import.meta.env.DEV 无法在 jsdom 翻转，生产语义在 app-clients.test.ts 单元层锁定）", () => {
-    // 本例锁定「组合根只经 resolveWsUrl 取 URL」这一接线事实：jsdom（dev 语义）下跨源覆盖生效，
-    // 生产忽略语义见 app-clients.test.ts「B1：生产模式（dev=false）…」例。
+  it("c) jsdom（dev 语义）下跨源覆盖生效=拒绝面接管（生产忽略语义在 app-clients.test.ts 单元层锁定）", () => {
     window.localStorage.setItem(TOKEN_STORAGE_KEY, "stored-secret");
     window.history.replaceState(null, "", "/?server=wss://collector.example.invalid/ws");
     render(React.createElement(RealApp, { createSocket: factory }));
-    expect(FakeWebSocket.instances[0]!.url).toBe("wss://collector.example.invalid/ws"); // dev 生效
-    act(() => FakeWebSocket.instances[0]!.open());
-    expect(FakeWebSocket.instances[0]!.sentFrames()).toEqual([{ t: "hello", protocolVersion: 1, token: "" }]);
+    expect(FakeWebSocket.instances).toHaveLength(0); // 不拨线
+    expect(screen.getByText(/已拒绝连接：目标不是本站/)).toBeTruthy();
   });
 
   it("d) 手输 token 走同源不受影响：输入面提交后 hello 正常携带", () => {

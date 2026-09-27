@@ -39,8 +39,9 @@ export function RealApp({ createSocket }: RealAppProps) {
   const [retryNonce, setRetryNonce] = useState(0);
   // 选中会话留在 RealApp：重连（重建三件套）后选择不丢
   const [file, setFile] = useState<string | null>(null);
-  // B1：当前连接目标为跨源（dev 覆盖）时为真——connbar 提示「跨源目标不携带本机凭据」
+  // B1：当前连接目标为跨源（dev 覆盖）时为真——拒绝面接管（不拨线+明白提示）
   const [untrustedTarget, setUntrustedTarget] = useState(false);
+  const [untrustedUrl, setUntrustedUrl] = useState<string | null>(null);
 
   // 挂载时一次性解析 token：URL ?token=（读取后清参数+存 localStorage）→localStorage→输入面。
   useEffect(() => {
@@ -60,17 +61,39 @@ export function RealApp({ createSocket }: RealAppProps) {
   useEffect(() => {
     if (token === null) return;
     const url = resolveWsUrl(window.location, window.location.search);
-    // B1 凭据目的地绑定：跨源目的地（仅 dev ?server= 可达；生产覆盖已被 resolveWsUrl 忽略）
-    // 零携密——hello 令牌置空串，由服务端按未认证拒绝，已存令牌绝不出本源。
+    // B1 凭据目的地绑定（用户拍板 2026-10-05 选项 A）：跨源目的地（仅 dev ?server= 可达；
+    // 生产覆盖已被 resolveWsUrl 忽略）一律不拨线——三件套不建、hello 永不发出，已存令牌绝不出本源。
     const trusted = isSameOriginWsTarget(window.location, url);
-    const created = createAppClients({ url, token: trusted ? token : "", createSocket });
     setUntrustedTarget(!trusted);
+    if (!trusted) {
+      setUntrustedUrl(url);
+      return; // 拒绝面提供「改连本站默认/重新输入令牌」
+    }
+    setUntrustedUrl(null);
+    const created = createAppClients({ url, token, createSocket });
     setClients(created);
     return () => {
       setClients(null);
       created.dispose();
     };
   }, [token, retryNonce, createSocket]);
+
+  // 选项 A：「改连本站默认」= 清 ?server=（保留其余参数与 hash/state）后重试拨线
+  const connectDefaultTarget = () => {
+    const params = new URLSearchParams(window.location.search);
+    params.delete("server");
+    const cleaned = params.toString();
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${cleaned ? `?${cleaned}` : ""}${window.location.hash}`,
+    );
+    setRetryNonce((n) => n + 1);
+  };
+  const restartWithFreshToken = () => {
+    clearStoredToken();
+    setToken(null); // effect 清理负责 dispose 旧三件套
+  };
 
   if (token === null) {
     return (
@@ -80,6 +103,27 @@ export function RealApp({ createSocket }: RealAppProps) {
           setToken(next);
         }}
       />
+    );
+  }
+  if (untrustedTarget) {
+    return (
+      <div className="app">
+        <section className="empty" role="alert">
+          <h2>已拒绝连接：目标不是本站</h2>
+          <p>跨源目标不支持凭据，已拒绝拨线（通行证不会发给别家门牌）：</p>
+          <p>
+            <code>{untrustedUrl}</code>
+          </p>
+          <p>
+            <button type="button" onClick={connectDefaultTarget}>
+              改连本站默认
+            </button>{" "}
+            <button type="button" onClick={restartWithFreshToken}>
+              重新输入令牌
+            </button>
+          </p>
+        </section>
+      </div>
     );
   }
   if (clients === null) {
@@ -95,7 +139,6 @@ export function RealApp({ createSocket }: RealAppProps) {
     <ConnectedApp
       clients={clients}
       file={file}
-      untrustedTarget={untrustedTarget}
       onSelectFile={setFile}
       onRetry={() => setRetryNonce((n) => n + 1)}
       onClearToken={() => {
@@ -109,14 +152,12 @@ export function RealApp({ createSocket }: RealAppProps) {
 function ConnectedApp({
   clients,
   file,
-  untrustedTarget,
   onSelectFile,
   onRetry,
   onClearToken,
 }: {
   clients: AppClients;
   file: string | null;
-  untrustedTarget: boolean;
   onSelectFile: (file: string) => void;
   onRetry: () => void;
   onClearToken: () => void;
@@ -159,7 +200,6 @@ function ConnectedApp({
         <span>列表：{CONN_LABEL[wsSnap.state]}</span>
         <span>订阅：{CONN_LABEL[subSnap.connState]}</span>
         <span>写：{CONN_LABEL[writeSnap.connState]}</span>
-        {untrustedTarget && <span>跨源目标不支持凭据：未携带本机令牌，服务端将按未认证拒绝</span>}
         {anyDown && (
           <button type="button" onClick={onRetry}>
             重新连接
