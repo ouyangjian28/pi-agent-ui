@@ -744,3 +744,12 @@
 - **拍板**：开发模式遇跨源 `?server=` 目标时，上段「零携密 hello+connbar 提示」改为**选项 A：一根线都不接**（三件套不建、hello 永不发出），拒绝面 role=alert 明示「已拒绝连接：目标不是本站」+目标 URL+两出口：「改连本站默认」（清 ?server= 保留其余参数/hash/state 后重试同源建连）/「重新输入令牌」（清 localStorage 回输入面）。生产忽略 ?server= 与 isSameOriginWsTarget 判据不变。
 - **落点**：real-app.tsx（untrustedTarget/untrustedUrl 状态+拒绝面分支+connectDefaultTarget/restartWithFreshToken；ConnectedApp 去掉不可达的 untrustedTarget 提示行）；token-gate.test.ts B1 块改写：a) 零 socket+拒绝面+令牌零外带，a2) 改连本站默认（URL 清参+hash/state 保留+同源三件套+拒绝面退出），a3) 重新输入令牌（清存+回输入面+零 socket），c) dev 语义=拒绝面（生产语义仍在 app-clients 单元层锁定）；app-clients.test.ts 空 token 例改为「API 层防御能力」定位（组合根不再这样调用）。
 - **运行证据**（GLM 亲跑）：`npx vitest run tests/unit/web/`=12 files/232 passed；`npx tsc -p apps/web --noEmit`+eslint=exit 0；全仓 `npx vitest run`=1204 passed+11 skipped。提交在 afd18bd 之上（见 git log）。
+
+
+#### r2 后修复批（B3+N2/N7/N8，GLM）
+
+- **B3（中，GPT r2 抓出）**：`改连本站默认`在 URL 仅剩 server 一参时失效——旧实现 replaceState 传空串/纯 hash=相对引用，原样保留 query，server 清不掉、永远出不了拒绝面。修法=目标 URL 显式带 `window.location.pathname`（`real-app.tsx` connectDefaultTarget）。回归=token-gate `a2-matrix` 四例（仅 server/仅 server+hash/重复 server 无余参/重复非 server 参数保留）：server 键全清+path/hash/state 保留+同源三件套+3 hello 携令牌+拒绝面退出+按钮前零连接。
+- **N2 空串 fragment 补拒**：`resolveWsUrl` 判据从 `parsed.hash === ""` 改为原始字符串 `!override.includes("#")`（URL.hash 区分不了尾随空 `#`，真实 Chromium 会抛 SyntaxError）。回归=app-clients 空 fragment 两例。
+- **N7 暗主题夹具修正**：`reduced-motion.browser.test.ts` 重构——亮/暗分两份独立文档，data-theme 挂 `<html>`（与生产行为一致；旧版挂普通 div 从未激活级联），并断言根 `--c-bg` 双主题不同值防同色假覆盖。
+- **N8 注释同步**：app-clients.ts 两处「组合根置空串 hello」旧语义注释改为「选项 A 不拨线」。
+- 运行证据：web 237 passed（含真实 Chromium reduce 实测）/全仓 1209 passed+11 skipped/tsc+eslint 净。

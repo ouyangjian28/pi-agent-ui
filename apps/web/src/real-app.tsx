@@ -78,7 +78,9 @@ export function RealApp({ createSocket }: RealAppProps) {
     };
   }, [token, retryNonce, createSocket]);
 
-  // 选项 A：「改连本站默认」= 清 ?server=（保留其余参数与 hash/state）后重试拨线
+  // 选项 A：「改连本站默认」= 清 ?server=（保留 pathname/其余参数/hash/state）后重试拨线。
+  // B3（GPT r2）：目标 URL 必须显式含 pathname——空串/纯 hash 是相对引用，会原样保留原 query，
+  // 「仅 server 一个参数」时清不掉 server、永远出不了拒绝面。
   const connectDefaultTarget = () => {
     const params = new URLSearchParams(window.location.search);
     params.delete("server");
@@ -86,7 +88,7 @@ export function RealApp({ createSocket }: RealAppProps) {
     window.history.replaceState(
       window.history.state,
       "",
-      `${cleaned ? `?${cleaned}` : ""}${window.location.hash}`,
+      `${window.location.pathname}${cleaned ? `?${cleaned}` : ""}${window.location.hash}`,
     );
     setRetryNonce((n) => n + 1);
   };

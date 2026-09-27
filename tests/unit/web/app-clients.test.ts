@@ -85,6 +85,16 @@ describe("resolveWsUrl", () => {
       resolveWsUrl({ protocol: "http:", host: "localhost:3000" }, "?server=ws://127.0.0.1:9001/ws#frag", { dev: true }),
     ).toBe("ws://localhost:3000/");
   });
+  it("N2（GPT r2 补证）：尾随空 fragment（…#）同样拒——URL.hash 空串区分不了，真实 Chromium 会抛 SyntaxError", () => {
+    expect(
+      resolveWsUrl({ protocol: "https:", host: "ui.example.com" }, "?server=wss://dev.example.com/ws%23", {
+        dev: true,
+      }),
+    ).toBe("wss://ui.example.com/");
+    expect(
+      resolveWsUrl({ protocol: "http:", host: "localhost:3000" }, "?server=ws://127.0.0.1:9001/ws#", { dev: true }),
+    ).toBe("ws://localhost:3000/");
+  });
   it("非 ws(s) scheme 的 server 值被忽略，回退同源默认", () => {
     expect(
       resolveWsUrl({ protocol: "https:", host: "ui.example.com" }, "?server=http://evil.example", { dev: true }),

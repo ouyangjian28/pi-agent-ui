@@ -36,8 +36,13 @@ export function resolveWsUrl(location: WsUrlLocationLike, search: string, option
     } catch {
       parsed = null; // 畸形值：回退默认
     }
-    // N2：带 fragment 的 ws(s) URL 按畸形处理（hash 非空即回退），不进 WebSocket 构造器
-    if (parsed !== null && (parsed.protocol === "ws:" || parsed.protocol === "wss:") && parsed.hash === "") {
+    // N2：带 fragment 的 ws(s) URL 按畸形处理（不进 WebSocket 构造器）。判据用原始字符串包含 "#"：
+    // URL.hash 只能区分非空 fragment，尾随空 "#"（hash===""）会被漏拒（GPT r2 补证）。
+    if (
+      parsed !== null &&
+      (parsed.protocol === "ws:" || parsed.protocol === "wss:") &&
+      !override.includes("#")
+    ) {
       return parsed.toString();
     }
   }
@@ -47,8 +52,8 @@ export function resolveWsUrl(location: WsUrlLocationLike, search: string, option
 /**
  * 凭据目的地绑定判据（GPT 审 B1）：hello 是否允许携带（已存/手输）令牌的唯一判据。
  * 同源 = 协议映射一致（https 页面只认 wss://——顺带杜绝 https 页面被 ?server= 降级为明文 ws://）
- * 且 host:port 全等（不同端口即跨源）。任一不同=未受信目的地：调用方必须零携密
- *（令牌置空串发 hello，由服务端按未认证 4401 拒绝），已存令牌绝不出本源。
+ * 且 host:port 全等（不同端口即跨源）。任一不同=未受信目的地：组合根一律不拨线
+ *（选项 A 拒绝面：三件套不建、hello 永不发出），已存令牌绝不出本源。
  */
 export function isSameOriginWsTarget(location: WsUrlLocationLike, url: string): boolean {
   let parsed: URL;
@@ -72,7 +77,7 @@ export interface AppClients {
 
 export interface CreateAppClientsOptions {
   readonly url: string;
-  /** hello 携带的令牌；跨源目的地由组合根置空串（零携密 hello，服务端按未认证拒）。 */
+  /** hello 携带的令牌；只发往同源目的地（跨源由组合根在调用前拒绝，选项 A 不拨线）。 */
   readonly token: string;
   /** 测试注入假 socket；缺省=浏览器全局 WebSocket（各客户端 defaultFactory）。 */
   readonly createSocket?: WebSocketFactory | undefined;

@@ -267,6 +267,55 @@ describe("B1：认证目的地绑定（RealApp 全链，选项 A=不拨线+明�
     expect(screen.queryByText(/已拒绝连接/)).toBeNull(); // 拒绝面退出
   });
 
+  // B3（GPT r2）回归：清 server 后无论剩不剩参数，目标 URL 都必须显式含 pathname——
+  // 旧实现的空串/纯 hash 相对引用会保留原 query，仅 server 一参时永远出不了拒绝面。
+  const crossOriginRef = () => `ws://${window.location.hostname}:1/ws`; // 同主机不同端口=跨源
+  const connectDefaultMatrix: Array<{ name: string; search: string; hash: string; wantSearch: string }> = [
+    { name: "仅 server 一参", search: `?server=${encodeURIComponent(crossOriginRef())}`, hash: "", wantSearch: "" },
+    {
+      name: "仅 server 一参+hash",
+      search: `?server=${encodeURIComponent(crossOriginRef())}`,
+      hash: "#frag",
+      wantSearch: "",
+    },
+    {
+      name: "重复 server 键（无其余参数）",
+      search: `?server=${encodeURIComponent(crossOriginRef())}&server=${encodeURIComponent(`wss://other.example.invalid/ws`)}`,
+      hash: "",
+      wantSearch: "",
+    },
+    {
+      name: "重复非 server 参数保留",
+      search: `?server=${encodeURIComponent(crossOriginRef())}&x=1&x=2`,
+      hash: "#h",
+      wantSearch: "?x=1&x=2",
+    },
+  ];
+  for (const c of connectDefaultMatrix) {
+    it(`a2-matrix【${c.name}】「改连本站默认」→ server 键全清+path/hash/state 保留+同源三件套携令牌`, () => {
+      window.localStorage.setItem(TOKEN_STORAGE_KEY, "stored-secret");
+      window.history.replaceState({ keep: 1 }, "", `/sub${c.search}${c.hash}`);
+      render(React.createElement(RealApp, { createSocket: factory }));
+      expect(FakeWebSocket.instances).toHaveLength(0); // 按钮前始终零连接
+      fireEvent.click(screen.getByRole("button", { name: "改连本站默认" }));
+      expect(window.location.pathname).toBe("/sub");
+      expect(window.location.search).toBe(c.wantSearch);
+      expect(window.location.search).not.toContain("server"); // server 键全部消失
+      expect(window.location.hash).toBe(c.hash);
+      expect(window.history.state).toEqual({ keep: 1 });
+      expect(FakeWebSocket.instances).toHaveLength(3); // 同源三件套
+      const expected = `ws://${window.location.host}/`;
+      for (const ws of FakeWebSocket.instances) expect(ws.url).toBe(expected);
+      act(() => {
+        for (const ws of FakeWebSocket.instances) ws.open();
+      });
+      for (const ws of FakeWebSocket.instances) {
+        expect(ws.sentFrames()).toEqual([{ t: "hello", protocolVersion: 1, token: "stored-secret" }]);
+      }
+      expect(screen.queryByText(/已拒绝连接/)).toBeNull(); // 拒绝面退出
+    });
+  }
+
   it("a3) 拒绝面「重新输入令牌」→ 清已存令牌回输入面（仍零 socket）", () => {
     window.localStorage.setItem(TOKEN_STORAGE_KEY, "stored-secret");
     const crossOrigin = `ws://${window.location.hostname}:1/ws`;
