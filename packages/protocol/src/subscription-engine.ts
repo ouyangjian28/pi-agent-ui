@@ -345,7 +345,9 @@ export class SubscriptionEngine {
     const overBudget = (): ServerFrame => {
       failed = true;
       this.close(4431, "帧超预算", false); // 单一错误出口（C6-04：close 不另排，本帧即返回的那份）
-      return { t: "error", code: 4431, message: "帧超预算", retryable: false, requestId: "" };
+      // K4-发现1：drain 出口终局帧同 close() 信封规则——带 subscriptionId（K3-B1 修订）；
+      // 重放注：首次提交 1d5c56f 时被变异还原事故吞掉（未提交改动遭 git checkout 还原），本提交=真落盘
+      return { t: "error", code: 4431, message: "帧超预算", retryable: false, requestId: "", subscriptionId: this.subscriptionId };
     };
     const commit = (bytes: number): void => { this.backlogBytes = Math.max(0, this.backlogBytes - bytes); };
     const flushHist = (batchEst: number): void => {
