@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""3c-3 变异三连：M6 REGISTRY-CACHE-BYPASS / M7 STATUSFOR-BASE-ONLY / M8 COMPOSE-DISPOSE-SKIP。
+"""3c-3 变异四连：M6 REGISTRY-CACHE-BYPASS / M7 STATUSFOR-BASE-ONLY / M8 COMPOSE-DISPOSE-SKIP / M9 DISPOSE-SHARE-DELETE。
 纪律：每变=apply→定向跑→(永远)restore→验哈希；日志含 stderr 并入（第19c/19d教训）。"""
 import subprocess, sys, hashlib, datetime
 
@@ -17,6 +17,11 @@ MUTS = {
     "apps/server/src/runtime/session-registry.ts",
     "    const s = sessions.get(file);",
     "    const s = undefined as ReturnType<typeof sessions.get>;",
+  ),
+  "M9-DISPOSE-SHARE-DELETE": (
+    "apps/server/src/runtime/session-registry.ts",
+    "      if (disposeP !== null) return disposeP; // 20轮F3：共享收尾 Promise——并发第二等待者不得提前完成",
+    "      if (false && disposeP !== null) return disposeP; // MUT-M9 并发第二等待者不共享收尾",
   ),
   "M8-COMPOSE-DISPOSE-SKIP": (
     "apps/server/src/composition.ts",
@@ -61,4 +66,4 @@ for name, (path, old, new) in MUTS.items():
 
 if fails:
     print("\n".join(["未杀变异:"] + fails)); sys.exit(1)
-print("三变异全杀+全还原（树净）")
+print("四变异全杀+全还原（树净）")
