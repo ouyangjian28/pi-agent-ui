@@ -118,7 +118,7 @@ describe("P0-1b 裁决持久化 v2（崩溃/重启矩阵 R1-R10）", () => {
     await seedAnchor(e);
     const anchorPath = join(e.evidenceDir, `${encodeURIComponent(e.file)}.evidence.json`);
     const anchorBefore = JSON.parse(await readFile(anchorPath, "utf8")) as { len: number; sha: string };
-    const subj = repairSubject(sha(torn), 30, 66);
+    const subj = fragSubject(sha(torn), 30, 66, "2026-10-05T00:00:00.000Z", "i1"); // r4 双证：解锁面用 fragment 裁决（归因 i1）；repair-only 恰是要堵的洞（B-r3-2）
     const r1 = await adjudicateJournal({
       ...opts(e, subj, "resend"), at: "2026-10-06T00:00:00.000Z",
       writeAnchorImpl: async () => { throw new Error("crash-transfer"); },
@@ -134,9 +134,9 @@ describe("P0-1b 裁决持久化 v2（崩溃/重启矩阵 R1-R10）", () => {
     const r2 = await adjudicateJournal(opts(e, subj, "resend"));
     expect(r2).toMatchObject({ kind: "idempotent", at: "2026-10-06T00:00:00.000Z" });
     const report = recoverFromSnapshot(await recapture(e));
-    expect(report.resumeBlocked).toBe(false);
-    expect(report.unknownEffect).toContain("i1"); // repair 裁决只解阴影不解效果
-    expect(report.resumable).toEqual([]);
+    expect(report.resumeBlocked).toBe(false); // 双证齐（repair 对账+fragment 归因 i1）→解锁
+    expect(report.unknownEffect).toContain("i1"); // fragment 裁决授权 resend，但撕裂意图在旧快照仍是 unknown（授权≠已处理）
+    expect(report.resumable).toEqual(["i1"]); // r4：归因 resend → i1 可重发
     await cleanup(e);
   });
 
@@ -180,7 +180,11 @@ describe("P0-1b 裁决持久化 v2（崩溃/重启矩阵 R1-R10）", () => {
     expect(buildRecoverReport(base, "q", { fragments: [], blocked: false }).resumeBlocked).toBe(true);
     const stale = [...base, JSON.parse(adjRepair(sha("other"), 22, 50))] as JournalLine[];
     expect(buildRecoverReport(stale, "q", { fragments: [], blocked: false }).resumeBlocked).toBe(true);
-    const match = [...base, JSON.parse(adjRepair(sha("real-tail"), 22, 50))] as JournalLine[];
+    // r4 双证：repair-only 配对不解效果门（B-r3-2 冷捕获缝）——对账面闭合仍阻断
+    const matchedRepairOnly = [...base, JSON.parse(adjRepair(sha("real-tail"), 22, 50))] as JournalLine[];
+    expect(buildRecoverReport(matchedRepairOnly, "q", { fragments: [], blocked: false }).resumeBlocked).toBe(true);
+    // 同四元组 fragment 裁决归因 i1（lines 需有 i1 重放范围在场）→双证齐才解锁
+    const match = [...base, JSON.parse(send("i1")), JSON.parse(adjFrag(sha("real-tail"), 22, 50, "2026-10-05T00:00:00.000Z", "i1", "resend"))] as JournalLine[];
     expect(buildRecoverReport(match, "q", { fragments: [], blocked: false }).resumeBlocked).toBe(false);
   });
 
@@ -209,14 +213,16 @@ describe("P0-1b 裁决持久化 v2（崩溃/重启矩阵 R1-R10）", () => {
     const e = await env([jl("i1"), send("i1"), repairRow(30, 66, sha(torn))]);
     await seedAnchor(e);
     const snap = await recapture(e); // 修复后（未裁决）快照
-    expect((await import("../../../apps/server/src/runtime/recover.ts")).recoverFromSnapshot(snap).resumeBlocked).toBe(true);
-    // 旧快照粘滞：裁决后旧快照 lines 不变（无裁决行）→repairUndecided 语义恒阻断
-    expect((await import("../../../apps/server/src/runtime/recover.ts")).recoverFromSnapshot(snap, { repairUndecided: true }).resumeBlocked).toBe(true);
-    // 落裁决→新快照（裁决行在场）解锁
-    expect((await adjudicateJournal(opts(e, repairSubject(sha(torn), 30, 66), "resend"))).kind).toBe("adjudicated");
+    const { recoverFromSnapshot } = await import("../../../apps/server/src/runtime/recover.ts");
+    expect(recoverFromSnapshot(snap).resumeBlocked).toBe(true);
+    // 旧快照粘滞：裁决后旧快照 lines 不变（无裁决行）→ repairUndecided 快照字段（r4 L-r3-2：写真字段而非被忽略的第二参数）恒阻断
+    expect(recoverFromSnapshot({ ...snap, repairUndecided: true }).resumeBlocked).toBe(true);
+    // 落裁决（r4 双证：fragment 归因 i1）→新快照（裁决行在场+双证齐）解锁
+    expect((await adjudicateJournal(opts(e, fragSubject(sha(torn), 30, 66, "2026-10-05T00:00:00.000Z", "i1"), "resend"))).kind).toBe("adjudicated");
     const fresh = await recapture(e);
     const report = recoverFromSnapshot(fresh);
     expect(report.resumeBlocked).toBe(false);
+    expect(report.resumable).toContain("i1"); // fragment resend 归因覆盖 unknown
     await cleanup(e);
   });
 
@@ -233,8 +239,8 @@ describe("P0-1b 裁决持久化 v2（崩溃/重启矩阵 R1-R10）", () => {
       "q", { fragments: [], blocked: false },
     );
     expect(half.resumeBlocked).toBe(true);
-    // 全部裁决→解锁
-    expect((await adjudicateJournal(opts(e, repairSubject(sha(tornA), 30, 66, at2), "resend"))).kind).toBe("adjudicated");
+    // 全部裁决→解锁（r4 双证：事务二也需 fragment 归因 i1；repair-only 对账不解效果门）
+    expect((await adjudicateJournal(opts(e, fragSubject(sha(tornA), 30, 66, at2, "i1"), "resend"))).kind).toBe("adjudicated");
     const full = await recapture(e);
     expect(recoverFromSnapshot(full).resumeBlocked).toBe(false);
     await cleanup(e);
@@ -336,13 +342,15 @@ describe("P0-1b 裁决持久化 v2（崩溃/重启矩阵 R1-R10）", () => {
     const X = sha(torn);
     const at1 = "2026-10-05T00:00:00.000Z";
     const at2 = "2026-10-05T01:00:00.000Z";
-    // 主负例：tx1 fragment resend i1 + tx2 仅 repair 裁决（解锁阴影不解效果）→新残片 unknown 不被旧授权覆盖
-    // （sending 证据只来自残片——不落完整 sending 行，避免在途排除污染杀点）
-    const rows = [jl("i1"), repairRow(30, 66, X, at1), repairRow(30, 66, X, at2),
-      adjFrag(X, 30, 66, at1, "i1", "resend"), adjRepair(X, 30, 66, at2)];
+    // 主负例（r4 重构，保 scopeCovers 独立杀点）：tx1=frag(i1,resend)，tx2=frag(i2,resend)——两事务归因面
+    // 均满足（双证齐，归因门不阻断），但 i1 的新残片证据跨双事务：shasToTxKeys(X)={tx1,tx2} 中 tx2 的
+    // 授权集={i2}不含 i1→scopeCovers 不覆盖→i1 留 unknown。若 tx2 换 repair-only 或不裁决，归因门先阻断，
+    // 杀点就不再是 scopeCovers 本身（GPT r3 L-r3-3 同型批评）。
+    const rows = [jl("i1"), jl("i2"), repairRow(30, 66, X, at1), repairRow(30, 66, X, at2),
+      adjFrag(X, 30, 66, at1, "i1", "resend"), adjFrag(X, 30, 66, at2, "i2", "resend")];
     const { lines } = parseJournalText(`${rows.join("\n")}\n`);
     const report = buildRecoverReport(lines, "q", { fragments: [{ raw: torn, error: "撕裂尾", partialTail: true }], blocked: false });
-    expect(report.resumeBlocked).toBe(false); // 阴影全解（两事务均有裁决）+残片归因成功
+    expect(report.resumeBlocked).toBe(false); // 双证齐（两事务均有归因裁决）→无阻断，杀点在作用域面
     expect(report.unknownEffect).toContain("i1");
     expect(report.resumable).not.toContain("i1"); // 旧裁决授权锢在 tx1 证据链——tx2 新证据未获同向裁决
     // 对照组：tx2 也 fragment resend i1（全部同 sha 事务同向裁决）→覆盖成立
@@ -462,13 +470,117 @@ describe("P0-1b 裁决持久化 v2（崩溃/重启矩阵 R1-R10）", () => {
       (fh as any).close = async () => { counter.closed += 1; await realClose(); };
       return { fh, size: real.size };
     };
+    // r4：写失败面同计数（open 计数+append 即抛）——句柄泄漏在写失败面同样可验
+    const crashCounting = async (abs: string): Promise<{ fh: FileHandle; size: number }> => {
+      const opened = await openCounting(abs);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (opened.fh as any).appendFile = async () => { throw new Error("crash-before-append"); };
+      return opened;
+    };
     const subj = repairSubject(sha(torn), 30, 66);
-    expect((await adjudicateJournal({ ...opts(e3, subj, "resend"), openHandle: openCounting })).kind).toBe("adjudicated");
-    expect((await adjudicateJournal({ ...opts(e3, subj, "resend"), openHandle: openCounting })).kind).toBe("idempotent");
-    expect((await adjudicateJournal({ ...opts(e3, subj, "abandon"), openHandle: openCounting })).kind).toBe("aborted"); // conflicting
-    expect((await adjudicateJournal({ ...opts(e3, { ...subj, at: "1999-01-01T00:00:00.000Z" }, "resend"), openHandle: openCounting })).kind).toBe("aborted"); // subject-absent
-    expect((await adjudicateJournal({ ...opts(e3, { ...subj, at: "1999-01-01T00:00:00.000Z" }, "resend"), openHandle: crashAppend })).kind).toBe("aborted"); // write-failed（不同句柄面）
+    // r4 L-r3-4 重写：逐次增量断言（每调用即验 opened===closed，中途泄漏立现）；五路径全部接计数句柄
+    // （含写失败面）；写失败形=open 计数后 append 即抛。
+    const runCounted = async (extra: Partial<Parameters<typeof adjudicateJournal>[0]>): Promise<string> => {
+      const r = await adjudicateJournal({ ...opts(e3, subj, "resend"), openHandle: openCounting, ...extra });
+      expect(counter.closed).toBe(counter.opened); // 逐次增量：本次调用无泄漏
+      return r.kind;
+    };
+    expect(await runCounted({})).toBe("adjudicated");
+    expect(await runCounted({})).toBe("idempotent");
+    expect(await runCounted({ verdict: "abandon" })).toBe("aborted"); // conflicting（同四元组反 verdict）
+    expect(await runCounted({ subject: { ...subj, at: "1999-01-01T00:00:00.000Z" } })).toBe("aborted"); // subject-absent
+    expect(await runCounted({ subject: { ...subj, at: "1999-01-01T00:00:00.000Z" }, openHandle: crashCounting })).toBe("aborted"); // write-failed（同计数面）
     expect(counter.closed).toBe(counter.opened); // 计数面：每开必关，无泄漏
     await cleanup(e3);
+  });
+
+  it("R17 残片无事务映射不覆盖（r4 B-r3-1）：残片 sha 不在 repairLog（撕裂字节失配同形异容）→授权链不成立，resumable 排除；变异杀点=该门改 continue 放行", async () => {
+    const torn = '{"t":"sending","intentId":"i1"';
+    const X = sha(torn);
+    const torn2 = '{"t":"sending","intentId":"i1","x":"y"'; // 同意图不同字节（完整闭合值+撕裂处干净）——sha≠X，repairLog 无对应事务
+    // 归因裁决锢在 X 事务；残片证据链指向 Y=sha(torn2)——无事务可证被授权→不覆盖
+    const rows = [jl("i1"), send("i1"), repairRow(30, 66, X), adjFrag(X, 30, 66, "2026-10-05T00:00:00.000Z", "i1", "resend")];
+    const report = buildRecoverReport(parseJournalText(`${rows.join("\n")}\n`).lines, "q", { fragments: [{ raw: torn2, error: "撕裂尾", partialTail: true }], blocked: false });
+    expect(report.resumeBlocked).toBe(false); // 双证齐（事务有归因裁决+无坏行未决）
+    expect(report.unknownEffect).toContain("i1");
+    expect(report.resumable).not.toContain("i1"); // B-r3-1 杀点：无映射→保守排除（旧实现空循环直达 return true=放行）
+  });
+
+  it("R18 锚严格 schema（r4 B-r3-3）：version≠1/file 错绑/len 负/len 非整数/sha 非小写hex——全部 anchor-corrupt 写前拒零改盘；合法锚不拒", async () => {
+    const torn = '{"t":"sending","intentId":"i1"';
+    const X = sha(torn);
+    const anchorPathOf = (e: Env) => join(e.evidenceDir, `${encodeURIComponent(e.file)}.evidence.json`);
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ["version=99", { version: 99, file: "q.jsonl", len: 0, sha: X }],
+      ["file 错绑", { version: 1, file: "other.jsonl", len: 0, sha: X }],
+      ["len 负", { version: 1, file: "q.jsonl", len: -1, sha: X }],
+      ["len 非整数", { version: 1, file: "q.jsonl", len: 1.5, sha: X }],
+      ["sha 大写", { version: 1, file: "q.jsonl", len: 0, sha: X.toUpperCase() }],
+      ["sha 短", { version: 1, file: "q.jsonl", len: 0, sha: "abc" }],
+    ];
+    for (const [name, a] of cases) {
+      const e = await env([jl("i1"), repairRow(30, 66, X)]);
+      const { writeFile: wf } = await import("node:fs/promises");
+      await wf(anchorPathOf(e), JSON.stringify(a), "utf8");
+      const before = await readFile(e.abs);
+      expect(await adjudicateJournal(opts(e, fragSubject(X, 30, 66, "2026-10-05T00:00:00.000Z", "i1"), "resend")), name).toMatchObject({ kind: "aborted", reason: "anchor-corrupt" });
+      expect((await readFile(e.abs)).equals(before), name).toBe(true); // 写前拒零改盘
+      await cleanup(e);
+    }
+    // 对照：合法锚（version=1+file 绑定+len 安全非负整数+sha 64 位小写 hex）不拒
+    const e2 = await env([jl("i1"), repairRow(30, 66, X)]);
+    await seedAnchor(e2);
+    expect(await adjudicateJournal(opts(e2, fragSubject(X, 30, 66, "2026-10-05T00:00:00.000Z", "i1"), "resend"))).toMatchObject({ kind: "adjudicated" });
+    await cleanup(e2);
+  });
+
+  it("R19 组一致性二维（r4 B-r3-4）：同四元组 verdict 混合/多目标任一>1→整组失效阻断（kind 维合法=双证共存）；写面拒的组合读面不得当有效授权", async () => {
+    const torn = '{"t":"sending","intentId":"i1"';
+    const X = sha(torn);
+    const base = [jl("i1"), send("i1"), repairRow(30, 66, X)];
+    const at = "2026-10-05T00:00:00.000Z";
+    const run = (extra: string[]) =>
+      buildRecoverReport(parseJournalText(`${[...base, ...extra].join("\n")}\n`).lines, "q", { fragments: [], blocked: false });
+    // verdict 混合（跨 kind 形）：fragment(resend,i1)+repair(abandon) 同四元组——效果语义矛盾→组失效
+    const mixedKind = run([adjFrag(X, 30, 66, at, "i1", "resend"), adjRepair(X, 30, 66, at, "abandon")]);
+    expect(mixedKind.resumeBlocked).toBe(true);
+    expect(mixedKind.derivedAdjudications).toEqual([]);
+    // 对照：同 verdict 的 repair+fragment 双行=双证合法共存（kind 维不判矛盾）
+    const dualCert = run([adjRepair(X, 30, 66, at, "resend"), adjFrag(X, 30, 66, at, "i1", "resend")]);
+    expect(dualCert.resumeBlocked).toBe(false);
+    expect(dualCert.resumable).toContain("i1");
+    // verdict 混合：同 intentId 同四元组双 verdict（写面 conflicting 拒，手写盘面防御）
+    const mixedVerdict = run([adjFrag(X, 30, 66, at, "i1", "resend"), adjFrag(X, 30, 66, at, "i1", "abandon")]);
+    expect(mixedVerdict.resumeBlocked).toBe(true);
+    expect(mixedVerdict.resumable).toEqual([]);
+    // 多目标（r3 已有 P8/R11，此处三维归一）
+    const multiTarget = run([adjFrag(X, 30, 66, at, "i1", "resend"), adjFrag(X, 30, 66, at, "i2", "resend")]);
+    expect(multiTarget.resumeBlocked).toBe(true);
+    // 对照：同 kind 同 verdict 单目标（双证齐）→组一致→解锁
+    const ok = run([adjFrag(X, 30, 66, at, "i1", "resend")]);
+    expect(ok.resumeBlocked).toBe(false);
+    expect(ok.resumable).toContain("i1");
+  });
+
+  it("R20 冷捕获真实链回归（r4 B-r3-2/P7）：真撕裂→真 repair→裁决→重读；repair-only 仍阻断 vs fragment 归因解锁", async () => {
+    const torn = `{"t":"sending","intentId":"i1","pay`;
+    const good = `${jl("i1")}\n${send("i1")}`;
+    const e = await env([], `${good}\n${torn}`); // 真撕裂尾（无换行）
+    await seedAnchor(e);
+    // 真 repair：撕裂尾移除→事务落盘
+    const rep = await repairJournalTail({ file: e.file, roots: [e.roots], evidenceDir: e.evidenceDir, buildId: "b1" });
+    expect(rep.kind).toBe("repaired");
+    if (rep.kind !== "repaired") throw new Error("unreachable");
+    const { byteStart, byteEnd, removedSha256: X, at: repAt } = rep; // 真实事务四元组（byteStart/End 由盘面决定，不硬编码）
+    // 冷捕获缝对照（B-r3-2 核心负例）：repair-only 裁决=对账闭合，重读后不得解锁重发授权
+    expect(await adjudicateJournal(opts(e, repairSubject(X, byteStart, byteEnd, repAt), "resend"))).toMatchObject({ kind: "adjudicated" });
+    const afterRepairOnly = recoverFromSnapshot(await recapture(e));
+    expect(afterRepairOnly.resumeBlocked).toBe(true); // 归因面缺席——重启后反而更宽的缝已闭合（B-r3-2）
+    // 同四元组 fragment 归因 i1→双证齐→解锁+可重发
+    expect(await adjudicateJournal(opts(e, fragSubject(X, byteStart, byteEnd, repAt, "i1"), "resend"))).toMatchObject({ kind: "adjudicated" });
+    const dual = recoverFromSnapshot(await recapture(e));
+    expect(dual.resumeBlocked).toBe(false);
+    expect(dual.resumable).toContain("i1");
+    await cleanup(e);
   });
 });

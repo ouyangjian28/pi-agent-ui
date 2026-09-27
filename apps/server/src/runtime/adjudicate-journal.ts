@@ -89,8 +89,14 @@ async function loadAnchor(evidenceDir: string, file: string): Promise<AnchorFile
   }
   try {
     const a = JSON.parse(txt) as AnchorFile;
-    if (typeof a.len !== "number" || typeof a.sha !== "string") return "corrupt";
-    return a;
+    // r4（GPT r3 B-r3-3）：严格锚 schema——与 repair-tail parseAnchor 逐项对齐（version=1+绑定
+    // 当前 file+len 非负安全整数+sha 64 位小写 hex）。只验两个字段类型时非法身份锚可被新锚洗白。
+    if (a !== null && typeof a === "object" && a.version === 1 && a.file === file &&
+        typeof a.len === "number" && Number.isInteger(a.len) && a.len >= 0 &&
+        typeof a.sha === "string" && /^[0-9a-f]{64}$/.test(a.sha)) {
+      return a;
+    }
+    return "corrupt";
   } catch {
     return "corrupt";
   }
@@ -160,13 +166,14 @@ export async function adjudicateJournal(opts: AdjudicateOptions): Promise<Adjudi
     const real = await openSafeReadWrite(a);
     return { fh: real.fh as unknown as FileHandle, size: real.size };
   });
-  let fh: FileHandle;
+  let fh: FileHandle | null = null; // r4 L-r3-1：open 成功后即进入 try/finally——readFile 失败也确定性 close，不依赖 GC
   let rawBuf: Buffer;
   try {
     const opened = await openHandle(abs);
     fh = opened.fh;
     rawBuf = await fh.readFile();
   } catch {
+    if (fh) await fh.close().catch((e) => audit(`adjudicate-fh-close-failed file=${opts.file} detail=${String(e)}`));
     audit(`adjudicate-aborted file=${opts.file} reason=file-absent`);
     return { kind: "aborted", reason: "file-absent", detail: "open-or-read-failed" };
   }
@@ -248,13 +255,20 @@ async function adjudicateWithHandle(
     const first = priors[0];
     const onlyTarget = targets.length === 1 ? targets[0] : undefined;
     if (first === undefined) return { kind: "aborted", reason: "conflicting-verdict", detail: "既有裁决集不可读（矛盾证据拒）" };
-    if (first.verdict === opts.verdict && priors.every((a) => a.subject.kind === subject.kind) && (subject.kind !== "fragment" || (onlyTarget !== undefined && onlyTarget === subject.intentId))) {
-      return { kind: "idempotent", at: first.at };
+    // r4（GPT r3 B-r3-2 双证）：repair 裁决（对账）与 fragment 裁决（归因）同四元组同 verdict=合法共存
+    // （不同 subject，互不构成翻转）；幂等/终局翻转判定按 kind 分域。
+    const sameKind = priors.filter((a) => a.subject.kind === subject.kind);
+    const sameKindFirst = sameKind[0];
+    if (sameKindFirst !== undefined) {
+      if (sameKindFirst.verdict === opts.verdict && (subject.kind !== "fragment" || (onlyTarget !== undefined && onlyTarget === subject.intentId))) {
+        return { kind: "idempotent", at: sameKindFirst.at };
+      }
+      if (subject.kind === "fragment" && onlyTarget !== undefined && onlyTarget !== subject.intentId) {
+        return { kind: "aborted", reason: "conflicting-verdict", detail: `该修复事务已绑定归因目标 ${onlyTarget}（终局不可静默更换）` };
+      }
+      return { kind: "aborted", reason: "conflicting-verdict", detail: `已裁决 ${sameKindFirst.verdict}，终局不可翻转` };
     }
-    if (subject.kind === "fragment" && onlyTarget !== undefined && onlyTarget !== subject.intentId) {
-      return { kind: "aborted", reason: "conflicting-verdict", detail: `该修复事务已绑定归因目标 ${onlyTarget}（终局不可静默更换）` };
-    }
-    return { kind: "aborted", reason: "conflicting-verdict", detail: `已裁决 ${first.verdict}，终局不可翻转` };
+    // 该 kind 首行：跨 kind 双证追加（verdicts 已验全同，targets 已验≤1，无矛盾面）
   }
 
   // 落盘：盘面门保证无撕裂尾（sep 逻辑保留作防御）；append+sync。

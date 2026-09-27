@@ -392,17 +392,21 @@ export function buildRecoverReport(lines: readonly JournalLine[], sessionId: Ses
   const validAdjudications = adjudications.filter((l) => repairKeys.has(repairKey(l.subject)));
   const fragAdj = validAdjudications.filter((l): l is Extract<JournalLine, { t: "adjudicate" }> & { subject: { kind: "fragment"; intentId: IntentId } } => l.subject.kind === "fragment");
   const repairAdj = validAdjudications.filter((l): l is Extract<JournalLine, { t: "adjudicate" }> & { subject: { kind: "repair" } } => l.subject.kind === "repair");
+  // r4（GPT r3 B-r3-4）：矛盾组=按四元组分组的**全部**有效裁决（fragment+repair 混算），组内效果
+  // 语义任一维不一致→整组失效：多 verdict（含 repair 行与 fragment 行矛盾）/多归因目标（fragment 内）。
+  // kind 维不判矛盾：同 verdict 的 repair+fragment 双行=双证合法形态（对账+归因共存，B-r3-2）。
+  // 写面拒的组合（反 verdict/换目标），读面手写盘面防御同拒，不得当有效授权。
   const conflictKeys = new Set<string>();
   {
-    const targetsByKey = new Map<string, Set<IntentId>>();
+    const groups = new Map<string, { verdicts: Set<string>; targets: Set<IntentId> }>();
     for (const l of validAdjudications) {
-      if (l.subject.kind !== "fragment") continue;
       const k = repairKey(l.subject);
-      const set = targetsByKey.get(k) ?? new Set<IntentId>();
-      set.add(l.subject.intentId);
-      targetsByKey.set(k, set);
+      const g = groups.get(k) ?? { verdicts: new Set<string>(), targets: new Set<IntentId>() };
+      g.verdicts.add(l.verdict);
+      if (l.subject.kind === "fragment") g.targets.add(l.subject.intentId);
+      groups.set(k, g);
     }
-    for (const [k, t] of targetsByKey) if (t.size > 1) conflictKeys.add(k);
+    for (const [k, g] of groups) if (g.verdicts.size > 1 || g.targets.size > 1) conflictKeys.add(k);
   }
   // r3（GPT r2 B3）：冲突组整组失效——矛盾归因证据存在时，该事务的 repair 裁决同样不可消阴影，
   // 冲突组非空本身并入修复阴影（读面对手写盘面/崩溃残局的防御：写面拒换目标不覆盖历史盘面）。
@@ -454,25 +458,21 @@ export function buildRecoverReport(lines: readonly JournalLine[], sessionId: Ses
   }
   // r3（GPT r2 B1）：覆盖判定——授权裁决（resend/abandon）携带来源事务四元组；intentId 的每一条
   // 来源残片，其内容可能归属的全部事务（同 sha 事务集）都须有该 intentId 的同向裁决才生效。
-  // 无残片源（终裁 unknown 行/G2 消耗）→ resend 不可覆盖（裁决只能授权其四元组证据链内的残片，
-  // 不能凭空翻案）；abandon 无源时视为终局放弃（无反证）。同 sha 双事务只裁其一→不覆盖（保守）。
+  // 无残片源（热路径修复后残片已移除/终裁 unknown 行/G2 消耗）→ r4（GPT r3 B-r3-2）冷热统一：
+  // 热路径唯一效果证据链=journal 内 repair+裁决行——授权链自身完整即成立；同 sha 双事务只裁其一→不覆盖（保守）。
   const scopeCovers = (id: IntentId, grants: Map<IntentId, Set<string>>): boolean => {
     const have = grants.get(id);
     if (!have) return false;
     const need = unknownShas.get(id);
-    if (!need || need.size === 0) return true; // 无残片源（适用 abandon；resend 调用方已先用 unknown.has 门控）
+    if (!need || need.size === 0) return true; // 无残片源：resend 授权链自证 / abandon 终局放弃（无反证）
     for (const s of need) {
       const txs = shasToTxKeys.get(s);
-      if (!txs) continue; // 残片内容无对应事务（如撕裂字节失配/G2 消耗路径）→ 无事务可授权
+      if (!txs || txs.size === 0) return false; // r4 B-r3-1：残片内容无对应事务（撕裂字节失配等）→来源无法证明被授权→不覆盖（保守排除，不得空循环放行）
       for (const k of txs) if (!have.has(k)) return false;
     }
     return true;
   };
-  const resendCovers = (id: IntentId): boolean => {
-    const need = unknownShas.get(id);
-    if (!need || need.size === 0) return false; // resend 必须锢在残片证据链内，不覆盖无源 unknown
-    return scopeCovers(id, resendKeys);
-  };
+  const resendCovers = (id: IntentId): boolean => scopeCovers(id, resendKeys); // r4：无源面由授权链自证——双证下归因门已保证事务有裁决，效果面不再依赖残片在场（否则热路径裁决恒无效=裁决持久化失义）
   const abandonExcludes = (id: IntentId): boolean => scopeCovers(id, abandonKeys);
   // G2 裁决（s4h H2 整批冲突校验）：同一 raw 的有效目标集>1=冲突裁决——两条都不是重复，整条证据
   // 保留阻断（消费前预检，两种顺序结果恒定）；相同目标重复合并（幂等）。裁决有效消耗条件：
@@ -498,8 +498,15 @@ export function buildRecoverReport(lines: readonly JournalLine[], sessionId: Ses
     consumedVerdictIds.add(target);
     unattributed = unattributed.filter((b) => b !== hit);
   }
-  const unadjudicatedRepairs = repairLog.filter((rf) => !adjudicatedRepairs.has(repairKey(rf))); // 配对制：每条修复事务须有身份匹配的裁决才解锁
-  const repairShadow = unadjudicatedRepairs.length > 0 || (opts.pendingRepair ?? false) || (opts.repairUndecided ?? false) || conflictKeys.size > 0; // P0-1a r1-r3 恒阻断语义+P0-1b 配对解锁：被移除尾段里的效果证据不可再派生，未裁决的修复事务、进行中事务（pending）、缺修复事实的旧快照（undecided，换新快照裁决）、矛盾归因冲突组（r3 B3）均保守阻断重发授权
+  const unadjudicatedRepairs = repairLog.filter((rf) => !adjudicatedRepairs.has(repairKey(rf))); // 对账面：无任何有效裁决的事务
+  // r4（GPT r3 B-r3-2）：双证模型——repair 裁决=物理修复对账（解「修复事实未确认」）；
+  // fragment 裁决=效果归因（携 intentId+verdict，是唯一的效果授权面）。冷热路径统一：每个修复事务
+  // 须有同四元组有效 fragment 裁决归因，否则其移除尾段的效果去向不明→范围级阻断。热路径残片在场
+  // 时由 unknown+scopeCovers 把关（同收窄）；冷捕获（新快照残片丢失）曾凭 repair-only 配对放行
+  // enqueue 重发资格——重启反而更宽，违背裁决持久化初衷，本门闭合该缝。
+  const attributedTxKeys = new Set<string>(effectiveFragAdj.map((l) => repairKey(l.subject)));
+  const unattributedRepairs = repairLog.filter((rf) => !attributedTxKeys.has(repairKey(rf)));
+  const repairShadow = unadjudicatedRepairs.length > 0 || unattributedRepairs.length > 0 || (opts.pendingRepair ?? false) || (opts.repairUndecided ?? false) || conflictKeys.size > 0; // P0-1a 恒阻断语义+P0-1b 配对解锁（双证）：未裁决事务、有裁决但无归因裁决的事务（repair-only 对账不解效果授权）、进行中事务（pending）、缺修复事实的旧快照（undecided）、矛盾组均保守阻断重发授权
   const resumeBlocked = diskBlocked || unattributed.length > 0 || repairShadow; // 盘面阻断、未裁决证据、修复阴影任一→授权阻断（两证分离）
   // 派生 unknown（provisional）：残片可靠关联或人工裁决消耗——非耐久终态事实
   const provisionals = new Set<IntentId>(attributed.map((a) => a.id)); // 可靠关联（结构证得）
@@ -520,8 +527,8 @@ export function buildRecoverReport(lines: readonly JournalLine[], sessionId: Ses
     resumable: resumeBlocked
       ? [] // R1/F1：有未裁决坏行或不可关联残片→不给任何重发授权
       : intents
-          .filter((r) => (!(unknown.has(r.intentId) && !resendCovers(r.intentId))) && !abandonExcludes(r.intentId) && !r.sending && r.lastVerdict === null && !r.responseTimeoutRecorded && !r.cancelled)
-          .map((r) => r.intentId), // 未裁决/不可关联残片并入的 unknown 意图不可重发；resend 裁决=作用域内授权重发覆盖（r3 B1：授权锢在裁决四元组证据链，旧裁决不越事务授权新证据）；abandon 裁决终局放弃不重发（R9）
+          .filter((r) => (!(unknown.has(r.intentId) && !resendCovers(r.intentId))) && !abandonExcludes(r.intentId) && (!r.sending || resendCovers(r.intentId)) && r.lastVerdict === null && !r.responseTimeoutRecorded && !r.cancelled)
+          .map((r) => r.intentId), // 未裁决/不可关联残片并入的 unknown 意图不可重发；resend 裁决=作用域内授权重发覆盖（r3 B1：授权锢在裁决四元组证据链，旧裁决不越事务授权新证据）；abandon 裁决终局放弃不重发（R9）；r4：在途 sending 默认不可重发，但同向 resend 授权链成立时可重发（裁决的本来目的）
     settledCount: intents.filter((r) => r.lastVerdict === "settled").length,
     diskBlocked,
     resumeBlocked,

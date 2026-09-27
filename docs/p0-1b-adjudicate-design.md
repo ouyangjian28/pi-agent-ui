@@ -85,3 +85,14 @@ r2 被审出四必修（授权串扰/marker 误放/冲突组可解锁/schema 未
 5. **低项**：句柄全程 try/finally 确定性 close（L1）；锚损坏/不可读=anchor-corrupt 写前拒（证据链已坏需人工），前缀漂移不拒但跳过转移不承诺自动收敛（L4，provider 对漂移锚保守拒 concurrent-modification）；R1b 改真「append 落+sync 抛」形/R9 补无残片源正反对照/R11 改目录链 symlink（O_NOFOLLOW 不挡目录链，realpath 门独立杀点）（L2）；注释/文档收敛到 v2+r3 语义，设计稿 §1-§6 标历史（L3）。
 
 崩溃矩阵扩为 R1a/R1b/R2-R16（TEST-MAP r3 节权威）。
+## 9. r4 双证模型（GPT r3 审 74 NO-GO 修复批；2026-10-08）
+
+r3 被审出四阻断。核心是 B-r3-2 的**双证模型**重构——本节为权威补丁，覆盖 §8 第 1/3 条的相应语义：
+
+1. **双证模型（B-r3-2）**：repair 裁决=物理修复**对账**（证明修复事实被确认）；fragment 裁决=效果**归因**（携 intentId+verdict，是唯一的效果授权面）。冷热统一：每个修复事务须有同四元组有效 fragment 裁决归因，否则其移除尾段的效果去向不明→范围级阻断（unattributedRepairs 入修复阴影）。修补的缝：真实修复后冷捕获（新快照残片丢失）曾凭 repair-only 配对解锁 enqueue 重发资格——重启反而比热路径更宽，违背裁决持久化初衷。授权链自证：无残片源（热路径修复后残片已移除）时 resend 覆盖由授权链自身成立（fragment 裁决四元组+归因即完整证据链），不依赖残片在场——否则热路径裁决恒无效=裁决持久化失义。在途 sending 意图默认不可重发，但同向 resend 授权链成立时可重发（裁决的本来目的）。
+2. **无映射保守排除（B-r3-1）**：scopeCovers 中残片 sha 无对应事务（撕裂字节失配等）→`return false`（来源无法证明被授权→保留排除），不再空循环直达放行。
+3. **锚严格 schema（B-r3-3）**：loadAnchor 对齐 repair-tail parseAnchor 逐项校验（version===1+绑定当前 file+len 非负安全整数+sha 64 位小写 hex），非法=corrupt 写前拒——旧实现只验两字段类型，非法身份锚（`{version:99,file:"wrong-file",len:0,sha:H(empty)}`）可被新锚洗白。
+4. **组一致性二维（B-r3-4）**：conflictKeys=按四元组分组的全部有效裁决（fragment+repair 混算），**效果语义**任一维不一致→整组失效：多 verdict（含跨 kind 矛盾）/多归因目标。kind 维不判矛盾——同 verdict 的 repair+fragment 双行=双证合法共存形态（对账+归因），写面幂等/冲突判定按 kind 分域（跨 kind 同 verdict 合法追加，同 kind 内同 verdict 同目标=幂等、反 verdict/换目标=conflicting-verdict）。写面拒的组合读面手写盘面防御同拒。
+5. **低项**：openHandle 成功后 readFile 失败路径也确定性 close（L1）；R6 改写真字段（repairUndecided 进快照对象，旧第二参数被单参函数忽略=假杀点）（L2）；R12 主负例重构=tx2 落 i2 归因裁决（归因面全满足，scopeCovers 独立杀点，不再被归因门遮蔽）（L3）；R16 五路径全接计数句柄+逐次增量断言（写失败面不再豁免计数）（L4）。
+
+崩溃矩阵扩为 R1a/R1b/R2-R20（TEST-MAP r4 节权威）。
