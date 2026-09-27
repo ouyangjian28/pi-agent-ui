@@ -743,6 +743,13 @@
 - 运行证据：PI_E2E=1 3 passed（13.86s）；默认面 60 文件 1158 passed+2 skipped（integration 3 skipped 在内）；tsc 三档+eslint 0。固定端口=COMPOSED_E2E_PORT 默认 4319（staticDir 模式要求固定 port，同源 origin 预知）。
 - 残余披露：①订阅面 events 断言只锁「有投影且 seq 单调」，不断言 evidence 事件与 journal 行一一对应（投影语义归 3b-2 单测面）；②真浏览器面（fetch+WS 来自页面脚本）未起 Playwright——前端联调批（⑤D/UI 接线）归口；③gateway 层 origin 快照独立变异（N3-④）挂写侧收线批。
 
+### ⑤C r1 后追加批：顶层 sessionFor 双源 E2E（⑤D 前置，GPT 5C r1 N2 落实）
+
+- 改动：composed-e2e.test.ts beforeAll 增顶层 `sessionFor`（与 write.sessionFor 同映射）——composition.ts:180-188 走 DualHistorySource 双源分叉（此前 C-2 为 journal-only）。
+- 新增 C-3 双源读面：口令轮（PENGUIN-43）→settled 后轮询重订阅→快照页须含 `kind:"message" role:"assistant" textPreview.text` 含口令（assistant 正文只存在于 pi 转录，journal 无正文=TECH B17——出现即双源接线真证据）+同页并存 journal 源 turn-enqueued 行（双源合序）。旧 C-3 stop+dispose 顺延为 C-4。
+- 断言类型注意：textPreview 是 SanitizedText 对象（{text,truncated}），非字符串（调试时误判过一次）。
+- 运行证据：tests/fixtures/run-records/5c-composed-e2e-dualsource.log（PI_E2E=1 4 passed 24.65s，两次真实 LLM 轮）；全仓 1158 passed。
+
 ### ⑤C r1 后清理批（2026-10-05；GPT 89 GO 后 N1-N5 落地）
 
 - N1：口径改「公开静态资源与受 token 认证的 WS 订阅/写面同端口共存」（静态 GET 不携 token）；运行统计单位改准=60 文件 passed/2 skipped+1158 用例 passed/14 skipped（跳过含本组 3 it）。
