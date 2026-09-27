@@ -1,0 +1,19 @@
+diff --git a/apps/server/src/runtime/recovery-evidence-source.ts b/apps/server/src/runtime/recovery-evidence-source.ts
+index 7b8db8a..212748a 100644
+--- a/apps/server/src/runtime/recovery-evidence-source.ts
++++ b/apps/server/src/runtime/recovery-evidence-source.ts
+@@ -114,11 +114,11 @@ export function createRecoveryEvidenceProvider(
+   opts: RecoveryEvidenceSourceOptions,
+ ): (file: string, signal?: AbortSignal) => Promise<RecoveryEvidenceResult> {
+   const maxBytes = opts.maxCombinedBytes ?? DEFAULT_RECOVERY_COMBINED_BYTES;
+-  if (!Number.isFinite(maxBytes) || !Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > 1024 * 1024 * 1024) {
++  if (false && (!Number.isFinite(maxBytes) || !Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > 1024 * 1024 * 1024)) { // MUTATION: 工厂校验移除
+     throw new Error(`maxCombinedBytes 非法（须有限正整数≤1GiB）：${String(maxBytes)}——拒绝创建 provider（B11-4 纵深）`);
+   }
+-  if (!isAbsolute(opts.evidenceDir)) throw new Error("evidenceDir 非法（须绝对路径）——拒绝创建 provider");
+-  if (!opts.roots.every(isAbsolute)) throw new Error("roots 非法（须绝对路径）——拒绝创建 provider");
++  if (false && !isAbsolute(opts.evidenceDir)) throw new Error("evidenceDir 非法（须绝对路径）——拒绝创建 provider"); // MUTATION
++  if (false && !opts.roots.every(isAbsolute)) throw new Error("roots 非法（须绝对路径）——拒绝创建 provider"); // MUTATION
+   const sessionIdFor = opts.sessionIdFor ?? ((f: string) => f.replace(/\.jsonl$/, ""));
+   const openLike = opts.openLike ?? defaultOpenLike;
+   const now = opts.now ?? (() => Date.now());

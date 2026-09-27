@@ -1,0 +1,14 @@
+diff --git a/apps/server/src/runtime/recovery-evidence-source.ts b/apps/server/src/runtime/recovery-evidence-source.ts
+index 7b8db8a..17276ff 100644
+--- a/apps/server/src/runtime/recovery-evidence-source.ts
++++ b/apps/server/src/runtime/recovery-evidence-source.ts
+@@ -257,8 +257,7 @@ export function createRecoveryEvidenceProvider(
+         }
+         const sha = sha256Hex(raw);
+         if (anchor !== null) {
+-          const pureExtension = raw.byteLength >= anchor.len &&
+-            (anchor.len === 0 || sha256Hex(raw.subarray(0, anchor.len)) === anchor.sha);
++          const pureExtension = true; // MUTATION: 守卫移除
+           if (!pureExtension) {
+             audit(`recovery-evidence-rewritten file=${file} oldLen=${anchor.len} newLen=${raw.byteLength}`);
+             return unavailable("concurrent-modification"); // 已见证据被缩/重写/替换——修复残片消失≠干净

@@ -1,0 +1,13 @@
+diff --git a/apps/server/src/runtime/recovery-evidence-source.ts b/apps/server/src/runtime/recovery-evidence-source.ts
+index 7b8db8a..e07e478 100644
+--- a/apps/server/src/runtime/recovery-evidence-source.ts
++++ b/apps/server/src/runtime/recovery-evidence-source.ts
+@@ -210,7 +210,7 @@ export function createRecoveryEvidenceProvider(
+           return unavailable("oversized");
+         }
+         // session 读后复核（P07：读窗内增长→合计再验 fail-closed；缩/消失=已披露残余，不回退）
+-        if (sAbs !== null) {
++        if (sAbs !== null && raw.byteLength + 0 > maxBytes) { // MUTATION: 复核移除（恒不过）
+           try {
+             const sh2 = await openLike(sAbs);
+             try {

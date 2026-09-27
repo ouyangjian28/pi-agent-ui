@@ -1,0 +1,13 @@
+diff --git a/apps/server/src/ws/safe-open.ts b/apps/server/src/ws/safe-open.ts
+index 7fe5f25..113c413 100644
+--- a/apps/server/src/ws/safe-open.ts
++++ b/apps/server/src/ws/safe-open.ts
+@@ -41,7 +41,7 @@ export async function openSafeFile(absPath: string): Promise<{ fh: import("node:
+   // W1-09：O_NONBLOCK 防 FIFO/设备文件在 open 内永久挂起（读侧常规文件无副作用）；win32 无该旗标则退 0。
+   const nbFlag = process.platform === "win32" || constants.O_NONBLOCK === undefined ? 0 : constants.O_NONBLOCK;
+   try {
+-    fh = await open(absPath, constants.O_RDONLY | constants.O_NOFOLLOW | nbFlag);
++    fh = await open(absPath, constants.O_RDONLY | 0 | nbFlag); // MUTATION: 去 O_NOFOLLOW
+   } catch (e) {
+     const code = (e as NodeJS.ErrnoException).code;
+     if (code === "ELOOP" || code === "ENOTDIR") throw new SafeOpenError("symlink", absPath, code);

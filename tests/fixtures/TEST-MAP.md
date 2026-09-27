@@ -576,3 +576,12 @@
 - **真集成**（tests/integration/recovery-real.test.ts，真 startServer+真 ws+真文件）：I1 501 意图多页完整 ID 集无重不含缓存后追加+同 hash 续页冻结+无 hash 新快照 total 502；I2 真路径注入预算合计超→oversized 帧+审计；I3 journal 缺失→read-failed；I4 撕裂尾真源→blockedReasons 含 torn-tail+resumable 空。坑：replayIntents 按 sessionId 过滤（journal.ts:68）——sessionIdFor 默认=文件名 stem（生产不变量：journal 文件名=会话 id，异映射宿主注入）。
 - 变异（3b4.md+patches/3b4/）：M-3B4-BUDGET（stat 层删→R2 审计断言杀；结果断言不杀=读窗纵深兜底，独占面=早拒审计行）/M-3B4-GREW（复核删→R4 注入杀）/M-3B4-ABORT（读后取消删→R10 读中取消杀；R6 读前取消只命中入口检查，初跑 SURVIVED→补 R10 转杀）。全部真实 diff+退出码+首败断言+还原哈希同值。
 - 终态：46 files **851 passed+7 skipped**（JSON=tests/fixtures/run-records/3b4-vitest.json）+tsc0（根）+lint0。
+
+## 3b-4 fix11（GPT 第 11 轮五阻断修复：安全读 v2+证据链；2026-10-03）
+- **v2 重构**：recovery-evidence-source.ts 接缝改 openLike（OpenLike=(abs)=>{size,read(maxBytes),close}；默认=safe-open 真路径：openSafeFile=O_NOFOLLOW|O_NONBLOCK+同 fd fstat isFile；readBounded=64KB 流式循环，n===0 EOF 止、累计超限即抛 too-large）——journal+session 双源全走安全打开。旧 statLike/readLike 删除。
+- **证据链 sidecar（B11-2）**：evidenceDir 锚点 <encodeURIComponent(file)>.evidence.json={version:1,file,len,sha256}；纯追加扩展才过（新 raw 前 len 字节 sha 相符+新长≥旧长）；缩/重写→unavailable(concurrent-modification)；锚点损坏→concurrent-modification；锚点不可写→read-failed；同 file 捕获 serialize 串行化；原子 tmp+rename 写穿。跨实例（重启/驱逐）续链。
+- **读窗双复核（B11-3）**：stat 层合计早拒（零读独占面）→读后字节复核 raw.byteLength>allowed→oversized-grew→读后 session 复核（二次 open size s2，raw+s2>max→oversized-grew）；缩/消失=已披露残余不回退（P06）。R19 补 P07 session 复核独占杀（seam 定序开：预检 400/复核 500）。
+- **工厂自防御（B11-4）**：composition 预算校验移出 tokenPollMs 分支+provider 工厂自验（非法/超 1GiB/相对 evidenceDir/相对 roots 即抛）；R18 六非法值矩阵。sessionFor 映射非法（绝对/越界）→file-unreadable 响亮失败不静默 journal-only（P10；R13，嵌套合法）。
+- **4402 映射（B11-5）**：ws-gateway file-unreadable→{t:error,code:4402,message:恢复读取失败,retryable:true,requestId}；审计带逻辑 file/detail 不带绝对 path（P12）。T2 改标；I3 真集成同断。
+- 测试面：R1-R19（18→19 it）+T1-T5+I1-I4；变异五连（3b4-fix11.md+patches/3b4-fix11/）：ANCHOR→R11+R12 / SESRECHECK→R19 / SAFEFLAGS→R5+R16 / FACTORY→R18 / 4402→T2，全部退出码 1+首败断言+还原哈希 27632e0d…。
+- 终态：46 files **861 passed+7 skipped**（JSON=tests/fixtures/run-records/3b4-fix11-vitest.json）+tsc0+lint0；基线提交 132ee3f。
