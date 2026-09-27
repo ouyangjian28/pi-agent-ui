@@ -794,41 +794,57 @@ describe("recovery-evidence-source（fix13 v4：+仓级串行/登记不变量）
       if (abs.endsWith("b.jsonl")) { bOpens++; return fb.openLike(abs); }
       return fa.openLike(abs);
     };
-    let release: (() => void) | null = null;
-    const gate = new Promise<void>((r) => { release = r; });
+    const gateCtl = { release: null as null | (() => void) };
+    const gate = new Promise<void>((r) => { gateCtl.release = r; });
+    // 第16轮加固：entered 屏障——persist 入口即 resolve，不靠 tick 数猜 A 是否到达
+    const enterCtl = { mark: null as null | (() => void) };
+    const entered = new Promise<void>((r) => { enterCtl.mark = r; });
     const persists: number[] = [];
     const persistSeenLike = async (dir: string, next: { version: 1; files: string[] }) => {
       persists.push(next.files.length);
+      enterCtl.mark?.();
       await gate; // A 的 seen 提交挂起——B 不得进入读改写
       await writeFile(join(dir, "seen.json"), JSON.stringify(next), "utf8");
     };
     const tick = () => new Promise<void>((r) => setImmediate(r));
+    let pA: Promise<RecoveryEvidenceResult> | null = null;
+    let pB: Promise<RecoveryEvidenceResult> | null = null;
     try {
       const p = createRecoveryEvidenceProvider({ trustFirstCapture: () => true, roots: [jRoot], evidenceDir: evDir, maxCombinedBytes: 100_000, openLike, persistSeenLike });
-      const pA = p("a.jsonl");
-      for (let i = 0; i < 50 && persists.length === 0; i++) await tick();
+      pA = p("a.jsonl");
+      await Promise.race([entered, new Promise<void>((_, rej) => setTimeout(() => rej(new Error("A 未在 5s 内到达 seen 提交点")), 5_000))]);
       expect(persists).toEqual([1]); // A 已到 seen 提交点（此时并集大小=1）
-      const pB = p("b.jsonl");
+      pB = p("b.jsonl");
       for (let i = 0; i < 10; i++) await tick();
       expect(bOpens).toBe(0); // B 未开 journal——整个 body 在仓级链上排队（强于「未入读改写」）
       expect(persists).toEqual([1]); // B 未触发第二次 persist
       expect((await readdir(evDir)).includes("seen.json")).toBe(false);
-      release!();
-      const [ra, rb] = await Promise.all([pA, pB]);
+      gateCtl.release!();
+      const [ra, rb] = await Promise.all([pA!, pB!]);
       expect(isRecoverySnapshot(ra)).toBe(true);
       expect(isRecoverySnapshot(rb)).toBe(true);
       expect(persists).toEqual([1, 2]); // B 在 A 之后读改写（seen 已含 a）
       const seen = JSON.parse(await readFile(join(evDir, "seen.json"), "utf8")) as { files: string[] };
       expect(seen.files).toEqual(["a.jsonl", "b.jsonl"]); // 并集不丢
-    } finally { await cleanup(); }
+    } finally {
+      gateCtl.release?.(); // 第16轮加固：失败路径也放闸（防 gate 悬挂）
+      await Promise.allSettled([pA ?? Promise.resolve(), pB ?? Promise.resolve()]); // 收束已启动任务再删目录
+      await cleanup();
+    }
   });
 
   it("R38/§六③ 有锚无登记+journal 非法前缀（截断/同长改写）→concurrent-modification 且不补登记、bless 不消耗、锚原文不动", async () => {
     const { jRoot, evDir, cleanup } = await mkRig("r38-");
     const full = Buffer.from(jl("c-1") + "\n");
     const sha = createHash("sha256").update(full).digest("hex");
-    await writeFile(join(evDir, "c.jsonl.evidence.json"), JSON.stringify({ version: 1, file: "c.jsonl", len: full.byteLength, sha }), "utf8");
-    await writeFile(join(evDir, "seen.json"), JSON.stringify({ version: 1, files: [] }), "utf8"); // 有仓但未登记 c
+    const anchorRaw = JSON.stringify({ version: 1, file: "c.jsonl", len: full.byteLength, sha });
+    const seenRaw = JSON.stringify({ version: 1, files: [] }); // 有仓但未登记 c
+    await writeFile(join(evDir, "c.jsonl.evidence.json"), anchorRaw, "utf8");
+    await writeFile(join(evDir, "seen.json"), seenRaw, "utf8");
+    // 第16轮强化：原文（逐字节）快照——失败后比对全文件内容而非字段抽查
+    const bytesSame = async () =>
+      (await readFile(join(evDir, "seen.json"), "utf8")) === seenRaw &&
+      (await readFile(join(evDir, "c.jsonl.evidence.json"), "utf8")) === anchorRaw;
     let bless = 0;
     const audits: string[] = [];
     const mk = (bytes: Buffer) => {
@@ -841,18 +857,77 @@ describe("recovery-evidence-source（fix13 v4：+仓级串行/登记不变量）
       const ra = await mk(trunc)("c.jsonl");
       expect(ra).toEqual({ kind: "unavailable", reason: "concurrent-modification" });
       expect(audits.some((l) => l.includes("recovery-evidence-rewritten") && l.includes(`oldLen=${full.byteLength}`) && l.includes(`newLen=${trunc.byteLength}`))).toBe(true);
+      expect(await bytesSame()).toBe(true); // 截断失败后 seen/锚逐字节未动
       // (b) 同长改写：中段字节翻转（len 相等、sha 不同）
       const mut = Buffer.from(full);
       const idx = mut.indexOf("c-1");
       mut[idx] = "x".charCodeAt(0);
       const rb = await mk(mut)("c.jsonl");
       expect(rb).toEqual({ kind: "unavailable", reason: "concurrent-modification" });
-      // 共同：不补登记（seen 原文不动）、bless 不消耗、锚文件原文不动
+      expect(await bytesSame()).toBe(true); // 改写失败后同样逐字节未动
+      // 共同：不补登记、bless 不消耗（第16轮措辞收窄：不补登记=原文未动，如上；bless 不消耗如下）
       expect(bless).toBe(0);
+    } finally { await cleanup(); }
+  });
+
+  // ============ 3b5-2（GPT 第16轮 92/100 GO 尾项）：R36 独立首杀+seen 门清理失败残留面 ============
+
+  it("R39/第16轮 锚首写仅一次失败（后续原语健康）→read-failed 且 seen 提交零发生——吞锚错变异的独占首杀面", async () => {
+    const { jRoot, evDir, cleanup } = await mkRig("r39-");
+    const audits: string[] = [];
+    let bless = 0;
+    let writes = 0;
+    let seenPersists = 0;
+    const fsx: FsLike = {
+      // 只拒第一次 writeFile（=锚 tmp）；此后一切原语健康——吞锚错变异将直通 seen 提交+发快照，本例必杀
+      writeFile: async (path, data, enc) => { writes++; if (writes === 1) throw new Error("EIO: first write denied"); return writeFile(path, data, enc); },
+      rename: async (a, b) => rename(a, b),
+      rm: async (path, options) => rm(path, options),
+    };
+    // 默认 seen 持久化走 fsx.writeFile——count 在接缝外无从计数，用 persistSeenLike 包一层只数不拦
+    const persistSeenLike = async (dir: string, next: { version: 1; files: string[] }) => {
+      seenPersists++;
+      await writeFile(join(dir, "seen.json"), JSON.stringify(next), "utf8");
+    };
+    try {
+      await writeFile(join(jRoot, "s.jsonl"), jl("s-1") + "\n", "utf8");
+      const p = createRecoveryEvidenceProvider({ trustFirstCapture: () => { bless++; return true; }, roots: [jRoot], evidenceDir: evDir, maxCombinedBytes: 100_000, audit: (l) => { audits.push(l); }, fsLike: fsx, persistSeenLike });
+      const r1 = await p("s.jsonl");
+      expect(r1).toEqual({ kind: "unavailable", reason: "read-failed" }); // 锚门独立拒绝（无第二道门兜底叙事）
+      expect(audits.some((l) => l.includes("detail=store"))).toBe(true);
+      expect(writes).toBe(1); // 仅锚首写一次（失败后不再有任何写）
+      expect(seenPersists).toBe(0); // seen 提交零发生
+      expect(bless).toBe(1);
+      expect((await readdir(evDir)).filter((n) => n.endsWith(".evidence.json") || n === "seen.json" || n.includes(".tmp-"))).toEqual([]); // 零落盘
+      const r2 = await p("s.jsonl"); // 同实例重试（原语已健康）
+      expect(isRecoverySnapshot(r2)).toBe(true);
+      expect(seenPersists).toBe(1);
+    } finally { await cleanup(); }
+  });
+
+  it("R40/第16轮 seen 门 rename+清理 rm 双拒（锚已提交）→read-failed（detail=seen-store）+残留=seen tmp；重试收敛", async () => {
+    const { jRoot, evDir, cleanup } = await mkRig("r40-");
+    const audits: string[] = [];
+    let renames = 0;
+    const fsx: FsLike = {
+      writeFile: async (path, data, enc) => writeFile(path, data, enc),
+      rename: async (a, b) => { renames++; if (renames >= 2) throw new Error("EBUSY: seen rename denied"); return rename(a, b); }, // 第 2 次=seen 归位
+      rm: async () => { throw new Error("EACCES: rm denied"); }, // 清理原语也坏
+    };
+    try {
+      await writeFile(join(jRoot, "s.jsonl"), jl("s-1") + "\n", "utf8");
+      const mk = (fs?: FsLike) => createRecoveryEvidenceProvider({ trustFirstCapture: () => true, roots: [jRoot], evidenceDir: evDir, maxCombinedBytes: 100_000, audit: (l) => { audits.push(l); }, ...(fs ? { fsLike: fs } : {}) });
+      const r1 = await mk(fsx)("s.jsonl");
+      expect(r1).toEqual({ kind: "unavailable", reason: "read-failed" }); // 原错保留（清理失败不掩盖）
+      expect(audits.some((l) => l.includes("detail=seen-store"))).toBe(true); // 分类=seen 门（非锚门）
+      const names = await readdir(evDir);
+      expect(names.some((n) => n === "s.jsonl.evidence.json")).toBe(true); // 锚已提交（区别于 R35 的锚门残留）
+      expect(names.includes("seen.json")).toBe(false);
+      expect(names.filter((n) => n.includes(".tmp-")).length).toBe(1); // 残留=seen tmp（锚已归位）
+      const r2 = await mk()("s.jsonl"); // 默认健康重试
+      expect(isRecoverySnapshot(r2)).toBe(true);
       const seen = JSON.parse(await readFile(join(evDir, "seen.json"), "utf8")) as { files: string[] };
-      expect(seen.files).toEqual([]);
-      const anchor = JSON.parse(await readFile(join(evDir, "c.jsonl.evidence.json"), "utf8")) as { sha: string };
-      expect(anchor.sha).toBe(sha);
+      expect(seen.files).toContain("s.jsonl");
     } finally { await cleanup(); }
   });
 });
