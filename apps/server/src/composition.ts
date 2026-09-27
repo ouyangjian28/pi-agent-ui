@@ -23,6 +23,8 @@ import { PiProcessHost } from "./host/process-host.ts";
 import { createRpcWriteHost } from "./ws/rpc-write-host.ts";
 import { resolveWithinRoots } from "./ws/safe-open.ts";
 import type { WriteHostPort } from "./ws/write-host.ts";
+import { createStaticHandler } from "./ws/static-serve.ts";
+import { createServer, type Server as HttpServer } from "node:http";
 import { isAbsolute, join } from "node:path";
 
 export interface ServerConfig {
@@ -61,6 +63,10 @@ export interface ServerConfig {
   /** 写侧宿主（3c-1）：缺省=只读部署（写类帧 4405）；接入后网关开放 prompt/stop。
    * 与 write（3c-3 自建接线）互斥——两者同供=配置歧义拒启。 */
   readonly writeHost?: WriteHostPort;
+  /** 静态托管目录（⑤B/3c-5 自举）：同端口 HTTP 服务该目录（web 构建产物，如 apps/web/dist）。
+   * 设置后走外部 http server 模式（WS 同源 upgrade）；须配固定 port+对应同源 origin
+   * （origin 白名单在构造期冻结，随机端口无法预知同源 origin——main 入口负责校验与推导）。 */
+  readonly staticDir?: string;
   /** 写侧自建接线（3c-3）：组合根组装真实写链（PiProcessHost+会话注册表+RpcWriteHost+statusFor
    * 真源）；server.dispose() 统一销毁（全量 stop+dispose）。sessionFor 必填（RpcSession 构造硬要求
    * 会话文件；无映射=写侧无从落地=配置错误）。 */
@@ -210,10 +216,14 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     audit,
   });
 
+  // ⑤B：staticDir 模式=外部 http server（静态服务+同源 upgrade）；否则=适配器自建 server。
+  // 外部模式下 listen 所有权在 composition：适配器只挂 upgrade 钩子，关 server 归 dispose。
+  const httpServer: HttpServer | null = config.staticDir !== undefined ? createServer(createStaticHandler(config.staticDir, audit)) : null;
   const adapter = new WsServerAdapter({
     allowedOrigins: config.allowedOrigins,
     ...(config.requireTlsOffLoopback !== undefined ? { requireTlsOffLoopback: config.requireTlsOffLoopback } : {}),
     ...(config.trustedProxies !== undefined ? { trustedProxies: config.trustedProxies } : {}),
+    ...(httpServer !== null ? { server: httpServer } : {}),
     audit,
   });
 
@@ -226,7 +236,28 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     }, gatewayMetaFrom(tmeta));
   });
 
-  const { port, host } = await adapter.listen(config.port ?? 0, config.host ?? "127.0.0.1");
+  let port: number;
+  let host: string;
+  if (httpServer !== null) {
+    // 外部模式：同源静态+WS 共用监听；固定 port 由调用方保证（随机端口无法预知同源 origin）
+    if ((config.port ?? 0) === 0) {
+      throw new Error("staticDir 模式必须显式指定固定 port（同源 origin 白名单需预知端口）");
+    }
+    const bound = await new Promise<{ port: number; host: string }>((resolveListen, rejectListen) => {
+      const onError = (err: Error): void => { rejectListen(err); };
+      httpServer.once("error", onError);
+      httpServer.listen(config.port, config.host ?? "127.0.0.1", () => {
+        httpServer.off("error", onError);
+        const a = httpServer.address();
+        if (typeof a === "object" && a !== null) resolveListen({ port: a.port, host: a.address });
+        else rejectListen(new Error("http server 监听后无法取得地址"));
+      });
+    });
+    port = bound.port;
+    host = bound.host;
+  } else {
+    ({ port, host } = await adapter.listen(config.port ?? 0, config.host ?? "127.0.0.1"));
+  }
 
   const pollMs = config.tokenPollMs ?? DEFAULT_TOKEN_POLL_MS;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -252,7 +283,16 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
         if (pollTimer !== null) { clearInterval(pollTimer); pollTimer = null; }
         if (config.registerSighup === true) process.off("SIGHUP", onSighup);
         gateway.dispose(); // 应用层告别（1000 server-shutdown）+观察器全解绑（DH 句柄归零）
-        await adapter.dispose(); // 传输层兜底（1001+关自建 server）
+        await adapter.dispose(); // 传输层兜底（1001+关自建 server；外部模式=只摘 upgrade 钩子）
+        if (httpServer !== null) {
+          // ⑤B：外部 server 归 composition 所有权——有界关闭（closeAllConnections 截 keep-alive 残留）
+          await new Promise<void>((resolveHttp) => {
+            const guard = setTimeout(() => { resolveHttp(); }, 5_000);
+            guard.unref?.();
+            httpServer.close(() => { clearTimeout(guard); resolveHttp(); });
+            httpServer.closeAllConnections();
+          });
+        }
         if (registry !== null) await registry.dispose(); // 3c-3：写侧统一销毁（全量 stop+dispose；网关先告别再杀进程）
         tokens.dispose();
         audit("composition disposed");

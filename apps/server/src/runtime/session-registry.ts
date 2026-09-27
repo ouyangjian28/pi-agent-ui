@@ -8,8 +8,8 @@
 //   recoveryEvidence 异步面，同步 statusFor 不重复声称；statusVersion 恒 0=无版本化源，诚实披露）。
 // - 统一销毁：dispose=全量 stop（退役进程：SIGTERM→宽限→SIGKILL→退出确认）+dispose（本地
 //   句柄：巡检 timer/耐久/回收器），串行执行保审计确定性；幂等；dispose 后 sessionFor 拒绝。
-import { FileDurability } from "./file-durability.js";
-import { RpcSession } from "./rpc-session.js";
+import { FileDurability } from "./file-durability.ts";
+import { RpcSession } from "./rpc-session.ts";
 import { sha256Hex12 } from "@pi-agent-ui/protocol";
 import type { DurabilityPort, ProcessHandle, ProcessHostPort, SessionStatus } from "@pi-agent-ui/protocol";
 import { isAbsolute } from "node:path";

@@ -1,7 +1,7 @@
 // pi 子进程宿主壳：spawn + 常驻排空（stdout/stderr）+ 事件流解析 + 退出捕获
 // 集成面：真 spawn 依赖本机 pi；单元测试走 LinePump 级（line-pump.test.ts）+注入式 fake child（本文件不直接单测）。
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { LinePump } from "./line-pump.js";
+import { LinePump } from "./line-pump.ts";
 
 export interface PiEvent {
   readonly type: string;

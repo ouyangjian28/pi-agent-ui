@@ -23,7 +23,7 @@ import {
   type RetireOutcome,
   type TurnKey,
 } from "@pi-agent-ui/protocol";
-import { IdleReaper, MapRegistry } from "./idle-reaper.js";
+import { IdleReaper, MapRegistry } from "./idle-reaper.ts";
 
 export interface RpcSessionOpts {
   /**
@@ -50,7 +50,7 @@ export interface RpcSessionOpts {
   /** 闲置期限（默认 30 分钟；双条件=agent_settled+登记表空才开始计时）。 */
   readonly idleMs?: number;
   /** 后台任务登记表（闲置回收双条件之一；默认空 MapRegistry，扩展任务接入后替换）。 */
-  readonly idleRegistry?: import("./idle-reaper.js").BackgroundTaskRegistry;
+  readonly idleRegistry?: import("./idle-reaper.ts").BackgroundTaskRegistry;
   /** EOF 宽限（闲置回收优雅链首选 EOF；超时升级 SIGTERM）。 */
   readonly eofGraceMs?: number;
   /** 显式禁用闲置回收器（测试/特殊宿主）。 */
@@ -83,7 +83,7 @@ export type SessionSendResult = LaunchOutcome | { readonly kind: "no-process" } 
  * 采样间完成的短登记不得沿用旧闲置起点。宿主应使用 session.idleRegistry（包装版）
  * 而非自有原始引用，否则活动通知语义失效。
  */
-function wrapRegistry(raw: import("./idle-reaper.js").BackgroundTaskRegistry, note: () => void): import("./idle-reaper.js").BackgroundTaskRegistry {
+function wrapRegistry(raw: import("./idle-reaper.ts").BackgroundTaskRegistry, note: () => void): import("./idle-reaper.ts").BackgroundTaskRegistry {
   return {
     register: (id: string, label?: string) => {
       raw.register(id, label);
@@ -115,7 +115,7 @@ export class RpcSession {
   /** S5-R3：两代 spawn 共用的 pi 参数（构造时解析：显式 piArgs 或绑定 sessionFile）。 */
   private readonly piArgs: readonly string[];
   /** 宿主登记面（S5-R1 包装版：register/complete 同步通知回收器活动；勿绕过它用原始引用）。 */
-  readonly idleRegistry: import("./idle-reaper.js").BackgroundTaskRegistry;
+  readonly idleRegistry: import("./idle-reaper.ts").BackgroundTaskRegistry;
   private reaper: IdleReaper | null = null; // dispose 置 null
   private readonly readiness = new Map<string, ReadinessWaiter>();
   private readonly readinessCancels = new Map<number, ReadinessCancel>();

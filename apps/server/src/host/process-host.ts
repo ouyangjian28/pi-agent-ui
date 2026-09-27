@@ -9,7 +9,7 @@
 //   [handler-error] 诊断路径，同块后续行继续排空。
 // 单元测试注入 spawnFn+PassThrough；真 pi 冒烟走 integration。
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { LinePump } from "./line-pump.js";
+import { LinePump } from "./line-pump.ts";
 import type { ProcessHandle, ProcessHostPort, ProcessSpawnHandlers } from "@pi-agent-ui/protocol";
 
 export interface PiProcessHostOpts {
