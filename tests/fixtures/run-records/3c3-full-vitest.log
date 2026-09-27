@@ -1,0 +1,994 @@
+# 3c-3 全量 verbose 回归（提交方自留证据；宿主时钟漂移注记：宿主 date 与档名日期序列不一致，git 提交时间随宿主钟）
+# $ npx vitest run --reporter=verbose  (cwd=repo@0359e1e)
+2026-09-27T15:32:45+08:00
+
+ RUN  v5.0.1 /home/yyj/ai/repos/pi-agent-ui
+
+ ↓ |integration| tests/integration/pi-e2e.test.ts > 真 pi E2E（切片4c） > e2e-1 真管道 readiness 往返+SIGTERM 退役退出确认（六项①②④）
+ ↓ |integration| tests/integration/pi-e2e.test.ts > 真 pi E2E（切片4c） > e2e-2 连续两轮：prompt 帧+受理+settled 耐久+通知恰一次+真实事件流（六项②③）
+ ↓ |integration| tests/integration/pi-e2e.test.ts > 真 pi E2E（切片4c） > e2e-3 SIGKILL 意外退出→同会话重组装→恢复重放呈现→撕裂尾识别（六项②⑤）
+ ↓ |integration| tests/integration/pi-e2e.test.ts > 真 pi E2E（切片4c） > e2e-4 真子进程背压：4MB 写在子进程读前挂起（write false→等 cb），读后兑现且字节完整（六项②）
+ ↓ |integration| tests/integration/pi-e2e.test.ts > 真 pi E2E（切片4c） > e2e-5 双管道排空：stdout+stderr 各超管道容量，两泵都排→子进程正常退出（任一不排空则死锁）
+ ↓ |integration| tests/integration/pi-e2e.test.ts > 真 pi E2E（切片4c） > e2e-6 旧代迟到输出不污染新代：真子进程退役前后输出只归因自己代次（六项⑥）
+ ↓ |integration| tests/integration/pi-e2e.test.ts > 真 pi E2E（切片4c） > e2e-7（切片5①）：闲置到期→真 EOF 自然退出（code 0）→send 冷启动 gen2 原会话续跑
+ ✓ |integration| tests/integration/pi-e2e.test.ts > assistantBodyText 命中谓词（受控） > user 消息含 TOKEN（assistant 不含）→不命中（旧版事件整体匹配会假命中） 2ms
+ ✓ |integration| tests/integration/pi-e2e.test.ts > assistantBodyText 命中谓词（受控） > assistant 正文含 TOKEN（thinking 段口令不计，只认 text 段）→命中 0ms
+ ✓ |integration| tests/integration/pi-e2e.test.ts > assistantBodyText 命中谓词（受控） > 非 message_end / 非 assistant / content 非数组→空串 0ms
+ ✓ |integration| tests/integration/pi-e2e.test.ts > assistantBodyText 命中谓词（受控） > s4h 补：thinking-only（content 只有 thinking 段含口令）→不命中；metadata-only（message_update 带 metadata 含口令）→不命中 0ms
+ ↓ |integration| tests/integration/ws-write-e2e.test.ts > 3c-3 真进程写/停 E2E > E1 prompt→write-ack launched→journal 三写硬序行→settled 落盘（真 pi 真轮次）
+ ↓ |integration| tests/integration/ws-write-e2e.test.ts > 3c-3 真进程写/停 E2E > E2 stop：settled 后无进程在飞→no-process（不伪造）；审计含真进程退出证据
+ ↓ |integration| tests/integration/ws-write-e2e.test.ts > 3c-3 真进程写/停 E2E > E3 退役后冷启动：再次 prompt→新代次 launched（同会话文件恢复原上下文）
+ ↓ |integration| tests/integration/ws-write-e2e.test.ts > 3c-3 真进程写/停 E2E > E4 dispose 在飞：轮次进行中 server.dispose()→统一销毁完成（进程退出+registry disposed）
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource（3b-2a+R1/R2）——基线与四窗口（§V①） > load=快照+observe 绑定（非 null）；前缀追加逐行 onAppend 6ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource（3b-2a+R1/R2）——基线与四窗口（§V①） > 窗口①监视前/读取中：读期间落盘的新行→装载后 dirty 收敛（激活即补扫） 3ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource（3b-2a+R1/R2）——基线与四窗口（§V①） > 窗口②激活前通知只计数：多次通知=一次重扫（合并） 7ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource（3b-2a+R1/R2）——基线与四窗口（§V①） > 窗口③重挂：重扫后旧句柄关闭、新句柄就位（无句柄泄漏） 13ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource（3b-2a+R1/R2）——基线与四窗口（§V①） > 窗口④换代重挂：stop 后重 load，旧流事件不进新流（§V③） 31ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource R1——load/observe/release 共享扫描所有权 > P4 双订阅共享初扫：并发 load=一次扫描、同快照；此后 append 双订阅各自收（不静默断流） 3ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource R1——load/observe/release 共享扫描所有权 > join 增量：B 晚到 load-join 返回基线快照（此后增长由 append 补齐） 6ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource R1——load/observe/release 共享扫描所有权 > P3 在飞初扫：B await 同一 promise（不二次扫描）；A 不被 B 覆盖（单 entry 提交） 5ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource R1——load/observe/release 共享扫描所有权 > release 配对：load 后 release（未 observe）→槽关闭（无主 watcher 归零） 1ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource R1——load/observe/release 共享扫描所有权 > P9 初扫在飞时放弃（release）→装载完成即弃：无主 watcher=0 11ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource R1——load/observe/release 共享扫描所有权 > unobserve 后待配对引用仍在：槽保留至引用清零 1ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource R1——load/observe/release 共享扫描所有权 > observe 无活跃代→null（换代竞态后不再绑定旧代） 0ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R1 预算边界：合计 −1 与恰等→快照；+1→oversized（真 fs 字节精确；追加序列过链） 12ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R2 合计口径+零读：各文件未超但合计超→oversized 且 journal 零读（stat 层早拒独占面） 1ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R3 UTF-8 字节口径：多字节字符按实际字节计入预算（真 fs） 3ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R4 读窗增长：fstat 后读时变大（seam 返超限字节）→oversized-grew（读后字节复核） 1ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R5 session 同源：ENOENT 降级 journal-only；session symlink→file-unreadable（真安全打开） 5ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R6 读前取消：signal 已 abort→read-failed 且零打开 1ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R7 撕裂尾：末行截断的残片入 bad（真撕裂样本——写入中断形态） 3ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > start：spawn→get_state 探针→ready；探针回执不进事件流（routed 面直接观察） 4ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > 两轮正常序：response 归因+settled 结算+gate 回 idle+journal 落盘 49ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > 意外退出：exit→gate 关(generation-retired)→start 重开→新代次新轮可跑 26ms
+ ✓ |unit| tests/unit/server/composition-write.test.ts > 3c-3 composition 写侧接线 > CW1 writeHost 与 write 同供 → 拒启（接线歧义门） 4ms
+ ✓ |unit| tests/unit/server/composition-write.test.ts > 3c-3 composition 写侧接线 > CW2 write.sessionFor 缺失 → 拒启（写侧无从落地） 1ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource R2——单飞扫描与通知折叠 > P2 在飞重扫与追加竞态：旧扫返回旧前缀不得误判 truncate；折叠一次跟进补齐 12ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource R2——单飞扫描与通知折叠 > 在飞重扫期间通知折叠：3 次通知→完成后恰一次跟进 27ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource R2——单飞扫描与通知折叠 > 读挂起期间换代（stop）：旧读完成不进任何流（await 后复核） 26ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource R2——单飞扫描与通知折叠 > onAppend 抛错不逸出（隔离） 7ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource R6——watcher 建立失败 fail-closed（不降空句柄） > 初扫 watch 建立失败→load=null（不读盘、无句柄） 0ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource R6——watcher 建立失败 fail-closed（不降空句柄） > 活跃期 watcher error→先重挂新句柄再重扫核实（无窗口、无读循环） 8ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource R6——watcher 建立失败 fail-closed（不降空句柄） > 重挂失败→unavailable(watch-failed)+槽关闭（fail-closed，不空转） 5ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource R6——watcher 建立失败 fail-closed（不降空句柄） > 活跃期 error 重挂也失败→unavailable（error 路径 fail-closed） 0ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource R6——watcher 建立失败 fail-closed（不降空句柄） > 邻文件健康：一个文件 watch 失败不波及另一文件流 7ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource——盘面分型（§V②） > rewrite（同位置原文变化）→invalidate 3ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource——盘面分型（§V②） > truncate（变短）→invalidate 3ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource——盘面分型（§V②） > replace（身份变化）→invalidate（3b-3⑤ 起：identity 变+内容变才 replace——同字节换 inode 走指纹短路，见 ⑤ 组） 3ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：A 认证入站（W1-01/02） > A1 hello 成功→welcome；坏 token→4401+close 1008；重复 hello→4404 7ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：A 认证入站（W1-01/02） > A2 Origin 缺失/不在白名单→4401+close 1008；非 loopback 无 TLS→4401 3ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：A 认证入站（W1-01/02） > A3 protocolVersion=2→4403+close 1003（错误矩阵） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：A 认证入站（W1-01/02） > A4 未认证非 hello→4401；hello 字段非法→4404（校验器口径） 2ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：A 认证入站（W1-01/02） > A6 R6/3b-1：per-IP 认证失败限速——同 IP 达限→正确令牌也拒；不同 IP 不受累（键控非全局）；审计可观测 4ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：A 认证入站（W1-01/02） > A5 入站管线：二进制→4403+close 1003（R4/3b-1 契约冻结映射）；非 JSON/未知 t→4404；写类→4405+close 1008；3×4404→close 1002；错误消息固定不回显 4ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：A 认证入站（W1-01/02） > A6 B1/3b1b：封锁期不记账不延长（跨窗正确/错误令牌均不改 blockedUntil/strikes）；到期后恢复 4ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：A 认证入站（W1-01/02） > A6 B2/3b1b：满表硬上界——全封锁时按最早到期显式淘汰+审计（不静默丢也不无界增长） 105ms
+ ✓ |unit| tests/unit/server/composition.test.ts > 3b-3① composition > R-04 配置门（非法数值/路径/Origin → 拒绝启动） > maxScanBytes：NaN/±Infinity/负数/分数/超 1GiB → 拒绝启动 9ms
+ ✓ |unit| tests/unit/server/composition.test.ts > 3b-3① composition > R-04 配置门（非法数值/路径/Origin → 拒绝启动） > tokenPollMs：负数/分数/超定时器上限 → 拒绝启动；0 与合法正值 → 接受 25ms
+ ✓ |unit| tests/unit/server/composition.test.ts > 3b-3① composition > R-04 配置门（非法数值/路径/Origin → 拒绝启动） > 轮询×预算笛卡尔（B13-3①）：tokenPollMs 省略/0/正值 × maxRecoveryCombinedBytes 值域——非法拒启、合法接受 38ms
+ ✓ |unit| tests/unit/server/composition.test.ts > 3b-3① composition > R-04 配置门（非法数值/路径/Origin → 拒绝启动） > trustFirstRecoveryCapture：true/false 两态接受（非 true 一律按关处理——false=显式关；类型面由 TS 收敛，不作运行时拒） 3ms
+ ✓ |unit| tests/unit/server/composition.test.ts > 3b-3① composition > R-04 配置门（非法数值/路径/Origin → 拒绝启动） > roots/sessionRoots/scanDir：相对路径 → 拒绝启动 3ms
+ ✓ |unit| tests/unit/server/composition.test.ts > 3b-3① composition > R-04 配置门（非法数值/路径/Origin → 拒绝启动） > allowedOrigins：空串/裸串（无 scheme） → 拒绝启动 1ms
+ ✓ |unit| tests/unit/server/composition.test.ts > 3b-3① composition > 空 allowedOrigins/空 roots → 拒绝启动（配置门） 1ms
+ ✓ |unit| tests/unit/server/composition.test.ts > 3b-3① composition > tokenFile 缺失/空 tokens → 拒绝启动（fail-closed） 2ms
+ ✓ |unit| tests/unit/server/composition.test.ts > 3b-3① composition > 启动→listen(0) 随机端口→dispose 后端口关闭（生命周期闭合） 8ms
+ ✓ |unit| tests/unit/server/composition.test.ts > 3b-3① composition > Origin 不在白名单 → HTTP 403（upgrade 前拒绝，无 WS） 5ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R8 真 8MiB 默认档：恰预算内→快照；+1→oversized（默认有界读真路径） 157ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R9 锚点稳定：重复捕获同内容=零追加扩展（合法）；锚点文件落盘且形状正确 10ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R10 读中取消：读挂起窗内 abort→读完成即 read-failed（门控读确定性，无计时依赖） 1ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R11 证据链改写：首捕后截尾/重写→concurrent-modification（bad 消失不得洗白） 4ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R12 重启续链：新实例同 evidenceDir——纯追加过；重写拒（驱逐/重启不丢已见证据） 6ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R13 session 映射非法：绝对路径/越界→file-unreadable 响亮失败（禁静默 journal-only）；嵌套合法 4ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R14 锚点损坏：sidecar 被外部改写/垃圾→concurrent-modification（篡改面 fail-closed） 3ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R15 锚点不可写：evidenceDir 不可创建/写入→read-failed（证据不落盘不得发结论） 2ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R16 journal 安全打开：根外 symlink→symlink；FIFO→not-regular 且 open 不永挂（真旗标） 11ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R17 追加连续捕获：两次纯追加→两次快照哈希前进（I1 语义单测面） 5ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R18 工厂自防御：非法预算/相对 evidenceDir/相对 roots→工厂即抛（B11-4 纵深） 2ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R19 session 读窗增长（P07）：读后复核 session 变大→合计再验 oversized（fail-closed；seam 定序开） 1ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R20/Q02 默认无授权：锚点缺失≠首捕——no-evidence-snapshot；锚不落盘；再读仍拒；审计 recovery-no-first-authority 3ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R21/bless 正例：授权首捕→快照+锚 {version,file,len,sha}+seen 登记；第二实例无 bless 过纯追加（锚既有即权威） 5ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R22/Q03 锚点丢失≠可信新生：捕获后删锚点→concurrent-modification（bless=true 也不可越）；审计 recovery-evidence-lost 3ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R23/Q05 session 首开 missing→读后二开复核新建：journal 600+新建 500>1000→oversized-grew；sessionOpens==2 1ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R24/Q05 持续 missing=journal-only：快照照发；复核二开仍 missing（sessionOpens==2，读会话零字节） 2ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R25/Q17 零长锚也验空摘要：伪锚 {len:0,sha:64×0}→concurrent-modification；合法空首捕→锚=H(empty) 且二次过 7ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R26/工厂补面（B12-4 纵深）：roots 空→抛 /不得为空/；sessionRoots 相对→抛 /sessionRoots/；1GiB 放/1GiB+1 拒 5ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R27/detail 脱敏：openLike 抛带绝对路径的普通 Error→file-unreadable.detail=构造名（Error），绝不透传 message 1ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R28/B13-1 双首捕并发（同实例不同 file）：仓级串行→登记=并集不丢更新；随后 A 锚丢失→concurrent-modification（bless 不可重新授权） 3ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > readiness 探针超时：自动退役+返回 readiness-timeout，不留活进程 85ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > stop：SIGTERM→退出确认；再 start 拒 not-idle 不会发生（idle 后可再拉起） 4ms
+ ✓ |integration| tests/integration/recovery-real.test.ts > 3b-4 恢复真读源集成（真 WS+真文件） > I1 501 意图多页完整期望 ID 数组；源变后同 hash 续页=冻结页（无刷新）；无 hash=新快照 106ms
+ ✓ |integration| tests/integration/recovery-real.test.ts > 3b-4 恢复真读源集成（真 WS+真文件） > I2 合计 8MiB 入口预算真路径：journal+session 合计超→unavailable/oversized 帧 30ms
+ ✓ |integration| tests/integration/recovery-real.test.ts > 3b-4 恢复真读源集成（真 WS+真文件） > I3 journal 缺失→file-unreadable→error 4402 retryable=true（契约映射；审计带逻辑文件） 32ms
+ ✓ |integration| tests/integration/recovery-real.test.ts > 3b-4 恢复真读源集成（真 WS+真文件） > I4 撕裂尾真源：末行无换行→快照含 torn-tail 证据→blockedReasons 呈现（不洗白） 33ms
+ ✓ |unit| tests/unit/server/composition-write.test.ts > 3c-3 composition 写侧接线 > CW3 真链失败面：prompt→cat 回声不答探针→not-ready(cause=readiness-timeout)+write-ack；审计含 spawn/registry/readiness 链 132ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R29/B13-2 登记不变量：残局=锚在而登记无（首捕 seen 写败/B13-2 重试面）→恒读 fail-closed 或补登记放行；补后稳定复用；零 tmp 残留 7ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R30/B13-2 seen 恒读 fail-closed：有锚+仓损坏（非合法 JSON）→read-failed——不静默放行 3ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R31/B12-1 bless 异常面：trustFirstCapture 抛错→read-failed（宿主面故障≠拒授权）；锚/登记均不落盘 2ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R32/Y14-1 真实 seen-store 写故障：persistSeenLike 首调抛错→read-failed（detail=seen-store）+锚已留+登记缺；清障重试→补登记→快照（B13-2 残局收敛实录） 3ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R33/§六② 默认持久化 seen tmp 写拒绝→read-failed（detail=seen-store）+锚留存+tmp 尽力清；清障重试收敛 4ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R34/§六② 默认持久化 seen tmp rename 拒绝（tmp 已建）→read-failed+tmp 尽力清+锚留存；重试收敛 3ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R35/§六② 清理 rm 自身失败→仍 read-failed 不洗白（原错保留）；tmp 残留=尽力而为边界，成功路径不受阻 3ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R36/§六② 锚点 tmp 写拒绝（首个 writeFile）→read-failed（detail=store）+锚/登记零落盘+bless 已消耗；重试收敛 4ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R37/§六③ 受控并发闸门：A 持仓链阻塞在 seen 持久化时 B 未入读改写（连 journal 都未开）；释放后双快照+seen 并集 4ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R38/§六③ 有锚无登记+journal 非法前缀（截断/同长改写）→concurrent-modification 且不补登记、bless 不消耗、锚原文不动 2ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R39/第16轮 锚首写仅一次失败（后续原语健康）→read-failed 且 seen 提交零发生——吞锚错变异的独占首杀面 2ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R40/第16轮 seen 门 rename+清理 rm 双拒（锚已提交）→read-failed（detail=seen-store）+残留=seen tmp；重试收敛 3ms
+ ✓ |unit| tests/unit/server/recovery-evidence-source.test.ts > recovery-evidence-source（fix13 v4：+仓级串行/登记不变量） > R39b/第17轮 默认持久化路径首杀配套：只拒首次 fsx.writeFile 且不注入 persistSeenLike——锚门失败走默认 seen 算法原路 3ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: 多段 POSIX 绝对路径遮蔽 2ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: 单段路径允许透出（命名性内容，声明） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: 中文多段路径遮蔽 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: 相对路径多段同遮（保守） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: file:// URL 路径连带遮蔽（保守） 1ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: https URL 无 userinfo 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: URL userinfo 整体遮蔽（B05） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: Windows 盘符路径 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: UNC 路径 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: env 赋值遮蔽 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: env 引号值遮蔽 1ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: 短 env 不遮（声明） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: Bearer 遮蔽 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: bearer 小写遮蔽 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: AKIA 凭据遮蔽 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: ssh 公钥遮蔽（base64 含斜杠） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: PEM 整块遮蔽（含换行） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: 截断 PEM 遮到末尾 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: RTL 双向控制字符整段替换 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: 零宽字符整段替换 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: 控制字符剥离 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: 换行折叠空格、制表符保留 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: NFC 归一 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: 多片段混合 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: 长文本截断置位 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: emoji 截断不劈代理对 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: title 上限 80 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: 空串 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: 纯 [path] 输出不被二次替换 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: env 值含路径不被撕碎（B05） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: PEM CERTIFICATE 标签整块遮蔽（B05） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: B07 超长 env 键名>128：前缀透出+值遮蔽（文档化边界） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: B07 深路径>32段：分段遮蔽全跨度（[path][path]） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: B07 scheme>32 字符：scheme 前缀透出、其余仍遮（文档化边界） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: B07 scheme 恰32：仍按 URL 遮（界内保全） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: B07 单段>255 字符：不遮（文档化边界） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: B6-N8 超长 userinfo URL：替换缩短后密码尾不得拉回预览（⑧尾随\\S*整体消费） 1ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: B6-N8 界外原长 URL（无截断路径）：整令牌遮 1ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: B6-N9 超长 Windows 路径：尾部不得泄漏（⑩尾随\\S*整体消费） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: B6 超长 UNC：尾段整体遮 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: B6 env 值带界外字符（冒号续值）：同令牌余段整体遮 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: B6-N8 限值边界 limit=11（恰含 https:[url] 整替换输出） 1ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: B6-N8 限值边界 limit=10（不足整替换输出→截断） 1ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: B6 PEM 标签不匹配（BEGIN A…END B）：最近 END 胜→整块遮（维护旧正则惰性语义） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: B6 PEM 小写标签：不当作 PEM（维护既有边界） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: B6 重复 BEGIN 无 END：遮到末尾一次（线性扫描器） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: C4/D12 POSIX 末段>255：整令牌遮（尾不回拉预览） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: C4 末段254（界内）：整遮 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: C4 末段255（界值）：整遮 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: C4 末段256（界外1）：整遮 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: C4 首段>255+后继段：整令牌遮（第二分支） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > text: C4 单段>255 仍不遮（声明语义保持） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > id: 机器 ID：合法原样 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > id: 机器 ID：合法 entryId 原样 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > id: 机器 ID：凭据形态不外发（先凭据后白名单） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > id: 机器 ID：非法字符映射 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > id: 机器 ID：撞键结构性消除 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > id: 机器 ID：零宽字符非法 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > id: 机器 ID：超长映射 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > id: 机器 ID：映射稳定（同输入同输出） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > id: 机器 ID：非 ASCII 高位字节不碰撞（B05） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > id: 机器 ID：高位字符不同输出（B05 碰撞对） 1ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > id: B07 machineId 超长凭据形态：哈希映射 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > 向量规模 ≥40（契约冻结门） 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > B07 性能门：65KiB 无分隔符文本 <500ms 122ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource——盘面分型（§V②） > 幂等重扫（无变化）不发布任何信号 20ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource——盘面分型（§V②） > 同文本两行（内容相同但 locator 不同）各自发布 2ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource R5——投影防御与坏行 > 坏行装载为 corrupt 占位（不 null、不抛）；追加坏行照常发布 2ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 真盘（3b-2a+R7 证据分级） > 真盘全分型：追加/改写/截短/替换(rename)/删除 + 半行撕裂 + 坏行 46ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 真盘（3b-2a+R7 证据分级） > UTF-8 精确切点（3b2c-B7）：中文首字节=65535，半字符截断不发布、补全逐字无损 76ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：A 认证入站（W1-01/02） > A6 ping 无 requestId（校验器接受）→pong；带 requestId 的 ping→4404 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：A 认证入站（W1-01/02） > W1-01 一致性：同帧喂冻结校验器与网关——拒绝帧必回 4404/4403/4405，接受帧必有响应（golden） 3ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：A 认证入站（W1-01/02） > W1-02 认证截止：helloWindowMs 内不发 hello→4401+close 1008（独立 timer；持续不续命） 40ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：A 认证入站（W1-01/02） > W1-02 准入配额：maxConnections=2 第 3 连接→立即 close 1013；连接关闭后名额归还 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：A 认证入站（W1-01/02） > W1-02 握手滑窗：handshakePerMinute=2 第 3 次接入→1013 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：B 队列与请求门（W1-01/03） > B7 requestId 在途重复→4404；第 5 个并发→4404（§369）；断开后槽释放 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：B 队列与请求门（W1-01/03） > B8 入站字节门：>262144B→4404（大 limit 字段拼装） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：C 订阅接线（W1-04/05） > C13 subscribe init：201 行历史→snapshot 首页（200 条上限）+分页到追平+进入 live；中逧行追加入 history 帧 5ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：C 订阅接线（W1-04/05） > C14 缺文件/symlink→4402 retryable=true（load null fail-closed） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：C 订阅接线（W1-04/05） > C15 live 事件（live 相态）与 status 帧经排空泵交付 3ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：C 订阅接线（W1-04/05） > C16 W1-05 原子重同步：错流→4404 不动旧订阅；同流超前→4409 保旧；旧订阅真实续页可用；成功替换关联旧 subscriptionId 7ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：C 订阅接线（W1-04/05） > C17 换流（盘面改写）：非前缀重扫→replace 新 streamId；旧游标→4404（不再按位置映射）；重新 init 换流可用 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：C 订阅接线（W1-04/05） > C 订阅数 8 上限：第 9 个 file→4429 retryable=false；同 file 替换不受限 3ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：C 订阅接线（W1-04/05） > C unsubscribe：静默关+撤未发帧；get-recovery page 无引擎→4404 计数 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：D 恢复与列表（W1-06/07/11） > D18 无快照→unavailable(no-evidence-snapshot) 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：D 恢复与列表（W1-06/07/11） > D19 W1-06 有快照→available 帧含 evidenceHash（64hex）；续页带旧 hash 一致→可用；hash 变→4409 evidence-changed 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：D 恢复与列表（W1-06/07/11） > D20 恢复帧含阻断理由映射（torn-tail→blockedReasons；fix14b 补 diskBlocked=true 断言——repaired 旧 fixture [] 真值掩蔽未修复态，改 false 后本测试行为非等价而是修正） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：D 恢复与列表（W1-06/07/11） > D21 W1-11 listVersion 稳定：静态目录两次请求（含跨页）版本不变；文件新增才递增 62ms
+ ✓ |unit| tests/unit/server/composition.test.ts > 3b-3① composition > 真 ws 升级+hello 认证通过+会话列表往返（组装全链冒烟） 50ms
+ ✓ |integration| tests/integration/recovery-real.test.ts > 3b-4 恢复真读源集成（真 WS+真文件） > I5/B12-3⑤ 真实 sessionId 映射实证：sessionFor→真 session 文件计入合计预算（超→oversized；宽→available） 59ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > 响应超时不阻断轮次收口：response 迟到被 ignored，settled 正常结算（协调器语义透传） 136ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > FileDurability：JSONL 逐行落盘；失败后 fail-closed；close 不解锁（S4-06：拒绝续写，不复位） 12ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > F3 同步重入：close 回调里同步再 dispose——恰一次 close（先发布 Promise 再运行，微任务边界） 1ms
+ ✓ |integration| tests/integration/real-fs.test.ts > 3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真 reader） > RF1 双源同 tick 追加：journal+session 各恰一次到货，无错流无换流 319ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b-2b②——合成与归因 > load=journal 全部在前 session 在后；session user 条目经 journal 盘面三元组归因得 intentId 6ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b-2b②——合成与归因 > 归因完整行纪律：journal 撕裂尾中的 enqueue 不参与匹配（user 未匹配 intentId=null） 0ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b-2b②——合成与归因 > journal 失败→load=null（fail-closed，4402 面） 0ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b-2b②——合成与归因 > session 缺失→journal-only 降级+审计 session-missing 0ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b-2b②——合成与归因 > 无 sessionFor 映射→journal-only 模式+审计 no-session-mapping 0ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b-2b②——合成与归因 > 归因读失败（journal 读通道故障）→session 投影缺证降级 intentId=null+审计 1ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b-2b②——合成与归因 > observe 双子源：journal 追加→onAppend(journal 行)；session 追加→onAppend(session 行)；失效转发 10ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b-2b②——合成与归因 > release 配对：load 后 release（未 observe）→双子源 watcher 全关 1ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b-2b②——合成与归因 > session 路径越界（outside sessionRoots）→session 子源拒载→journal-only 降级+审计 1ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b-2b②——合成与归因 > 真盘冒烟（3b-2b②）：临时目录双文件装载+归因 7ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b2b-R1/R2——跨 await 复核与降级恢复（GPT 65→修复） > R1a：session 读等待窗内 journal 合法追加→装载吸收增长（旧快照不得回滚索引） 5ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b2b-R1/R2——跨 await 复核与降级恢复（GPT 65→修复） > R1b：session 读等待窗内 journal 换代→旧副本作废，有界重装发布新代内容（不透旧快照） 6ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b2b-R1/R2——跨 await 复核与降级恢复（GPT 65→修复） > R1c：sessionFor 同步抛错→journal 引用精确回滚（无孤儿 watcher），异常上抛 1ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b2b-R1/R2——跨 await 复核与降级恢复（GPT 65→修复） > R1b-观察面：journal 活跃代已失效→新 observe=null（session 成功不得掩盖事实源失效） 3ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b2b-R1/R2——跨 await 复核与降级恢复（GPT 65→修复） > R2：journal-only 降级→双源恢复：load 补接 session 观察（同 sinks），后续追加直达 3ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b2b-R1/R2——跨 await 复核与降级恢复（GPT 65→修复） > R3：journal 坏 enqueue 行→attribution-schema-rejected 审计+归因不采信（session 投影 intentId=null） 1ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b2c-fix1——五阻断闭合（GPT 72→修复） > F1-01：session 缺失等待窗内 journal 合法追加→降级出口也复核，返回吸收增长的 cur（不透旧快照） 6ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b2c-fix1——五阻断闭合（GPT 72→修复） > F1-02（fix3 免扣模型）：晚附不消耗装载方引用——B release 结算自己的债；C 重开续流零静默断流 4ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b2c-fix1——五阻断闭合（GPT 72→修复） > F2-01（fix3 免扣模型）：observe 出口结算自己的引用——零 carry；后继 C load/release 零孤儿 1ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b2c-fix1——五阻断闭合（GPT 72→修复） > F2-02：多注册登记——新注册先停、旧注册仍活→恢复晚附补接旧注册（不丢 session 事件） 3ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b2c-fix1——五阻断闭合（GPT 72→修复） > F1-04/F2-02：同 sinks 合法重绑（各自有 load 配对）——包装身份隔离；旧 stop 迟到只关旧注册 5ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 真盘（3b-2a+R7 证据分级） > N13（3b2c-B7）：默认真工厂（RealWatcher）建立失败→load=null+reader 零调用 1ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 真盘（3b-2a+R7 证据分级） > maxScanBytes 硬限：超限→load=null（scan-over-budget 面在重扫） 1ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 真盘（3b-2a+R7 证据分级） > 真盘初扫读挂起期间 release：装载即弃（槽关闭、无泄漏） 12ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b2c-B1/B2——槽位代次隔离+原始回调身份门（GPT 3b2b 反例） > N1：初扫挂起→release→装载即弃；后续 load=全新初照成功（不残留） 10ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b2c-B1/B2——槽位代次隔离+原始回调身份门（GPT 3b2b 反例） > N2：初扫期 watch 错误关闭本代；新初扫不被上一代错误计数污染 5ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b2c-B1/B2——槽位代次隔离+原始回调身份门（GPT 3b2b 反例） > N3：直调旧代原始 onError（绕过 closed 门）不杀新代初扫 5ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b2c-B1/B2——槽位代次隔离+原始回调身份门（GPT 3b2b 反例） > N4：直调旧代原始 notice（绕过 closed 门）不驱动新代重读 17ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b2c-B1/B2——槽位代次隔离+原始回调身份门（GPT 3b2b 反例） > N4b：同槽换代（carry 存活槽位）下旧代原始 notice 不驱动新代重读 16ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b2c-B1/B2——槽位代次隔离+原始回调身份门（GPT 3b2b 反例） > N6：旧代未配对引用的 release 扣旧账，不取消新代在飞装载 16ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b2c-B1/B2——槽位代次隔离+原始回调身份门（GPT 3b2b 反例） > releaseCarry：无账可扣的 release 结转，由下一代成功 load 吸收（计数不为负、槽不泄漏） 5ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b2c-B1/B2——槽位代次隔离+原始回调身份门（GPT 3b2b 反例） > 槽静默回收：失败装载结算后 slot-reaped；再 load=全新槽 0ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > B6 性能门：重复 BEGIN 无 END 多规模阶梯（32K→512K） 82ms
+ ✓ |unit| tests/unit/contracts-sanitizer.test.ts > 脱敏向量（人工 golden） > B6 性能门：含 END 的整块 PEM 大输入同样线性（BEGIN…END 成对 ×大规模） 3ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b2c-fix1——五阻断闭合（GPT 72→修复） > R1-耗尽：三窗口全换代→有界重试耗尽→load=null+审计 load-revalidate-exhausted 35ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b2c-fix1——五阻断闭合（GPT 72→修复） > 3b2c-fix3——引用守恒单账本（免扣晚附，GPT F3-01/02 反例） > F3-01：晚附后交错结算（B observe + C release）无 carry；后继 D 双源观察+新行直达 4ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b2c-fix1——五阻断闭合（GPT 72→修复） > 3b2c-fix3——引用守恒单账本（免扣晚附，GPT F3-01/02 反例） > F3-02：多注册×多 load——晚附双绑定免扣；C/D release 各结算；当前交付双达+后继周期双源 5ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b2c-fix1——五阻断闭合（GPT 72→修复） > 3b2c-fix3——引用守恒单账本（免扣晚附，GPT F3-01/02 反例） > F3-02b：多注册×单 load——晚附双绑定免扣；C observe 结算唯一引用；无任何 carry 6ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b-3⑤：fingerprints() 元数据面 > 未装载→null；双源活跃→两指纹；journal-only→session=""（契约 §1.3 信息性元数据） 1ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b3-fix4 F4-2：dispose 终止语义（GPT fix3 F3R-DISPOSE 组合层漏口） > F4/P-DUAL-RETRY-DISPOSE 在飞 load 的等待窗内 dispose→重试循环不重开子源：load-aborted-disposed/零新 watcher 7ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b3-fix4 F4-2：dispose 终止语义（GPT fix3 F3R-DISPOSE 组合层漏口） > F4/P-DUAL-OBS-COLLECT dispose 收口全部 ObsState：sinks 置空/通知静默/账本清空/入口拒绝 5ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b3-fix5 F5-2：dispose 通知/注册窗口（GPT fix4 P10/P11/P7） > F5/P-OBSERVE-AUDIT-REENTRY 子源 observe 审计回调重入 dispose→迟到注册不落账：obs 零残留/迟到 stop 回收/幂等 5ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b3-fix5 F5-2：dispose 通知/注册窗口（GPT fix4 P10/P11/P7） > F5/P-JOURNAL-RESOLVED journal-only 已履约子源快照：dispose 后如实返回（语义钉死，不冒称一律 fail-closed）+零新句柄 5ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b3-fix5 F5-2：dispose 通知/注册窗口（GPT fix4 P10/P11/P7） > F5/P-LATE-ATTACH-REENTRY 晚附补接期间宿主收掉单个注册→迟到绑定回收：孤儿 stop 不挂已死状态/其余注册照附 13ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b3-fix6 F6-1：终止通知注册资格门（GPT fix5 P11/P12） > F6/P-DUAL-TERM-DISPOSE 终止回调内整体 dispose→后继注册零回调（invalidate 面） 2ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b3-fix6 F6-1：终止通知注册资格门（GPT fix5 P11/P12） > F6/P-DUAL-TERM-UNBIND 终止回调内退订他人→该注册零回调，其余照投 3ms
+ ✓ |unit| tests/unit/server/dual-history-source.test.ts > DualHistorySource 3b3-fix7 F7-2：晚附 observe 窗内收口+session watcher 错误→wrap 门的独占杀伤面（GPT fix6 P7） > F7/P-LATE-WATCH-FAIL 晚附窗内收口 A+watcher 重挂失败→活 B 照收不可用、已收口 A 零终止回调 8ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > Y-C2b 并发 dispose：复用同一收尾 Promise——第二次 await 不早于第一次（close 挂起时不提前返回） 59ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > S4-03a 探针 write reject：启动失败→立即退役（不等超时）→readiness-timeout 14ms
+ ✓ |unit| tests/unit/web/app.test.ts > 双布局壳与导航 > 桌面呈现三栏；窄屏只呈现一级且动态响应断点 321ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b2e-C1/C2——生命周期收口+watcher 注册身份 > C1/D1+D14：合法旧 held 引用保槽——同槽再起靠两行清零存活（错误+dirty 不跨代） 17ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b2e-C1/C2——生命周期收口+watcher 注册身份 > C1/D2：挂起重扫终了收尾回收无主槽（不滞留 Map） 6ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b2e-C1/C2——生命周期收口+watcher 注册身份 > C2/D15：同代 rearm 后旧句柄 rawNotice 不得多读（reg 注册身份门） 10ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b2e-C1/C2——生命周期收口+watcher 注册身份 > C2/D3：同代旧句柄 rawError 不得驱动 rearm 杀当前观察 11ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b2e-C1/C2——生命周期收口+watcher 注册身份 > C2/D4（GPT 3b2d）：合法引用路径同槽换代——旧闭包直调不扰新代 11ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b2g-R1/R2——回收身份门与注册提交重入 > R1/F10：slot-reaped 审计回调重入 load——旧回收第二次调用不得删新槽（幂等） 1ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b2g-R1/R2——回收身份门与注册提交重入 > R2/F4：注册返回前嵌套错误+嵌套建立失败→watch-failed 且无孤儿句柄 10ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b2g-R1/R2——回收身份门与注册提交重入 > R2/F5：注册返回前嵌套错误+嵌套建立成功→新注册存活、外层返回句柄即关 21ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b2g-R1/R2——回收身份门与注册提交重入 > R2/H5：注册返回前最后订阅退出（生命周期换代、reg 不变）→返回句柄即关，无孤儿 9ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b2c-F2（GPT fix2 §7.5）：currentRows 无副作用固化 > load→currentRows×3→observe→stop：读纯只读（不触发重扫/不扰动引用账）→零句柄收尾 1ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b2c-F2（GPT fix2 §7.5）：currentRows 无副作用固化 > Y3-03：副本语义（两次返回引用不等+改返回数组不污染内部）+合法周期 load→currentRows×3→release→重开无 carry 1ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > RealReader 3b2c-F2-03（GPT fix2）：BOM 保留与字节坐标 > 开头 BOM（EF BB BF）保留不剥→第二行 locator=真字节偏移（旧默认解码剥 BOM→坐标漂移 -3） 2ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > RealReader 3b2c-F2-03（GPT fix2）：BOM 保留与字节坐标 > 有/无 BOM 两输入文本不同（不再折叠同一 text→digest 判等力保留） 1ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > RealReader 3b2c-F2-03（GPT fix2）：BOM 保留与字节坐标 > 撕裂尾=未完成多字节序列（无 \n）→容忍可读，完整前缀不受影响 1ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > RealReader 3b2c-F2-03（GPT fix2）：BOM 保留与字节坐标 > Y3-03/Y4-01：同一 JSON 行追加补全两次写入——截断在其第三字节前，补余下字节+换行后完整发布，前缀 locator 不漂移 4ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > RealReader 3b2b-R5（GPT 65→修复）：非法 UTF-8 fail-closed > 完整行含非法 UTF-8（字节 0xff）→read-failed（旧代码有损解码为 U+FFFD 行，等价类假前缀可乘） 1ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > RealReader 3b2b-R5（GPT 65→修复）：非法 UTF-8 fail-closed > 3b2c-F1-05：完整行含【合法】U+FFFD 字符（EF BF BD）→可读不拒（旧代码把合法字符误杀→整文件 4402） 2ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > RealReader 3b2b-R5（GPT 65→修复）：非法 UTF-8 fail-closed > 撕裂尾含非法 UTF-8（无 \n）→容忍可读（本就不发布，偏移漂移不观察） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：D 恢复与列表（W1-06/07/11） > D22 W1-07 断开取消排队计算：死连接的排队任务被取消，槽让给活连接（provider 不被死任务调用） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：D 恢复与列表（W1-06/07/11） > D23 W1-08 审计回调抛错不阻断令牌撤销（safeAudit） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：心跳/寿命/关闭 > 心跳空闲超时→4432+close 1000；pong 刷新 80ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：心跳/寿命/关闭 > 寿命上限→close 1000 lifetime-cap（ping/idle 全禁用仍生效） 121ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > c7 回归（C6-01..05） > C6-01：真实 500 中文×450 条——整帧实测装页（每页 ≤pageFrameBudgetBytes，无事件丢失/重复） 16ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > c7 回归（C6-01..05） > C6-04：稳态队列不误杀——2000 轮恒留 1 项待发（GPT 口径：队列永不全空）+drain(1) 恒 live 83ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > c7 回归（C6-01..05） > C6-05：空流 H=0 首页=空 done 页；重试走缓存（statusVersion 冻结，不漂移） 0ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ①正常快照三页→live（首页→续页→末页） 2ms
+ ✓ |unit| tests/unit/server/session-list.test.ts > 会话列表扫描（真 IO） > 身份=header.id（r8-04：文件名≠身份）；file=独立定位键；倒序+首个 user 标题 7ms
+ ✓ |unit| tests/unit/server/session-list.test.ts > 会话列表扫描（真 IO） > r8-03 必修：坏 header 不吞下一条——正常 user/assistant 仍计 entry，标题取首个 user，身份=null 显式呈现 1ms
+ ✓ |unit| tests/unit/server/session-list.test.ts > 会话列表扫描（真 IO） > r8-03：首行可解析但非 session header（截断/损坏）→按正文计，不吞 1ms
+ ✓ |unit| tests/unit/server/session-list.test.ts > 会话列表扫描（真 IO） > 纯 header 文件：活动时刻取 header.timestamp，标题=(无标题) 2ms
+ ✓ |unit| tests/unit/server/session-list.test.ts > 会话列表扫描（真 IO） > 撕裂尾（末行半 JSON）跳过不炸；无 user 时默认标题；titleMax 截断 3ms
+ ✓ |unit| tests/unit/server/session-list.test.ts > 会话列表扫描（真 IO） > limit 上限（倒序截尾） 2ms
+ ✓ |unit| tests/unit/server/session-list.test.ts > 会话列表扫描（真 IO） > 目录不存在=空列表；非 .jsonl 文件忽略；多 user 取首个 2ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > S4-03b 探针 write 挂起：超时能结束启动等待→退役；重试第二代 ready（GPT P4） 104ms
+ ✓ |unit| tests/unit/server/session-list.test.ts > 会话列表扫描（真 IO） > fs.watch 变化门铃：新 .jsonl 文件出现触发回调（rename；可能=新增/删除/替换，调用方重扫确认） 122ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ②重复首页请求→幂等重发同帧 2ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ③重复中间页→内容幂等+新 requestId（B01） 5ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ④跳页（≠期待下页）→4409（C5-05：超前/乱序统一可重试） 3ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ⑤末页后重复末页（60s 内）→内容幂等+新 requestId 1ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ⑥末页宽限过期→4409（retryable） 1ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ⑦快照期事件缓冲→末页后回放（history 先于 live） 1ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ⑧快照期缓冲超限→4431+closed 6ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ⑨游标重同步（中段）→补齐→live 1ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ⑩游标超前→4409 0ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ⑪旧 snapshotId 续页→4404 1ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ⑫closed 后 handle→4404 1ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ⑬live 期：status/history/live 帧交织（drain 分批≤16） 1ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ⑭追平补页 H+1→空页 done 进 live（B01）；H=0 同 2ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ⑮缓存域完整游标：错流同 seq 不命中（B01） 2ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ⑯字节装页先于条数（B04）：预算切断+done 由实装决定 0ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ⑰多页分页期间缓冲回放（B01 矩阵：真实双源分页③） 2ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ⑱两页淘汰：第 3 页后重复第 1 页→4409（缓存窗口=最近 2 页；非期待=超前统一） 2ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ⑲C5-03/C6-01：整帧实测超页预算→退末条收缩；首条即超→显式失败（4431，retryable=false） 0ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ⑳C5-04：live 期积压双门——1025 帧 status→超 subscriptionBacklogMax→4431 关订阅 2ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ㉑C5-04：paging 期编入序——历史追加/status/历史追加按到达序回放（跨队列不乱序） 2ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ㉒C5-05：缓存幂等域含 status——重试不重调 status（statusVersion 随页冻结） 3ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 订阅引擎 13 时序 > ㉓C5-05：末页宽限=固定期限（自页生成时刻；缓存重试不续命） 1ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > c8 回归（R1/R2：缓存信封预算+失败清理） > R1：缓存重发不因合法 requestId 变长击穿页预算（GPT c9 反例原样固化：119×500 中文+末条 325；assistant role） 8ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > c8 回归（R1/R2：缓存信封预算+失败清理） > R1b：缓存重发防御终判（故障注入：缓存生成后 snapshot 帧超预算→唯一 4431+closed+无残留） 1ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > c8 回归（R1/R2：缓存信封预算+失败清理） > R2：live 冲批失败→丢弃已取出 status（closed 队列不复活；二次 drain 空；错误恰一份） 0ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > c8 回归（R1/R2：缓存信封预算+失败清理） > R2：history 冲批失败同样不残留（origin 切换路径） 0ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 3b3-fix8 F8-1：页提交资格统一终检（GPT fix7 P8/P9/P10/P11） > F8/P-PAGE-EST-EVENT 续页填装 estimateEvent 关引擎→4404：不出退役页、closed 不被改写 1ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 3b3-fix8 F8-1：页提交资格统一终检（GPT fix7 P8/P9/P10/P11） > F8/P-PAGE-EST-FRAME 续页终判 estimateFrame 关引擎→4404（与 estimateEvent 分立——两端口独立杀伤） 1ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 3b3-fix8 F8-1：页提交资格统一终检（GPT fix7 P8/P9/P10/P11） > F8/P-PAGE-NONFINAL 非末页（done=false）估算器关引擎→4404：else-paging 复活路径死（GPT fix7 P9 输入二） 3ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 3b3-fix8 F8-1：页提交资格统一终检（GPT fix7 P8/P9/P10/P11） > F8/P-H1-EST H+1 追平补页 estimateFrame 关引擎→4404：不 rememberPage 空页、不返回退役空页（GPT fix7 P8） 1ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 3b3-fix8 F8-1：页提交资格统一终检（GPT fix7 P8/P9/P10/P11） > F8/P-CACHED-EST 缓存重发 estimateFrame 关引擎→4404：不返回退役缓存页（GPT fix7 P11——本分支此前无任何 closed 检查） 1ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 3b3-fix8 F8-1：页提交资格统一终检（GPT fix7 P8/P9/P10/P11） > F9/P-BUDGET-CACHED 缓存重发估帧回调关引擎+返回超限→4404 非 4431（GPT fix8 P8） 2ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 3b3-fix8 F8-1：页提交资格统一终检（GPT fix7 P8/P9/P10/P11） > F9/P-BUDGET-H1 H+1 估帧回调关引擎+返回超限→4404 非 4431（GPT fix8 P9） 0ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 3b3-fix8 F8-1：页提交资格统一终检（GPT fix7 P8/P9/P10/P11） > F9/P-BUDGET-PAGE-SHRINK 续页终判持续超限且首轮关引擎→4404 非 4431（GPT fix8 P10 输入A：退空口） 1ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 3b3-fix8 F8-1：页提交资格统一终检（GPT fix7 P8/P9/P10/P11） > F9/P-BUDGET-PAGE-EMPTY 续页首轮关+超限、次轮通过→退空判定口 4404 非 4431（GPT fix8 P10 输入B） 1ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 3b3-fix8 F8-1：页提交资格统一终检（GPT fix7 P8/P9/P10/P11） > F10/P-BUDGET-NAN 对照：估算器返回 NaN（未关闭）→退空→4431（旧成功谓词语义保留，GPT fix9 Y10-3） 1ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 3b3-fix8 F8-1：页提交资格统一终检（GPT fix7 P8/P9/P10/P11） > F9/P-BUDGET-NOCLOSE 对照：未关闭且真超限→4431（预算失败语义保留，不因 F9-1 一律 4404） 1ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 3b3-fix8 F8-1：页提交资格统一终检（GPT fix7 P8/P9/P10/P11） > F8/P-PAGE-NOW-ENGINE 续页提交尾 lastPageAt=now() 关引擎→4404：GPT fix7 P10 引擎序列（装页/终判毕→时钟窗失效） 1ms
+ ✓ |unit| tests/unit/subscription-engine.test.ts > 3b3-fix8 F8-1：页提交资格统一终检（GPT fix7 P8/P9/P10/P11） > F8/P-GRACE-NOW 末页宽限检查内 now 关引擎→4404：宽限窗同样终检（GPT fix7 P10 同型入口） 0ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1：心跳/寿命/关闭 > 传输关闭→清理幂等（connectionCount 归零） 2ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1b：B 系阻断回归 > B2 换流观察器绑当前索引+seq 规范化传播+双连接同文件 3ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1b：B 系阻断回归 > B3a 同 file 并发双 init：后提交者替换前者（stream-replaced 恰一次，单引擎） 8ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1b：B 系阻断回归 > B3b 7+2 并发新 file：提交点重验守住 8 订阅上限（恰一个 4429） 2ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1b：B 系阻断回归 > B4 observe 通路容量出口：触顶→4402+订阅清理+停观察 2ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1b：B 系阻断回归 > B5 同长改题推进 listVersion（指纹含 title 等可见字段） 4ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1b：B 系阻断回归 > B6 握手记账有界：饱和期拒接不存时间戳（60 连接后账本≤限额） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1b：B 系阻断回归 > B7 安静连接末页缓存主动释放（监督 tick 触发 purge） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1b：B 系阻断回归 > B8 恢复内容页缓存：provider 恰一次+续页拼回 501 意图+证据变→4409 6ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1c：R 系阻断回归 > R1a 空流身份：已装载空流 resync seq1 受理（H+1 追平）；foreign 仍拒 2ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1c：R 系阻断回归 > R1b 空流后追加：同坐标续读（live seq1 交付） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1c：R 系阻断回归 > R2a 分页中换流：旧订阅 4409 退役+不收新流事件+旧游标 4404+重新 init 可用 4ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1c：R 系阻断回归 > R2b 双连接 live 换流：两旧订阅均退役；新流事件仅新订阅者收 2ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1c：R 系阻断回归 > R3a 初装触顶：三连 init（宽容换流+registry 拒建路径）统一 4402 无快照；observe 追加面归 Q6 例 2ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1c：R 系阻断回归 > R4a 无 hash 同 requestId=读当前：现取新快照覆盖缓存；携旧 hash→4409 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1c：R 系阻断回归 > R4b 缓存有界驱逐：第 9 个缓存驱逐最旧；被逐条目重读→provider 重调+offset0 现算（跨页续读归 B8 面） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1d：D 系阻断回归 > D1a LRU 挤出协调：第 5 流挤出 f0→旧订阅 4409 退役+撤观察引用；旧游标 4404；重新 init=新流全量快照 2ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1d：D 系阻断回归 > D1c/Q6 宽容换流钩子+observe 迟到回调吸收：budget-swap 退役；FileOverBudgetError 不逸出；4402 retryable=true 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1d：D 系阻断回归 > D2 4402 错误矩阵·改写重建出口：盘面改写且超限→4402+retryable=true+无新快照+连接存活 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway w1d：D 系阻断回归 > D2b 前缀增量出口：盘面同流增长跨阈（3→6）→重 init 走增量 append→4402+retryable=true+无新快照 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > 3b-2 源事件接线（onInvalidate/onUnavailable） > invalidate(rewrite)→该文件订阅 4409 stream-replaced+撤观察+不自动重装载；重订阅=新流新装载 7ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > 3b-2 源事件接线（onInvalidate/onUnavailable） > R3（3b2a-P5）旧代 sink 闭包不得侵新订阅：旧 onAppend/onInvalidate/onUnavailable 全被身份门丢弃 23ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > 3b-2 源事件接线（onInvalidate/onUnavailable） > R1（3b2a-P9）连接在 load 挂起期间断开→load 解析后释放引用、无孤儿观察 12ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > 3b-2 源事件接线（onInvalidate/onUnavailable） > R1 observe-missed：observe 返 null（换代竞态）→4409 退本订阅+释放，不静默断流 7ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > 3b-2 源事件接线（onInvalidate/onUnavailable） > unavailable(deleted)→4402 历史源不可用文案+retryable+撤观察；不波及同连接他文件订阅 12ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b-3⑤：整文件指纹短路（契约 §1.3——变更检测触发器） > 同内容同身份 notice→fingerprint-skip：无 append 无 invalidate（幂等重扫静默） 21ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b-3⑤：整文件指纹短路（契约 §1.3——变更检测触发器） > 同字节换 inode→fingerprint-skip-identity-change（不失效）；后续新 inode 上真追加仍达 6ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b-3⑤：整文件指纹短路（契约 §1.3——变更检测触发器） > 内容增长→正常 append+指纹跟进；随后同内容 notice→fingerprint-skip 5ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b-3⑤：整文件指纹短路（契约 §1.3——变更检测触发器） > 真盘 rename 覆盖同字节（真新 inode）→无 invalidate；随后真追加正常（RealReader+RealWatcher 冒烟） 6ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b-3⑤：整文件指纹短路（契约 §1.3——变更检测触发器） > R-02/W1 追加先于重扫（读快照已含）→正常前缀路径（不进 skip 分支） 2ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b-3⑤：整文件指纹短路（契约 §1.3——变更检测触发器） > R-02/W2 读后重挂前追加（读快照不含）→核对读补发恰一次 5ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b-3⑤：整文件指纹短路（契约 §1.3——变更检测触发器） > R-02/W3 重挂后追加→新 watch notice 正常路径；核对读无追加=纯 skip 收敛 5ms
+ ✓ |unit| tests/unit/server/process-host.test.ts > PiProcessHost（注入式假 child） > spawn：事件泵解析好行/坏行分流+撕裂行跨块拼接+stderr 透传 3ms
+ ✓ |unit| tests/unit/server/process-host.test.ts > PiProcessHost（注入式假 child） > 句柄唯一：两次 spawn 两个不同 id 1ms
+ ✓ |unit| tests/unit/server/process-host.test.ts > PiProcessHost（注入式假 child） > writeStdin 真背压：缓冲满→等 drain→resolve；期间字节可读 27ms
+ ✓ |unit| tests/unit/server/process-host.test.ts > PiProcessHost（注入式假 child） > writeStdin EPIPE：stdin 带错 destroy→reject 呈现调用方 6ms
+ ✓ |unit| tests/unit/server/process-host.test.ts > PiProcessHost（注入式假 child） > exit 事件=唯一退出证据；error 后到的 exit 不重复报；句柄清理后 writeStdin 拒绝 1ms
+ ✓ |unit| tests/unit/server/process-host.test.ts > PiProcessHost（注入式假 child） > 正常退出：exit(code,signal) 直报+flush 残尾行 7ms
+ ✓ |unit| tests/unit/server/process-host.test.ts > PiProcessHost（注入式假 child） > stop：kill 信号透传；未知句柄安全 no-op 0ms
+ ✓ |unit| tests/unit/server/process-host.test.ts > PiProcessHost（注入式假 child） > closeStdin：EOF 写出（优雅关闭面） 5ms
+ ✓ |unit| tests/unit/server/process-host.test.ts > PiProcessHost（注入式假 child） > stdout 大块多行一次到达：全部解析不丢 0ms
+ ✓ |unit| tests/unit/server/process-host.test.ts > PiProcessHost（注入式假 child） > S4-01a 短写异步 EPIPE：write 已接收但回调报错→reject（不得先报成功）；迟到流错误被吸收器兜住 6ms
+ ✓ |unit| tests/unit/server/process-host.test.ts > PiProcessHost（注入式假 child） > S4-01b 背压中错误：64KB 挂起中 destroy(err)→reject 不挂死 11ms
+ ✓ |unit| tests/unit/server/process-host.test.ts > PiProcessHost（注入式假 child） > S4-01c pending 中 close：背压挂起中无错 destroy→close 事件→reject（不是成功） 11ms
+ ✓ |unit| tests/unit/server/process-host.test.ts > PiProcessHost（注入式假 child） > S4-01d 同步抛错：stdin.write 同步 throw→reject+监听清理（不留泄漏监听） 0ms
+ ✓ |unit| tests/unit/server/process-host.test.ts > PiProcessHost（注入式假 child） > S4-02 运行错误（pid 在）不折算退出：句柄保留可写；stderr 记录；后到真 exit 正常上报恰一次 0ms
+ ✓ |unit| tests/unit/server/process-host.test.ts > PiProcessHost（注入式假 child） > S4-07a 审计抛错不阻断：exit 仍上报+stop kill 仍执行 0ms
+ ✓ |unit| tests/unit/server/process-host.test.ts > PiProcessHost（注入式假 child） > S4-07b 消费者抛错不截断事件泵：同块 a 抛错→b 仍处理+[handler-error] 诊断 0ms
+ ✓ |unit| tests/unit/server/process-host.test.ts > PiProcessHost（注入式假 child） > Y2 type 非字符串：{"type":123} 分流 [stdout-nonjson]，不进 onEvent 0ms
+ ✓ |unit| tests/unit/web/app.test.ts > 双布局壳与导航 > 手机可见返回按钮恢复列表层级和原行焦点 174ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > S4-04a 旧 start 超时续体不退役新代（GPT P5）：A 挂起→退出→B ready→A=superseded 且 B 不收信号 122ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > S4-04b 同步段窗口（GPT P6）：探针回执后同段退出→start 不得返回 ready（superseded） 1ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > S4-04c 启动中 stop：取消挂起探针→stop confirmed；旧 start=superseded 不双退 1ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > safe-open（A1-A4） > 域解析：双根+分隔边界 1ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > safe-open（A1-A4） > symlink 最终组件拒绝（O_NOFOLLOW）；根内 symlink 同样拒绝 3ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > safe-open（A1-A4） > 目录（非常规文件）拒绝 1ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > safe-open（A1-A4） > 有界读：超限即刻失败（too-large），不读完 1ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > safe-open（A1-A4） > 正常读取同句柄闭环 1ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > token-auth（A5-A6） > fromTokens 校验；check 逐字比对 1ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > token-auth（A5-A6） > fromFile 初始不可读→fail-closed 抛错（拒启动） 1ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > token-auth（A5-A6） > fromFile+reload：撤销集合=旧−新；失败沿用旧 5ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > token-auth（A5-A6） > reload 乱序丢弃（不回退旧版本） 1ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > connection-queue（B7-B10） > 正常 drain：全部经 port.send，回调成功释放字节 11ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > connection-queue（B7-B10） > 帧数门：边界允许 +1 拒→恰一次 4431 直发+close(4431)+限时 terminate 61ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > connection-queue（B7-B10） > 字节门：累计超限拒收（边界=允许） 0ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > connection-queue（B7-B10） > 回调错误→终止；迟到回调不复活不复账 6ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > connection-queue（B7-B10） > send 同步抛错→终止 6ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > connection-queue（B7-B10） > 背压门：bufferedAmount≥4MB→终止 0ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > connection-queue（B7-B10） > drain 批量上限：一批 ≤drainBatch，余量下一轮 0ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > connection-queue（B7-B10） > close(1000) 正常路径：尽力排空 0ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > compute-semaphore（B11/B12） > 并发 2+FIFO；release 后推进 1ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > compute-semaphore（B11/B12） > 排队 5s 超时→timeout；取消→canceled 2ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > compute-semaphore（B11/B12） > 重复 release 幂等（不多还槽） 0ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > session-scan（D21） > 稳定排序：lastActiveMs desc+null 最后+file 次键；total=命中数 4ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > session-scan（D21） > 枚举上限 1000→dirReliability=partial+total 未截断数 1ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > session-scan（D21） > sanitize 先于截断：超长标题截断且已脱敏 1ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > session-scan（D21） > 坏文件（symlink）→条目占位 partial 不吞文件 2ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > session-scan（D21） > 单文件超读取预算→partial 1ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > ws-support w1 修复面（W1-03/09/12） > W1-09 FIFO（命名管道）open 不阻塞：O_NONBLOCK→同 fd fstat 拒 not-regular 6ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > ws-support w1 修复面（W1-03/09/12） > W1-12 ISO 时间戳（真实 pi 会话格式）：lastActiveMs=Date.parse 非 null 7ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > ws-support w1 修复面（W1-03/09/12） > W1-03 帧数门计入在途：回调未兑现的 send 占位，未完成+排队>上限→拒收 1ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > gatewayMetaFrom（3b-2 clientIp 接线） > 直连元数据全链映射（origin/loopback/tls/clientIp） 0ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > gatewayMetaFrom（3b-2 clientIp 接线） > 可信代理派生的 clientIp 原样透传（不退 unknown） 0ms
+ ✓ |unit| tests/unit/server/ws-support.test.ts > gatewayMetaFrom（3b-2 clientIp 接线） > origin 缺失（非浏览器入口被拒前）→undefined（网关默认拒路径） 0ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > 3b2c-B3/B4——引用恰一次配对与同步终止 > B3：首订阅 observe 消费引用→不 release；次订阅复用绑定→release 结算（恰一次/流） 12ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > 3b2c-B3/B4——引用恰一次配对与同步终止 > B3/N11：真源+他方裸 load——网关关流后他方引用仍在，观察句柄不归零；他方结算后才收 49ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > 3b2c-B3/B4——引用恰一次配对与同步终止 > B4/N12：observe 同步终止（右侧未返回即 onUnavailable）→不发死快照+孤儿 stop 即停+audit 10ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > 3b2e-C3——observe null 消费判定 > C3/D8：同步 onUnavailable+observe 返回 null→无死快照+无孤儿 stop+引用必释放（恰一次） 10ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > 3b2e-C3——observe null 消费判定 > C3 变体：同步 onInvalidate+observe 返回 null→4409+无死快照+释放恰一次 8ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > 3b2e-C3——observe null 消费判定 > C3/D9：load 本就 null（文件缺失）→不取引用不释放（null 前置于一切） 9ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：①Origin 门+无 deflate > Origin 缺失/null/子串伪造 → upgrade 前 HTTP 403 15ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：①Origin 门+无 deflate > Origin 精确匹配 → 101 upgrade；客户端提 permessage-deflate → 服务端不协商（R05/3b-1 假绿修复） 40ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b-3⑤：整文件指纹短路（契约 §1.3——变更检测触发器） > F3/W5 读前+读后各追加一次（无后续通知）→两行都到；核对读收敛无环 84ms
+ ✓ |unit| tests/unit/server/file-durability.test.ts > FileDurability（受控 fsPort） > S4-06a 部分写失败→撕裂尾；close 不解锁：续写拒绝，盘面不再推进（GPT P9） 3ms
+ ✓ |unit| tests/unit/server/file-durability.test.ts > FileDurability（受控 fsPort） > S4-06b markRepaired 显式授权：解锁后续写可用（授权证据归宿主） 1ms
+ ✓ |unit| tests/unit/server/file-durability.test.ts > FileDurability（受控 fsPort） > S4-06c close 串行：挂起的 append 先完成，close 后才关 fd；close 后新 append 拒绝 10ms
+ ✓ |unit| tests/unit/server/file-durability.test.ts > FileDurability（受控 fsPort） > 零进展保护（Y3）：write 返回 0 字节→报错不进死循环 0ms
+ ✓ |unit| tests/unit/server/file-durability.test.ts > FileDurability（受控 fsPort） > S4-B3a 同段 append→close：已接收 append 照常完成（close 只拦后来调用） 0ms
+ ✓ |unit| tests/unit/server/file-durability.test.ts > FileDurability（受控 fsPort） > S4-B3b 挂起中 append×2→close：两任务都完成，close 后才关 fd 11ms
+ ✓ |unit| tests/unit/server/file-durability.test.ts > FileDurability（受控 fsPort） > R3a 目录同步恰一次：首次成功追加后同步父目录，后续追加不再（文件名条目耐久边界） 1ms
+ ✓ |unit| tests/unit/server/file-durability.test.ts > FileDurability（受控 fsPort） > R3b 目录同步失败=fail-closed：本次 append 拒绝+失败态置位（不确认未同步的文件名） 0ms
+ ✓ |unit| tests/unit/server/file-durability.test.ts > FileDurability（受控 fsPort） > Y2 部分写重试字节正确性：offset 尊重，盘面逐字节无重写/无丢字节 0ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > S4-05a 耐久挂起不提前通知：settled 行 fsync 挂起→onSettled 不触发；释放→结算→恰好一次；重复 settled 不再触发 85ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b-2b③：DualHistorySource 接线验证 > D1 双源快照：journal 前 session 后；session user 事件带归因 intentId；无错流 4ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b-2b③：DualHistorySource 接线验证 > D2 live 追加双源各自到货→history 帧续投；交错不换流（无 4404/4409） 4ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b-2b③：DualHistorySource 接线验证 > D3 session 盘面换代→invalidate(replace)→旧订阅退役 4409；新订阅新流 6ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b-2b③：DualHistorySource 接线验证 > D4 session 缺失→journal-only 降级（审计 session-missing；快照仅 journal 行；非 4402） 6ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b-2b③：DualHistorySource 接线验证 > D6 交错 live 追加后二次装载：分流前缀成立不换流+continueFrom 余量序（journal 先）无重无漏 18ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b-2b③：DualHistorySource 接线验证 > D5 journal 读失败→整体 fail-closed→4402 retryable（session 在也不能洗白） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b-2b③：DualHistorySource 接线验证 > D8 3b2c-F1-03：journal 空文件（H=0）——A 先订阅；session 出现后 B 装载→空索引分支也分发，A 收到首批行 2ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b-2b③：DualHistorySource 接线验证 > D9 3b2c-§8：恢复后新追加+B 退订再开+重复装载——恰一次纪律持续成立，无错流无重复（真全退见 D10） 4ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b-2b③：DualHistorySource 接线验证 > D7 3b2b-R2：journal-only 订阅期 session 恢复+二次装载——续编行恰一次达 A（load 分发与活跃订阅协同）；后续通知不重复 33ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b-2b③：DualHistorySource 接线验证 > D10 3b2c-fix2 §7.5：真全退（A+B 退订）→双源句柄归零→盘面增长→C 再开快照含全部→新行 live 直达 9ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b-3⑤：整文件指纹短路（契约 §1.3——变更检测触发器） > R-02/收敛性：连续同字节 rename（identity 链变）核对读有限收敛，无自触发环 146ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b3-fix4 F4-2：dispose 终止语义（GPT fix3 F3R-DISPOSE 三漏口封堵） > F4/P-DISPOSE-PRE-SCAN load 后同步 dispose（排队初扫未启动）→微任务被入口门拦截：不建代/零 watcher/槽不复活 0ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b3-fix4 F4-2：dispose 终止语义（GPT fix3 F3R-DISPOSE 三漏口封堵） > F4/P-DISPOSE-IN-FLIGHT 初扫在飞（挂起读）dispose→撤票+已建句柄全关+通知静默：结算 fail-closed 且无孤儿 watcher 21ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b3-fix5 F5-2：分发循环逐行/逐 sink 生命周期与成员资格（GPT fix4 P10 同批残余通知） > F5/P-BATCH-DISPOSE 同批分发回调内 dispose→残余行不投递：双 sink 均只收首行/句柄全关/终态拒绝 5ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b3-fix5 F5-2：分发循环逐行/逐 sink 生命周期与成员资格（GPT fix4 P10 同批残余通知） > F5/P-BATCH-UNBIND 同批分发回调内退订单 sink→后续行跳过已退订者：A 只收首行/B 双行照收 7ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b3-fix6 F6-1：终止通知成员资格可撤销（GPT fix5 P11/P12） > F6/P-TERM-DISPOSE 终止回调内整体 dispose→后继注册零回调（invalidate 面） 5ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b3-fix6 F6-1：终止通知成员资格可撤销（GPT fix5 P11/P12） > F7/P-TERM-RETAIN 终止分发源级提前 return 也释放旧注册成员面（dispose 后槽已摘，无人再清——旧代码 Set 滞留） 5ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b3-fix6 F6-1：终止通知成员资格可撤销（GPT fix5 P11/P12） > F6/P-TERM-UNBIND 终止回调内退订他人→该注册零回调，其余照投（invalidate 面） 5ms
+ ✓ |unit| tests/unit/server/history-source.test.ts > FileHistorySource 3b3-fix6 F6-1：终止通知成员资格可撤销（GPT fix5 P11/P12） > F6/P-TERM-DISPOSE-UNAVAIL **读失败**（非 watch 失败——watch-failed 面由 fix7 F7/P-LATE-WATCH-FAIL 覆盖）→unavailable 面同型：终止回调内 dispose→后继注册零回调 5ms
+ ✓ |unit| tests/unit/server/evidence-migration.test.ts > migrateLegacyEvidence（3b5-3 迁移执行面） > MG1 正常迁移：空仓先行 no 文件；随后 fresh 首锚+登记+验收记录整体面 14ms
+ ✓ |unit| tests/unit/server/evidence-migration.test.ts > migrateLegacyEvidence（3b5-3 迁移执行面） > MG2 旧仓旧锚补登记：有锚未登记→legacy-anchor，锚 len/sha 不变，补 seen 10ms
+ ✓ |unit| tests/unit/server/evidence-migration.test.ts > migrateLegacyEvidence（3b5-3 迁移执行面） > MG3 幂等重跑：已登记文件 no-op，seen.json 原字节不变（未发生登记提交） 16ms
+ ✓ |unit| tests/unit/server/evidence-migration.test.ts > migrateLegacyEvidence（3b5-3 迁移执行面） > MG4 截断拒：recovery-evidence-rewritten，锚与 seen 原字节不动、不补登记 5ms
+ ✓ |unit| tests/unit/server/evidence-migration.test.ts > migrateLegacyEvidence（3b5-3 迁移执行面） > MG5 同长改写拒：oldLen==newLen 亦拒，锚与 seen 原字节不动 2ms
+ ✓ |unit| tests/unit/server/evidence-migration.test.ts > migrateLegacyEvidence（3b5-3 迁移执行面） > MG6 越根拒：root 内 symlink 指向 root 外→file-unreadable detail=symlink，不建锚不登记 2ms
+ ✓ |unit| tests/unit/server/evidence-migration.test.ts > migrateLegacyEvidence（3b5-3 迁移执行面） > MG7 审计行逐条断言：混合四文件（fresh/legacy/截断/noop）计数+行归属+字典序 10ms
+ ✓ |unit| tests/unit/server/evidence-migration.test.ts > migrateLegacyEvidence（3b5-3 迁移执行面） > MG8 session 映射越界拒：透传 file-unreadable detail=会话映射中文案，不建登记 2ms
+ ✓ |unit| tests/unit/server/evidence-migration.test.ts > migrateLegacyEvidence（3b5-3 迁移执行面） > MG9 seen 仓损坏：registered=unknown（不臆断），拒绝 detail=seen-load，锚事实仍可读 2ms
+ ✓ |unit| tests/unit/server/evidence-migration.test.ts > migrateLegacyEvidence（3b5-3 迁移执行面） > MG10 嵌套目录枚举：相对名保留路径，锚名=encodeURIComponent(相对名) 3ms
+ ✓ |unit| tests/unit/server/evidence-migration.test.ts > migrateLegacyEvidence（3b5-3 迁移执行面） > MG11 超预算拒：recovery-oversized，不建锚不登记，锚=null 1ms
+ ✓ |unit| tests/unit/web/app.test.ts > 双布局壳与导航 > 列表上下键、Enter 打开与 Esc 返回均管理焦点 194ms
+ ✓ |unit| tests/unit/web/app.test.ts > 双布局壳与导航 > 空 adapter 与空态场景可读，仍有新建入口 20ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：②TLS+代理头 > wss 正例：客户端信任指定 CA → 连接成功且 meta.tls=true 708ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：②TLS+代理头 > XFP/XFF 伪造拒（无信任代理→头不生效） 2ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：②TLS+代理头 > 可信代理正例：XFF/XFP 按头派生有效地址 4ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：②TLS+代理头 > deriveConnMeta 单元对照：可信代理但头缺失→保守回退 socket 事实 0ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > 完整两轮（enqueue/sending/settled）：无坏行、两轮已结算、无效果未知、不阻断 5ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > 撕裂尾：末段无换行→partialTail 坏行、好行保留（写入中断=效果未知面） 2ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > R1：enqueue 完整+sending 撕裂尾→阻断恢复授权（blocked+resumable 空）+残片可关联→效果未知 1ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > R1b：残片不可关联（撕裂断在 intentId 前）→阻断依旧、不臆造效果未知 1ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > R1c：截尾修复后重读须携带先前残片证据（不能把「证据不存在」解释为「从未发送」） 2ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > 坏行分型：完整行但 JSON 损坏/无 t 字段→partialTail=false；空行跳过不判坏 1ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > R2：schema 损坏拒收（可解析但非法行型不进重放不抛异常） 1ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > 效果未知三分档：sending 无终态/超时未结算/已判 unknown；非 sending 无终态=可重发 0ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > 会话过滤：他 session 的 enqueue 不进重放（跨会话 journal 隔离） 0ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > 前提演示：非 enqueue 行无会话身份——同文件另一 session 的终态行可越界结算同 id 意图（输入前提=每会话独立 journal 文件，由组装层保证） 0ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > sending+cancelled：取消挡重发，但不抹此前发送副作用未知的呈现（拆 GPT 第四节1：不再泛化「cancelled 不算效果未知」） 0ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > cancelled/delivered 终态：未发送的 cancelled 与已 delivered 均不进效果未知也不进可重发 0ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > F1a：不可关联 sending 残片（{"t":"send）→修复后续读（blocked=false）resumable 仍恒空+unattributableFragments 呈现；显式归因后解锁 0ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > F1d（G1）：更短残片（{ / {"t":"s / {"t":"sen）同为未裁决证据→阻断，resumable 恒空 1ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > F1e（G1）：双 intentId 异值残片=归属歧义→不可关联阻断（不取首个臆造归属） 0ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > F1f（G1）：可解析但归属超出重放范围（i-99 不在 map）→不静默消失，进不可关联阻断 0ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > F1g（G2a）：归因目标不在重放范围→结构性无效，不解除证据（旧版仍删残片解锁） 0ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > F1h（G2b）：同 raw 双残片→歧义拒绝（位置不可分）；重复裁决幂等（再入 no-op 不解锁另一条） 0ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > F1i（H1）：身份形态不可完全解释→保守阻断（不误放 unknownEffect/resumable） 1ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > F1i2（H1）：受限结构正常面保持——截断在身份字段边界外（数字段）仍唯一归因 0ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > F1j（H2）：同一证据的冲突裁决（同 raw 双目标）→整条保留阻断，结果与顺序无关；同目标重复=幂等合并 0ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > F1k（I1 表驱动）：第二身份字段在各截断点全阻断（键未闭/键闭无冒号/键闭+空白/冒号写值未写/值未闭/完整二次键）——普通键/转义键/嵌套键三型 2ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > F1k3（M-h1a2 定向）：纯嵌套身份键残片（无任何顶层身份键）保守阻断——栈长检查被去时顶层身份被嵌套键冒名顶替 0ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > F1l（J1 表驱动）：非法结构残片（多根/member-end 开容器/key 位置开容器/数组根/尾逗号闭合）全阻断 1ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > F1m（Y1 词法）：非标量前缀垃圾/值与元素非法转义拒绝；合法标量截断与嵌入身份文本正常面保持 0ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > K-Y1/K-Y2（s4k 加固）：数组第二及后续元素容器不再保守误拒；裸控制字符拒绝；尾逗号门不回归 0ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > F1k2（I1 正常面）：转义键解码后同等识别——顶层唯一转义 intentId 键+完整值仍归因；数字段截断保持 0ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > F1b：残片 intentId 为 JSON 转义（\u0069-1=i-1）→字面量解码后正确关联（裸正则提取会漏） 0ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > F1c：归因不在场（raw 不匹配任何残片）→忽略，阻断保留 0ms
+ ✓ |unit| tests/unit/server/recover.test.ts > recover（恢复入口受控面） > F2：嵌套结构校验（payload={}/matchKey=[]/cleared=[42]/intervalEnd=[]/kind 非法/attachments 元素非字符串/ordinal 非整数→拒收不进重放） 1ms
+ ✓ |unit| tests/unit/server/recover.test.ts > 恢复证据快照（c5 B03：结论只对快照负责） > 修复前捕获→阻断呈现；同快照修复后续读不再洗白（残片保留→unknown 不消失） 2ms
+ ✓ |unit| tests/unit/server/recover.test.ts > 恢复证据快照（c5 B03：结论只对快照负责） > 冷启动无快照：宿主规则=unavailable(no-evidence-snapshot)——裸读当前盘面得 resumable 是假安全（反例固化） 3ms
+ ✓ |unit| tests/unit/server/recover.test.ts > 恢复证据快照（c5 B03：结论只对快照负责） > 归因修订入快照：消耗残片+unknown 保留+evidenceHash 随修订变化（输入域含 attributedFragments） 5ms
+ ✓ |unit| tests/unit/server/recover.test.ts > 恢复证据快照（c5 B03：结论只对快照负责） > perIntent 穷尽：cancelled 优先于无终态（取消终局）；not-evaluated=可重发候选 1ms
+ ✓ |unit| tests/unit/server/composition-write.test.ts > 3c-3 composition 写侧接线 > CW4 会话缓存：两次 prompt 同 file→registry 恰建一次（audit 计数） 566ms
+ ✓ |unit| tests/unit/server/ws-gateway-write.test.ts > 3c-1 写侧帧：网关派发面 > W1 未接线：prompt→4405+close 1008（v1 冻结不变） 5ms
+ ✓ |unit| tests/unit/server/ws-gateway-write.test.ts > 3c-1 写侧帧：网关派发面 > W2 prompt 合法→write-ack launched；宿主收到 file/text；审计行 2ms
+ ✓ |unit| tests/unit/server/ws-gateway-write.test.ts > 3c-1 写侧帧：网关派发面 > W3 stop 合法→write-stop-ack confirmed 1ms
+ ✓ |unit| tests/unit/server/ws-gateway-write.test.ts > 3c-1 写侧帧：网关派发面 > W4 file 越界→4404 且宿主未被调 1ms
+ ✓ |unit| tests/unit/server/ws-gateway-write.test.ts > 3c-1 写侧帧：网关派发面 > W5 形状违反→4404（缺 text/多余字段/rid 非法/空 text） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway-write.test.ts > 3c-1 写侧帧：网关派发面 > W6 未开放写类 t（send/kill）→4405（接线态同样） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway-write.test.ts > 3c-1 写侧帧：网关派发面 > W7 未认证写帧→4401（优先级①先于写层） 2ms
+ ✓ |unit| tests/unit/server/ws-gateway-write.test.ts > 3c-1 写侧帧：网关派发面 > W8 requestId 在途重复→第二次 4404（宿主只调一次） 2ms
+ ✓ |unit| tests/unit/server/ws-gateway-write.test.ts > 3c-1 写侧帧：网关派发面 > W9 宿主抛错→4402 retryable=true+审计 write-frame-error 1ms
+ ✓ |unit| tests/unit/server/ws-gateway-write.test.ts > 3c-1 写侧帧：网关派发面 > W10 text 超 WRITE_TEXT_MAX_BYTES→4404 2ms
+ ✓ |unit| tests/unit/server/ws-gateway-write.test.ts > 3c-1 写侧帧：网关派发面 > W11 槽归还：同 rid 先后可复用（第一次 ack 后不再在途） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway-write.test.ts > 3c-1 写侧帧：网关派发面 > W13 W5 分连接版：每坏帧独立连接→各自 4404（空 text 案现在可观测） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway-write.test.ts > 3c-1 写侧帧：网关派发面 > W14 容量门独立：4 个不同 rid 在途后第 5 个→4404 在途请求超限（非重复门） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway-write.test.ts > 3c-1 写侧帧：网关派发面 > W15 失败路径槽归还：prompt 4402 后同 rid 可复用（stop→ack，再 prompt→ack） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway-write.test.ts > 3c-1 写侧帧：网关派发面 > W15b stop 失败路径槽归还：4402 后同 rid 可复用（prompt→ack） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway-write.test.ts > 3c-1 写侧帧：网关派发面 > W16 ack.file 显式回显契约裸名（W2/W3 的补强断言） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway-write.test.ts > 3c-1 写侧帧：网关派发面 > W17 UTF-8 字节边界：恰 65536B（含多字节）过；65538B（多字节）拒 2ms
+ ✓ |unit| tests/unit/server/ws-gateway-write.test.ts > 3c-1 写侧帧：网关派发面 > W12 接线态读路径回归：hello→welcome、ping→pong 不受影响 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b-2b③：DualHistorySource 接线验证 > D11 3b2c-fix2 §7.5：A/B 在线恢复——逐条核对 streamId/seq/entryId 双引擎一致 19ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b-2b③：DualHistorySource 接线验证 > 3b-3⑤：装载后审计 index-fingerprint（journal/session 各 12hex；journal-only 面 session=-） 13ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b3-fix2：F1/F2 发布循环 > F1/P-ORDER 大批量续编让出窗口内 onAppend 越序杀手→严格升序完整数组（21..1221 各恰一次） 33ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b3-fix2：F1/F2 发布循环 > F2/P-CLOSE 发布让出窗口内连接关闭→观察收口不被在飞发布阻塞（stopped+release 落地，无泄漏绑定） 37ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > S4-05b 超时记录收口路径：response 超时→settled 到→通知恰一次 161ms
+ ✓ |integration| tests/integration/real-fs.test.ts > 3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真 reader） > RF2 撕裂尾跨写补全：半行不发布，补全+换行后恰一次发布（session 面） 584ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > 正常序：launch→success 回绑→settled 结算→屏障释放；未登记 response=ignored-unknown 4ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > 反例1 事件→settled→success：settled 先到保留缓冲，success 回绑即结算（不等第二个） 1ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > 反例2 响应超时→晚到 success→晚到 settled：先耐久记录再移出；不回绑不开 run；晚到 settled 结算记录 2ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > 超时后无 id settled：唯一在途归因结算（attribution 审计） 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > 反例3 settled 已缓冲→超时处理：记录+结算一次；重复 settled=迟到丢弃 1ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > 反例4 终态耐久失败→重复事件保持关闭（重复 settled 再呈现 settle-durability-failed 不改写） 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > 反例5 A 收口后 B 在飞：A 晚到 settled（带 id）不得结算 B 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > 反例6 close 插入 submit 耐久窗口：invalidated 不登记、晚到 response=未登记 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > 反例7 换代：旧代次登记清除（含非空缓冲计数）+晚到事件丢弃；新代次轮不受影响 1ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > 事件缓冲溢出：关闭屏障+审计，已缓冲保留呈现（不静默丢） 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > run-open 事件直接交付；旧代次/轮外事件丢弃 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > 响应超时记录 fsync 失败：gate fail-closed 且不移出在途 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > 无在途时无 id settled=四联空丢弃+审计 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > 响应失败(ok=false)：审计+屏障不动（处置面宿主接管） 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > 整轮超时委托 gate：closed(turn-timeout) 中断呈现 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > response-timeout 行重放：记录标记+终态由 settled 行承载（S2-06） 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > S2-01 超时记录等待窗口（挂起期世界变化合并裁决） > 等待期 event+settled 到达：合并保留→recorded-and-settled+缓冲交付 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > S2-01 超时记录等待窗口（挂起期世界变化合并裁决） > 等待期 success 回绑：superseded（超时未生效，gate 保持 run） 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > S2-01 超时记录等待窗口（挂起期世界变化合并裁决） > 等待期重入：pending（不重复追加记录行） 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > S2-02 旧超时跨换代/新轮失效（不得覆盖新登记、不得关新 Gate） > 换代+新轮在飞：旧超时完成=invalidated，不覆盖 B；A 晚到 settled 丢弃 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > S2-02 旧超时跨换代/新轮失效（不得覆盖新登记、不得关新 Gate） > 换代+新轮在飞：旧超时 append 失败=invalidated，不关新轮 Gate 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > S2-03 结算失败缓冲保留+弃置恢复手续（abandonHeld） > accepted-settle-failed：缓冲保留在登记上；reopen→abandonHeld→新轮可 submit 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > S2-03 结算失败缓冲保留+弃置恢复手续（abandonHeld） > 写后拒绝（settled 行已落盘）：held 保留缓冲；abandonHeld 计数后新轮可 submit 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > S2-03 结算失败缓冲保留+弃置恢复手续（abandonHeld） > abandonHeld 拒绝弃置活轮（gate 在飞）与空登记 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > S2-03 结算失败缓冲保留+弃置恢复手续（abandonHeld） > abandonHeld 释放挂起超时槽位：releasedPendingTimeout=true/false 直接入审计 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > S2-B1 结算等待窗口：交付取登记上最新缓冲 > timed-out→settled 挂起窗口新增事件：一并交付（e0+e1 都在 drain） 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > S2-B1 结算等待窗口：交付取登记上最新缓冲 > bufferedSettled→超时分派第二次等待窗口新增事件：recorded-and-settled 一并交付 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > S2-B2 超时槽位所有权（退役释放；旧 finally 不清新槽） > A 挂起→退役（槽位释放）→新轮 B 超时可自行发起；旧 A 完成=invalidated 不动 B 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > S2-B2 超时槽位所有权（退役释放；旧 finally 不清新槽） > 旧 A 完成不清 B 槽位：B 再查=pending(B)；不双追加 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > S2-B3 失败侧所有权（正常更替后旧 reject 不关后继轮） > A 正常收口→B 在飞→旧 A 超时 reject=invalidated；B 正常收口 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > S2-Y1 无关代次退役无副作用 > A(gen2) 结算挂起→retire(gen1)=no-op→结算正常完成 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > S2-Y4 drain 回调契约（抛错隔离+审计） > drain 回调抛错：不中断结算，审计 drain-callback-failed 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > S2-C1 正常收口=槽位释放边界（挂起超时不占位新轮） > A 挂起超时→success+settled 正常收口→B 超时可自行发起；双挂起旧 A finally 不动 B 槽 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > S2-C1 正常收口=槽位释放边界（挂起超时不占位新轮） > bufferedSettled 合并式结算→recorded-and-settled 也释放槽位；B 超时可自行发起 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > S2-C3 许可交接窗口（send 返回后登记前失效） > sending 完成微任务窗口 close→invalidated/post-send：不登记不 launched 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > S2-C3 许可交接窗口（send 返回后登记前失效） > close+reopen 后 B 抢先派发：A 续跑时 B 已接管（dispatching）→最终 B in-flight；invalidated 不覆盖 B 登记 0ms
+ ✓ |unit| tests/unit/dispatch-coordinator.test.ts > 派发协调层（DispatchCoordinator，§169④） > S2-C3 许可交接窗口（send 返回后登记前失效） > 【受控替身·分支面】Gate in-flight 但属另一意图（同 kind 不同 intentId）→invalidated/post-send 0ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：③continuation+多字节 UTF-8 分界+控制帧 > 碎片帧跨码点+插入 ping 控制帧 → 仍一条完整消息 88ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：③continuation+多字节 UTF-8 分界+控制帧 > 服务端 transport ping → 客户端 ws 自动 pong → onPong 触发 4ms
+ ✓ |unit| tests/unit/web/app.test.ts > 双布局壳与导航 > 加载与连接异常静态场景不声称成功或重试已受理 121ms
+ ✓ |unit| tests/unit/web/app.test.ts > 双布局壳与导航 > unknown 与恢复暂定为中性状态，三色均附文字 8ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > 正常序两轮：spawn→submit→首字节写→事件路由带代次→收口→第二轮同进程；idle 时 submit/retire=no-process 3ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > 首字节窗口失效（受控替身）：协调器返 launched 但进程已退役→不写 stdin+审计（防御深度） 1ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > 背压窗口换代零串扰：写挂起期间意外退出→换代→写续体只及旧 handle，新轮写新 handle 1ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > 旧代次事件丢弃：退役代次 handle 的事件丢弃+审计；新代次正常路由 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > stopping 期仍路由：SIGTERM 宽限内晚到事件=旧轮最后事实，不丢；确认后丢弃 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > 串行化交接：stopping 中 spawnNext 拒；退出确认→协调器清登记+gate 关→idle 后可 spawn 新代次 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > 宽限升级 SIGKILL：SIGTERM 无响应→grace 醒→SIGKILL→exit 确认 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > 截止失败+晚到收口：deadline-exceeded 保持 stopping；晚到 exit 自动退役→idle→可 spawn 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > 意外退出：running 中 exit→代次退役+gate 关+登记清→idle；reopen 后新轮可跑 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > retire 前置/重入：idle=no-process；交接中重入=stopping 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > spawn 失败回滚：spawn 抛错→idle 保持可重试 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > 重复 exit 幂等：第二次 exit 只审计，不重复退役（onGenerationRetired 恰一次） 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > S3-01 双收口不覆盖新代次：宽限内 onExit 先收口→B 抢先接管→retire 续体幂等不清 B 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > S3-02a dispatching 窗口：硬序 fsync 挂起中意外退出→gate 关闭→旧 submit 续体 invalidated 不写；新代次可跑 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > S3-02b settling 窗口：终态行 fsync 挂起中意外退出→gate 关闭→旧 settled 续体失效 held；B 登记不受污染 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > S3-03 Gate 许可复核：协调器登记后首字节前 gate 被关（排队微任务窗口）→invalidated 不写 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > S3-04a 预算截断：grace>deadline 时宽限被钳到总预算，第二段只探查 1ms（requests=[1000,1]，先断言再收口） 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > S3-04b 晚醒不重置预算：宽限期睡过头（超量推进）→第二段只睡剩余量 1ms（先断言再收口） 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > S3B-01 默认时钟=单调 performance.now：不注入 nowMs 也能完整走一轮交接 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > S3B-01 时钟回拨不扩大预算：nowMs 从 10000 跳回 -50000，第二段仍按钳位剩余=5000（非 65000） 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > S3B-01 非有限时钟按 0 对待：NaN 时钟不产生 NaN/Infinity 预算 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > S3B-02 A 宽限内收口后 B 立即退役不被 A 旧续体挡：retireInFlight 按代次隔离 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > S3B-02 A 旧 finally 不清 B 槽位：B 挂起期间 A 续体收尾，B/第三代次仍各自独立退役 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > S3C-01 默认时钟选用单调源：performance.now 被调用且 Date.now 未被读取 1ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > stderr 按代次过滤：当前带 generation 转发；退役/非当前丢弃+审计 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > spawn 同步退出：onExit 在 spawn 内冒出→spawn-exited 结果+已收口 idle+恰一次退役，可重试 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > 审计钩子抛错被隔离：机制不受影响（submit/retire 照常完成） 0ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > 写拒绝透传且不毁监管器：EPIPE→submitTurn 拒绝→换代→新轮正常 1ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > S5-R2 表驱动：EOF 段不吃 SIGTERM 自身宽限（TERM 截止锚在发出时刻） 2ms
+ ✓ |unit| tests/unit/process-supervisor.test.ts > 进程代次监管器（ProcessSupervisor，切片3） > S5-R2：EOF 段内自然退出→confirmed(idle-eof)；TERM 段内退出→confirmed(idle-eof-escalated) 0ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b3-fix2：F1/F2 发布循环 > F2/P-REPLACE 发布让出窗口内 onInvalidate(replace)→发布按流作废中止；新订阅新流不发旧坐标帧 85ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b3-fix3：F2 提交窗口同步化（GPT 双微任务探针固化） > F2/P-CLOSE-MICRO 提交窗双微任务关连接→要么关前拦截（零绑定）要么关后收口（绑定即清），恒零残留+引用恰一次 2ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b3-fix3：F2 提交窗口同步化（GPT 双微任务探针固化） > F2/P-REPLACE-MICRO 提交窗双微任务 onInvalidate(replace)→旧流即退（4409），任何时序都不复活退役流坐标 42ms
+ ✓ |unit| tests/unit/r3.regressions.test.ts > 三审① clear 不改写历史终局（lastVerdict 保护） > enqueue→consumed→delivered→clear 重放：终局保持 delivered，绝不被改写 cancelled 3ms
+ ✓ |unit| tests/unit/r3.regressions.test.ts > 三审② 历史 consumed 终点漂移耐久化（重放来的也追加更新行） > 首扫单 user 暂定→重放（终点 u1）→宿主补终答→二扫追加终点更新行（新终点 a1） 2ms
+ ✓ |unit| tests/unit/r3.regressions.test.ts > 三审③ untrusted 锚不作可信分区 > 审者反例：uA→aA(stop)→x(toolCall 无 result)→tail(stop)——B 错锚 x 判 untrusted，A 不被 x 切分区间救成 delivered 0ms
+ ✓ |unit| tests/unit/r3.regressions.test.ts > 三审④ 前置必填+超时语义统一 > 前置失败输出=空水位+空消费记录（终裁拒绝完整形态） 1ms
+ ✓ |unit| tests/unit/r3.regressions.test.ts > 三审④ 前置必填+超时语义统一 > roundTimedOut=true 开终裁窗：运行态 sending 意图按恢复态歧义源判定（非 inflight 直推） 0ms
+ ✓ |unit| tests/unit/r3.regressions.test.ts > 三审⑥ R2-01 补类（附件不一致/跨组共享/锚缺失）+R2-05 直接断言 > 附件身份不一致的锚→untrusted 0ms
+ ✓ |unit| tests/unit/r3.regressions.test.ts > 三审⑥ R2-01 补类（附件不一致/跨组共享/锚缺失）+R2-05 直接断言 > 跨组共享锚（不同文本两意图同锚）→双 untrusted 0ms
+ ✓ |unit| tests/unit/r3.regressions.test.ts > 三审⑥ R2-01 补类（附件不一致/跨组共享/锚缺失）+R2-05 直接断言 > 锚缺失（不在投影）→untrusted+水位不跨越 0ms
+ ✓ |unit| tests/unit/r3.regressions.test.ts > 三审⑥ R2-01 补类（附件不一致/跨组共享/锚缺失）+R2-05 直接断言 > R2-05 直接断言：缺 toolCallId 的 toolResult→区间不闭合；corrupt 双表示→不闭合 0ms
+ ✓ |unit| tests/unit/r3.regressions.test.ts > 三审⑥ R2-03 区间排他真命中（候选在他人既有 C 区间内） > 组内两 user：B 锚 u1 终点 a2（区间含 u2）→C 候选 u2 落 B 区间内→不落锚 1ms
+ ✓ |unit| tests/unit/projection-frames.test.ts > 纯投影装页（c6 C5-07） > packPage：双上限+前进保证（首条必装）+next/total/truncated 2ms
+ ✓ |unit| tests/unit/projection-frames.test.ts > 纯投影装页（c6 C5-07） > packPage：offset 域外→null（宿主 4409）；尾页 next=null+truncated=false 0ms
+ ✓ |unit| tests/unit/projection-frames.test.ts > 纯投影装页（c6 C5-07） > buildRecoveryFrame：单 offset 驱动三视图（C6-02）——perIntent 装页；unknown/resumable 从本页行派生；blocked 恒空表 1ms
+ ✓ |unit| tests/unit/projection-frames.test.ts > 纯投影装页（c6 C5-07） > buildRecoveryFrame：3000 意图×128 字符 ID 逐页有界（C6-02+GPT c7 精度：真实长 ID+UTF-8 字节断言） 14ms
+ ✓ |unit| tests/unit/projection-frames.test.ts > 纯投影装页（c6 C5-07） > buildSessionsFrame：页级聚合（条目 partial→partial）+hasMore 续页+limit（C6-06） 1ms
+ ✓ |unit| tests/unit/projection-frames.test.ts > 纯投影装页（c6 C5-07） > buildSessionsFrame：目录级 partial 输入→页级 partial（C6-06 目录截断反例）+默认 limit 50+limit 钳位 1ms
+ ✓ |unit| tests/unit/projection-frames.test.ts > 纯投影装页（c6 C5-07） > 单条超预算→null（显式失败，宿主转错误帧） 0ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > S4-05c settled 先于 response（buffered）：不提前通知；response 回绑即结算→恰一次 106ms
+ ✓ |unit| tests/unit/web/app.test.ts > 双布局壳与导航 > 手机新建保留模型下拉；不创建真实会话，Esc 返回新建按钮 91ms
+ ✓ |unit| tests/unit/web/app.test.ts > 双布局壳与导航 > 不把 HTML 或未知 part 当活动内容或权限卡渲染 55ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：④双门尺寸（真网关组合） > R05/3b-1 双门字节精度：262,143/262,144B 合法 ping→pong；262,145B → 恰一条新 4404（nonce 关联+基线计数，不靠历史帧充数） 82ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：④双门尺寸（真网关组合） > 1MiB+1 单帧 → 传输接收器 close 1009（先于应用层） 32ms
+ ✓ |unit| tests/unit/sha256.test.ts > sha256 golden + node:crypto 对拍 > 固定 golden（NIST 向量） 1ms
+ ✓ |unit| tests/unit/sha256.test.ts > sha256 golden + node:crypto 对拍 > 边界长度对拍（0..72 全长 + 119/120/1000） 4ms
+ ✓ |unit| tests/unit/sha256.test.ts > sha256 golden + node:crypto 对拍 > 多字节 UTF-8 与 emoji/中文 0ms
+ ✓ |unit| tests/unit/sha256.test.ts > sha256 golden + node:crypto 对拍 > 64KiB 长输入（块循环路径） 2ms
+ ✓ |unit| tests/unit/sha256.test.ts > sha256HexBytes 3b-3⑤：字节入口对拍 node:crypto > 空/随机字节/撕裂多字节尾/64KiB 全对齐（指纹=整文件字节含撕裂尾） 7ms
+ ✓ |unit| tests/unit/session-projection.test.ts > session-projection 3b-2b① > 基础：header→unknown-line；user/assistant→message；final 映射 4ms
+ ✓ |unit| tests/unit/session-projection.test.ts > session-projection 3b-2b① > locator=字节偏移：多字节行后偏移按 UTF-8 字节数推进 1ms
+ ✓ |unit| tests/unit/session-projection.test.ts > session-projection 3b-2b① > 撕裂尾不发布（末段无 \n）；补全换行后自然编入 1ms
+ ✓ |unit| tests/unit/session-projection.test.ts > session-projection 3b-2b① > 缺 id/角色非法→corrupt-entry；可解析非 message→unknown-line 0ms
+ ✓ |unit| tests/unit/session-projection.test.ts > session-projection 3b-2b① > user 三元组匹配：textHash+ordinal 按序消费；带 generation 0ms
+ ✓ |unit| tests/unit/session-projection.test.ts > session-projection 3b-2b① > 附件身份：同文本不同附件不误配 1ms
+ ✓ |unit| tests/unit/session-projection.test.ts > session-projection 3b-2b① > 区间归因：终点哈希不符→区间无效全 null（不采信伪造终点） 0ms
+ ✓ |unit| tests/unit/session-projection.test.ts > session-projection 3b-2b① > 区间归因（正确哈希）：assistant/toolResult/锚 user 全归 I1 0ms
+ ✓ |unit| tests/unit/session-projection.test.ts > session-projection 3b-2b① > 孤儿 toolResult（无 toolCallId）→intentId:null；有 id 归区间 0ms
+ ✓ |unit| tests/unit/session-projection.test.ts > session-projection 3b-2b① > toolCall 块分立：块键 entryId:blockIndex 0 基；本体事件先行 1ms
+ ✓ |unit| tests/unit/session-projection.test.ts > session-projection 3b-2b① > final 全表：length→true（预览截断标注）；aborted→true；toolResult/system 补全角色 0ms
+ ✓ |unit| tests/unit/session-projection.test.ts > session-projection 3b-2b① > 预览脱敏+截断：环境变量遮蔽；200 上限 0ms
+ ✓ |unit| tests/unit/session-projection.test.ts > session-projection 3b-2b① > 空文本/纯换行→零行 0ms
+ ✓ |unit| tests/unit/session-projection.test.ts > session-projection 3b-2b-R3/R4/R6（GPT 65→修复） > 3b2c-Y2：归因匹配域=进入和解的意图（prompt/steer/followUp）——abort/takeover 合法行不消费序号 1ms
+ ✓ |unit| tests/unit/session-projection.test.ts > session-projection 3b-2b-R3/R4/R6（GPT 65→修复） > R3：坏 enqueue/consumed 行不采信并计数；非 JSON/其他行型不计入 rejected；撕裂尾不参与 0ms
+ ✓ |unit| tests/unit/session-projection.test.ts > session-projection 3b-2b-R3/R4/R6（GPT 65→修复） > R4：真实图片块（data 字段）身份=sha256 前 12hex——同图同 id 按序消费，异图不误配 0ms
+ ✓ |unit| tests/unit/session-projection.test.ts > session-projection 3b-2b-R3/R4/R6（GPT 65→修复） > R4：多重集换序等价（AB=BA 同组）；未知块 u: 前缀不可匹配写侧 12hex 面 1ms
+ ✓ |unit| tests/unit/session-projection.test.ts > session-projection 3b-2b-R3/R4/R6（GPT 65→修复） > R6：stopReason=length→textPreview.truncated=true（短正文也置位）；非 length 对照 false；空正文占位保留信号 0ms
+ ✓ |integration| tests/integration/real-ws.test.ts > 3b-3③ real-ws：真实传输+慢客户端矩阵 > RW1 快/慢并存：慢客户端卡分页→订阅级 4431（retryable=false 只关订阅）；快客户端全量不受影响；慢客户端 cursor 续读恢复 1071ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b3-fix3：F2 提交窗口同步化（GPT 双微任务探针固化） > F2/P-REPLACE-NEWGEN 换流窗内另一请求已建新代→旧盘面 load 返回者再 replace，绝不复活退役流/最终归属唯一 3ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b3-fix3：F2 提交窗口同步化（GPT 双微任务探针固化） > Y-F2-LEDGER/PUBLISH-STATES-CHURN LRU 挤出/换流后发布账本回收（size 与 registry 同步，无残留增长） 2ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b3-fix3：F2 提交窗口同步化（GPT 双微任务探针固化） > Y-F2-LEDGER/PUBLISH-IN-FLIGHT-RECYCLE 在飞发布循环遇换流回收→循环自止无互踩，后续订阅新流照常 42ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b3-fix4：F4-1 同步可重入提交资格复核（GPT fix3 F3R-COMMIT 探针固化） > F4/P-SYNC-CLOSE startSnapshot 冻结 status 的同步回调内关连接→提交资格复核拦截：零绑定/引用恰一次 release/无死帧 2ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b3-fix4：F4-1 同步可重入提交资格复核（GPT fix3 F3R-COMMIT 探针固化） > F4/P-SYNC-REPLACE B 订阅的 statusFor 回调内同步 invalidate（A 已绑观察）→B 身份复核拦截：B 旧坐标零承诺/引用恰一次/新流可续订 2ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b3-fix4：F4-4 发布账本第四出口（GPT fix3 F3R-LEDGER：syncIndex 换流路回收） > F4/P-PS-REWRITE-RECYCLE 非前缀改写（订阅触发换流）→旧流发布账本项即刻回收：不滞留旧流/新流从新坐标起步 3ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b3-fix4：F4-4 发布账本第四出口（GPT fix3 F3R-LEDGER：syncIndex 换流路回收） > F4/P-PS-OVERBUDGET-CHURN 超容量失败分支（非前缀+索引超预算）不滞留旧流账本：失败路换流照回收 2ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b3-fix6：F6-3 宿主 status 纯数据化（GPT fix5 P6 序列化重入边界） > F6/P-SERIAL-REENTRY status 带 getter/toJSON→资格门冻结恰一次求值，下游序列化零宿主代码 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b3-fix5：F5-1 门后重入提交资格复核（GPT fix4 P3/P4 探针固化） > F5/P-RETIRE-OVERFLOW 退旧 4409 入队触发队列溢出同步 closeConn→门后复核拦截：无复活绑定/引用恰一次/零死帧 6ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b3-fix5：F5-1 门后重入提交资格复核（GPT fix4 P3/P4 探针固化） > F5/P-RETIRE-AUDIT-REENTRY 撤帧审计宿主回调重入关连接→门后复核拦截：无复活绑定/引用恰一次/无复活快照 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b3-fix7 F7-3：续页/H+1 冻结窗重入资格复核（GPT fix6 P9/P10） > F7/P-PAGE-REENTRY 续页冻结窗内宿主 invalidate→closed 引擎按入口同语义拒（4404），不出旧快照/不复活 6ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b3-fix7 F7-3：续页/H+1 冻结窗重入资格复核（GPT fix6 P9/P10） > F7/P-H1-FREEZE live 态 H+1 补页冻结窗内宿主 invalidate→同型拒（4404），空页快照不复活 closed 引擎 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b3-fix7 F7-3：续页/H+1 冻结窗重入资格复核（GPT fix6 P9/P10） > F7/P-SERIAL-GETTER getter-only status（无 toJSON）→冻结窗恰一次求值，帧内纯数据 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b3-fix8 F8-1：宿主时钟窗整合（GPT fix7 P10——网关公开 now 注入面） > F8/P-PAGE-NOW 入站时钟窗内 invalidate→4409 后零退役快照、新订阅新流、观察已收口（网关级防线例，engine.handle 未及调用） 5ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b3-fix8 F8-1：宿主时钟窗整合（GPT fix7 P10——网关公开 now 注入面） > F9/P-PAGE-NOW-COMMIT 引擎页提交时钟窗内 invalidate→4409 后 4404、零退役快照（真提交点：freeze 内 arm，pageAt=now() 触发） 6ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b-4：typed recovery 结果映射+连接级取消 > T1 typed unavailable（oversized）→recovery 帧 availability=unavailable reason=oversized（冻结枚举直传） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b-4：typed recovery 结果映射+连接级取消 > T2 typed file-unreadable→error 4402 retryable=true（契约 §5.2/§5.3/3b-0 §4F：请求级错误帧；typed 区分入审计 file/detail） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b-4：typed recovery 结果映射+连接级取消 > T5 迟到交付：连接关后 provider 才 resolve（本例 unavailable 面）→零帧+不回填缓存（二次请求重调不命中旧结果；成功快照面=T5c） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b-4：typed recovery 结果映射+连接级取消 > T3 取消语义：provider 挂起中传输关闭→AbortSignal 触发（provider 可停读）；无帧泄漏+连接清户 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b-4：typed recovery 结果映射+连接级取消 > T4 应用关闭同路取消：closeConn（服务端主动）也触发 abort（幂等） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b-4：typed recovery 结果映射+连接级取消 > T5b 迟到交付资源回收（unavailable/Error 面）：连接关后 resolve/reject 双面→零帧+信号量归零（inFlight==0）+重调不回填（成功快照面=T5c） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b-4：typed recovery 结果映射+连接级取消 > T5c/B13-3② 迟到成功快照：连接关后 provider 才 resolve 合法 snapshot→零帧+死连接 recoveryPages 仍空+信号量归零（成功面同样不回填） 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b-4：typed recovery 结果映射+连接级取消 > T4b/B13-3② 公开关闭入口：应用级关闭（rig.dispose→网关收尾关闭所有连接）也触发 abort——非仅私有 closeConn 可达 1ms
+ ✓ |unit| tests/unit/server/ws-gateway.test.ts > ws-gateway 3b-4：typed recovery 结果映射+连接级取消 > T6/B12-3⑤ LRU 驱逐实证：9 个 requestId 同文件→首条驱逐→携旧 hash 续页=缓存 miss 重调（快照已变→4409）；幸存条目续页零重调 25ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > S4-B1a 响应先到+写永久挂起：总截止仍终结启动（readiness-timeout，非永久 pending） 109ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > S4-B1b 响应已到+写挂起：stop 取消口仍有效（superseded 不永久等待） 4ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > S4-B2a 响应后同段 stop：start 不返回 ready（P4），旧启动失效 5ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > S4-B2b 探针成功与 start 返回之间退出（P2 终窗）：返回前复核，不报 ready 2ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > S4-B2c 探针成功路径内同步退出（readyGeneration 已置→finish 前窗口）：返回前复核兜底 1ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > S5-R3：构造拒绝——sessionFile 与 piArgs 都缺（无持久身份不得启用回收生命周期） 0ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > S5-R3：默认绑定 sessionFile——两代 spawn 同一 --session 文件（跨回收持久身份） 13ms
+ ✓ |unit| tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > enqueue→turn-enqueued（preview/ordinal/generation/intentId/locator 全链） 3ms
+ ✓ |unit| tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 完整行集合各 kind 映射（sending/engaged/consumed/cancelled/delivered/settled/unknown/response-timeout/clear） 0ms
+ ✓ |unit| tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 撕裂尾（无换行）不发布；补全换行后成行 0ms
+ ✓ |unit| tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 空文本=0 行；空行=journal-corrupt 占位（完整行不静默丢） 0ms
+ ✓ |unit| tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 坏完整行分型：JSON 解析失败/非对象/null/缺 t/未知 t→journal-corrupt 0ms
+ ✓ |unit| tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > R5/P1：schema 非法行→journal-corrupt 不抛错（严格校验与恢复侧同权威） 0ms
+ ✓ |unit| tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > R5：未知行型不猜语义（未来版本行保守 corrupt） 0ms
+ ✓ |unit| tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 合法行容忍额外字段（前向兼容：多余键不判坏） 0ms
+ ✓ |unit| tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > preview 截断到 HISTORY_PREVIEW_LIMIT（200） 1ms
+ ✓ |unit| tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 行号定位：坏行也占行号（locator 连续） 0ms
+ ✓ |unit| tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 跨行序完整性：100 行→100 行、locator 单调 1ms
+ ✓ |unit| tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 同文本不同两行=两行各自投影（去重归源 diff，不归投影） 0ms
+ ✓ |unit| tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > sanitize 面：控制字符被剥后进 preview 0ms
+ ✓ |unit| tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > baseEvent 只认行内字段（跨行不串扰） 0ms
+ ✓ |unit| tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > R5 与恢复侧同权威：journalLineSchemaError 直接对照（同输入同判定） 0ms
+ ✓ |unit| tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 3b2c-B5 额外字段安全 null 投影 > N7 精确输入：sending+generation 对象→kind=sending、generation=null（对象不逃入事件） 0ms
+ ✓ |unit| tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 3b2c-B5 额外字段安全 null 投影 > sending+generation 数组/字符串/负数/非安全整数→一律 null（不猜语义） 0ms
+ ✓ |unit| tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 3b2c-B5 额外字段安全 null 投影 > engaged/delivered/settled 带额外 generation→null（生命周期行不声明该字段） 0ms
+ ✓ |unit| tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 3b2c-B5 额外字段安全 null 投影 > clear+额外 intentId（错型对象）→事件 intentId=null（clear 不声明 intentId） 0ms
+ ✓ |unit| tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 3b2c-B5 额外字段安全 null 投影 > enqueue/response-timeout 的 generation=已验证字段→照常投影（正控制） 0ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：⑤真 send 回调+清理 > send done 回调在真实交付后兑现一次；关闭后 send 即拒 129ms
+ ✓ |unit| tests/unit/server/idle-reaper.test.ts > idle-reaper（闲置回收受控面） > 双条件满足才开始计时；到期触发优雅回收；审计序完整 4ms
+ ✓ |unit| tests/unit/server/idle-reaper.test.ts > idle-reaper（闲置回收受控面） > 条件断开清零计时；重新满足从新起点计 0ms
+ ✓ |unit| tests/unit/server/idle-reaper.test.ts > idle-reaper（闲置回收受控面） > 登记表活跃阻断回收；完成后恢复计时 0ms
+ ✓ |unit| tests/unit/server/idle-reaper.test.ts > idle-reaper（闲置回收受控面） > supervisor 非 running（idle 无进程/stopping）不回收 0ms
+ ✓ |unit| tests/unit/server/idle-reaper.test.ts > idle-reaper（闲置回收受控面） > 到期触发前同步复核：条件在复核时翻假→取消不触发 0ms
+ ✓ |unit| tests/unit/server/idle-reaper.test.ts > idle-reaper（闲置回收受控面） > 回收挂起中防重入：不重复触发；完成后可再计 3ms
+ ✓ |unit| tests/unit/server/idle-reaper.test.ts > idle-reaper（闲置回收受控面） > 时钟非有限不推进（不设起点不触发）；恢复有限后从新起点计 0ms
+ ✓ |unit| tests/unit/server/idle-reaper.test.ts > idle-reaper（闲置回收受控面） > S5-R1：采样间活动失效旧起点（生产期限）——短登记在两 tick 间完成后不从旧起点回收 1ms
+ ✓ |unit| tests/unit/server/idle-reaper.test.ts > idle-reaper（闲置回收受控面） > s5c B1：audit 回调内短活动对（register+complete 同步+note）→eligible 看不见但活动复核取消；起点回退活动时刻（剩余期限延续） 3ms
+ ✓ |unit| tests/unit/server/idle-reaper.test.ts > idle-reaper（闲置回收受控面） > S5-R4：audit 回调同步重入（登记/dispose/受理）→触发前最终复核取消，不发起退役 0ms
+ ✓ |unit| tests/unit/server/idle-reaper.test.ts > idle-reaper（闲置回收受控面） > dispose 后不再触发；MapRegistry 重复 register 幂等/未知 complete 无害 0ms
+ ✓ |unit| tests/unit/r2.regressions.test.ts > R2-01 既有锚同验证（不得绕过身份门） > 既有锚指向 assistant 条目→unknown+untrusted，绝不 delivered 7ms
+ ✓ |unit| tests/unit/r2.regressions.test.ts > R2-01 既有锚同验证（不得绕过身份门） > 既有锚文本与意图 matchKey 不一致（错组）→unknown+untrusted 4ms
+ ✓ |unit| tests/unit/r2.regressions.test.ts > R2-03 排他与水位不可信证据 > 区间终答在永久排除集 P 中→不作①证据→unknown 1ms
+ ✓ |unit| tests/unit/r2.regressions.test.ts > R2-03 排他与水位不可信证据 > 候选落在他人既有 C 区间内→不落新锚（不吞证据） 1ms
+ ✓ |unit| tests/unit/r2.regressions.test.ts > R2-03 排他与水位不可信证据 > 冲突锚双 unknown 时水位不推进（untrusted 拦） 0ms
+ ✓ |unit| tests/unit/r2.regressions.test.ts > R2-07 前置条件显式门 > 水位身份验证失败→全部暂定（终裁拒绝） 0ms
+ ✓ |unit| tests/unit/r2.regressions.test.ts > R2-07 前置条件显式门 > 外部写者闩→永暂定 0ms
+ ✓ |unit| tests/unit/r2.regressions.test.ts > R2-07 前置条件显式门 > 恢复态写者未静止→暂定（alive=false 不再是终裁默契授权） 0ms
+ ✓ |unit| tests/unit/r2.regressions.test.ts > R2-04 clear 行重放接通 > journal 层：enqueue→sending→clear 行重放→cancelled=true（非预填布尔） 0ms
+ ✓ |unit| tests/unit/r2.regressions.test.ts > R2-04 clear 行重放接通 > recovery 层：cancelled 意图恰一 verdict（组内多意图不漏判） 0ms
+ ✓ |unit| tests/unit/r2.regressions.test.ts > N18 连扫两次不造锚（真实样例：同一歧义输入两次，不手填） > 恢复态 sending 双意图一 user 条目→两次扫描 verdict 一致+锚为空 1ms
+ ✓ |unit| tests/unit/r2.regressions.test.ts > N18b 全链正向样例（二审任务 3：首扫产物→journal 重放→二扫，不手填 consumed） > 首扫落行持久化→replayIntents 重放→二扫与手填口径同判（sending 恢复态） 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 编码器：SessionSendResult→WriteSendOutcomeDTO > E1 launched：key 扁平化（intentId/commandId 保留，generation 不跨面） 4ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 编码器：SessionSendResult→WriteSendOutcomeDTO > E2 busy/gate-rejected 透传 1ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 编码器：SessionSendResult→WriteSendOutcomeDTO > E3 gate-failed：stage 保留、error 截断（unknown 不跨面） 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 编码器：SessionSendResult→WriteSendOutcomeDTO > E4 invalidated 四 stage 全透传（enqueue/sending/post-send/first-byte） 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 编码器：SessionSendResult→WriteSendOutcomeDTO > E5 no-process 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 编码器：SessionSendResult→WriteSendOutcomeDTO > E6 not-ready：cause 有/无两形（源可选→DTO 可选） 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 编码器：SessionSendResult→WriteSendOutcomeDTO > E7 stop 四分支同构（confirmed 复制 exit，不携引用） 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 编码器：SessionSendResult→WriteSendOutcomeDTO > E8 kind 集合冒烟（值正确性由 E1/E6 等完整对象断言负责；对值失真盲=E1/H1 才是杀伤面） 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H1 sendPrompt：file 交工厂、text 交会话、DTO 回 launched 扁平形 1ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H2 stop：RetireOutcome 同构回传 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H3 注册表缓存：同 file 工厂只调一次（send+stop 共享实例） 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H4 不同 file 不同实例（缓存按 file 分桶） 3ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H5 工厂抛错→审计留细节+剥离重抛（无内部串外泄） 1ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H6 会话 send 抛错同面：审计+剥离重抛（W9 的 4402 通道来源） 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H7 审计回调自身抛错被隔离（不影响重抛语义） 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H8 异步工厂（Promise 返回）可用 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H9 同步工厂首次并发 prompt+stop：恰建一次、两操作落同实例、后续仍缓存 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H10 可控异步工厂并发 prompt/prompt：deferred 释放后仍恰建一次、两 text 落同实例 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H11 工厂失败（并发共享同一失败）后健康重试：占位已清、重试恰再建一次 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H12 恶意不可字符串化拒绝值×两 op：仍固定 message、无内部附带字段（格式化不逃逸） 1ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H13 会话 stop 自身拒绝→同样剥离（write-host-internal: stop）+审计留细节 0ms
+ ✓ |unit| tests/unit/server/rpc-write-host.test.ts > 3c-2 宿主适配：createRpcWriteHost > H14 gate-failed 细节截断前落审计：audit 行含 stage+detail，DTO 仍无 error 0ms
+ ✓ |unit| tests/unit/server/composition-write.test.ts > 3c-3 composition 写侧接线 > CW5 stop on idle 会话：write-stop-ack {kind:no-process}（不伪造进程死活） 356ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > 轮派发屏障（TurnGate） > 硬序：enqueue→sending 两 fsync 完成后才发 send 许可（行序=机械硬序①②） 2ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > 轮派发屏障（TurnGate） > 屏障占用：in-flight 中第二意图 submit=busy 拒绝 1ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > 轮派发屏障（TurnGate） > enqueue fsync 失败（写前拒绝替身）：failed(stage enqueue)+closed 保持+无 sending 行+后续 submit=closed 拒绝 1ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > 轮派发屏障（TurnGate） > sending fsync 失败（写前拒绝替身）：failed(stage sending)+closed；journal=有 enqueue 无 sending 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > 轮派发屏障（TurnGate） > success 仅受理不释放屏障：onAccepted 后第二意图仍 busy 1ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > 轮派发屏障（TurnGate） > settled+终态耐久成功才释放：idle 后下一意图可受理；settled 行已 fsync 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > 轮派发屏障（TurnGate） > 终态耐久失败：closed 保持（屏障不释放）；reopen 后可受理 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > 轮派发屏障（TurnGate） > 乱序基础：settled 先于 success（acceptedAt 仍 null）正常收口 idle 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > 轮派发屏障（TurnGate） > 晚到回执均 no-op：settled 收口后的 accepted 与 settled 不炸不开新轮 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > 轮派发屏障（TurnGate） > 轮超时：in-flight 超窗→closed(turn-timeout)=中断呈现；窗口内不裁决；reopen 解锁 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > A1-01：close/reopen 使 pending 中的旧操作失效 > enqueue fsync pending 期间 close：旧 submit=invalidated(enqueue)，不发放 send、不尝试 sending、不覆盖 closed 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > A1-01：close/reopen 使 pending 中的旧操作失效 > sending fsync pending 期间 close：旧 submit=invalidated(sending)（两 fsync 均已成功仍不发 send） 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > A1-01：close/reopen 使 pending 中的旧操作失效 > fsync pending 期间 close 且随后 reject：invalidated 优先于 failed（生命周期接管） 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > A1-01：close/reopen 使 pending 中的旧操作失效 > settled 行 fsync pending 期间 close：追加成功后不转 idle（closed 保持） 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > A1-01：close/reopen 使 pending 中的旧操作失效 > 旧轮 settled 追加失败发生在换代后的新在飞轮：不得关闭新轮（A1-04 反例后半） 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > A1-01：close/reopen 使 pending 中的旧操作失效 > settling 期间（settled 行 fsync pending）submit=busy（终态未耐久不放屏障） 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > A1-02：fsync reject≠盘上无行（写后拒绝替身） > sending 写后拒绝：failed(stage sending)+closed，但 journal 已含 sending 行（进程内不得宣称「无 sending」） 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > A1-02：fsync reject≠盘上无行（写后拒绝替身） > 写后拒绝下副作用通道仍未开栓（send 许可从未发放=未发送成立；盘态另行裁决） 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > B1-01：非 closed 的 reopen=无副作用假失败（不得取消 pending 中的有效操作） > enqueue fsync pending 期间 reopen()=false 且无副作用：追加完成→send 许可正常发放，屏障不卡死 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > B1-01：非 closed 的 reopen=无副作用假失败（不得取消 pending 中的有效操作） > sending fsync pending 期间 reopen()=false：追加完成→send 许可正常发放 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > B1-01：非 closed 的 reopen=无副作用假失败（不得取消 pending 中的有效操作） > settled 行 fsync pending 期间 reopen()=false：追加完成→idle 正常释放，下一意图可受理 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > B1-01：非 closed 的 reopen=无副作用假失败（不得取消 pending 中的有效操作） > 失败 reopen 后原操作失败路径不受污染：enqueue reject→failed(enqueue)+closed（正常 fail-closed） 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > 硬序 pending 面（s1b：未关闭时直接断言许可不早于追加完成） > sending fsync 挂起期间 submit 不 resolve：send 许可不先于第二次追加完成 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > B1-01 补遗（s1c 建议固化：失败 reopen 后原操作失败路径两窗口） > sending fsync pending 假失败 reopen 后 reject：failed(sending)+closed（正常 fail-closed，非 invalidated） 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > B1-01 补遗（s1c 建议固化：失败 reopen 后原操作失败路径两窗口） > settled 行 fsync pending 假失败 reopen 后 reject：closed（durability-failure），未错误释放为 idle 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > B1-01 补遗（s1c 建议固化：失败 reopen 后原操作失败路径两窗口） > TurnSettleResult 四值直接断言（s2b Y4；屏障解除证据契约） > 正常收口=settled（唯一解锁证据） 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > B1-01 补遗（s1c 建议固化：失败 reopen 后原操作失败路径两窗口） > TurnSettleResult 四值直接断言（s2b Y4；屏障解除证据契约） > settled 行写后拒绝=durability-failure（closed 保持，不放行） 0ms
+ ✓ |unit| tests/unit/turn-gate.test.ts > B1-01 补遗（s1c 建议固化：失败 reopen 后原操作失败路径两窗口） > TurnSettleResult 四值直接断言（s2b Y4；屏障解除证据契约） > 结算挂起窗口 close=invalidated（旧操作不拥有新状态） 0ms
+ ✓ |unit| tests/unit/read-index.test.ts > 读索引不变量（c5 B02） > append 原子赋 seq：输入携带 seq 被覆盖统一（坐标不分裂） 1ms
+ ✓ |unit| tests/unit/read-index.test.ts > 读索引不变量（c5 B02） > 内容摘要：同位改写（同 locator 不同内容）→isPrefixOf=false（换流） 0ms
+ ✓ |unit| tests/unit/read-index.test.ts > 读索引不变量（c5 B02） > scanDigest：源+定位+原始行三要素参与（同投影不同 raw→不同摘要；同 raw 稳定） 1ms
+ ✓ |unit| tests/unit/read-index.test.ts > 读索引不变量（c5 B02） > boot 隔离：注册表 ID=注入随机源（两次 boot 不同流 ID，不随注册序重放） 0ms
+ ✓ |unit| tests/unit/read-index.test.ts > 读索引不变量（c5 B02） > 触顶卸载：get 发现 overBudget→废弃换新流（有限出口）+get 触达即 LRU 刷新 1ms
+ ✓ |unit| tests/unit/read-index.test.ts > 读索引不变量（c5 B02） > C6-03：首次触顶换流后——空流/预算内 get 恒放行（不因历史触顶记录误拒）；现流再触顶才拒 0ms
+ ✓ |unit| tests/unit/read-index.test.ts > 读索引不变量（c5 B02） > boot 默认流 ID：crypto 随机源唯一（两次构造不同 id，非注册序重放） 2ms
+ ✓ |unit| tests/unit/read-index.test.ts > 读索引不变量（c5 B02） > replace：文件替换→换流（新 streamId+空索引） 0ms
+ ✓ |unit| tests/unit/r4.regressions.test.ts > 四审① 历史 delivered+clear 不授权新增尾部（证据定格） > 历史 delivered 区间不因尾部 x 扩展：无更新行+水位不被带跑 4ms
+ ✓ |unit| tests/unit/r4.regressions.test.ts > 五审① 无 clear 的历史终局不降级（如数输出+证据定格） > delivered 无 clear：保持 delivered，不进待终检（不降级 unknown） 2ms
+ ✓ |unit| tests/unit/r4.regressions.test.ts > 五审① 无 clear 的历史终局不降级（如数输出+证据定格） > settled 无 clear：统一报 delivered（settled 蕴含执行终局） 0ms
+ ✓ |unit| tests/unit/r4.regressions.test.ts > 六审① 历史终局+同组未收口 sending：歧义优先于直输出 > delivered+B 同组 sending：A 不直输出，歧义判 unknown+untrusted 1ms
+ ✓ |unit| tests/unit/r4.regressions.test.ts > 六审① 历史终局+同组未收口 sending：歧义优先于直输出 > settled+B 同组 sending：同判 unknown+untrusted 0ms
+ ✓ |unit| tests/unit/r4.regressions.test.ts > 四审③ untrusted 不占候选排他位（第一遍预扫） > 顺序 [B,A]：B 错锚不挡 A 的合法候选 2ms
+ ✓ |unit| tests/unit/r4.regressions.test.ts > 四审③ untrusted 不占候选排他位（第一遍预扫） > 顺序 [A,B]：交换顺序同样不挡 1ms
+ ✓ |unit| tests/unit/r4.regressions.test.ts > 四审④ 超时=开终裁窗（非全体暂定） > roundTimedOut=true：同文本组歧义判终裁 untrusted（非暂定拒绝） 0ms
+ ✓ |unit| tests/unit/r4.regressions.test.ts > 四审④ 超时=开终裁窗（非全体暂定） > roundTimedOut=true：单意图完整轮正例可 delivered（终裁窗内过四联） 0ms
+ ✓ |unit| tests/unit/r4.regressions.test.ts > 四审⑤ 通知 doneReason 断言补齐 > closeWithAcks 三 ACK 齐收口必带 doneReason='acks' 0ms
+ ✓ |unit| tests/unit/r4.regressions.test.ts > 四审⑤ 通知 doneReason 断言补齐 > derived+outbox expired → accountDomainClose 映射账本域 done(reason=expired) 0ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > 切片5①：settled 后闲置到期→EOF 优雅回收（无信号）→send 自动冷启动 gen2（journal 保留续写） 151ms
+ ✓ |unit| tests/unit/server/composition-write.test.ts > 3c-3 composition 写侧接线 > CW6 dispose 在途：readiness 等待期 server.dispose()→resolve 有限时间内+审计含 registry disposed（统一销毁面） 191ms
+ ✓ |unit| tests/unit/server/session-registry.test.ts > session-registry（3c-3） > SR1 同 file 同实例（缓存幂等）；不同 file 不同实例；files() 排序快照 3ms
+ ✓ |unit| tests/unit/server/session-registry.test.ts > session-registry（3c-3） > SR2 映射非法拒建：相对路径/空串/工厂抛错→描述性 Error（含 file 与实值） 1ms
+ ✓ |unit| tests/unit/server/session-registry.test.ts > session-registry（3c-3） > SR3 statusFor 未构造：进程 idle 真值+其余 unknown 语义（bg unknown/reap idleMs 配置真值/recovery 不声称） 1ms
+ ✓ |unit| tests/unit/server/session-registry.test.ts > session-registry（3c-3） > SR4 sessionId 确定性：同 file 跨注册表实例同 id（sha256Hex12 派生，重启稳定） 0ms
+ ✓ |unit| tests/unit/server/session-registry.test.ts > session-registry（3c-3） > SR5 statusFor 已构造（idle 初态）：进程真值 idle+ready false+bg known（计数 0）+reap 未计时 1ms
+ ✓ |unit| tests/unit/server/session-registry.test.ts > session-registry（3c-3） > SR6 statusFor 进程段随监管器真值走：构造后 send 面由上层驱动（本测用内部观测对照）——注册表只透传 0ms
+ ✓ |unit| tests/unit/server/session-registry.test.ts > session-registry（3c-3） > SR7 dispose：全量 stop+dispose 串行（审计序可见）+幂等+files 清空+销毁后拒绝构造 1ms
+ ✓ |unit| tests/unit/server/session-registry.test.ts > session-registry（3c-3） > SR8 dispose 时进程在飞：stop 先行（宿主收到 stop 调用）再 dispose 本地 0ms
+ ✓ |unit| tests/unit/server/session-registry.test.ts > session-registry（3c-3） > SR9 销毁健壮性：耐久 close 拒绝→RpcSession 层隔离（dispose 不 reject）→registry.dispose 照常收尾+审计可见；registry 自层 catch 为纵深防御（无注入口，不假测） 1ms
+ ✓ |unit| tests/unit/server/session-registry.test.ts > session-registry（3c-3） > SR10 durabilityFor 注入生效（默认面=FileDurability 由 composition-write 真链覆盖） 0ms
+ ✓ |unit| tests/unit/server/session-registry.test.ts > session-registry（3c-3） > SR11 审计隔离：audit 回调抛错不影响构造/销毁 0ms
+ ✓ |unit| tests/unit/contracts-validate.test.ts > 入站帧校验 > hello 合法（最小） 2ms
+ ✓ |unit| tests/unit/contracts-validate.test.ts > 入站帧校验 > hello 版本不支持（合法整数）→4403 1ms
+ ✓ |unit| tests/unit/contracts-validate.test.ts > 入站帧校验 > hello protocolVersion 非整数→4404（格式层先于版本层） 0ms
+ ✓ |unit| tests/unit/contracts-validate.test.ts > 入站帧校验 > hello 缺 token→4404；token 空串→4404 0ms
+ ✓ |unit| tests/unit/contracts-validate.test.ts > 入站帧校验 > hello 多余字段→4404 0ms
+ ✓ |unit| tests/unit/contracts-validate.test.ts > 入站帧校验 > 写类帧（prompt）→4405（鉴权前禁写；不论其余字段） 0ms
+ ✓ |unit| tests/unit/contracts-validate.test.ts > 入站帧校验 > 未知 t→4404（不回显超长） 0ms
+ ✓ |unit| tests/unit/contracts-validate.test.ts > 入站帧校验 > 非对象/缺 t→4404 0ms
+ ✓ |unit| tests/unit/contracts-validate.test.ts > 入站帧校验 > list-sessions 合法（最小+分页） 0ms
+ ✓ |unit| tests/unit/contracts-validate.test.ts > 入站帧校验 > list-sessions limit 超上限→4404；offset 负→4404 0ms
+ ✓ |unit| tests/unit/contracts-validate.test.ts > 入站帧校验 > subscribe init 合法 0ms
+ ✓ |unit| tests/unit/contracts-validate.test.ts > 入站帧校验 > subscribe resync（cursor）合法 0ms
+ ✓ |unit| tests/unit/contracts-validate.test.ts > 入站帧校验 > subscribe page（snapshotId+historyNext）合法 0ms
+ ✓ |unit| tests/unit/contracts-validate.test.ts > 入站帧校验 > subscribe 分支互斥：cursor+snapshotId→4404；snapshotId 无 historyNext→4404 0ms
+ ✓ |unit| tests/unit/contracts-validate.test.ts > 入站帧校验 > subscribe 非法 file→4404（路径穿越/坏字符） 0ms
+ ✓ |unit| tests/unit/contracts-validate.test.ts > 入站帧校验 > cursor seq 非法→4404（负数/非整数/缺字段） 0ms
+ ✓ |unit| tests/unit/contracts-validate.test.ts > 入站帧校验 > unsubscribe 合法 0ms
+ ✓ |unit| tests/unit/contracts-validate.test.ts > 入站帧校验 > get-recovery 合法；evidenceHash 非法→4404 0ms
+ ✓ |unit| tests/unit/contracts-validate.test.ts > 入站帧校验 > ping 合法（nonce；无 requestId） 0ms
+ ✓ |unit| tests/unit/contracts-validate.test.ts > 入站帧校验 > requestId 非法→4404（缺失/超长/坏字符） 0ms
+ ✓ |unit| tests/unit/contracts-validate.test.ts > 入站帧校验 > estimateFrameBytes：ASCII/中文/代理对 UTF-8 字节 0ms
+ ✓ |unit| tests/unit/b-face.regressions.test.ts > 一审 B 面五反例回归 > B1 部分轮补齐后收敛：首扫 unknown（暂定）→补终答重扫 delivered（旧终点不得卡死） 3ms
+ ✓ |unit| tests/unit/b-face.regressions.test.ts > 一审 B 面五反例回归 > B3 完整轮水位推进到重算终点（终答 entry）而非锚 user/旧终点 0ms
+ ✓ |unit| tests/unit/b-face.regressions.test.ts > 一审 B 面五反例回归 > B6 无 user 条目时绝不 delivered（assistant 同 hash 不认锚） 0ms
+ ✓ |unit| tests/unit/b-face.regressions.test.ts > 一审 B 面五反例回归 > B5 两意图共享同一 consumed 锚→锚冲突=组歧义→双 unknown（不得双 delivered） 0ms
+ ✓ |unit| tests/unit/b-face.regressions.test.ts > 一审 B 面五反例回归 > B7 工具配对假阳性修复：孤立 result=false；1call+2 同 id result=false；重复 id 按次数 1ms
+ ✓ |unit| tests/unit/b-face.regressions.test.ts > 一审 B 面五反例回归 > B8 区间内坏行（corrupt）→证据不完整→unknown 0ms
+ ✓ |unit| tests/unit/b-face.regressions.test.ts > N19b 混合路径+C1 二扫正向解除 > N19b：A 自有锚+B 新匹配同轮终检——A 区间被 B 锚切分，A 借不到 B 的终答 1ms
+ ✓ |unit| tests/unit/b-face.regressions.test.ts > N19b 混合路径+C1 二扫正向解除 > C1 二扫正向解除：首扫 I2 超界 unknown→补齐新 user+终答后二扫 I2 落锚 delivered 1ms
+ ✓ |unit| tests/unit/recovery.two-pass.test.ts > 四联终检五反例（D8 锚点） > Ⓔ 已消费未生成回答：文件尾=user（续跑中）→整个归组 unknown（即使 I1 区间完整） 2ms
+ ✓ |unit| tests/unit/recovery.two-pass.test.ts > 四联终检五反例（D8 锚点） > Ⓐ 末条 assistant 自带 toolCall（toolUse）→⓪不满足→unknown 0ms
+ ✓ |unit| tests/unit/recovery.two-pass.test.ts > 四联终检五反例（D8 锚点） > Ⓑ abort 轮后崩溃（stopReason=aborted）→⓪不满足→unknown 0ms
+ ✓ |unit| tests/unit/recovery.two-pass.test.ts > 四联终检五反例（D8 锚点） > Ⓒ 本轮完成但队列未静止（enqueue 未 consumed/clear）→③不满足→unknown 0ms
+ ✓ |unit| tests/unit/recovery.two-pass.test.ts > 四联终检五反例（D8 锚点） > Ⓓ 首 assistant 前崩溃（零落盘）→候选空+恢复态→unknown（不洗白） 0ms
+ ✓ |unit| tests/unit/recovery.two-pass.test.ts > 两遍式调度（十八审②：第一遍身份+消费，第二遍统一终检） > A 落 consumed 后终检时 B 已有 consumed——两遍式让 A/B 同轮 delivered（单遍会把 A 误拦） 1ms
+ ✓ |unit| tests/unit/recovery.two-pass.test.ts > 两遍式调度（十八审②：第一遍身份+消费，第二遍统一终检） > ②工具配对：区间内 toolCall 无 toolResult→unknown 0ms
+ ✓ |integration| tests/integration/real-fs.test.ts > 3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真 reader） > RF3 rename-over 同字节：不换流（fingerprint 短路）+重挂后新追加仍达（watch 重建） 470ms
+ ✓ |unit| tests/unit/notification.monotonic.test.ts > 通知状态机跃迁合法性（三 ACK 分立+单调性） > 主线相邻前进合法：received→derived→started→done 2ms
+ ✓ |unit| tests/unit/notification.monotonic.test.ts > 通知状态机跃迁合法性（三 ACK 分立+单调性） > done 单调：done 后任何降级拒绝（含迟到 started） 0ms
+ ✓ |unit| tests/unit/notification.monotonic.test.ts > 通知状态机跃迁合法性（三 ACK 分立+单调性） > 禁倒退：derived→received 拒；received 不得跳 done（需经派生/开栓） 0ms
+ ✓ |unit| tests/unit/notification.monotonic.test.ts > 通知状态机跃迁合法性（三 ACK 分立+单调性） > expired 独立终态（一审 A1 修正）：未终态可入 expired；expired 后迟到 ACK 不升 done（超时收口即终局） 1ms
+ ✓ |unit| tests/unit/notification.monotonic.test.ts > 通知状态机跃迁合法性（三 ACK 分立+单调性） > done 收口裁决（一审 A1）：三 ACK 齐才 done；缺一不收口；执行终局不替代 ACK；未开栓无收口面 1ms
+ ✓ |unit| tests/unit/notification.monotonic.test.ts > 迟到重投墓碑（八审 P0-2：删墓碑后再投同 notificationId 不得重新执行） > done 后重投=拒绝再派生，状态保持 done 0ms
+ ✓ |unit| tests/unit/notification.monotonic.test.ts > 迟到重投墓碑（八审 P0-2：删墓碑后再投同 notificationId 不得重新执行） > 未终态重投=按未决恢复扫描处理（不误吞） 0ms
+ ✓ |unit| tests/unit/server/safe-open.test.ts > safe-open readBounded（fix12 内层接缝单测） > S1 分次循环到 EOF：40B 数据 16B×2+8B 三段读回；position 恒 null（顺序读交由 fd 偏移） 2ms
+ ✓ |unit| tests/unit/server/safe-open.test.ts > safe-open readBounded（fix12 内层接缝单测） > S2 读中硬限：maxBytes=32 下第三段累计 48>32 → too-large（不等读完） 2ms
+ ✓ |unit| tests/unit/server/safe-open.test.ts > safe-open readBounded（fix12 内层接缝单测） > S3 恰等于上限不抛（<=maxBytes 合法）：48B maxBytes=48 → 全量回 0ms
+ ✓ |unit| tests/unit/server/safe-open.test.ts > safe-open readBounded（fix12 内层接缝单测） > S4 read 异常归类 read-failed：第 2 次注入 EIO → SafeOpenError{kind:read-failed}（detail 携原因） 0ms
+ ✓ |unit| tests/unit/server/safe-open.test.ts > safe-open readBounded（fix12 内层接缝单测） > S5 空文件：首次 read 即 EOF(0) → 空 Buffer 零段 0ms
+ ✓ |unit| tests/unit/command-channel.test.ts > 通用命令通道（CommandChannel） > 占位先行：placeholder fsync 先于 send；成功路径 result 行 fsync+内存 settle 2ms
+ ✓ |unit| tests/unit/command-channel.test.ts > 通用命令通道（CommandChannel） > 同 opId 同参重试（应答丢失场景）：cached 不重发（send 未再执行） 1ms
+ ✓ |unit| tests/unit/command-channel.test.ts > 通用命令通道（CommandChannel） > 同键不同参：rejected-different-args+审计钩子触发+不发送 0ms
+ ✓ |unit| tests/unit/command-channel.test.ts > 通用命令通道（CommandChannel） > 占位 fsync 失败（写前拒绝）：未发送+内存占位留置→同 opId 重试=unknown-effect；新 opId=重新受理 0ms
+ ✓ |unit| tests/unit/command-channel.test.ts > 通用命令通道（CommandChannel） > 占位 fsync 失败（写后拒绝，A1-02）：reject≠盘上无行——占位行已在数组但 reject；同 opId 仍 unknown-effect，新 opId=ok 0ms
+ ✓ |unit| tests/unit/command-channel.test.ts > 通用命令通道（CommandChannel） > send 抛错=效果未知：send-failed+占位留置（重试同 opId=unknown-effect 不重发） 0ms
+ ✓ |unit| tests/unit/command-channel.test.ts > 通用命令通道（CommandChannel） > send 返回 null=协议违规（A1-05）：send-failed+审计行+占位留置（不得当 cached(null)/落盘洗白） 0ms
+ ✓ |unit| tests/unit/command-channel.test.ts > 通用命令通道（CommandChannel） > 结果耐久失败（写前拒绝）：result-durability-failed（结果在手）+内存保持占位态（重试=unknown-effect） 0ms
+ ✓ |unit| tests/unit/command-channel.test.ts > 通用命令通道（CommandChannel） > 结果耐久失败（写后拒绝，A1-02）：进程内 unknown-effect 口径；原通道重试=unknown-effect；重放读到结果行=cached 非洗白 0ms
+ ✓ |unit| tests/unit/command-channel.test.ts > 通用命令通道（CommandChannel） > 崩溃重放后旧 opId=unknown-effect（占位无结果不重发不受理）；新 opId 正常 0ms
+ ✓ |unit| tests/unit/command-channel.test.ts > B1-02：审计钩子异常隔离（观测层失败不进主链路） > 同键不同参：onAudit 抛错不影响 rejected-different-args 返回 0ms
+ ✓ |unit| tests/unit/command-channel.test.ts > B1-02：审计钩子异常隔离（观测层失败不进主链路） > send 返回 null（A1-05）：onAudit 抛错不影响 send-failed+占位留置 0ms
+ ✓ |unit| tests/unit/server/composition-write.test.ts > 3c-3 composition 写侧接线 > CW7 statusFor 真源接线：订阅快照 status.process.phase=idle（未构造会话）+sessionId 确定性派生 50ms
+ ✓ |unit| tests/unit/server/line-pump.test.ts > LinePump（stdout 常驻排空行缓冲） > 整块多行：逐行回调，空行跳过 2ms
+ ✓ |unit| tests/unit/server/line-pump.test.ts > LinePump（stdout 常驻排空行缓冲） > 半行分块：跨块拼回完整行（排空即回调，不等块边界） 0ms
+ ✓ |unit| tests/unit/server/line-pump.test.ts > LinePump（stdout 常驻排空行缓冲） > CRLF：\r 保留在行尾由解析层容忍（泵职责=按 \n 拆；跨平台写手） 0ms
+ ✓ |unit| tests/unit/server/line-pump.test.ts > LinePump（stdout 常驻排空行缓冲） > 多字节跨块（送审前自审修复的回归）：中文字符横跨 chunk 边界不撕裂 0ms
+ ✓ |unit| tests/unit/server/line-pump.test.ts > LinePump（stdout 常驻排空行缓冲） > 多字节跨块：4 字节 emoji 横跨边界（代理对不劈半） 0ms
+ ✓ |unit| tests/unit/server/line-pump.test.ts > LinePump（stdout 常驻排空行缓冲） > 多字节撕裂尾：末尾不完整字节序列 flush 交解析层判坏行（如实呈现不静默丢） 0ms
+ ✓ |unit| tests/unit/server/line-pump.test.ts > LinePump（stdout 常驻排空行缓冲） > flush 残余：流结束交付最后无换行行（撕裂尾） 0ms
+ ✓ |unit| tests/unit/server/line-pump.test.ts > LinePump（stdout 常驻排空行缓冲） > reset 清缓冲（复用） 0ms
+ ✓ |unit| tests/unit/server/pi-child-pumps.test.ts > attachPumps 三路径分离（r8） > 正常事件→onEvent；非 JSON 行→[stdout-nonjson]；无 type 行→[stdout-nonjson]；onEvent 抛错→[handler-error] 不误报格式问题且泵继续 3ms
+ ✓ |unit| tests/unit/server/pi-child-pumps.test.ts > attachPumps 三路径分离（r8） > r8b-01：null 行/数组行/原始值行不炸泵——与后续正常事件同块时也不丢（JSON.parse("null") 成功但 e.type 会抛的回归） 0ms
+ ✓ |unit| tests/unit/n18b.evidence.test.ts > 匹配键派生演算（三审定界冻结口径） > 同文本双发：序号区分（0/1）；hash 相同+附件多重集相同 1ms
+ ✓ |unit| tests/unit/n18b.evidence.test.ts > 匹配键派生演算（三审定界冻结口径） > 同文本不同图：附件多重集不同→不同组（保重复次数） 0ms
+ ✓ |unit| tests/unit/n18b.evidence.test.ts > 匹配键派生演算（三审定界冻结口径） > 规范化=字节级+CRLF→LF+首尾 trim，中间空白不动 0ms
+ ✓ |unit| tests/unit/n18b.evidence.test.ts > N18b：新终答≠天然归属证明（身份证据样例） > 歧义组内即使出现完整轮（U+A stop），无锚意图仍 unknown——新终答不解锁归属 1ms
+ ✓ |unit| tests/unit/n18b.evidence.test.ts > N18b：新终答≠天然归属证明（身份证据样例） > 解除歧义=新增身份证据：I1 有锚后组内仍歧义（I2 sending 无锚）——十三审③第一步第二步同门 0ms
+ ✓ |unit| tests/unit/writer-authority.test.ts > W1 双 tab 写权代次（让位广播） > A 接管后 B 接管：代次+1，A 旧代次提交被拒（stale-epoch） 2ms
+ ✓ |unit| tests/unit/writer-authority.test.ts > W1 双 tab 写权代次（让位广播） > 非持有者提交被拒（not-holder） 0ms
+ ✓ |unit| tests/unit/writer-authority.test.ts > W1a A 在飞+B 输入接管（默认转接现有进程，无双写者） > 写者进程存活：转接（代次+1 进程不动）——不发停止信号（r8c：证据=signal 未调用，非 spawn 计数） 1ms
+ ✓ |unit| tests/unit/writer-authority.test.ts > W1b SIGKILL 后仍未退出（确认截止→失败冻结→核验转正） > 全链：startHandoff→SIGTERM→宽限过→SIGKILL→截止到→frozen（不开新写者）→核验→complete 1ms
+ ✓ |unit| tests/unit/writer-authority.test.ts > W1b SIGKILL 后仍未退出（确认截止→失败冻结→核验转正） > 退出确认在截止前到达→complete 可 spawn（正常交接路径） 0ms
+ ✓ |unit| tests/unit/writer-authority.test.ts > 释放与冻结期命令门 > 持有者断连释放后：无持有者提交被拒 0ms
+ ✓ |unit| tests/unit/writer-authority.test.ts > 释放与冻结期命令门 > 非持有者 release=无操作（不误清他人写权） 0ms
+ ✓ |unit| tests/unit/writer-authority.test.ts > 释放与冻结期命令门 > frozen 期一切提交被拒（frozen） 0ms
+ ✓ |unit| tests/unit/writer-authority.test.ts > r8-01 交接期提交门（terminating/killed/complete 拒新提交） > 从真实持有状态进交接：逐阶段断言旧持有者新提交被拒；默认转接不影响既有轮（本模块不拦在飞轮） 0ms
+ ✓ |unit| tests/unit/writer-authority.test.ts > r8-01 交接期提交门（terminating/killed/complete 拒新提交） > W1b 冻结转正路径：verifyRecovered 后旧页面提交仍拒（holder 已清） 0ms
+ ✓ |unit| tests/unit/writer-authority.test.ts > r8-01 交接期提交门（terminating/killed/complete 拒新提交） > 默认转接（无交接）提交门不受影响：B 接管后 B 即刻可提交（W1a 进程不动路径） 0ms
+ ✓ |unit| tests/unit/read-index-dual.test.ts > ReadIndex 3b-2b②——按源分流前缀 > 交错编入（journal/session 到达序交错）后固定源序重扫：前缀成立（旧逐位比对会误判换流） 2ms
+ ✓ |unit| tests/unit/read-index-dual.test.ts > ReadIndex 3b-2b②——按源分流前缀 > 同源改写（同 locator 原文变）→前缀不成立（换流）；另一源完好不掩盖 1ms
+ ✓ |unit| tests/unit/read-index-dual.test.ts > ReadIndex 3b-2b②——按源分流前缀 > 单源截断（重扫后该源行数少于已编入）→前缀不成立 0ms
+ ✓ |unit| tests/unit/read-index-dual.test.ts > ReadIndex 3b-2b②——按源分流前缀 > continueFrom：按 journal 余量先 session 余量后确定性续编；续编后与全量重扫互为前缀 1ms
+ ✓ |unit| tests/unit/read-index-dual.test.ts > ReadIndex 3b-2b②——按源分流前缀 > continueFrom 幂等保护之外：前缀不成立时调用=宿主违约（行为=尾追不前缀），文档化而非防御 0ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > 切片5①：登记表活跃阻断闲置回收；完成后再到期回收 233ms
+ ✓ |unit| tests/unit/session-attribution.test.ts > 会话条目归因（c6 C5-06） > ①GPT 定向反例：user-A/assistant-A/user-B/assistant-B——assistant-A 归 A（前向区间，非旧「向前到下一锚」） 1ms
+ ✓ |unit| tests/unit/session-attribution.test.ts > 会话条目归因（c6 C5-06） > ②锚=entryId 身份（同位置换 id 不串）；区间含两端（锚与终点都归意图） 0ms
+ ✓ |unit| tests/unit/session-attribution.test.ts > 会话条目归因（c6 C5-06） > ③终点哈希不符→区间整体不采信（条目 null，不猜） 0ms
+ ✓ |unit| tests/unit/session-attribution.test.ts > 会话条目归因（c6 C5-06） > ④锚/终点不可见（session 文件截断）→null；终点在锚前→无效区间 0ms
+ ✓ |unit| tests/unit/session-attribution.test.ts > 会话条目归因（c6 C5-06） > ⑤重叠/嵌套区间：内层（更近锚）优先 0ms
+ ✓ |unit| tests/unit/session-attribution.test.ts > 会话条目归因（c6 C5-06） > ⑥同意图多次 consumed：最新生效（区间扩张）；旧区间外条目按新区间判 0ms
+ ✓ |unit| tests/unit/session-attribution.test.ts > 会话条目归因（c6 C5-06） > ⑦序前置条件（c7 C5-06 残余收口）：不同意图 consumed 逆序**不保证**同结果——journal 序是前置条件；同锚多次 consumed=数组末项（journal 序最晚）生效 0ms
+ ✓ |unit| tests/unit/session-attribution.test.ts > 会话条目归因（c6 C5-06） > ⑦b c8 R3：同意图不同锚=最新 consumed 生效，旧锚区间作废（GPT 反例 u1,a1,u2,a2→[null,null,I,I]） 0ms
+ ✓ |unit| tests/unit/session-attribution.test.ts > 会话条目归因（c6 C5-06） > ⑧无 consumed→全 null；system/toolResult 同规则归区间 0ms
+ ✓ |unit| tests/unit/session-attribution.test.ts > 会话条目归因（c6 C5-06） > ⑨blockIndex 语义外置：多 toolCall 共用 entryId 区分靠宿主（entryId 唯一化后进入本投影）——此例固化约束 0ms
+ ✓ |unit| tests/unit/identity-gate.test.ts > 十八审①：数量相等但消费身份未知→组级 unknown，不落任何耐久锚 > steer+followUp 同文本同图，条目数=意图数，锚缺失→歧义 2ms
+ ✓ |unit| tests/unit/identity-gate.test.ts > 十一审①：原始序号禁候选内重编 > A/B/C=e1/e2/e3 同文本，A 已锚 e1→B 取原始序号 2=e2（非候选重编第 2=e3） 0ms
+ ✓ |unit| tests/unit/identity-gate.test.ts > 八审：水位不吞未决意图的恢复证据 > A 未决 B 完成：B 可 delivered，水位停（advanceTo=null），A 证据不被吞 0ms
+ ✓ |unit| tests/unit/identity-gate.test.ts > clear 前置分派与 cancelled 水位跳过 > cancelled 意图不阻塞后续 delivered 判定（十七审②：跳过直接推进） 0ms
+ ✓ |unit| tests/unit/command-dedup.test.ts > 通用命令去重表（opId 幂等） > 首次受理=admitted 占位；应答 settle 后同键同参=cached 不重发 2ms
+ ✓ |unit| tests/unit/command-dedup.test.ts > 通用命令去重表（opId 幂等） > 同键不同参=拒绝（非幂等重放，禁盲执行） 0ms
+ ✓ |unit| tests/unit/command-dedup.test.ts > 通用命令去重表（opId 幂等） > 崩溃闭环：占位无结果（发送后崩溃）→恢复重放→admit=unknown-effect 不重发不受理 0ms
+ ✓ |unit| tests/unit/command-dedup.test.ts > 通用命令去重表（opId 幂等） > 重启重放完整记录（占位+结果）→cached 0ms
+ ✓ |unit| tests/unit/command-dedup.test.ts > 通用命令去重表（opId 幂等） > 滚动清除（r8-02+r8b：生命周期判据分离——最后消息时刻≠退出时刻；活跃不删/未知不删/退出满保留窗才删） 1ms
+ ✓ |unit| tests/unit/command-dedup.test.ts > 通用命令去重表（opId 幂等） > 无占位的 settle=无操作（占位必须先行） 0ms
+ ✓ |unit| tests/unit/server/composition.test.ts > 3b-3① composition > R-03 生产流身份随机：两实例首流不同 id；跨实例 cursor → 4404 拒绝 1390ms
+ ✓ |integration| tests/integration/real-fs.test.ts > 3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真 reader） > RF4 rename-over 改写：在订连接收 4409（invalid-stream 真路径）；重订得新 streamId 315ms
+ ✓ |unit| tests/unit/server/composition-write.test.ts > 3c-3 composition 写侧接线 > CW8 statusFor 构造后：prompt 失败退 idle 后快照 process.phase 仍 idle+bg known（注册表观测面贯通） 356ms
+ ✓ |integration| tests/integration/real-fs.test.ts > 3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真 reader） > RF5 delete：unlink→4402（retryable=true）+订阅终止；RF6 recreate：新装载成流 155ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > s5c B2：dispose 同步急停——调用返回后 tick 通道立即失效（微任务让渡窗口内不再触发回收） 221ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > S5-R1：采样间短登记（经包装面 register/complete）→闲置起点后移到活动时刻（不沿用旧起点） 234ms
+ ✓ |integration| tests/integration/real-fs.test.ts > 3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真 reader） > RF7 缺源恢复晚附：journal-only 订阅→session 落盘→后续新行直达+晚附行恰一次 156ms
+ ✓ |unit| tests/unit/server/composition-write.test.ts > 3c-3 composition 写侧接线 > CW9 dispose 审计序：session-registry disposed 先于 composition disposed（统一销毁挂在收尾链） 351ms
+ ✓ |unit| tests/unit/server/composition-write.test.ts > 3c-3 composition 写侧接线 > CW10 越界 file 照旧 4404（写侧接线不放宽读侧授权域）：prompt file=/etc/hosts.jsonl 49ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：⑤真 send 回调+清理 > 客户端暂停读 → done 不兑现（绑定真实 flush 非立即返回）；恢复读 → done 兑现 846ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：⑤真 send 回调+清理 > 背压下 done 等真实 flush（64KB 大消息×多，客户端持续读取） 6ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > 切片5①：EOF 宽限超时→升级 SIGTERM（优雅链降级） 155ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > S4-YC1 启动中 stop、exit 延迟未达：旧 start=superseded（结果分类不依赖 exit 送达时序） 1ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > Y-C2 dispose 关闭耐久句柄（可选 close 端口；生产职责收口） 1ms
+ ✓ |integration| tests/integration/real-fs.test.ts > 3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真 reader） > RF8 旧 cursor 分页：H 后增长 2 行→resync(cursor@H) 补齐 2 行→续投 live 无重无漏 161ms
+ ✓ |unit| tests/unit/server/composition.test.ts > 3b-3① composition > Y-05 tokenPollMs 轮询真实生效：无手动 reload，写新 token 文件后旧 token 自动失效 344ms
+ ✓ |unit| tests/unit/server/composition.test.ts > 3b-3① composition > Y-01 并发 dispose：两方同时收尾→都在完整关停后 resolve，收尾体恰执行一次 29ms
+ ✓ |unit| tests/unit/server/composition.test.ts > 3b-3① composition > reloadTokens：写新 token 文件→轮换生效（旧 token 拒新 hello） 303ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > S4-05d settled 先缓冲→超时记录收口（recorded-and-settled）：通知恰一次 151ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > S4-05e settled 耐久 reject：零通知（settle-durability-failed 不发完成通知） 72ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > 闲置回收定时边界（s5c 外审反例正式化） > s5c-正例：short-turn——活动后旧期限不沿用，自活动时刻满期才回收 1ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > 闲置回收定时边界（s5c 外审反例正式化） > s5c-正例：generation——活动后旧期限不沿用，自活动时刻满期才回收 0ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > 闲置回收定时边界（s5c 外审反例正式化） > s5c-正例：spaced-task——活动后旧期限不沿用，自活动时刻满期才回收 0ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > 闲置回收定时边界（s5c 外审反例正式化） > s5c-B1：audit 回调内公开 wrapper 短活动对（register+complete）→到期判定被活动复核取消 0ms
+ ✓ |unit| tests/unit/server/rpc-session.test.ts > RpcSession（受控替身） > 闲置回收定时边界（s5c 外审反例正式化） > s5c-B2：到期 tick 的 audit 回调里同步调用公开 dispose（不 await）→尚未开始的回收作废 0ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：⑤真 send 回调+清理 > R01/3b-1 宿主回调抛错不退进程：message/pong/send-done 隔离+审计；连接不受影响 178ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：⑤真 send 回调+清理 > R01/3b-1 超限触发接收器 error：error 回调抛错隔离不退进程，连接达终局（1009）；审计+触发计数可观测（3b1b 强化） 29ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：⑤真 send 回调+清理 > B3/3b1b 同轮交错：listen 启动中 dispose → 启动 Promise 显式拒绝，两 Promise 均收敛，无残留监听 2ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：⑤真 send 回调+清理 > B3/3b1b 启动失败后 dispose：监听撞端口→拒绝；dispose 仍正常收敛；重复 dispose 幂等 0ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：⑤真 send 回调+清理 > C1/3b1c 单次取消：listen 启动中 dispose → 临时监听器全部摘除（error/listening 计数归零） 0ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：⑤真 send 回调+清理 > C1/3b1c 重复启动拒绝：启动中/同步参数错误的二次 listen 均拒且不破坏首次启动的结算 0ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：⑤真 send 回调+清理 > C1/3b1c 已监听后重复 listen 拒绝；失败后顺序重试可正常获得端口 1ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：⑤真 send 回调+清理 > R4/3b1b binary 真网络回归（真 adapter+真 gateway 组合）：已认证连接发二进制→error 4403+close 1003 52ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：⑥token 三态（真 TokenAuthority 组合） > 启动缺失令牌文件 → 构造失败（fail-closed 拒启动） 1ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：⑥token 三态（真 TokenAuthority 组合） > R05/3b-1 真轮换：A/B 双令牌在线；撤销 A→A 连接 4401+close 1008、B 存活；重载失败→保守沿用旧基准 136ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：⑥token 三态（真 TokenAuthority 组合） > 错令牌连接被拒：4401→close 1008（固定消息不回显令牌） 27ms
+ ✓ |integration| tests/integration/real-ws.test.ts > 3b-3③ real-ws：真实传输+慢客户端矩阵 > RW2 停读套接字同负载对照（R-01 修复后语义）：pause+1.2MB 突发→零误杀；resume→全量恰一次；连接存活 1763ms
+ ✓ |integration| tests/integration/real-fs.test.ts > 3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真 reader） > RF9 句柄票据收口：全退订后盘面追加静默（观察代理零泄漏）+再订可恢复 715ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：⑥token 三态（真 TokenAuthority 组合） > R6/3b-1 per-IP 认证失败限速+退避（真网络）：达限→封锁内正确令牌也拒；过期→恢复 317ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：⑦关闭竞态+无句柄悬挂 > dispose → 存量连接收 1001；同端口立即可再监听（句柄释放） 27ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：⑦关闭竞态+无句柄悬挂 > R02/3b-1 普通 GET → 404 应答（自建 server 管未升级连接）；不读不关的裸 socket 不挂 dispose（整体有界） 303ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：⑦关闭竞态+无句柄悬挂 > R02/3b-1 dispose 后 listen() 拒绝（终态不复活） 0ms
+ ✓ |integration| tests/integration/real-fs.test.ts > 3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真 reader） > RF12 指纹字段与源字节对拍（Y-04）：装载/追加/换流三态下索引指纹=源文件 SHA-256 全 64hex 610ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：⑦关闭竞态+无句柄悬挂 > R02/3b-1 接收器自启关闭同截止：真暂停读的客户端在 closeHandshakeMs 内被 terminate（服务端终局时延） 406ms
+ ✓ |integration| tests/integration/ws-transport.net.test.ts > 3b-1 真网络：⑦关闭竞态+无句柄悬挂 > upgrade 握手中途 socket 早关 → 无泄漏无崩溃（审计记录） 201ms
+ ✓ |integration| tests/integration/real-ws.test.ts > 3b-3③ real-ws：真实传输+慢客户端矩阵 > RW6 快客户端单突发（R-01 反例 P-FAST 复现）：正常读+6750 行单突发→全量恰一次零错 928ms
+ ✓ |integration| tests/integration/real-fs.test.ts > 3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真 reader） > RF13 撕裂尾指纹语义（Y-04 钉死）：未成完整行不编入→索引指纹停旧值；补全后跟进到全量 SHA-256 707ms
+ ✓ |integration| tests/integration/real-fs.test.ts > 3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真 reader） > RF14 非前缀重建路指纹字段（Y-04）：直驱 syncIndex 非前缀分支→重建后指纹=新源字节 SHA-256（真指纹三路统一之重建路） 305ms
+ ✓ |integration| tests/integration/real-fs-budget.test.ts > 3b-3④ 预算容量（真盘体量；组合层无合计门——单文件/单流/流池三门） > BG1 双源同池 20k 触顶状态机：journal 19,998+session 3=20,001 越界→订阅 4402；宽容换流后新流再触顶→仍 4402；额度已用第三订→registry 拒建（审计 index-over-budget-get） 4677ms
+ ✓ |integration| tests/integration/real-ws.test.ts > 3b-3③ real-ws：真实传输+慢客户端矩阵 > RW7 恢复期大批量续编（真传输）：journal-only 订阅期 session 落盘 8000 行→B 订阅触发批量续编→A 全量恰一次（R-01 syncIndex 路） 998ms
+ ✓ |integration| tests/integration/real-fs.test.ts > 3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真 reader） > RF11 3b3c：恢复期大批量续编（session 首装 1100 行）→既有 live 引擎同步排水不被积压门误杀 535ms
+ ✓ |integration| tests/integration/real-fs.test.ts > 3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真 reader） > RF10 4404 真路径：从未装载文件的 resync cursor→4404（错流门） 1ms
+ ✓ |integration| tests/integration/real-ws.test.ts > 3b-3③ real-ws：真实传输+慢客户端矩阵 > RW3 字节门两级：262,145B 应用帧→4404（帧超字节上限）；>1MiB 传输帧→close 1009 38ms
+ ✓ |integration| tests/integration/real-ws.test.ts > 3b-3③ real-ws：真实传输+慢客户端矩阵 > RW4 Origin/token 真路径：白名单外 Origin→HTTP 403 拒握手；坏 token→4401+close 1008 4ms
+ ✓ |integration| tests/integration/real-ws.test.ts > 3b-3③ real-ws：真实传输+慢客户端矩阵 > RW5 断开竞态：A 硬断（不退订）→B 共享观察不受扰，续投恰一次；服务端连接清理有审计 789ms
+ ✓ |integration| tests/integration/real-fs-budget.test.ts > 3b-3④ 预算容量（真盘体量；组合层无合计门——单文件/单流/流池三门） > BG2 恰在预算内（20,000）不触顶：双源 19,997+3=20,000 恰好放行，快照正常 1433ms
+ ✓ |integration| tests/integration/real-fs-budget.test.ts > 3b-3④ 预算容量（真盘体量；组合层无合计门——单文件/单流/流池三门） > BG3 每文件扫描预算 8MiB：9MiB journal→4402（scan-over-budget，retryable=true） 233ms
+ ✓ |integration| tests/integration/real-fs-budget.test.ts > 3b-3④ 预算容量（真盘体量；组合层无合计门——单文件/单流/流池三门） > BG4 流池 LRU 32：33 文件装载挤出最旧→旧文件重订=新 streamId（流身份丢失）；当前流数不超 32 1172ms
+stdout | tests/integration/real-fs-budget.test.ts > 3b-3④ 预算容量（真盘体量；组合层无合计门——单文件/单流/流池三门） > BG5 内存峰值披露（口径=单 20k 事件流满载；非生产 RSS 断言）：heapUsed<384MiB 快照记录
+[BG5] heapUsed=49.1MiB rss=273.5MiB external=11.9MiB
+
+ ✓ |integration| tests/integration/real-fs-budget.test.ts > 3b-3④ 预算容量（真盘体量；组合层无合计门——单文件/单流/流池三门） > BG5 内存峰值披露（口径=单 20k 事件流满载；非生产 RSS 断言）：heapUsed<384MiB 快照记录 1758ms
+ ✓ |integration| tests/integration/pi-child.smoke.test.ts > pi 子进程事件泵（集成冒烟） > spawn pi -p →stdout JSONL 事件流→退出 11248ms
+
+ Test Files  52 passed | 1 skipped (53)
+      Tests  967 passed | 11 skipped (978)
+   Start at  15:32:45
+   Duration  11.68s (tests 83%, transform 12%, import 4%, environment 1%)
+
+exit=0

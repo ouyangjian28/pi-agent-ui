@@ -1,0 +1,2 @@
+# $ npx eslint apps/server/src tests/unit/server/session-registry.test.ts tests/unit/server/composition-write.test.ts
+exit=0

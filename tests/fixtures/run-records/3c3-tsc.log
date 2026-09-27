@@ -1,0 +1,2 @@
+# $ npx tsc --noEmit -p apps/server
+exit=0
