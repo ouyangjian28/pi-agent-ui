@@ -624,6 +624,12 @@
 - fix13「tsc 0」断言不实勘正（composition delete-readonly 两错被管线吞）——fix14 起 tsc 一律裸跑直录 TSC_EXIT。
 - 过程失误实录：BACKFILL 首次重放在未提交态上做，checkout 还原吞掉 v4.1 源改动——重放+先提交再变异（M-240 同型教训再确认：变异前基线必须已提交）。
 - 终态：tsc 0（裸码）/lint 0/vitest 47 files 886 passed+7 skipped=893（基线 892，+1=R32）。
+## 3b5-3（PROJECT 3b-5：迁移执行面——宿主显式初始化路径旧锚/旧仓迁移工具；2026-10-03）
+- 源=apps/server/src/runtime/evidence-migration.ts（新）：migrateLegacyEvidence(opts)——roots 递归枚举 *.jsonl，显式迁移窗口（trustFirstCapture 恒 true，仅限本工具创建的 provider 实例生命周期）内逐文件经 createRecoveryEvidenceProvider 权威化，全部语义（纯追加前缀拒/首锚/补登记/串行）复用 provider 接缝不复制：bless 包装=fresh 形态计数（legacy-anchor 不询及→source 判定）；fsx.rename 包装=fs 直通+seen.json 归位观测（migrated/noop 幂等判据）；audit=逐文件行收集。拒绝 fail-closed 直传：不补登记不动锚（provider R38 既有语义），工具只如实记录。返回迁移验收记录（每文件 outcome/source/锚 len+sha/registered/拒绝原因/审计行；整体 evidenceDir+roots+起止+计数+拒绝清单），不落盘。
+- 测试 MG1-MG11（tests/unit/server/evidence-migration.test.ts，11 it；设计先写文件头注释≤90 行）：MG1 正常迁移（含空仓先行+时钟注入断言）/MG2 旧锚补登记 legacy-anchor/MG3 幂等重跑 noop（seen 原字节）/MG4 截断拒（锚+seen 原字节、审计行唯一原文）/MG5 同长改写拒（oldLen==newLen）/MG6 越根拒 symlink（POSIX-only，R16 先例）/MG7 混合四文件审计行逐条+字典序+计数/MG8 session 映射越界拒（透传中文 detail）/MG9 seen 仓损坏→registered=unknown/MG10 嵌套枚举（锚名 encodeURIComponent）/MG11 超预算拒（maxCombinedBytes=10 小预算例）。
+- 变异三连（3b5-3-migration.md+patches/3b5-3/，全裸跑直录退出码，还原后 sha256=提交版复核）：M-3B5-BLESSWIN（bless 恒 false）→ 4 杀 MG1/MG3/MG7/MG10，首败 MG1，MG2 仍绿=旧锚路径不询 bless（B15④佐证）；M-3B5-PUREAPPEND（provider:388 纯追加验删，临时未提交 patch，变异态 tsc 0）→ 双面杀：工具 MG4/MG5/MG7（首败 MG4：截断被放行且补登记）+provider R11/R12/R25/R38——接缝真实委托无工具层旁路；M-3B5-IDEMPOT（seen.json 归位观测删）→ 5 杀 MG1/MG2/MG3/MG7/MG10，首败 MG1（迁移误报 noop；MG3 首跑即需 migrated=1，双向锁定）。
+- 证据：run-records/3b5-3-vitest.json=913/906/7/0（基线 902=895+7，+11）+3b5-3-vitest.log（默认报告器+裸退出码 0）；3b5-3-tsc.log=TSC_EXIT=0；3b5-3-lint.log=改动两文件 LINT_EXIT=0；三变异完整输出=3b5-3-{blesswin,pureappend,idempot}-mutation-full.log（首败均从 FAIL 块归属，未跨块摘句）+3b5-3-pureappend-mutation-tsc.log。
+- 已知限制（如实）：多 root 同名相对路径先根先读（provider resolveWithinRoots 既有，记录按逻辑名去重）；枚举含 symlink/FIFO 名交 provider 拒；registered/anchor=盘面只读报告非证据链判定；工具不覆盖 B15⑥ 四接缝的自定义实现注入面（provider 侧 R32/R39/R40 已覆盖）。
 ## 3b5-2b（第17轮 92/100 GO 收口批：证据与措辞收口；2026-10-03）
 - 第17轮（审报=~/ai audits/gpt-adapter-3b5-2-review-2026-10-03.md）：92/100 GO——**不认可「尾项全清」**；未清项=证据（SERIAL 首败归属矛盾+变异完整输出缺）与措辞（旧档未原位撤回、注释未同步）。
 - R39b 默认持久化路径首杀配套（只拒首次 fsx.writeFile 且**不注入 persistSeenLike**）：吞锚错变异下默认 seen 算法照走（fsx 第 2+ 次写健康）→seen.json 落成→快照洗白→R39b 杀（首败 `expected { version: 1, file: 's.jsonl', …(6) } to deeply equal { kind: 'unavailable', …(1) }`）——堵「默认 persist 分支错误」盲区。
