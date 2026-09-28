@@ -66,6 +66,12 @@ export interface RepairLine {
   /** 写入时 journal 契约版本（=JOURNAL_CONTRACT_VERSION）。 */
   readonly contractVersion: number;
   readonly at: string; // ISO8601
+  /** r7（GPT r6 P1-r6-1）：修复时对移除尾段做受限结构扫描的归因留痕——顶层唯一身份可证时
+   *  记该 id；不可归因（none/conflict）显式记 null。作用：①写面结构一致门（fragment 裁决
+   *  归因须与之一致，矛盾裁决拒落盘）②读面影响域并入（冷捕获丢 raw 后结构归因不失忆）。
+   *  缺省=存量行（r7 前无此字段）：不做强一致校验、不并入影响域，未归因事务阻断门兜底。
+   *  字段序放最尾：旧形态行=新形态行的严格前缀（崩溃部分行残局的前缀判定跨版本兼容）。 */
+  readonly fragIntentId?: IntentId | null;
 }
 
 /** P0-1b 裁决留痕行（P0 冻结序②）：宿主人工裁决的持久记录——重启不重问。

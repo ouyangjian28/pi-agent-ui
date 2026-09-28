@@ -711,7 +711,8 @@ describe("P0-1a GPT r3 阻断修复批（B3a/B3b/B6）", () => {
     }
     expect((await readFile(e.abs)).equals(before)).toBe(true); // 盘面逐字节不变（i2 行保留）
     expect(await readFile(join(e.evidenceDir, `${encodeURIComponent(e.file)}.repair-pending.json`), "utf8")).toBe(markerBefore);
-    await cleanup(e);
+    await rm(e.roots, { recursive: true, force: true });
+    await rm(e.evidenceDir, { recursive: true, force: true });
   });
 
   it("RT35-B3a/P3 部分补行形：前缀上界=修复行长度——等于原尾长/超过原尾长的合法前缀同样收敛（四态 5/14/40/100）", async () => {
@@ -732,7 +733,8 @@ describe("P0-1a GPT r3 阻断修复批（B3a/B3b/B6）", () => {
         expect(r.at).toBe(m.startedAt);
       }
       expect((await readdir(e.evidenceDir)).some((f) => f.includes("repair-pending"))).toBe(false);
-      await cleanup(e);
+      await rm(e.roots, { recursive: true, force: true });
+    await rm(e.evidenceDir, { recursive: true, force: true });
     }
   });
 
@@ -755,7 +757,8 @@ describe("P0-1a GPT r3 阻断修复批（B3a/B3b/B6）", () => {
     }
     expect((await readFile(e.abs)).equals(raw233)).toBe(true); // 盘面一字不动（旧代码先 truncate 后拒=违反 aborted 契约）
     expect((await readdir(e.evidenceDir)).some((f) => f.includes("repair-pending"))).toBe(true); // marker 保留
-    await cleanup(e);
+    await rm(e.roots, { recursive: true, force: true });
+    await rm(e.evidenceDir, { recursive: true, force: true });
   });
 
   it("RT37-B6/M-P 非修复行前缀的短尾：冲突拒绝（判据必须含字节前缀匹配，非仅长度/对齐）", async () => {
@@ -770,7 +773,8 @@ describe("P0-1a GPT r3 阻断修复批（B3a/B3b/B6）", () => {
     if (r.kind === "aborted") expect(r.reason).toBe("repair-marker-conflict");
     expect((await readFile(e.abs)).equals(before)).toBe(true);
     expect((await readdir(e.evidenceDir)).some((f) => f.includes("repair-pending"))).toBe(true);
-    await cleanup(e);
+    await rm(e.roots, { recursive: true, force: true });
+    await rm(e.evidenceDir, { recursive: true, force: true });
   });
 
   it("RT38-B6/M-R 跨 build 已补行形：重试转锚不重写行——盘面原文逐字节保留", async () => {
@@ -789,6 +793,51 @@ describe("P0-1a GPT r3 阻断修复批（B3a/B3b/B6）", () => {
     const anchor = JSON.parse(await readFile(join(e.evidenceDir, `${encodeURIComponent(e.file)}.evidence.json`), "utf8")) as { len: number; sha: string };
     expect(anchor.len).toBe(before.byteLength); // 锚=新后像
     expect((await readdir(e.evidenceDir)).some((f) => f.includes("repair-pending"))).toBe(false);
-    await cleanup(e);
+    await rm(e.roots, { recursive: true, force: true });
+    await rm(e.evidenceDir, { recursive: true, force: true });
+  });
+});
+
+// r7（GPT r6 P1-r6-1）：repair 行结构归因留痕 fragIntentId 生成面——可归因撕裂尾记顶层
+// 唯一身份，不可归因显式 null；读面 RepairFact 呈现；schema 认行。
+describe("r7 repair 行 fragIntentId 结构归因留痕", () => {
+  it("RT-r7-1 可归因撕裂尾：repair 行 fragIntentId=顶层唯一身份，repairLog 派生呈现", async () => {
+    const e = await env([jl("i1")]);
+    await seedAnchor(e);
+    const clean = await readFile(e.abs, "utf8");
+    const TORN = `{"t":"sending","intentId":"i1","x":"y"`; // 完整键值对后截断——顶层 intentId 唯一可证（未完成键/未闭合值会被拒，见 RT-r7-2）
+    await appendFile(e.abs, TORN, "utf8");
+    const r = await repairJournalTail(OPT(e));
+    expect(r.kind).toBe("repaired");
+    const after = await readFile(e.abs, "utf8");
+    const row = JSON.parse(after.slice(Buffer.byteLength(clean, "utf8"))) as { t: string; fragIntentId?: string | null };
+    expect(row.t).toBe("repair");
+    expect(row.fragIntentId).toBe("i1"); // 结构归因留痕=顶层唯一身份
+    const rec = await recoverFromJournal(e.abs, "q");
+    expect(rec.repairLog[0]?.fragIntentId).toBe("i1"); // 读面 RepairFact 呈现
+    expect(journalLineSchemaError(row as unknown as Record<string, unknown>)).toBeNull(); // schema 认行
+    await rm(e.roots, { recursive: true, force: true });
+    await rm(e.evidenceDir, { recursive: true, force: true });
+  });
+  it("RT-r7-2 不可归因撕裂尾：fragIntentId 显式 null（none）；schema 认行", async () => {
+    const e = await env([jl("i1")]);
+    await seedAnchor(e);
+    const clean = await readFile(e.abs, "utf8");
+    const TORN = `{"t":"sending","pay`; // 键名未闭合撕裂→conflict（未完成键拒绝）
+    await appendFile(e.abs, TORN, "utf8");
+    const r = await repairJournalTail(OPT(e));
+    expect(r.kind).toBe("repaired");
+    const after = await readFile(e.abs, "utf8");
+    const row = JSON.parse(after.slice(Buffer.byteLength(clean, "utf8"))) as { t: string; fragIntentId?: string | null };
+    expect(row.fragIntentId).toBeNull(); // 不可归因=显式 null（诚实留痕，非缺省）
+    expect(journalLineSchemaError(row as unknown as Record<string, unknown>)).toBeNull();
+    await rm(e.roots, { recursive: true, force: true });
+    await rm(e.evidenceDir, { recursive: true, force: true });
+  });
+  it("RT-r7-3 存量行（无 fragIntentId 字段）schema 照认——向后兼容", () => {
+    const legacy = JSON.parse(legalRepairRow(10, 25, "a".repeat(64))) as Record<string, unknown>;
+    expect("fragIntentId" in legacy).toBe(false);
+    expect(journalLineSchemaError(legacy)).toBeNull();
+    expect(journalLineSchemaError({ ...legacy, fragIntentId: 42 })).toMatch(/fragIntentId/); // 非法类型拒
   });
 });

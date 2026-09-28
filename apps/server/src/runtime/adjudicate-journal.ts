@@ -64,7 +64,7 @@ export interface AdjudicateOptions {
 export type AdjudicateResult =
   | { kind: "adjudicated"; at: string; anchorMoved: boolean }
   | { kind: "idempotent"; at: string }
-  | { kind: "aborted"; reason: "file-absent" | "path-escape" | "repair-pending" | "marker-unreadable" | "bad-tail" | "anchor-corrupt" | "subject-absent" | "conflicting-verdict" | "write-failed"; detail?: string };
+  | { kind: "aborted"; reason: "file-absent" | "path-escape" | "repair-pending" | "marker-unreadable" | "bad-tail" | "anchor-corrupt" | "subject-absent" | "conflicting-verdict" | "inconsistent-attribution" | "write-failed"; detail?: string };
 
 interface AnchorFile {
   readonly version: 1;
@@ -238,6 +238,14 @@ async function adjudicateWithHandle(
   }
   if (subject.kind === "fragment" && !knownIntentIds(lines).has(subject.intentId)) {
     return { kind: "aborted", reason: "subject-absent", detail: "归因目标不在重放范围（enqueue∪sending 集）" };
+  }
+  // r7（GPT r6 P1-r6-1）：结构一致门——repair 行结构归因留痕（fragIntentId）与 fragment 裁决
+  // 归因目标强一致。残片顶层身份可证时归因必须与之一致，否则拒：防「结构 i1/归因 i2」矛盾
+  // 裁决落盘，冷捕获丢 raw 后读面失忆使 i1 越过影响域（审人 S5 反例）。缺省（存量）/null
+  //（补完/不可归因）无结构证据→不强一致（读面未归因事务阻断门兜底）。
+  const structuralId = matches[0]?.fragIntentId ?? null;
+  if (subject.kind === "fragment" && structuralId !== null && subject.intentId !== structuralId) {
+    return { kind: "aborted", reason: "inconsistent-attribution", detail: `归因目标 ${subject.intentId} 与残片结构身份 ${structuralId} 不一致（矛盾裁决拒落盘）` };
   }
 
   // ④幂等/冲突终局（r1 B3 + r2 B3）：收集该四元组全部既有裁决（两 kind），矛盾集检测——

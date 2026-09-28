@@ -749,3 +749,62 @@ describe("P0-1b 裁决持久化 v2（崩溃/重启矩阵 R1-R10）", () => {
     await cleanup(e2);
   });
 });
+
+// r7（GPT r6 P1-r6-1）：结构一致门+影响域并入。repair 行 r7 起留痕结构归因 fragIntentId
+// （生成面见 repair-tail.test.ts RT-r7-1/2）；写面据此强一致（矛盾裁决拒落盘），读面据此
+// 并入影响域（冷捕获丢 raw 后结构归因不失忆——S5：结构 i1/持久裁决目标 i2→冷态 i1 放行的缝）。
+describe("r7 结构一致门与影响域并入（GPT r6 P1-r6-1）", () => {
+  const repairRowF = (byteStart: number, byteEnd: number, removedSha256: string, at: string, fragIntentId: string | null) =>
+    JSON.stringify({ t: "repair", reason: "torn-tail", byteStart, byteEnd, removedSha256, buildId: "b1", contractVersion: 2, at, fragIntentId });
+  it("R27 写面结构一致门：归因目标与 repair 行 fragIntentId 不一致→inconsistent-attribution 零追加；一致/无结构证据对照放行", async () => {
+    const torn = '{"t":"sending","intentId":"i1","x":"y"';
+    const H = sha(torn); const at = "2026-10-05T00:00:00.000Z";
+    // 形一（S5 落盘前拦截）：结构 i1 留痕在场，fragment 裁决请求归因 i2 → 拒
+    const e1 = await env([jl("i1"), jl("i2"), repairRowF(30, 66, H, at, "i1")]);
+    await seedAnchor(e1);
+    const before1 = await readFile(e1.abs);
+    const r1 = await adjudicateJournal(opts(e1, fragSubject(H, 30, 66, at, "i2"), "resend"));
+    expect(r1).toMatchObject({ kind: "aborted", reason: "inconsistent-attribution" });
+    expect(await readFile(e1.abs)).toEqual(before1); // 零追加（盘面逐字节不变）
+    // 形二：一致归因 i1 → 落行
+    const r2 = await adjudicateJournal(opts(e1, fragSubject(H, 30, 66, at, "i1"), "resend"));
+    expect(r2.kind).toBe("adjudicated");
+    // 形三：fragIntentId=null（不可归因留痕）→无结构证据→不强一致（人工归因自由）
+    const e3 = await env([jl("i1"), jl("i2"), repairRowF(30, 66, H, at, null)]);
+    await seedAnchor(e3);
+    const r3 = await adjudicateJournal(opts(e3, fragSubject(H, 30, 66, at, "i2"), "resend"));
+    expect(r3.kind).toBe("adjudicated");
+    // 形四：存量行（无字段）→现行为保持
+    const e4 = await env([jl("i1"), jl("i2"), repairRow(30, 66, H, at)]);
+    await seedAnchor(e4);
+    const r4 = await adjudicateJournal(opts(e4, fragSubject(H, 30, 66, at, "i2"), "resend"));
+    expect(r4.kind).toBe("adjudicated");
+    for (const e of [e1, e3, e4]) await cleanup(e);
+  });
+  it("R28 读面影响域并入（S5 存量防御）：结构留痕 i1+持久裁决目标 i2——冷态 i1 不失忆（须覆盖判定）；热态对照+无关正对照", () => {
+    const torn = '{"t":"sending","intentId":"i1","x":"y"';
+    const H = sha(torn); const at = "2026-10-05T00:00:00.000Z";
+    // S5 形（一致门前的存量已落库）：repair 行留痕 i1，fragment 裁决归因 i2（组内单目标，非冲突组）
+    const rows = [jl("i1"), jl("i2"), jl("i3"), repairRowF(30, 66, H, at, "i1"),
+      adjRepair(H, 30, 66, at, "resend"), adjFrag(H, 30, 66, at, "i2", "resend")];
+    // 冷态（冷捕获丢 raw/fragments）：i1 因 fragIntentId 并入影响域→须 resendCovers(i1)（本事务归因 i2 无 i1→不覆盖）→排除（旧形：i1 失忆放行=S5 缺陷）
+    const cold = buildRecoverReport(parseJournalText(`${rows.join("\n")}\n`).lines, "q", { fragments: [], blocked: false });
+    expect(cold.resumeBlocked).toBe(false); // 事务有 fragment 裁决（i2）→非未归因事务，不全局阻断
+    expect(cold.resumable).not.toContain("i1"); // 结构归因 i1 并入影响域——覆盖不成立→排除
+    expect(cold.resumable).toContain("i2"); // 归因 i2 的 resend 裁决授权效果（单事务全覆盖成立）→合法重发
+    expect(cold.resumable).toContain("i3"); // 无关意图正对照——影响域并入不得无差别封禁 enqueue
+    // 热态对照：残片在场（结构归因 i1 进 unknown）→两态一致排除
+    const hot = buildRecoverReport(parseJournalText(`${rows.join("\n")}\n`).lines, "q", {
+      fragments: [{ raw: torn, error: "撕裂尾", partialTail: true }], blocked: false,
+    });
+    expect(hot.resumable).not.toContain("i1");
+    expect(hot.resumable).toContain("i3");
+    // 补正对照：一致归因（i1）落库后——冷态覆盖成立（单事务归因 i1 全覆盖）→授权成立且可重发（缝的修不是阻断重发，而是让覆盖判定拿到全部证据）
+    const fixed = [jl("i1"), repairRowF(30, 66, H, at, "i1"),
+      adjRepair(H, 30, 66, at, "resend"), adjFrag(H, 30, 66, at, "i1", "resend")];
+    const ok = buildRecoverReport(parseJournalText(`${fixed.join("\n")}\n`).lines, "q", { fragments: [], blocked: false });
+    expect(ok.resumeBlocked).toBe(false);
+    expect(ok.resendAuthorized).toContain("i1"); // 结构留痕与归因一致→单事务全覆盖→授权成立
+    expect(ok.resumable).toContain("i1"); // 覆盖成立→不排除；无 sending/终态→可重发（授权的目的即重发，与 resendAuthorized 一致）
+  });
+});

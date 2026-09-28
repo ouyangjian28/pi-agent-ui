@@ -110,7 +110,7 @@ export interface RecoverReport {
   readonly repairLog: readonly RepairFact[];
 }
 
-/** P0-1a 修复留痕事实（repair 行的读面呈现形态）。 */
+/** P0-1a 修复留痕事实（repair 行的读面呈现形态）。fragIntentId=r7 结构归因留痕（缺省=存量行）。 */
 export interface RepairFact {
   readonly byteStart: number;
   readonly byteEnd: number;
@@ -118,6 +118,7 @@ export interface RepairFact {
   readonly buildId: string;
   readonly contractVersion: number;
   readonly at: string;
+  readonly fragIntentId?: IntentId | null;
 }
 
 /** perIntent 行（contracts.RecoveryIntentRow 同构）：verdict 按优先级取值；
@@ -158,7 +159,7 @@ type TopLevelIdScan = { kind: "none" } | { kind: "conflict" } | { kind: "unique"
  *  生产 journal 行是「顶层对象」的 JSON 前缀（截断只发生在尾部），故栈空出现任何字符=非生产形态。
  *  身份键识别：键名 JSON.parse 归一（"intent\\u0049d" 转义变体解码后**同等识别**再检查层级/重复，
  *  不是一律拒绝）；嵌套（栈长≥2）或顶层外出现 intentId 键→conflict；第二次顶层键→conflict。 */
-function scanTopLevelIntentId(raw: string): TopLevelIdScan {
+export function scanTopLevelIntentId(raw: string): TopLevelIdScan {
   type ObjExpect = "key-or-end" | "key-required" | "colon" | "value" | "member-end";
   type ArrExpect = "value-or-end" | "value-required" | "element-end";
   type Ctx = { type: "obj"; expect: ObjExpect } | { type: "arr"; expect: ArrExpect };
@@ -381,7 +382,7 @@ export function buildRecoverReport(lines: readonly JournalLine[], sessionId: Ses
   const diskBlocked = opts.blocked ?? fragments.length > 0;
   const repairLog: RepairFact[] = lines
     .filter((l): l is Extract<JournalLine, { t: "repair" }> => l.t === "repair")
-    .map((l) => ({ byteStart: l.byteStart, byteEnd: l.byteEnd, removedSha256: l.removedSha256, buildId: l.buildId, contractVersion: l.contractVersion, at: l.at }));
+    .map((l) => ({ byteStart: l.byteStart, byteEnd: l.byteEnd, removedSha256: l.removedSha256, buildId: l.buildId, contractVersion: l.contractVersion, at: l.at, ...(l.fragIntentId !== undefined ? { fragIntentId: l.fragIntentId } : {}) }));
   // P0-1b：裁决留痕行派生——journal 派生裁决不参与 G2 raw 匹配（G2 只消耗快照 attributedFragments），
   // 效果经授权作用域通道（resendKeys/abandonKeys）传递；repair 裁决=配对解锁修复事务（身份四元组
   // 逐字段匹配——旧裁决不作用于新事务，不匹配=在场但不计解锁）。
@@ -478,7 +479,10 @@ export function buildRecoverReport(lines: readonly JournalLine[], sessionId: Ses
     }
     return true;
   };
-  const txImpacted = new Set<IntentId>(effectiveFragAdj.filter((l) => l.verdict === "resend").map((l) => l.subject.intentId)); // r6（GPT r5 P1-r5-1）：事务归因影响域——有 fragment resend 裁决归因到本意图的事务集所涉意图（冷捕获丢残片后 enqueue-only 盘面无 unknown 证据，但其尾段可能含本意图的 sending——「证据缺失」不得免检授权）
+  const txImpacted = new Set<IntentId>([
+    ...effectiveFragAdj.filter((l) => l.verdict === "resend").map((l) => l.subject.intentId),
+    ...repairLog.filter((rf) => typeof rf.fragIntentId === "string" && rf.fragIntentId !== null).map((rf) => rf.fragIntentId as IntentId), // r7（GPT r6 P1-r6-1）：repair 行结构归因留痕并入影响域——冷捕获丢 raw 后「结构归因 i1 但持久裁决目标 i2」的 i1 不再失忆（存量行缺省不并入，未归因事务阻断门兜底）
+  ]); // r6（GPT r5 P1-r5-1）：事务归因影响域——有 fragment resend 裁决归因到本意图的事务集所涉意图（冷捕获丢残片后 enqueue-only 盘面无 unknown 证据，但其尾段可能含本意图的 sending——「证据缺失」不得免检授权）
   const resendCovers = (id: IntentId): boolean => scopeCovers(id, resendKeys, "resend");
   const abandonExcludes = (id: IntentId): boolean => scopeCovers(id, abandonKeys, "abandon");
   // G2 裁决（s4h H2 整批冲突校验）：同一 raw 的有效目标集>1=冲突裁决——两条都不是重复，整条证据

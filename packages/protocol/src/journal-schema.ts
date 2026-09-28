@@ -102,6 +102,9 @@ export function journalLineSchemaError(obj: UnknownRecord): string | null {
       if (typeof obj["buildId"] !== "string" || (obj["buildId"] as string).length === 0) return "缺字段/错类型 buildId";
       if (typeof obj["contractVersion"] !== "number" || !Number.isSafeInteger(obj["contractVersion"] as number) || (obj["contractVersion"] as number) < 1)
         return "缺字段/错类型 contractVersion";
+      // r7：结构归因留痕——缺省（存量行）/null（不可归因）/非空 string 合法，其余拒。
+      const fid = obj["fragIntentId"];
+      if (fid !== undefined && fid !== null && (typeof fid !== "string" || fid.length === 0)) return "非法 fragIntentId";
       return str("at");
     }
     case "adjudicate": {
