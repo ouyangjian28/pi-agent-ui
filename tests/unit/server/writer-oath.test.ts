@@ -157,6 +157,12 @@ describe("W-oath-3 写前守卫（FF-3 旧写者停写；冻结粘性；增量�
     if (!v0.ok) expect(v0.reason).toBe("uninitialized"); // r1 缺陷形：未初始化默认放行
     const v0b = await g.checkBeforeAppend();
     expect(v0b.reason).toBe("uninitialized"); // 粘性（与吞字节同界：冻结后不再演化）
+    // 冻结后 initialize 同样无效（r3/GPT r2 R2-F2 杀点：若可重置，未宣誓实例可绕过 uninitialized 拒起）
+    const sizeNow = (await import("node:fs/promises").then((m) => m.stat(path))).size;
+    expect(g.initialize({ byteEnd: sizeNow })).toBe(false);
+    const v0c = await g.checkBeforeAppend();
+    expect(v0c.ok).toBe(false);
+    if (!v0c.ok) expect(v0c.reason).toBe("uninitialized"); // 仍是原冻结判定，非重扫结果
     // 独立实例：正常建基线后 journal 消失
     const g2 = new WriterGuard(path, 1, "boot-a");
     g2.initialize({ byteEnd: 10 });
