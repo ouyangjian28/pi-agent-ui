@@ -10,11 +10,14 @@
 // composer 展示面：注入 writeClient 且 file 非空且视图∈{empty, streaming, resync-needed, stopped}；
 // loading/auth-failed/error/closed/unsubscribed 不展示（既有行为）。
 // C4：stopped 终局诚实标注恢复入口=上层重选文件（当前版本无重建按钮，不做自动重发/自动重订）。
+// D2 直播正文面：LiveStreamView 流式渲染 v1.1 三形（final 权威/增量 rAF 批合/正文落历史即清本轮）；
+// live-list 退为旁路面——只收 pi-progress/turn-state/process-note 三形，正文三形不再文本化占位。
 
 import React from "react";
 import { useSessionDetail } from "../ws/use-session-detail";
 import type { SubscribeClientSurface } from "../ws/subscribe-client";
 import { WriteComposer } from "./write-composer";
+import { LiveStreamView } from "./live-stream";
 import type { WriteClientSurface } from "../ws/write-client";
 import type { HistoryEvent, LiveEvent } from "@pi-agent-ui/protocol/src/contracts";
 
@@ -61,15 +64,21 @@ function HistoryRow({ event }: { event: HistoryEvent }) {
   );
 }
 
-function liveEventText(event: LiveEvent): string {
+/** 直播三形以外的旁路事件（进度/回合/进程）——D2 起正文三形由 LiveStreamView 流式渲染，不再走文本化列表。 */
+type ProgressLiveEvent = Exclude<
+  LiveEvent,
+  { readonly kind: "message-delta" } | { readonly kind: "message-part-end" } | { readonly kind: "message-final" }
+>;
+
+function isProgressEvent(event: LiveEvent): event is ProgressLiveEvent {
+  return event.kind === "pi-progress" || event.kind === "turn-state" || event.kind === "process-note";
+}
+
+function liveEventText(event: ProgressLiveEvent): string {
   switch (event.kind) {
     case "pi-progress": return `进度 ${event.piType}（${event.note}）`;
     case "turn-state": return `回合状态：${event.turn.state}`;
     case "process-note": return `进程${event.phase === "running" ? "运行" : "停止"}通知`;
-    // D1 直播三形（v1.1）：文本化占位——D2 渲染批替换为真流式正文渲染
-    case "message-delta": return `［${event.part === "text" ? "正文" : "思考"}增量］${event.delta}`;
-    case "message-part-end": return `［${event.part === "text" ? "正文" : "思考"}段尾］`;
-    case "message-final": return `［助手全文］${event.text}`;
   }
 }
 
@@ -176,9 +185,10 @@ export function SessionDetail({
             正在加载更多历史…
           </p>
         ) : null}
-        {view.liveEvents.length > 0 ? (
+        <LiveStreamView liveEvents={view.liveEvents} historyEvents={view.events} />
+        {view.liveEvents.some(isProgressEvent) ? (
           <ul className="live-list" aria-live="polite" aria-label="直播事件">
-            {view.liveEvents.map((event, index) => (
+            {view.liveEvents.filter(isProgressEvent).map((event, index) => (
               <li key={index}>{liveEventText(event)}</li>
             ))}
           </ul>
