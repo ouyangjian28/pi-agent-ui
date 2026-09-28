@@ -528,6 +528,72 @@ hr {
   white-space: pre-wrap;
 }
 
+/* D3-F 扩展问答对话框：面板卡片堆叠；选项/动作按钮沿用 accent 令牌；ui-note 三级配色（旁路面） */
+.session-detail .ui-dialog-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin: var(--sp-3) 0;
+}
+.session-detail .ui-dialog {
+  background: var(--c-panel);
+  border: 1px solid var(--c-accent);
+  border-radius: 8px;
+  padding: var(--sp-3) var(--sp-4);
+}
+.session-detail .ui-dialog h3 {
+  margin: 0 0 var(--sp-2);
+}
+.session-detail .ui-dialog-options {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.session-detail .ui-dialog-message {
+  white-space: pre-wrap;
+  margin: 0 0 var(--sp-2);
+}
+.session-detail .ui-dialog-actions {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-start;
+}
+.session-detail .ui-dialog-actions input,
+.session-detail .ui-dialog-actions textarea {
+  flex: 1;
+  font: inherit;
+  border: 1px solid var(--c-border);
+  border-radius: 6px;
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--c-bg);
+  color: var(--c-fg);
+}
+.session-detail .ui-dialog-actions textarea {
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+}
+.session-detail .ui-dialog-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: var(--sp-2);
+}
+.session-detail .ui-dialog-timeout {
+  color: var(--c-muted);
+}
+.session-detail .live-note-info {
+  color: var(--c-accent);
+}
+.session-detail .live-note-warning {
+  color: var(--c-warn);
+}
+.session-detail .live-note-error {
+  color: var(--c-err);
+}
+
 @keyframes list-select-in {
   from {
     transform: translateX(-4px);

@@ -1463,3 +1463,213 @@ describe("观察者清理锁死（external-store listener 移除即停通知；A
     expect(kept).toBeGreaterThan(keptAt); // 在册者仍收通知（正对照：确有状态推进发生）
   });
 });
+
+// ---------------------------------------------------------------------------
+// D3-F 扩展问答透传（契约 v1.2；docs/d3-ui-passthrough-design.md §3/§4）
+
+describe("D3 ui-request/ui-closed/ui-answer（瞬态问答面）", () => {
+  function uiRequest(over: Record<string, unknown> = {}): unknown {
+    return { t: "ui-request", requestId: "ui-1", file: "a.jsonl", method: "confirm", message: "允许执行吗？", ...over };
+  }
+
+  it("live 相位：ui-request 入快照 uiRequests（可选域透传；file 不冗余存储）", () => {
+    const { client, ws } = livePhase();
+    ws.receive(
+      uiRequest({
+        requestId: "ui-1",
+        method: "select",
+        title: "选哪个？",
+        options: ["甲", "乙"],
+        timeoutMs: 30_000,
+        message: undefined,
+      }),
+    );
+    const reqs = client.getSnapshot().uiRequests;
+    expect(reqs).toHaveLength(1);
+    expect(reqs[0]).toEqual({
+      requestId: "ui-1",
+      method: "select",
+      title: "选哪个？",
+      options: ["甲", "乙"],
+      timeoutMs: 30_000,
+    });
+    expect(reqs[0]).not.toHaveProperty("file"); // file 只用于过滤，不入快照
+  });
+
+  it("paging/subscribing 相位也可收（订阅活跃即收，§4 任意相）", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    client.subscribeSession("a.jsonl");
+    // subscribing（首页未达）
+    ws.receive(uiRequest({ requestId: "ui-a" }));
+    expect(client.getSnapshot().uiRequests.map((r) => r.requestId)).toEqual(["ui-a"]);
+    // paging（首页 hasMore，续页在途）
+    const initRequestId = (ws.sentFrames()[1] as { requestId: string }).requestId;
+    ws.receive(
+      pageFrame({
+        requestId: initRequestId,
+        barrier: 3,
+        page: [msg(1)],
+        historyNext: { streamId: "stream-1", seq: 2 },
+      }),
+    );
+    expect(client.getSnapshot().phase).toBe("paging");
+    ws.receive(uiRequest({ requestId: "ui-b" }));
+    expect(client.getSnapshot().uiRequests.map((r) => r.requestId)).toEqual(["ui-a", "ui-b"]);
+  });
+
+  it("畸形整帧忽略零副作用：method 非枚举 / select 缺 options / options 含非字符串 / timeoutMs 非数 / 缺 requestId", () => {
+    const { client, ws } = livePhase();
+    const before = client.getSnapshot();
+    ws.receive(uiRequest({ method: "notify" })); // 即显族不是对话族帧
+    ws.receive(uiRequest({ method: "select" })); // select 无 options 不可答
+    ws.receive(uiRequest({ method: "select", options: ["甲", 2] }));
+    ws.receive(uiRequest({ timeoutMs: "30s" }));
+    ws.receive({ t: "ui-request", file: "a.jsonl", method: "confirm" }); // 缺 requestId
+    expect(client.getSnapshot()).toBe(before);
+  });
+
+  it("跨 file 忽略（frame.file≠当前订阅 file 零副作用）", () => {
+    const { client, ws } = livePhase();
+    const before = client.getSnapshot();
+    ws.receive(uiRequest({ file: "b.jsonl" }));
+    expect(client.getSnapshot()).toBe(before);
+  });
+
+  it("非活跃相位忽略：idle（未发起订阅）与退订后均不收", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    ws.receive(uiRequest()); // idle：snapshot.file=null，天然不收
+    expect(client.getSnapshot().uiRequests).toHaveLength(0);
+    const done = livePhase();
+    done.client.unsubscribeSession();
+    const frozen = done.client.getSnapshot();
+    done.ws.receive(uiRequest());
+    expect(done.client.getSnapshot()).toBe(frozen);
+  });
+
+  it("同 requestId 重复广播幂等（不重复入列）", () => {
+    const { client, ws } = livePhase();
+    ws.receive(uiRequest());
+    ws.receive(uiRequest({ title: "重复帧改写不应生效" }));
+    const reqs = client.getSnapshot().uiRequests;
+    expect(reqs).toHaveLength(1);
+    expect(reqs[0]).not.toHaveProperty("title");
+  });
+
+  it("ui-closed 移除对应提问；未知 id/畸形帧零副作用", () => {
+    const { client, ws } = livePhase();
+    ws.receive(uiRequest({ requestId: "ui-1" }));
+    ws.receive(uiRequest({ requestId: "ui-2", method: "input", placeholder: "输入路径" }));
+    expect(client.getSnapshot().uiRequests).toHaveLength(2);
+    const before = client.getSnapshot();
+    ws.receive({ t: "ui-closed", requestId: "ui-ghost", reason: "overflow" }); // 未知 id
+    expect(client.getSnapshot()).toBe(before);
+    ws.receive({ t: "ui-closed", requestId: "ui-1", reason: "bogus" }); // 畸形 reason
+    expect(client.getSnapshot()).toBe(before);
+    ws.receive({ t: "ui-closed", requestId: "ui-1", reason: "process-retired" });
+    expect(client.getSnapshot().uiRequests.map((r) => r.requestId)).toEqual(["ui-2"]);
+  });
+
+  it("ui-closed(answered) 也撤框（他端已答场景；后端批 1b3bcd5 第 4 因，跨批时序补齐）", () => {
+    const { client, ws } = livePhase();
+    ws.receive(uiRequest({ requestId: "ui-1" }));
+    ws.receive(uiRequest({ requestId: "ui-2", method: "input" }));
+    const before = client.getSnapshot();
+    ws.receive({ t: "ui-closed", requestId: "ui-1", reason: "answered" });
+    expect(client.getSnapshot().uiRequests.map((r) => r.requestId)).toEqual(["ui-2"]);
+    expect(client.getSnapshot()).not.toBe(before); // 真撤框非零副作用
+  });
+
+  it("answerUi：三形态发帧（字段恰其一）并本地移除（不等 ack）", () => {
+    const { client, ws } = livePhase();
+    ws.receive(uiRequest({ requestId: "ui-1", method: "select", options: ["甲", "乙"] }));
+    ws.receive(uiRequest({ requestId: "ui-2", method: "confirm" }));
+    ws.receive(uiRequest({ requestId: "ui-3", method: "editor", prefill: "草稿" }));
+    const sentBefore = ws.sentFrames().length;
+
+    client.answerUi("ui-1", { value: "乙" });
+    client.answerUi("ui-2", { confirmed: true });
+    client.answerUi("ui-3", { cancelled: true });
+    expect(ws.sentFrames().slice(sentBefore)).toEqual([
+      { t: "ui-answer", requestId: "ui-1", value: "乙" },
+      { t: "ui-answer", requestId: "ui-2", confirmed: true },
+      { t: "ui-answer", requestId: "ui-3", cancelled: true },
+    ]);
+    expect(client.getSnapshot().uiRequests).toHaveLength(0); // 本地作答即移除，不等 ack
+  });
+
+  it("answerUi 对未知/已答 id 不发帧（防重复作答）", () => {
+    const { client, ws } = livePhase();
+    ws.receive(uiRequest());
+    client.answerUi("ui-1", { confirmed: false });
+    const sent = ws.sentFrames().length;
+    const snap = client.getSnapshot();
+    client.answerUi("ui-1", { confirmed: true }); // 已移除=不可再答
+    client.answerUi("ui-ghost", { cancelled: true });
+    expect(ws.sentFrames().length).toBe(sent);
+    expect(client.getSnapshot()).toBe(snap);
+  });
+
+  it("4404 对 ui-answer 静默：不置错误、不升级连接级（晚答/已答/跨订阅拒收）", () => {
+    const { client, ws } = livePhase();
+    ws.receive(uiRequest());
+    client.answerUi("ui-1", { confirmed: true });
+    const before = client.getSnapshot();
+    ws.receive({ t: "error", code: 4404, message: "unknown ui-request", retryable: false, requestId: "ui-1" });
+    expect(client.getSnapshot()).toBe(before); // 零副作用：无错误文案、相位不变
+    expect(before.connState).toBe("ready");
+    expect(before.errorKind).toBeNull();
+  });
+
+  it("连接终局清空（瞬态语义，断线重连不重放）：serverClose 后 uiRequests 空", () => {
+    const { client, ws } = livePhase();
+    ws.receive(uiRequest());
+    expect(client.getSnapshot().uiRequests).toHaveLength(1);
+    ws.serverClose(1006);
+    const snap = client.getSnapshot();
+    expect(snap.connState).toBe("closed");
+    expect(snap.uiRequests).toHaveLength(0);
+  });
+
+  it("换订阅/流终局清空：subscribeSession 重置与 resync-needed 均清瞬态面", () => {
+    const { client, ws, subscriptionId } = livePhase();
+    ws.receive(uiRequest({ requestId: "ui-1" }));
+    client.subscribeSession("b.jsonl"); // 换订阅=新快照
+    expect(client.getSnapshot().uiRequests).toHaveLength(0);
+
+    const again = livePhase();
+    again.ws.receive(uiRequest({ requestId: "ui-9" }));
+    again.ws.receive(terminalError(4409, subscriptionId)); // 续读终局：无活动流，提问不再可答
+    expect(again.client.getSnapshot().phase).toBe("resync-needed");
+    expect(again.client.getSnapshot().uiRequests).toHaveLength(0);
+  });
+});
+
+describe("D3 ui-note（LiveEvent v1.2 新形，走 events(origin=live)）", () => {
+  it("ui-note 三 notifyType 入 liveEvents（append-only，与其他旁路事件共存）", () => {
+    const { client, ws, subscriptionId } = livePhase();
+    ws.receive(
+      liveEvents(subscriptionId, 2, [
+        { kind: "ui-note", notifyType: "info", message: "提示" },
+        { kind: "ui-note", notifyType: "warning", message: "警告" },
+        { kind: "ui-note", notifyType: "error", message: "错误" },
+      ]),
+    );
+    const live = client.getSnapshot().liveEvents;
+    expect(live).toHaveLength(3);
+    expect(live[0]).toEqual({ kind: "ui-note", notifyType: "info", message: "提示" });
+  });
+
+  it("ui-note 畸形（notifyType 非枚举/缺 message）整帧拒绝，liveSeq 不推进", () => {
+    const { client, ws, subscriptionId } = livePhase();
+    const before = client.getSnapshot();
+    ws.receive(liveEvents(subscriptionId, 2, [{ kind: "ui-note", notifyType: "fatal", message: "x" }]));
+    expect(client.getSnapshot()).toBe(before);
+    ws.receive(liveEvents(subscriptionId, 2, [{ kind: "ui-note", notifyType: "info" }]));
+    expect(client.getSnapshot()).toBe(before);
+    // liveSeq=2 未被消费：合法帧仍可用同序号受理（坏帧零副作用，不污染幂等窗口）
+    ws.receive(liveEvents(subscriptionId, 2, [{ kind: "ui-note", notifyType: "info", message: "合法" }]));
+    expect(client.getSnapshot().liveEvents).toHaveLength(1);
+  });
+});

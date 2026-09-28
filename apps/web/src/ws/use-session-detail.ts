@@ -12,7 +12,7 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 import type { HistoryEvent, LiveEvent, TurnState } from "@pi-agent-ui/protocol/src/contracts"; // 绕开 barrel（同 subscribe-client）
-import type { SessionDetailSnapshot, SubscribeClientSurface } from "./subscribe-client";
+import type { SessionDetailSnapshot, SubscribeClientSurface, UiRequest } from "./subscribe-client";
 
 export type DetailViewStatus =
   | "loading" // 连接/握手/首订阅在途，或分页中尚无任何内容
@@ -44,6 +44,8 @@ export interface SessionDetailView {
   readonly banner: string | null;
   /** resync-needed 态且持有游标=可发起续读。 */
   readonly canResync: boolean;
+  /** D3 活跃扩展提问（身份门内才透出；组件挂 UiDialog 区）。 */
+  readonly uiRequests: readonly UiRequest[];
 }
 
 function turnText(turn: TurnState): string {
@@ -84,6 +86,7 @@ export function sessionDetailViewOf(snap: SessionDetailSnapshot, targetFile?: st
       errorMessage: snap.connState === "error" ? snap.errorMessage : null,
       banner: null,
       canResync: false,
+      uiRequests: [], // 身份门外不透出提问（旧 file 的对话框不得泄入新会话）
     };
   }
   let status: DetailViewStatus;
@@ -122,6 +125,7 @@ export function sessionDetailViewOf(snap: SessionDetailSnapshot, targetFile?: st
     errorMessage: status === "error" && snap.phase === "closed" && snap.errorMessage === null ? snap.streamNote : snap.errorMessage,
     banner,
     canResync: snap.connState === "ready" && snap.phase === "resync-needed" && snap.cursor !== null,
+    uiRequests: snap.uiRequests,
   };
 }
 
