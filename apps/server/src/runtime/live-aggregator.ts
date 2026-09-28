@@ -1,5 +1,5 @@
 // D1 直播面聚合器（docs/d1-live-stream-design.md）：pi 进程事件→LiveEvent 流。
-// 职责三段：①过滤（disp!=="delivered" 不广播=未记账轮次不外泄；thinking 缺省不透；
+// 职责三段：①过滤（disposition 白名单门 delivered/buffered 放行其余拒——见 shouldBroadcastLive；thinking 缺省不透；
 // final 只透 assistant——system 事件含全工具清单不外泄，user 已知无价值）②节流（同 (part,
 // contentIndex) 增量窗内合并；窗到/8KiB 上限/part-end/final 即时 flush）③预算（单帧 ≤8KiB
 // 超长切分；单 turn 广播总量 2MiB 软上限——超限停 delta 只发 final，防失控输出刷爆慢订阅）。
@@ -198,8 +198,6 @@ export class LiveAggregator {
         return false;
     }
   }
-
-  /** turn 收口（turn_end/agent_settled 后调用）：清窗。 */
 
   private pushDelta(part: "text" | "thinking", contentIndex: unknown, delta: string, sink: LiveSink): void {
     if (this.overBudget) return; // 超限停 delta（final 仍发）

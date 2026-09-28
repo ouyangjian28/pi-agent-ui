@@ -1171,6 +1171,8 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - tests/integration/d1-live-e2e.test.ts（PI_E2E=1，20s：真 pi 一轮→delta 流+final+拼接前缀校验；修复批后复跑绿）。
 - 变异七杀全验真：Mu-d1-1（缺省窗 80→0→W-d1-3d schedule 延时断言红）/Mu-d1-2（thinking 缺省透→W-d1-2）/Mu-d1-3（final role 滤去→W-d1-6）/Mu-d1-4（disposition 门去→W-d1-8b；修复批升级为路由工厂层杀点 Mu-d1-4b）/Mu-d1-5（turn_start 复位删→W-d1-9 跨 turn 恢复红）/Mu-d1-11（byteLen 回退码元→W-d1-11 中文字节口径红）。教训：Mu-d1-4 首轮杀点缺失（门内联在 composition 闭包）→提成纯函数+makeLiveOnPiEvent 路由工厂（修复批）；checkout 误伤未提交杀点改动→**杀点补强必须先提交再注杀**（M-245 家族新变体）。
 
+**K3 复审 r2=92/100 GO（2026-10-09，D1 放行；报告=projects/pi-agent-ui/audits/k3-d1-r2-review-2026-10-09.md）**：P1/P2 全项核实闭合+变异三杀 /tmp 副本独立验真+sliceByBytes 2 万随机模糊全过。P3-c 记档：agent_settled 现过 coordinator.onPiEvent 的两个边际副作用——awaiting-response 相下占 bufferedEvents 一格+缓冲恰满时触发 gate.close("buffer-overflow")；实害=零（onBufferDrain 生产未接线，drain 出的 agent_settled 无消费者；满缓冲 close 本不可避免）。P3-a/P3-b 注释残留已清（本批）。
+
 **修复批（3d1b927，K3 审 80 NO-GO 全项闭合）**：P1-1 turn 预算跨 turn 复位（agent_start/turn_start 边界 turnBytes=0/overBudget=false+W-d1-9）/P2-1 disposition 门黑名单→白名单（delivered/buffered 放行，未知态拒）+文档三处口径同步/P2-2 rpc-session agent_settled 也透传 onPiEvent（清窗兑底可达，coordinator 结算序不变）/P2-3 预算/切分 UTF-8 字节口径（byteLen+sliceByBytes 二分安全切片）/P2-4 dispose 收口（liveSink=null+聚合器 dispose 撤定时器+清 Map）/P2-5 超限只发 delta 不补提前 part-end/P2-6 接线闭包提取 makeLiveOnPiEvent 工厂+W-d1-1 a/b 接线级+W-d1-8 恒真断言废→真实退订零投+W-d1-8c engine phase 门（paging 期丢/live 期投）/P3-1 onTurnEnd 死 API 删。新增测试：W-d1-9/10/11+W-d1-1 a/b+接线级白名单杀点+W-d1-8b 晚绑定+agent_settled 透传单测。全仓 1516 绿。
 
 **E2E 杂项教训**：tokens.json 须 {version:1,tokens:[...]}；订阅文件须预存（4402 fail-closed）手造 writer 行；短回复整体在窗内被 final 权威吸收→prompt 要长回复（~120 字）断言 delta 流非空。
