@@ -96,3 +96,14 @@ r3 被审出四阻断。核心是 B-r3-2 的**双证模型**重构——本节�
 5. **低项**：openHandle 成功后 readFile 失败路径也确定性 close（L1）；R6 改写真字段（repairUndecided 进快照对象，旧第二参数被单参函数忽略=假杀点）（L2）；R12 主负例重构=tx2 落 i2 归因裁决（归因面全满足，scopeCovers 独立杀点，不再被归因门遮蔽）（L3）；R16 五路径全接计数句柄+逐次增量断言（写失败面不再豁免计数）（L4）。
 
 崩溃矩阵扩为 R1a/R1b/R2-R20（TEST-MAP r4 节权威）。
+## 10. r5 冷热一致+授权执行分层（GPT r4 审 71 NO-GO 修复批；2026-10-08）
+
+r4 被审出三红二黄。核心是 P1-r4-1 的**冷热一致性**与 P1-r4-3 的**授权/执行分层**——本节为权威补丁，覆盖 §9 第 1 条的相应语义：
+
+1. **无源分支保守化（P1-r4-1）**：scopeCovers 无残片源（need 空：热路径修复后残片已移除/冷捕获丢 fragments/G2 消耗）不再「有任意授权即覆盖」——改为**归因全覆盖**：repairLog 全部事务均有本意图同向 fragment 裁决（同四元组+kind+intentId）才放行。修补的缝：同 sha 双事务各归因一意图时，冷捕获（丢 fragments）反而比热路径宽——两态统一收窄。G2 消耗时残片内容 sha 补入 unknownShas 源追踪（第二缝）：G2 归因的新残片 sha 无事务映射→覆盖判定失败→旧事务 fragment 授权不越新来源。
+2. **写面组一致性前移（P1-r4-2）**：候选加入后统一二维判定（candVerdicts=priors 全部 verdict+本次>1 拒；candTargets=fragment 目标集+本次>1 拒，**不限定请求 kind**）先于 kind 内幂等——修补的缝：repair abandon 在场+fragment resend 请求曾被落行→读面整组剔除→写工具自造矛盾组锁死恢复。
+3. **授权/执行分层（P1-r4-3）**：resumable 回退排除在途 sending（删 r4 的授权链放宽——旧 resend 授权不自动覆盖之后的完整 sending，无代次/尝试界限时执行静止未证）；RecoverReport 新增 **resendAuthorized**（授权证明面=通过作用域覆盖判定的 resend 授权意图，含在途 sending）——宿主（P0-3 接线）据此呈现/操作，不自动重发。授权≠执行资格。
+4. **安全整数（P2-r4-1）**：len 校验 Number.isInteger→**isSafeInteger** 六处（repair-tail 117/138/139、adjudicate-journal 95、evidence-migration 112、recovery-evidence-source 209/342）——2^53 被 isInteger 接收但精度失真。
+5. **测试真杀点（P2-r4-2）**：R6 加 undecided 干净盘面成对断言（旧阻力来自未裁事务非本门）；R12-G2 对账先行（adjRepair+adjFrag 齐）独立断言归因门（旧形被 repairShadow 遮蔽）；R16 写失败/读失败真形（真事务过身份门后 append 抛/readFile 抛——旧形 at=1999 在盘面门就拒，写失败从未到达）；新增 R21（冷热差分成对）/R22（G2 补源）/R23（写面交叉矩阵四形）/R24（锚安全整数边界）。
+
+崩溃矩阵扩为 R1a/R1b/R2-R24（TEST-MAP r5 节权威）。
