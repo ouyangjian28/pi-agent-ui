@@ -199,6 +199,7 @@ function detailSnap(patch: Partial<SessionDetailSnapshot>): SessionDetailSnapsho
     liveEvents: [],
     status: null,
     cursor: null,
+    uiRequests: [],
     ...patch,
   };
 }

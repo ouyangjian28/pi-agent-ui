@@ -4,7 +4,8 @@
 // 维护单文件会话详情只读快照（SessionDetailSnapshot，不可变整体替换，供 useSyncExternalStore 消费）。
 //
 // 保真清单（重写锚点）：
-// ①出帧类型层封闭：只发 hello/subscribe/unsubscribe（OutgoingFrame 联合型），写类帧无从构造；
+// ①出帧类型层封闭：只发 hello/subscribe/unsubscribe/ui-answer（OutgoingFrame 联合型；ui-answer=D3 问答帧，
+//   非写帧），写类帧无从构造；
 // ②消费帧先过运行时形状门（parse* 系列，文件内私有纯函数）：welcome/snapshot/events/status/
 //   resync-required/error 逐字段校验，坏帧=零副作用（不污染快照、不消费在途、后续合法帧照常受理）；
 // ③错误文案受控：快照内 errorMessage/streamNote 只承载 errorTextFor 的本文件文案——远端 error.message
@@ -29,6 +30,13 @@
 //   无流身份且 requestId 空缺/空串的 4409/4431/4402=旧信封终局，按当前活动流兼容处理（本面单 file
 //   至多一个活动订阅，归属无歧义；无活动流则零副作用忽略）。
 
+// ⑫D3-F 扩展问答透传（契约 v1.2，docs/d3-ui-passthrough-design.md §3/§4）：ui-request/ui-closed=瞬态
+//   帧（连接级直达，不进 events 快照/live 流，断线不重放）——形状门后仅当前订阅 file 且订阅活跃相位
+//   （subscribing/paging/live）受理，入快照 uiRequests（key=requestId，同 id 重复广播幂等）；ui-closed/
+//   本地作答即移除（不等 ack）；4404 对 ui-answer 静默（晚答/已答/跨订阅拒收，不弹错误不重试）；
+//   ui-note=LiveEvent v1.2 新形，走既有 events(origin=live) 形状门入旁路面；连接/订阅终局即清空
+//   uiRequests（瞬态语义，重连/重订阅无重放属正常）。
+
 // 同仓惯例：绕开 barrel 直引自包含 contracts 模块（浏览器安全、零 Node 依赖；LIMITS 为值导入，
 // filePattern 冻结源避免本地复制漂移）。
 import { LIMITS } from "@pi-agent-ui/protocol/src/contracts";
@@ -44,10 +52,17 @@ import type {
   StartResult,
   SubscriptionId,
   TurnState,
+  UiClosedFrame,
+  UiRequestFrame,
+  UiRequestMethod,
 } from "@pi-agent-ui/protocol/src/contracts";
 
-/** 本客户端允许发送的帧（§5.1 六客户端帧的订阅生命周期子集；写类 t 在类型层即不可达）。 */
-type OutgoingFrame = Extract<ClientFrame, { readonly t: "hello" } | { readonly t: "subscribe" } | { readonly t: "unsubscribe" }>;
+/** 本客户端允许发送的帧（§5.1 订阅生命周期子集 + D3 ui-answer——问答帧驾驶宿主侧 pi stdin，非写帧、
+ * 不触 journal/writerEpoch；写类 t 在类型层仍不可达）。 */
+type OutgoingFrame = Extract<
+  ClientFrame,
+  { readonly t: "hello" } | { readonly t: "subscribe" } | { readonly t: "unsubscribe" } | { readonly t: "ui-answer" }
+>;
 
 /** 连接级五态：connecting→authenticating→ready；任一前置态可落 closed/error（无自动重连）。 */
 export type DetailConnState = "connecting" | "authenticating" | "ready" | "closed" | "error";
@@ -63,6 +78,22 @@ export type SubscriptionPhase =
 
 /** 错误成因：auth-failed/handshake-failed/transport=连接级；subscribe-failed=订阅请求被拒；stream-terminal=流终局（4431 等）。 */
 export type DetailErrorKind = "auth-failed" | "handshake-failed" | "transport" | "subscribe-failed" | "stream-terminal";
+
+/** D3 活跃提问（ui-request 入快照的存储形；file 已按当前订阅过滤，不冗余存储）。 */
+export interface UiRequest {
+  readonly requestId: string;
+  readonly method: UiRequestMethod;
+  readonly title?: string;
+  readonly options?: readonly string[]; // select
+  readonly message?: string; // confirm 题面
+  readonly placeholder?: string; // input
+  readonly prefill?: string; // editor
+  readonly timeoutMs?: number; // 仅 UI 提示；前端不据此自动作答/撤框（撤框只听 ui-closed）
+}
+
+/** D3 答案负载（三形态恰其一，判别联合在类型层封闭）：select/input/editor→value；confirm→confirmed；
+ * 任意方法用户放弃→cancelled:true。 */
+export type UiAnswer = { readonly value: string } | { readonly confirmed: boolean } | { readonly cancelled: true };
 
 /**
  * 会话详情快照（不可变；每次变更整体替换——getSnapshot 缓存语义，未变即引用相等）。
@@ -83,6 +114,8 @@ export interface SessionDetailSnapshot {
   readonly status: SessionStatus | null;
   /** 续读游标：最近一次服务端页游标（historyNext；末页后=liveFrom）——严格服务端值，不重算。 */
   readonly cursor: EventCursor | null;
+  /** D3 活跃扩展提问（瞬态；ui-request push、ui-closed/本地作答即移除；连接/订阅终局清空不重放）。 */
+  readonly uiRequests: readonly UiRequest[];
 }
 
 /** 可注入的 WebSocket 最小面（测试用假 socket 顶替；实现方只需提供五回调+send/close/readyState）。 */
@@ -118,6 +151,7 @@ const INITIAL: SessionDetailSnapshot = {
   liveEvents: [],
   status: null,
   cursor: null,
+  uiRequests: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -298,7 +332,7 @@ function historyEventOk(v: unknown): v is HistoryEvent {
 const PI_TYPES = ["agent_start", "turn_start", "message_start", "message_update", "message_end", "turn_end", "agent_end", "agent_settled"] as const;
 const PROGRESS_NOTES = ["thinking", "tool-start", "tool-end", "compacting", "message-start", "message-end"] as const;
 
-/** LiveEvent（组3）判别联合全域。 */
+/** LiveEvent（组3）判别联合全域；v1.2 增 ui-note（D3 即显族 notify 透传，append-only 重放无害）。 */
 function liveEventOk(v: unknown): v is LiveEvent {
   if (!rec(v)) return false;
   switch (v.kind) {
@@ -308,6 +342,8 @@ function liveEventOk(v: unknown): v is LiveEvent {
       return nonNegNum(v.statusVersion) && turnStateOk(v.turn);
     case "process-note":
       return v.phase === "running" || v.phase === "stopping";
+    case "ui-note":
+      return (v.notifyType === "info" || v.notifyType === "warning" || v.notifyType === "error") && str(v.message);
     default:
       return false;
   }
@@ -420,6 +456,45 @@ function parseResyncRequired(v: Record<string, unknown>): ResyncRequiredFrame | 
   if (!transportId(v.subscriptionId)) return null;
   if (v.reason !== "server-side-gap" && v.reason !== "stream-replaced") return null;
   return { t: "resync-required", subscriptionId: v.subscriptionId, reason: v.reason };
+}
+
+/** ui-request（契约 v1.2 §3.1）：requestId/file/method 必备，method 枚举闭合；select 必携 options:string[]；
+ * 可选域在场即验形（title/message/placeholder/prefill=string；timeoutMs=非负有限数）。畸形整帧拒收。 */
+function parseUiRequest(v: Record<string, unknown>): UiRequestFrame | null {
+  if (!transportId(v.requestId)) return null;
+  if (!str(v.file)) return null;
+  const method = v.method;
+  if (method !== "select" && method !== "confirm" && method !== "input" && method !== "editor") return null;
+  if (v.title !== undefined && !str(v.title)) return null;
+  if (v.message !== undefined && !str(v.message)) return null;
+  if (v.placeholder !== undefined && !str(v.placeholder)) return null;
+  if (v.prefill !== undefined && !str(v.prefill)) return null;
+  if (v.timeoutMs !== undefined && !nonNegNum(v.timeoutMs)) return null;
+  let options: readonly string[] | undefined;
+  if (v.options !== undefined) {
+    if (!Array.isArray(v.options) || !v.options.every(str)) return null;
+    options = v.options;
+  }
+  if (method === "select" && options === undefined) return null; // select 无选项不可答，按畸形拒收
+  return {
+    t: "ui-request",
+    requestId: v.requestId,
+    file: v.file,
+    method,
+    ...(v.title === undefined ? {} : { title: v.title as string }),
+    ...(options === undefined ? {} : { options }),
+    ...(v.message === undefined ? {} : { message: v.message as string }),
+    ...(v.placeholder === undefined ? {} : { placeholder: v.placeholder as string }),
+    ...(v.prefill === undefined ? {} : { prefill: v.prefill as string }),
+    ...(v.timeoutMs === undefined ? {} : { timeoutMs: v.timeoutMs as number }),
+  };
+}
+
+/** ui-closed（契约 v1.2 §3.1）：requestId 必备，reason 枚举闭合。 */
+function parseUiClosed(v: Record<string, unknown>): UiClosedFrame | null {
+  if (!transportId(v.requestId)) return null;
+  if (v.reason !== "process-retired" && v.reason !== "no-subscriber" && v.reason !== "overflow") return null;
+  return { t: "ui-closed", requestId: v.requestId, reason: v.reason };
 }
 
 // ---------------------------------------------------------------------------
@@ -538,6 +613,7 @@ export class SubscribeClient {
       liveEvents: [],
       status: null,
       cursor: null,
+      uiRequests: [], // 换订阅=瞬态问答面同清（不重放）
       errorKind: null,
       errorMessage: null,
       streamNote: null,
@@ -572,7 +648,19 @@ export class SubscribeClient {
     this.queuedFile = null;
     this.noteCancelledBuild(); // 首包前退订——建订在途留痕，迟到首页只补退订不落快照
     this.dropActiveSubscription(true);
-    this.transition({ phase: "idle", cursor: null, streamNote: null, errorKind: null, errorMessage: null });
+    this.transition({ phase: "idle", cursor: null, streamNote: null, errorKind: null, errorMessage: null, uiRequests: [] });
+  }
+
+  /**
+   * D3 问答：发 ui-answer 帧并本地移除该提问（不等 ack；首个合法答案胜出，其余连接/晚答被服务端 4404
+   * 静默拒收——本地面不重试不弹错）。仅活跃列表中的 requestId 可答（防重复发送/过期 id）。
+   */
+  answerUi(requestId: string, answer: UiAnswer): void {
+    if (this.stopped) return;
+    if (this.snapshot.connState !== "ready") return;
+    if (!this.snapshot.uiRequests.some((r) => r.requestId === requestId)) return;
+    this.sendFrame({ t: "ui-answer", requestId, ...answer });
+    this.transition({ uiRequests: this.snapshot.uiRequests.filter((r) => r.requestId !== requestId) });
   }
 
   /**
@@ -699,6 +787,35 @@ export class SubscribeClient {
       case "resync-required":
         this.handleResyncRequired(parsed);
         return;
+      case "ui-request": {
+        const frame = parseUiRequest(parsed);
+        if (frame === null) return; // 畸形整帧忽略
+        // 只对当前订阅 file 生效（跨 file 广播/迟到帧忽略）；订阅活跃相位（subscribing/paging/live）才受理——
+        // idle/closed/resync-needed 无活动流，答了也只会被 4404 拒，不收
+        const phase = this.snapshot.phase;
+        if (frame.file !== this.snapshot.file) return;
+        if (phase !== "subscribing" && phase !== "paging" && phase !== "live") return;
+        if (this.snapshot.uiRequests.some((r) => r.requestId === frame.requestId)) return; // 同 id 重复广播幂等
+        const req: UiRequest = {
+          requestId: frame.requestId,
+          method: frame.method,
+          ...(frame.title === undefined ? {} : { title: frame.title }),
+          ...(frame.options === undefined ? {} : { options: frame.options }),
+          ...(frame.message === undefined ? {} : { message: frame.message }),
+          ...(frame.placeholder === undefined ? {} : { placeholder: frame.placeholder }),
+          ...(frame.prefill === undefined ? {} : { prefill: frame.prefill }),
+          ...(frame.timeoutMs === undefined ? {} : { timeoutMs: frame.timeoutMs }),
+        };
+        this.transition({ uiRequests: [...this.snapshot.uiRequests, req] });
+        return;
+      }
+      case "ui-closed": {
+        const frame = parseUiClosed(parsed);
+        if (frame === null) return; // 畸形整帧忽略
+        if (!this.snapshot.uiRequests.some((r) => r.requestId === frame.requestId)) return; // 未知/已清 id 零副作用
+        this.transition({ uiRequests: this.snapshot.uiRequests.filter((r) => r.requestId !== frame.requestId) });
+        return;
+      }
       case "error":
         this.handleError(parsed);
         return;
@@ -806,12 +923,12 @@ export class SubscribeClient {
       this.activeSub = null;
       this.binding = null;
       this.pending = null;
-      this.transition({ phase: "closed", subscriptionId: null, streamNote: "订阅已被新订阅替换，旧流已停止" });
+      this.transition({ phase: "closed", subscriptionId: null, streamNote: "订阅已被新订阅替换，旧流已停止", uiRequests: [] });
       return;
     }
     // server-side-gap：服务端缺口——无自动重同步（用户显式续读）；快照与 cursor 保留
     this.pending = null;
-    this.transition({ phase: "resync-needed", streamNote: "检测到服务端事件缺口，需要重新同步后继续" });
+    this.transition({ phase: "resync-needed", streamNote: "检测到服务端事件缺口，需要重新同步后继续", uiRequests: [] });
   }
 
   private handleError(v: Record<string, unknown>): void {
@@ -887,10 +1004,10 @@ export class SubscribeClient {
     this.binding = null;
     this.pending = null; // 该流在途请求不再期待回包——清理属流终局，不置请求失败文案（新信封不指认请求）
     if (code === 4409) {
-      this.transition({ phase: "resync-needed", streamNote: errorTextFor(4409) });
+      this.transition({ phase: "resync-needed", streamNote: errorTextFor(4409), uiRequests: [] }); // 无活动流，瞬态提问不再可答
       return;
     }
-    this.transition({ phase: "closed", errorKind: "stream-terminal", errorMessage: errorTextFor(code) });
+    this.transition({ phase: "closed", errorKind: "stream-terminal", errorMessage: errorTextFor(code), uiRequests: [] });
   }
 
   private handleClose(code: number): void {
@@ -903,14 +1020,14 @@ export class SubscribeClient {
     }
     this.pending = null; // 连接终态清在途/排队，迟到回包不再有归属
     this.queuedFile = null;
-    this.transition({ connState: "closed" }); // 连接终态；无自动重连
+    this.transition({ connState: "closed", uiRequests: [] }); // 连接终态；无自动重连；瞬态提问不重放
   }
 
   /** 连接级错误出口：清在途/排队（迟到回包不再变更快照）+受控文案进快照。 */
   private failConnection(errorKind: DetailErrorKind, errorMessage: string): void {
     this.pending = null;
     this.queuedFile = null;
-    this.transition({ connState: "error", errorKind, errorMessage });
+    this.transition({ connState: "error", errorKind, errorMessage, uiRequests: [] });
   }
 
   /** 订阅请求失败出口：不作废连接（连接与其余订阅面保持），订阅相位终局+受控文案。
@@ -918,7 +1035,7 @@ export class SubscribeClient {
   private failSubscription(errorMessage: string): void {
     this.noteCancelledBuild();
     this.dropActiveSubscription(true);
-    this.transition({ phase: "closed", errorKind: "subscribe-failed", errorMessage, streamNote: null });
+    this.transition({ phase: "closed", errorKind: "subscribe-failed", errorMessage, streamNote: null, uiRequests: [] });
   }
 
   private transition(patch: Partial<SessionDetailSnapshot>): void {
@@ -927,8 +1044,8 @@ export class SubscribeClient {
   }
 }
 
-/** 组件/hook 所需客户端面（subscribe/getSnapshot 对齐 useSyncExternalStore；其余为订阅生命周期动作）。 */
+/** 组件/hook 所需客户端面（subscribe/getSnapshot 对齐 useSyncExternalStore；其余为订阅生命周期动作+D3 问答）。 */
 export type SubscribeClientSurface = Pick<
   SubscribeClient,
-  "subscribe" | "getSnapshot" | "subscribeSession" | "unsubscribeSession" | "resyncFromCursor"
+  "subscribe" | "getSnapshot" | "subscribeSession" | "unsubscribeSession" | "resyncFromCursor" | "answerUi"
 >;
