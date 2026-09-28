@@ -104,7 +104,9 @@ describe("LiveStreamView 直播正文渲染", () => {
     await flushFrame();
     expect(screen.getByLabelText("直播正文").textContent).toBe("本轮正文");
     // 历史区落行（同帧不再含 live 新增）→ 直播区清空
-    view.rerender(React.createElement(LiveStreamView, { liveEvents: live, historyEvents: [assistantMsg(1, "本轮正文")] }));
+    view.rerender(
+      React.createElement(LiveStreamView, { liveEvents: live, historyEvents: [assistantMsg(1, "本轮正文")] }),
+    );
     await flushFrame();
     expect(screen.queryByLabelText("直播正文")).toBeNull();
   });
