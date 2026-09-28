@@ -55,6 +55,7 @@ interface Rig {
   audits: string[];
   dir: string;
   inFile: string;
+  created: { n: number }; // sessionFor 调用计数（零副作用杀点：身份拒必须不触会话创建）
   authority: { report: { resendAuthorized: readonly string[]; resumeBlocked: boolean } | null; liveGen: number | null; throwReport: boolean };
   dispose(): Promise<void>;
 }
@@ -64,6 +65,7 @@ async function makeRig(): Promise<Rig> {
   const audits: string[] = [];
   const session = new RecordingSession();
   const authority = { report: { resendAuthorized: ["i-auth"], resumeBlocked: false } as { resendAuthorized: readonly string[]; resumeBlocked: boolean } | null, liveGen: 3 as number | null, throwReport: false };
+  const created = { n: 0 };
   const resumeAuthority: ResumeAuthority = {
     reportFor: async () => {
       if (authority.throwReport) throw new Error("boom-report");
@@ -72,7 +74,7 @@ async function makeRig(): Promise<Rig> {
     generationFor: () => authority.liveGen,
   };
   const writeHost = createRpcWriteHost({
-    sessionFor: () => session,
+    sessionFor: () => { created.n++; return session; },
     audit: (l) => { audits.push(l); },
     resumeAuthority,
   });
@@ -90,7 +92,7 @@ async function makeRig(): Promise<Rig> {
     gw.attach(c, c.hooks(), { origin: "http://localhost:5173", loopback: true, tls: false } satisfies ConnMeta);
     return c;
   };
-  return { gw, conn, session, audits, dir: d, inFile: "s1.jsonl", authority, dispose: async () => { gw.dispose(); await rm(d, { recursive: true, force: true }); } };
+  return { gw, conn, session, audits, dir: d, inFile: "s1.jsonl", created, authority, dispose: async () => { gw.dispose(); await rm(d, { recursive: true, force: true }); } };
 }
 
 async function authed(r: Rig): Promise<FakeConn> {
@@ -165,6 +167,7 @@ describe("P0-2 r3a 帧身份门：resume/prompt.generation", () => {
       await c.say({ t: "resume", requestId: "r1", file: r.inFile, intentId: "i-auth", generation: 3 });
       expect(resumeAck(c)?.["outcome"]).toEqual({ kind: "identity-rejected", cause: "no-recovery-data" });
       expect(r.session.sends.length).toBe(0);
+      expect(r.created.n).toBe(0);
     } finally { await r.dispose(); }
   });
 
@@ -176,6 +179,7 @@ describe("P0-2 r3a 帧身份门：resume/prompt.generation", () => {
       await c.say({ t: "resume", requestId: "r1", file: r.inFile, intentId: "i-auth", generation: 3 });
       expect(resumeAck(c)?.["outcome"]).toEqual({ kind: "identity-rejected", cause: "resume-blocked" });
       expect(r.session.sends.length).toBe(0);
+      expect(r.created.n).toBe(0);
     } finally { await r.dispose(); }
   });
 
@@ -186,6 +190,7 @@ describe("P0-2 r3a 帧身份门：resume/prompt.generation", () => {
       await c.say({ t: "resume", requestId: "r1", file: r.inFile, intentId: "i-other", generation: 3 });
       expect(resumeAck(c)?.["outcome"]).toEqual({ kind: "identity-rejected", cause: "resume-not-authorized" });
       expect(r.session.sends.length).toBe(0);
+      expect(r.created.n).toBe(0);
       expect(r.audits.some((l) => l.includes("cause=resume-not-authorized"))).toBe(true);
     } finally { await r.dispose(); }
   });
@@ -197,6 +202,7 @@ describe("P0-2 r3a 帧身份门：resume/prompt.generation", () => {
       await c.say({ t: "resume", requestId: "r1", file: r.inFile, intentId: "i-auth", generation: 2 }); // 活代=3
       expect(resumeAck(c)?.["outcome"]).toEqual({ kind: "identity-rejected", cause: "generation-mismatch" });
       expect(r.session.sends.length).toBe(0);
+      expect(r.created.n).toBe(0);
       expect(r.audits.some((l) => l.includes("frame=2") && l.includes("live=3"))).toBe(true);
     } finally { await r.dispose(); }
   });
@@ -235,6 +241,7 @@ describe("P0-2 r3a 帧身份门：resume/prompt.generation", () => {
       const ack1 = c.frames().find((f) => f.t === "write-ack" && f.requestId === "p1");
       expect(ack1?.["outcome"]).toEqual({ kind: "identity-rejected", cause: "generation-mismatch" });
       expect(r.session.sends.length).toBe(0); // 零副作用：身份拒在 sessionFor 之前
+      expect(r.created.n).toBe(0);
       // 匹配代（3）→放行（触 send）
       await c.say({ t: "prompt", requestId: "p2", file: r.inFile, text: "hi", generation: 3 });
       const ack2 = c.frames().find((f) => f.t === "write-ack" && f.requestId === "p2");
