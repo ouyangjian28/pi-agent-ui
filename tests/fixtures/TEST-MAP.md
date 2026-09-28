@@ -1117,4 +1117,4 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 
 **E2E 排障两教训**：①provider 首捕需 trustFirstCapture（B12-1 冷启动权威门：未登记 file 默认 no-evidence-snapshot）→E2E boot 加 trustFirstRecoveryCapture:true（composition config 字段同名；生产=宿主显式声明）。②IntentMatchKey.attachmentIdentity 是 **string**（identity.ts:56，空附件=""，=排序 join(",")）非数组——手造 journal 用 [] 会 schema 拒（嵌套非法 matchKey.attachmentIdentity.attachmentIdentity）致 resumeBlocked。
 
-**变异**：待补（基线提交后五步单链）。
+**变异五杀**（基线 8bfc633；五步单链=注入→git diff 验非空→定向红点名→checkout 还原→复绿；日志 /tmp/mu-r3b-{1..5}.log）：Mu-r3b-1 复核门 resumeBlocked 恒跳→W-res-13；Mu-r3b-2 payload null 门跳→W-res-14；Mu-r3b-3 执行点代次复核跳→W-res-16；Mu-r3b-4 send("") 透传破坏→W-res-8（payload 断言挂）；Mu-r3b-5 in-flight 合并破坏（hit=null）→W-ra-8。全部还原复绿（W-res+W-ra 26/26）。
