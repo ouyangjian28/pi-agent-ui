@@ -183,7 +183,7 @@ describe("守卫壳杂项（bad-tail 面+同实例幂等）", () => {
 
 describe("r2 根修：生命周期队列（GPT r1 审 R1/R2/R3 杀点）", () => {
   it("R1-交错1 boot 在途 dispose：检查点中止零宣誓+锁当场释放+后继工厂可写", async () => {
-    // 放大窗口：readJournal 暂停（acquire 已完成、oath 未跑——检查点②拦截位）
+    // 放大窗口：boot 在途（acquire/读面任一阶段；立即 dispose 置位早于 oath——实际命中检查点①after-lock，GPT L4 勘正）
     let resumeRead: (() => void) | null = null;
     const gate = new Promise<void>((res) => { resumeRead = res; });
     const f = createGuardedJournalWriterFactory({
@@ -194,7 +194,7 @@ describe("r2 根修：生命周期队列（GPT r1 审 R1/R2/R3 杀点）", () =>
     const bootP = (w as unknown as { writerBooted: Promise<unknown> }).writerBooted; // 观察在途
     const disposing = f.dispose(); // boot 在途时关停（不 await——观察交错）
     await new Promise((r) => setTimeout(r, 20)); // dispose 置位+drainAndClose 入队等待
-    resumeRead!(); // 放行 boot：恢复后见 disposed → 检查点② 中止
+    resumeRead!(); // 放行 boot（若尚未进 read 则 gate 已 resolve 无害）：恢复后见 disposed → 检查点① 中止（after-lock 当场 release）
     await Promise.all([bootP, disposing]);
     // 断言：零宣誓（journal 不存在或空）+锁已清
     await expect(readFile(journal, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
@@ -237,8 +237,9 @@ describe("r2 根修：生命周期队列（GPT r1 审 R1/R2/R3 杀点）", () =>
     await fB.dispose();
   });
 
-  it("R2 同写者并发 append 不自冻：A 在 datasync 窗口 B 紧随——两行都成+无 foreign 冻结", async () => {
-    // 真底座包延迟层放大窗口：首 append 落盘慢返（替身不写盘会致记账/盘面脱节——真 fdatasync 语义）
+  it("R2 同写者并发 append 不自冻：A 在 datasync 窗口 B 紧随——两行都成+无 foreign 冻结（杀点=写入顺序断言非自冻；GPT L2 勘称）", async () => {
+    // 真底座包延迟层放大窗口：首 append 落盘慢返（替身不写盘会致记账/盘面脱节——真 fdatasync 语义）。
+    // Mu-b2 队列拆除时的实际失败=顺序断言 [i-2,i-1]；自冻窗口（已落盘未记账）由 R2b 受控暂停例覆盖。
     let firstInFlight: (() => void) | null = null;
     const release = new Promise<void>((res) => { firstInFlight = res; });
     const real = new FileDurability(journal);
@@ -262,6 +263,46 @@ describe("r2 根修：生命周期队列（GPT r1 审 R1/R2/R3 杀点）", () =>
     await Promise.all([p1, p2]);
     expect(appended.map((l) => (l as { intentId?: string }).intentId)).toEqual(["i-1", "i-2"]);
     await w.append({ t: "settled", intentId: "i-3" }); // 无粘性冻结：第三行仍可写
+    expect(appended).toHaveLength(3);
+    await f.dispose();
+  });
+
+  it("R2b 落盘后未记账窗口不自冻（GPT r2 审 P3 探针转正）：已写字节、note 未更新——第二 append 仍被串行排队", async () => {
+    // 受控暂停=真实底座 origAppend 已返回（字节已 fdatasync 落盘）但包装层尚未返回给 note 的窗口。
+    // 用 entered/resume 信号而非固定延迟（GPT L2 建议）；r1 版在此窗口第二个 check 会 foreign 自冻。
+    let firstLanded: (() => void) | null = null;
+    let resumeFirst: (() => void) | null = null;
+    const landed = new Promise<void>((res) => { firstLanded = res; });
+    const resume = new Promise<void>((res) => { resumeFirst = res; });
+    const real = new FileDurability(journal);
+    const origAppend = real.append.bind(real);
+    let appendCount = 0;
+    const appended: JournalLine[] = [];
+    real.append = async (l: JournalLine): Promise<void> => {
+      appendCount += 1;
+      if (appendCount === 1) {
+        await origAppend(l); // 首行已真实落盘
+        appended.push(l);
+        firstLanded!();
+        await resume; // ……但尚未返回给 note（记账未更新窗口）
+        return;
+      }
+      await origAppend(l);
+      appended.push(l);
+    };
+    const f = createGuardedJournalWriterFactory({
+      bootId: "boot-a", now: () => "2026-10-09T00:00:00.000Z",
+      durabilityFor: () => real,
+    });
+    const w = f.writerFor(journal);
+    const p1 = w.append({ t: "settled", intentId: "i-1" });
+    await landed; // 首行字节已在盘上、记账窗口打开
+    const p2 = w.append({ t: "settled", intentId: "i-2" }); // 第二 check 若在 note 前飞=盘面比记账多 1 行→r1 版 foreign 自冻
+    await new Promise<void>((r) => setTimeout(r, 20)); // 给潜在乱序窗口留机会（若有早退 bug 则已入队底座）
+    resumeFirst!();
+    await Promise.all([p1, p2]);
+    expect(appended.map((l) => (l as { intentId?: string }).intentId)).toEqual(["i-1", "i-2"]);
+    await w.append({ t: "settled", intentId: "i-3" }); // 无粘性冻结
     expect(appended).toHaveLength(3);
     await f.dispose();
   });

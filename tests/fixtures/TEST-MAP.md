@@ -1069,9 +1069,16 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 
 **三 P1 修复**（报告 worktrees/gpt-p02-r1-review/p02-r1-review.md；探针 /tmp/gpt-p02-r1-probe/）：
 - R1 dispose 汇合在途 boot：每 writer 生命周期队列（boot/append/close 全串行临界区）；dispose=同步置位→drainAndClose 汇合全部队列→释放锁；boot 检查点①(after-lock 当场 release 零泄漏)/②(pre-oath 归口 dispose 释放零宣誓)。交错杀点=交错1（走①：零宣誓+锁清+后继可写）/交错2（走②：旧 boot 不污染新持有者 B——恰一代 writer+B 续写不冻结）。
-- R2 check→append→note 整体临界区：同写者并发 append 不自冻（datasync 窗口无第二个 check 在飞；杀点=真 FileDurability 包延迟层首行慢返，B 紧随两行都成+第三行仍可写——替身不写盘会致记账/盘面脱节，接缝须真底座语义）。
+- R2 check→append→note 整体临界区：同写者并发 append 不自冻（datasync 窗口无第二个 check 在飞；杀点=真 FileDurability 包延迟层首行慢返，B 紧随两行都成+第三行仍可写——替身不写盘会致记账/盘面脱节，接缝须真底座语义。**GPT L2 勘称：Mu-b2 实际失败=写入顺序断言 [i-2,i-1]，非 foreign 自冻**；落盘后未记账窗口由 R2b 受控暂停例（GPT P3 探针转正：entered/resume 信号）覆盖）。
 - R3 bootP 构造即归一化（异常→failed 恒拒，永不成 unhandled rejection）+取锁 I/O 归一 lock-io-failed+mkdir 父目录（对齐 FileDurability 递归建目录——锁先跑目录未建=ENOENT 杀装配）。杀点=子进程 EACCES 探针 exit=0 SURVIVED+append 恒拒（r1 版对照 exit=1 实锤）。
 - R4 测试/文档收窄：E2E epoch1 toBe(1)（includes 可被 epoch=10 误匹配）+A-1 勘称「实例重建非 OS 进程 SIGKILL」+try/finally 收尾；设计稿 §3「同步拒」过称改「await boot 结果 reject」/§5 释放序勘误（实际=registry→guardedWriters→tokens）/§6 崩溃链边界收窄（stale 锁/清锁链=E2E 未验证，单元 W-asm-2 覆盖）。
 - r2 面诚实标注：4402/not-ready.cause/writerState 呈现=r2 帧身份批交付，r1 gate-failed 不冒称 4409。
 
 **变异四点全杀**（基线 52bba50；五步单链）：Mu-b1 dispose 不汇合队列（直接释放）→交错1+2 红；Mu-b2 append 不进队列→R2 自冻红；Mu-b3 bootP 无归一化→vitest 进程崩溃 no tests（进程级证据：rejection 逃逸杀进程=r1 R3 缺陷复活）；Mu-b4 检查点② if(false&&)→交错2 红（**首跑未杀**——测试时序不可达检查点②，修=enteredRead Promise 信号锚定 readJournal 已进；教训：变异杀点必须点验路径真经过被改行，测试接缝的 gate 放行不得依赖 dispose 完成（dispose 汇合队列等 boot=互等死锁反模式））。全部还原复绿。
+
+### P0-2 r2 尾债批（GPT r2 审 88 GO 之 L1-L4；2026-10-09）
+
+- **L1（P2）**：p02-assembly-e2e.test.ts A-2 内层 `const l4` 遮蔽外层 `let` → 改赋值 `l4 = await boot()`（断言失败路径 finally 也能清第二 server）。
+- **L2（P3）**：R2 用例标题/注释勘称「杀点=写入顺序断言非自冻」；新增 **R2b 落盘后未记账窗口**（GPT r2 审 P3 探针转正：origAppend 已返回、note 未更新——entered/resume 受控信号非固定延迟；r1 版此窗口第二 check 会 foreign 自冻）。单元 16→17 例。
+- **L3（P3）**：设计稿五处——服务表改「当前表现/r3 预留」两栏制（4402/not-ready.cause/writerState 不再冒称已交付）/FF-P02-3 证据层级勘正（受控交错=单元+审读探针，E2E 无 dispose 期并发注入）/W-asm-2 去「sessionFor 抛」矛盾句/§6 迭代史章节引用漂移勘正（§1.4/§4/§5）。
+- **L4（P3）**：交错1 注释「检查点②」→①（after-lock——立即 dispose 置位早于 acquire 完成）；§1.4 与守卫壳源码注释统一「可观察 release rejection 记 audit；底层吞掉的 unlink 错误可能仅留残锁」。

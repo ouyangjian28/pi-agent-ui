@@ -134,7 +134,7 @@ const d = describe.skipIf(!RUN)("P0-2 r1 W-asm-6 装配面 E2E（真服务重启
     try {
     await promptRound(l3, f2, "a2-r1", "只回复两个字：在的"); // server3 装配持锁+一轮业务
     const before = (await readJournal(f2)).length;
-    const l4 = await boot(); // 第二实例（同 dir 同 roots）
+    l4 = await boot(); // 第二实例（同 dir 同 roots）——赋值外层 let：断言失败路径 finally 也能清（GPT L1）
     const audits4Start = audits.length;
     l4.ws.send(JSON.stringify({ t: "prompt", requestId: "a2-r2", file: f2, text: "只回复两个字：不行" }));
     await until(() => l4.frames.some((f) => f.t === "write-ack" && f.requestId === "a2-r2"), "write-ack a2-r2", 60_000);

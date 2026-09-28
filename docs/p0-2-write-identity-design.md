@@ -42,19 +42,19 @@ ws-gateway 写分支 → rpc-write-host → session-registry.sessionFor(file) �
 
 ### 1.3 装配失败面（fail-closed 语义）
 
-| 失败 | 行为 | 服务呈现 |
-|---|---|---|
-| 锁 EEXIST（活/死同拒；stale=诊断） | 该 file 写面不开 | 该会话写请求→4402（not-ready.cause=writer-lock-held）；读面正常 |
-| 盘面 bad-tail（撕裂尾/坏行在场——oath 门拒；修复/裁决=1a/1b 既有面，不入装配链 ADR-P02-D4） | 写面不开 | cause=writer-bad-tail |
-| 宣誓写失败（fsync 失败等） | 写面不开 | cause=writer-oath-failed |
-| 运行中冻结（superseded/foreign-write） | 后续 append 全拒 | audit+statusFor 呈现 writerState（冻结原因+对方 epoch/bootId） |
+| 失败 | 行为 | 当前服务呈现（r1/r2 已交付） | 帧身份批（r3）预留 |
+|---|---|---|---|
+| 锁 EEXIST（活/死同拒；stale=诊断） | 该 file 写面不开 | write-ack gate-failed{stage:enqueue,cause:writer-lock-held}（audit 同步留痕） | 4402（not-ready.cause=writer-lock-held）；读面正常 |
+| 盘面 bad-tail（撕裂尾/坏行在场——oath 门拒；修复/裁决=1a/1b 既有面，不入装配链 ADR-P02-D4） | 写面不开 | 同上 gate-failed 面（cause=writer-bad-tail 入 audit） | cause=writer-bad-tail 结构化呈现 |
+| 宣誓写失败（fsync 失败等） | 写面不开 | 同上 gate-failed 面（audit writer-oath-failed） | cause=writer-oath-failed 结构化呈现 |
+| 运行中冻结（superseded/foreign-write） | 后续 append 全拒 | audit 留痕（guarded-writer 前缀） | statusFor 呈现 writerState（冻结原因+对方 epoch/bootId） |
 
 运维清锁前提（P0-3 设计稿 §3 已冻结）：停服务（含旧/暂停写者）+禁并发拉起+同命名空间+其他清锁者串行化。**stale 锁不自动清**——SIGKILL 后自动重启（systemd）会拒绝开写面直至运维清锁；这是 P0-3 r2 已审定的 fail-closed 语义，本批不改。
 
 ### 1.4 关停序（composition dispose 插位）
 
 现有冻结序：摘 onConnection → 停轮询/SIGHUP → gateway.dispose（1000 告别+观察器解绑）→ adapter.dispose → tokens.dispose。
-本批插入：composition.dispose 实际序=registry.dispose（排空会话）→ **guardedWriters.dispose（汇合每 writer 生命周期队列含在途 boot/append+关底座+逐文件 `releaseLock()`）** → tokens.dispose——释放前写面静止由队列汇合保证（r2 根修：不再依赖调用方序）。释放失败=audit（锁残留=下次启动 EEXIST 拒，可接受；r1 勘误：unlink 细节通常不可见=「部分失败可能静默残锁」，继承 P0-3 组件行为）。
+本批插入：composition.dispose 实际序=registry.dispose（排空会话）→ **guardedWriters.dispose（汇合每 writer 生命周期队列含在途 boot/append+关底座+逐文件 `releaseLock()`）** → tokens.dispose——释放前写面静止由队列汇合保证（r2 根修：不再依赖调用方序）。可观察到的 release rejection 记 audit；底层吞掉的 unlink 错误可能仅留残锁（锁残留=下次启动 EEXIST 拒，可接受；r1 勘误：unlink 细节通常不可见，继承 P0-3 组件行为——r2 审 L4 措辞统一）。
 
 ## §2 r2 帧身份（预告，r1 审定后细化）
 
@@ -66,7 +66,7 @@ ws-gateway 写分支 → rpc-write-host → session-registry.sessionFor(file) �
 
 - **FF-P02-1 装配硬序**：任一 journal 业务行写入前该文件必有 writer 宣誓行且 guard 就绪；装配失败=零业务行写入（E2E 断言盘面）。
 - **FF-P02-2 守卫全覆**：TurnGate/DispatchCoordinator 两写入口产生的全部行经守卫（测试注入探针：绕守卫直接打 FileDurability 的路径不存在——装配层唯一构造点走查+变异）。
-- **FF-P02-3 关停有序**：dispose 后无新 append 被受理；锁释放前写面已静止（E2E：dispose 期间注入并发写→全拒或已在途完成，无锁释放后写）。
+- **FF-P02-3 关停有序**：dispose 后无新 append 被受理；锁释放前写面已静止（证据层级=单元受控交错（R1-交错1/2+GPT r2 审探针 P4：guard-check 挂起时 dispose→在途先完成再释放，late 行拒）——组合根 E2E 无 dispose 期并发写注入，不冒称）。
 - **FF-P02-4 重启身份**：同 bootId 不重复宣誓同文件；重启（新 bootId）→新 epoch 严格递增；旧进程存活→新进程锁拒。
 - **FF-P02-5（r2）帧身份拒旧**：旧 generation/intentId 冒充→4409，零盘面写入。
 
@@ -82,7 +82,7 @@ ws-gateway 写分支 → rpc-write-host → session-registry.sessionFor(file) �
 | # | 断言 | 杀点 |
 |---|---|---|
 | W-asm-1 | 装配硬序：首 append 前 writer 行已在盘（读盘断言）；装配失败 append→reject 恒拒（fail-closed） | 去装配 await→挂 |
-| W-asm-2 | 锁失败零写：EEXIST（活/死同拒）→sessionFor 抛/写全拒+零业务行 | 去锁检查→挂 |
+| W-asm-2 | 锁失败零写：EEXIST（活/死同拒）→写全拒（sessionFor 同步契约不变，见 §4 P02-D3）+零业务行 | 去锁检查→挂 |
 | W-asm-3 | 守卫接线：check 冻结后 append 拒（superseded 注入异已宣誓行）| 壳绕过（直接 inner.append）→挂 |
 | W-asm-4 | 字节记账：noteAppended=序列化实长（serializeJournalLine 共用断言） | 计数偏移→后续 check 误冻/误放→挂 |
 | W-asm-5 | 关停序：dispose 后 append 拒+锁已释放（文件不存在）；释放前写面静止 | 释放提前→挂 |
@@ -92,4 +92,4 @@ ws-gateway 写分支 → rpc-write-host → session-registry.sessionFor(file) �
 ## §6 迭代史
 
 - r1：装配面（GPT 审 58 NO-GO：R1 dispose 不汇合在途 boot→锁泄漏/释放后旧宣誓污染后继；R2 check→append→note 未整体串行→同写者自冻粘性；R3 bootP 无 rejection 归一化→取锁 I/O 异常 unhandled rejection 杀进程——三探针实锤 /tmp/gpt-p02-r1-probe/）。
-- r2（本批）：根修=每 writer 生命周期队列（boot/append/close 全串行临界区）+dispose 汇合队列（含在途 boot）+boot 检查点①②（装配中 dispose→零宣誓零泄漏中止）+bootP 构造即归一化（异常→failed 恒拒，永不成 unhandled）+mkdir 父目录（对齐 FileDurability）。杀点：R1-交错1/交错2、R2 并发自写、R3 子进程 EACCES exit=0。文档同步收窄（§5 释放序/§3 同步拒称/§6 崩溃链边界）。
+- r2（本批）：根修=每 writer 生命周期队列（boot/append/close 全串行临界区）+dispose 汇合队列（含在途 boot）+boot 检查点①②（装配中 dispose→零宣誓零泄漏中止）+bootP 构造即归一化（异常→failed 恒拒，永不成 unhandled）+mkdir 父目录（对齐 FileDurability）。杀点：R1-交错1/交错2、R2 并发自写、R3 子进程 EACCES exit=0。文档同步收窄（§1.4 释放序/§4 P02-D3 同步拒称/§5 W-asm-6 崩溃链边界；r2 审 L3 勘正原引用漂移）。

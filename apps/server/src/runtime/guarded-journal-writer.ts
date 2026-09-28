@@ -211,7 +211,7 @@ export function createGuardedJournalWriterFactory(opts: GuardedWriterFactoryOpts
         audit(`guarded-writer drain-error file=${w.journalPath} detail=${String(e)}`);
       })));
       writers.clear();
-      // 写面静止后释放全部锁（按文件归口；释放失败不吞清理——audit 留痕，锁自然残留下次 fail-closed）
+      // 写面静止后释放全部锁（按文件归口；可观察的 release rejection 记 audit——底层吞掉的 unlink 错误可能仅留残锁，下次启动 EEXIST fail-closed）
       for (const [file, release] of releases) {
         try { await release(); } catch (e) { audit(`guarded-writer release-error file=${file} detail=${String(e)}`); }
       }
