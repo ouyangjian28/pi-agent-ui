@@ -106,7 +106,6 @@ export function assembleEntryFrame(input: AssembleInput): AssembleEntryResult {
   // 段1：粗估快筛（按块序；先到先装；放不下→安全预截至剩余量；其后块全部省略）。
   const state: SliceableState[] = [];
   let used = 0;
-  let firstOmitted = n; // 其后块全省略
   for (let i = 0; i < n; i++) {
     const b = input.blocks[i] as EntryBlock;
     const need = blockBytes(b);
@@ -118,11 +117,12 @@ export function assembleEntryFrame(input: AssembleInput): AssembleEntryResult {
     if (b.kind === "text" || b.kind === "thinking") {
       const { text } = sliceUtf8Safe(b.text, budget - used);
       state.push({ kept: text.length });
-    } else {
-      firstOmitted = i; // 不可预截（attachment 无变量内容/toolCall 已限 512）——本块起省略
-    }
+    } // 不可预截（attachment 无变量内容/toolCall 已限 512）——本块起省略
     break;
   }
+
+  // 可见块口径（不含 thinking）——与扫描面 marks blockCount 同源同值（v5.1 §4.5a；门开时两同名字段不分叉）。
+  const visibleCount = input.blocks.filter((b) => b.kind !== "thinking").length;
 
   // 段2：终判整帧实测+末块再切片（每轮保留代码单元严格递减→必终止；下界=空串）。
   for (;;) {
@@ -143,7 +143,7 @@ export function assembleEntryFrame(input: AssembleInput): AssembleEntryResult {
       blocks,
       ...(input.stopReason !== undefined ? { stopReason: input.stopReason } : {}),
       ...(truncated ? {} : { rawBytes: input.rawBytes }),
-      ...(n > 0 ? { totalBlockCount: n } : {}),
+      ...(visibleCount > 0 ? { totalBlockCount: visibleCount } : {}),
     };
     if (estimateFrameBytes(frame) <= LIMITS.singleEventBytes) return { frame };
 

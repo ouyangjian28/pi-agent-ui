@@ -3,7 +3,8 @@
 // （后续写入补全后经重扫 diff 自然编入）；完整但不可解析的行→journal-corrupt 占位（不丢不静默）。
 // 坐标纪律（read-index B02）：locator=journal 行号（1 基字符串）；digest 由 scanDigest 对 raw 原文计算
 // （宿主不得用投影后事件算摘要——投影会抹平改写差异）。
-// 时间面（v1 披露）：ts=null（journal 行无统一时间戳；enqueue.payload.sentAt 的展示级映射留后续）；
+// 时间面（v1 披露，D4 §4.1c 不对称契约保留）：ts=null（journal 行无统一时间戳；enqueue.payload.sentAt 的展示级映射留后续）；
+// session 源已另立 ts=行级 ISO→epoch ms（见 session-projection.ts 头部声明）——两侧不对称是写入契约非遗漏。
 // seq=0 占位——ReadIndex.append 以分配值覆盖（坐标系归索引，宿主序号不进入）。
 import { sanitizeText } from "./sanitizer.ts";
 import { journalLineSchemaError, type UnknownRecord } from "./journal-schema.ts";

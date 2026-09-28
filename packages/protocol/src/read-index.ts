@@ -56,7 +56,7 @@ export class ReadIndex {
   /** D4 §4.2 全文读面索引：entryId→首个 message 事件（source:entryId 键，首见为准——与归因面
    *  同纪律；corrupt 占位/unknown-line 不在 events 里以 message 形态出现，天然不登；system 不登
    *  （姿态继承：请求已登记 system entryId=4414 unknown-entry）。值为 append 时点快照
-   *  {source, locator, digest, event}——locator 侚 readLineAt 定点读。 */
+   *  {source, locator, digest, event}——locator 供 readLineAt 定点读。 */
   private readonly entryIndex = new Map<string, IndexedEvent>();
   /** 源文件指纹（整文件 SHA-256；空=未记录）。语义（Y-04 钉死）：值=最后事件编入/装载时点摘要，
    * 非实时版本（撕裂尾不推进）；信息性+变更检测触发器，恢复面禁用。 */

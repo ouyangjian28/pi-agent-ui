@@ -185,6 +185,20 @@ describe("D4 §4.1b assembleEntryFrame 两段式预算", () => {
     expect(b0 && b0.kind === "text" && b0.truncatedAt !== undefined && b0.truncatedAt > 0).toBe(true);
     expect(estimateFrameBytes(r.frame) <= LIMITS.singleEventBytes).toBe(true); // 终判实测
   });
+  it("P2-1 回归：门开含 thinking 时 totalBlockCount=可见口径（与事件 blockCount 同源不分叉）", () => {
+    const blocks: EntryBlock[] = [
+      { kind: "thinking", text: "独白".repeat(50) },
+      text(40_000), // 触发截断（其后块省略）
+      text(100),
+    ];
+    const r = assembleEntryFrame({ ...base, blocks, rawBytes: 40_310 });
+    if (!r.frame) throw new Error("expect frame");
+    expect(r.frame.state).toBe("truncated");
+    expect(r.frame.totalBlockCount).toBe(2); // 非输入块数 3——thinking 不计（省略的 text(100) 仍计）
+    // 门关/无 thinking：现状等价（=n）
+    const r2 = assembleEntryFrame({ ...base, blocks: [text(40_000), text(100)], rawBytes: 40_100 });
+    expect(r2.frame?.totalBlockCount).toBe(2);
+  });
   it("中文多块有内容：截断不切到空", () => {
     const blocks = [text(5, "字"), text(20_000, "字"), text(50, "字")];
     const r = assembleEntryFrame({ ...base, blocks, rawBytes: 60_120 });

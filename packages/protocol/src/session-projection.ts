@@ -20,7 +20,8 @@
 // 解析失败回退 null 不抛；journal 源 ts=null 保持（不对称写入契约——两投影文件头部声明同步）。
 // seq=0 占位——ReadIndex.append 以分配值覆盖。lengthHash 派生=fnv1a64Hex(raw 行)
 // （写侧 journal consumed intervalEnd 须同构——跨侧派生冻结点，待 GPT 确认）。
-import { fnv1a64Hex, sanitizeText } from "./sanitizer.ts";import { attributeSessionEntries, type ConsumedInterval } from "./session-attribution.ts";
+import { fnv1a64Hex, sanitizeText } from "./sanitizer.ts";
+import { attributeSessionEntries, type ConsumedInterval } from "./session-attribution.ts";
 import type { ScanRow } from "./read-index.ts";
 import type { EntryBlock, HistoryEvent, SanitizedText } from "./contracts.ts";
 import { capEncodedBytes, ENTRY_ARGS_PREVIEW_MAX_BYTES } from "./entry-frame.ts";
