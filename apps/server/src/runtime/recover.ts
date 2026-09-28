@@ -460,7 +460,9 @@ export function buildRecoverReport(lines: readonly JournalLine[], sessionId: Ses
     unknownShas.set(id, set);
   }
   // r3（GPT r2 B1）：覆盖判定——授权裁决（resend/abandon）携带来源事务四元组；intentId 的每一条
-  // 来源残片，其内容可能归属的全部事务（同 sha 事务集）都须有该 intentId 的同向裁决才生效。
+  // 来源残片，其内容可能归属的全部事务（同 sha 事务集）都须有该 intentId 的同向裁决才生效
+  // （resend 面；abandon 面自 r6 起分向=任一在场即排除，见函数首行注释——放弃是终局负向证据，
+  // 与正向授权的「无法证明即拒」方向相反）。
   // r5（GPT r4 P1-r4-1）：无残片源（热路径修复后残片已移除/冷捕获丢 fragments/G2 消耗）不再自证放行——
   // 无法证明来源集时，只有「全部修复事务均有本意图同向 fragment 裁决」（最强可证覆盖）才成立；
   // 否则保守拒绝（旧形：任意归因在场即覆盖→双事务各归因一 id 时冷捕获反而放行，冷热不一致）。

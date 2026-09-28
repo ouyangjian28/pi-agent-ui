@@ -1009,3 +1009,15 @@
 - **测试**（adjudicate.test.ts 29 例+repair-tail.test.ts 38 例；全仓 1402 绿）：**R27** 写面一致门四形（不一致拒+盘面逐字节不变/一致落行/null 放行/存量放行）；**R28** 读面并入三态（S5 冷态 i1 排除+i2 授权重发合法+i3 无关正对照/热态对照/一致归因补正=resendAuthorized+resumable 双含 i1——缝的修复=证据完备而非阻断重发）；**RT-r7-1/2/3** 生成面（可归因=i1/不可归因=conflict 显式 null/存量无字段 schema 照认+类型 42 拒）。教训：可归因撕裂尾须完整闭合值（`"x":"y"` 形）——未闭合键被判 conflict（RT-r7-1 首版串 `"x"` 未闭合红）。
 - **变异三连全杀**（基线 7f39170 附近提交后注入；五步单链）：Mu-r7-1 一致门 `if (false)`→R27 杀；Mu-r7-2 txImpacted 并入项删→R28 杀（冷态 i1 失忆复活=S5 缺陷形）；Mu-r7-3 structuralIntentId 恒 null→RT-r7-1 杀（unique 面；RT-r7-2 本断 null 故不杀，杀点单一预期）。三连 checkout 还原后定向复绿+全仓复绿。
 - **注释债**（P2-r6-1）：测试头注 R1-R10→R1-R28 全谱、describe 标题对齐、设计稿 §11 第 1 条边界勘误+§12 新节。
+
+## P0-1b r8 崩溃窗结构身份持久化批（GPT r7 审 82 NO-GO 修复；报告=audits/gpt-p01b-r7-review-2026-10-08.md；2026-10-08）
+
+**范围**：P1-r7-1（marker 不含结构身份→截断后写行前崩溃补完行无条件 null→i2 归因落盘后 i1 越权重启）+P2-r7-1（文档闭合过称三处勘误+N-abandon-official 转正）。权威语义=设计稿 §13。
+
+- **marker 携带身份**（repair-tail.ts）：RepairMarker 加 `fragIntentId?: string | null` 三态（缺省=旧版/null=扫描即不可归因/string=留痕）；fresh 写 marker 与 bounds/哈希同批持久化（破坏前取证，与 fresh 行同源扫描值 sid）。
+- **补完行恢复身份**：completeMarkerResidue builtRow `fragIntentId: marker.fragIntentId ?? null`——尾段物理消失但身份随 marker 存活。
+- **旧版 marker 保守拒（双层门）**：主函数入口门（有尾+旧 marker+非吻合形）+补全面顶部门（防御深度）——一律 repair-marker-conflict/detail=legacy-marker-no-structural-evidence，盘面零动零截回；开发期无存量，宿主清 marker 后 fresh 重做取证。
+- **部分行判据放宽**：isPartialRow 从逐字节前缀比对改为「起点吻合+尾长<构造行全长」——值写入中形（行尾字段值写一半，非行前缀）与旧行 `}` 无换形合法收敛；信任域=marker 信封+pendingRepair 挡 journal 写者。
+- **测试**（adjudicate 30+repair-tail 42；全仓 1407 绿）：**RT-r8-1** marker 携身份两形（可归因 i1/不可归因 null）；**RT-r8-2** resend 真窗全链（崩溃→重试行带 id→i2 归因被一致门零落盘拦→一致归因 i1 授权=resendAuthorized+resumable 双含）；**RT-r8-3** abandon 真窗（i1 永不可重发）；**RT-r8-4** 旧 marker 双形保守拒（无尾走顶部门/有尾走入口门）；**R31** abandon verdict 一致门负例（N-abandon-official 转正：不一致 abandon 同拒+一致放行）；**RT37** 更新双形（界内任意尾收敛重写+超界长尾仍拒）。
+- **变异五点全杀**（基线 6eb761f/后补杀点提交后注入；五步单链）：Mu-r8-1 顶部门删→RT-r8-4 无尾形杀；Mu-r8-1b 入口门删→RT-r8-4 有尾形杀；Mu-r8-2 fresh marker 去字段→RT-r8-1/2/3 杀；Mu-r8-3 补完恒 null→RT-r8-2 杀；Mu-r8-4 上界删→RT37 超界形杀。全部 checkout 还原复绿。
+- **文档勘误**（P2-r7-1）：§12 三处（严格前缀说法→部分行限定；「矛盾裁决自此不可持久化」→加 r7 崩溃窗例外；未归因门兜底→收窄为「事务至少被看过」不保证归因正确）；scopeCovers 头注分向澄清（resend 全覆盖/abandon 任一在场即排除）；§13 新节。

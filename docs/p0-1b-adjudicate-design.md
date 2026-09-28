@@ -123,9 +123,20 @@ r5 被审出两 P1。核心是**安全方向的显式分离**与**执行面影�
 
 r6 被审出 P1-r6-1：**热态结构归因到持久裁决目标集之外的意图，冷捕获后绕过覆盖判定**。受信宿主提交与残片顶层身份不一致的归因（结构 i1/裁决 i2）时，冷态丢 raw→i1 不在 unknown/txImpacted/abandonKeys 任何集→enqueue-only 放行=冷比热宽。§11 第 1 条「事务无关的 enqueue（无任何归因）不受影响」的边界勘误：**「无持久归因」不等于「事务无关」**——结构归因证据（残片顶层身份）在冷态失忆后，持久面必须有等价信息，否则影响域不完备。本节为权威补丁：
 
-1. **结构归因留痕（生成面）**：repair 行新增可选字段 `fragIntentId`（字段序最尾——旧形态行=新形态行的严格前缀，崩溃部分行残局的前缀判定跨版本兼容）。repair-tail 修复时对移除尾段做受限结构扫描（scanTopLevelIntentId）：顶层唯一身份可证→记该 id；none/conflict→显式 null；marker 补完路径（尾段已物理消失）诚实 null。schema：缺省（存量行）/null/非空 string 合法，其余拒。
-2. **写面结构一致门（P1-r6-1 主闭合）**：fragment 裁决请求的归因目标与 repair 行 fragIntentId 强一致——不一致→`inconsistent-attribution` 拒落盘（零追加）。矛盾裁决（结构 i1/归因 i2）自 r7 起不可能持久化。fragIntentId 缺省（存量）/null（不可归因/补完）无结构证据→不强一致，人工归因自由（读面未归因事务阻断门兜底：事务无任何 fragment 裁决→repairShadow 阻断，§9 双证语义）。
+1. **结构归因留痕（生成面）**：repair 行新增可选字段 `fragIntentId`（字段序最尾；**r8 勘误**：旧形态行≠新形态行的严格前缀——旧行以 `}` 闭合，同 bounds 下仅旧**部分行**（未写到 `}`）是新行前缀；r8 起部分行判定不再依赖前缀比对=起点吻合+长度界，见 §13）。repair-tail 修复时对移除尾段做受限结构扫描（scanTopLevelIntentId）：顶层唯一身份可证→记该 id；none/conflict→显式 null；marker 补完路径的结构身份 r8 起随 marker 持久化恢复（§13；r7 形「诚实 null」仅存于旧版 marker 残局=一律保守拒）。schema：缺省（存量行）/null/非空 string 合法，其余拒。
+2. **写面结构一致门（P1-r6-1 主闭合）**：fragment 裁决请求的归因目标与 repair 行 fragIntentId 强一致——不一致→`inconsistent-attribution` 拒落盘（零追加）。矛盾裁决（结构 i1/归因 i2）自 r7 起不可能持久化（**r8 勘误**：r7 例外=崩溃窗补完行无条件 null——截断后写行前崩溃丢结构证据，i2 归因可落盘；r8 marker 携带身份后窗闭合，见 §13）。fragIntentId 缺省（存量）/null（不可归因/补完）无结构证据→不强一致，人工归因自由（读面未归因事务阻断门兜底：事务无任何 fragment 裁决→repairShadow 阻断，§9 双证语义；**r8 收窄**：同事务其他事务身份的 fragment 裁决（i2）在场即解除阻断——兜底只保证「事务至少被某归因看过」，不保证归因正确；这正是 r8 必须让补完行带结构身份的原因）。
 3. **读面影响域并入（存量防御）**：txImpacted 并入 repair 行 fragIntentId（有效值）——一致门生效前已落库的 S5 形（结构留痕 i1+裁决目标 i2）在冷态不再失忆：i1 并入影响域→须 resendCovers→归因不含 i1→排除。存量行（无字段）不并入：其归因裁决缺失时由未归因事务阻断门兜底；归因在场时（r1-r6 全部测试形态）行为不变。
 4. **不变式保持**：无关 enqueue 正对照不受影响（R28 的 i3）——影响域并入不是无差别封禁；热态行为零变化（残片在场时结构归因经 unknown 已入覆盖判定）；一致归因+全覆盖→授权成立且可重发（缝的修复=让覆盖判定拿到全部证据，不是阻断重发）。
 
 崩溃矩阵扩为 R1a/R1b/R2-R28+RT-r7-1/2/3（TEST-MAP r7 节权威）。注释债清理：测试头注 R1-R10→R1-R28 全谱、describe 标题、R20/R12 杀点注释与现行断言对齐（P2-r6-1）。
+
+## 13. r8 崩溃窗结构身份持久化（GPT r7 审 82 NO-GO 修复批；2026-10-08）
+
+P1-r7-1：r7 的 marker 不含结构身份——「截断后写行前崩溃」残局补完时无条件 `fragIntentId: null`，i2 归因落盘后 i1 越权重启资格（未归因门因 i2 裁决在场而失效，事务效果撕裂）。修复四件：
+
+1. **marker 携带身份（生成面）**：fresh 写 marker 时 `fragIntentId` 与 bounds/哈希同批持久化（破坏前取证，与 fresh 行同源扫描值）；三态=string（可归因）/null（扫描即不可归因，真实无身份）/缺省（旧版）。
+2. **补完行恢复身份（补全面）**：`buildRepairRow(… fragIntentId: marker.fragIntentId ?? null)`——尾段已物理消失但身份随 marker 存活；null 仅当截断前扫描即不可归因。
+3. **旧版 marker 保守拒（防御面）**：无 `fragIntentId` 的 marker 残局（尾缺失形）一律 `repair-marker-conflict` 拒（detail=legacy-marker-no-structural-evidence，主函数入口门+补全面顶部门双层，盘面零动）。开发期无存量；宿主清 marker 后 fresh 重做即重新取证（尾在=证据在）。
+4. **部分行判据放宽（收敛面）**：`isPartialRow` 从逐字节前缀比对放宽为「起点吻合+尾长<构造行全长」——r7 留痕 fragIntentId 后「值写入中」形（行尾字段值写一半，非行前缀）与旧行 `}` 无换形均合法收敛；信任域=marker 信封（evidenceDir 越权等同可改锚）+pendingRepair 挡 journal 写者在事务期 append。
+
+不变式：无裁决时意图默认可重启（未决状态，合法）；裁决落盘须与结构留痕强一致（不一致→`inconsistent-attribution` 拒，不挑 verdict——R31 abandon 负例）。测试：RT-r8-1（marker 携身份）/RT-r8-2（resend 真窗全链：行带 id→不一致门拦 i2 归因零落盘→一致归因 i1 授权）/RT-r8-3（abandon 真窗）/RT-r8-4（旧 marker 双形保守拒）；变异 Mu-r8-1/1b/2/3/4 五点全真杀。
