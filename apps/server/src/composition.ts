@@ -21,7 +21,7 @@ import { createRecoveryEvidenceProvider, isRecoverySnapshot, type RecoveryEviden
 import { recoverFromSnapshot } from "./runtime/recover.ts";
 import { createSessionRegistry, type SessionRegistry } from "./runtime/session-registry.ts";
 import type { UiAsk, UiNoteEvent } from "./runtime/rpc-session.ts";
-import type { UiClosedReason } from "@pi-agent-ui/protocol";
+import type { ProcessHostPort, UiClosedReason } from "@pi-agent-ui/protocol";
 import { LiveAggregator, type LiveContentEvent, makeLiveOnPiEvent } from "./runtime/live-aggregator.ts";
 import { createGuardedJournalWriterFactory } from "./runtime/guarded-journal-writer.ts";
 import { randomUUID } from "node:crypto";
@@ -87,6 +87,12 @@ export interface WriteWiringOpts {
   readonly sessionFor: (file: string) => string;
   /** pi 可执行（默认 PATH 解析 "pi"）。 */
   readonly piBin?: string;
+  /** 额外 pi 参数（spawn 尾部追加，如 "-e fixture --no-extensions"；M-OPS 模型选择同面）。
+   * 不得含 --mode/--session 基底替换（基底由 RpcSession 统一铸造）。 */
+  readonly extraPiArgs?: readonly string[];
+  /** 进程宿主注入缝（D3-T1 E2E）：缺省=PiProcessHost 生产实现；受控替身仅供集成测试注入，
+   * 生产配置不得提供（与 piBin 同供=配置歧义拒启）。 */
+  readonly host?: ProcessHostPort;
   readonly responseTimeoutMs?: number;
   readonly turnTimeoutMs?: number;
   readonly readinessTimeoutMs?: number;
@@ -252,12 +258,16 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     if (typeof config.write.sessionFor !== "function") {
       throw new Error("write.sessionFor 缺失或非函数：写侧无从落地会话文件，拒绝启动");
     }
-    const host = new PiProcessHost({
+    if (config.write.host !== undefined && config.write.piBin !== undefined) {
+      throw new Error("write.host 与 write.piBin 同供：受控替身注入缝与生产二进制互斥，配置歧义拒启");
+    }
+    const host: ProcessHostPort = config.write.host ?? new PiProcessHost({
       ...(config.write.piBin !== undefined ? { piBin: config.write.piBin } : {}),
       onAudit: (l) => audit(l),
     });
     registry = createSessionRegistry({
       host,
+      ...(config.write.extraPiArgs !== undefined ? { extraPiArgs: config.write.extraPiArgs } : {}),
       sessionFor: config.write.sessionFor,
       durabilityFor: (file: string) => guardedWriters.writerFor(file), // P0-2 r1：守卫壳统一接管两写入口（FF-P02-2）
       // D1 直播面：pi 事件→per-file 聚合器→gateway.broadcastLive。gateway 晚于 registry 构造，
@@ -330,10 +340,11 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
         audit,
         resumeAuthority: makeResumeAuthority({ roots: config.roots, provider: recoveryEvidence, registry: { statusFor: (f: string) => registry!.statusFor(f) }, semaphore }),
       }),
-      // D3：答案端口适配（结构同形：UiAnswerOutcome≡UiAnswerOutcomeGateway；file 即 sessionFor 键）
+      // D3：答案端口适配（结构同形：UiAnswerOutcome≡UiAnswerOutcomeGateway）。键归一：uiPending 存逻辑名
+      // （broadcastUiRequest 归一后写入），registry 键=journal 绝对路径——resolveWithinRoots 反映射（同 statusFor 口径）。
       uiHost: {
         answer: (file: string, requestId: string, payload: { value: string } | { confirmed: boolean } | { cancelled: true }) =>
-          registry!.sessionFor(file).answerUi(requestId, payload),
+          registry!.sessionFor(resolveWithinRoots(file, config.roots) ?? file).answerUi(requestId, payload),
       },
     } : {}),
     audit,
@@ -371,20 +382,25 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
   // D1 直播面：gateway 就位后回填广播槽（此前事件=零订阅期丢弃无害；见上 onPiEvent 接线注）。
   liveSink = (file, ev) => gateway.broadcastLive(file, ev);
 
-  // D3 扩展问答：gateway 就位后回填路由槽。零订阅者→立即回 pi cancelled（不悬挂扩展；docs §4）
-  // +ui-closed(no-subscriber) 广播（无接收者=仅审计）。作废/已答直接广播（撤框幂等 by requestId）。
+  // D3 扩展问答：gateway 就位后回填路由槽。**键归一（D3-T1 E2E 实证修复）**：registry 回调携 journal
+  // 绝对路径，网关订阅键=逻辑名——sink 方向 abs→logical（logicalNameWithinRoots，广播才可达订阅者；
+  // 同族缺陷 r3a 曾在 resume 面抓过，此处同防），answer 方向在 uiHost 适配器反向映射。两方向成对，单改任一=劈裂。
+  // 零订阅者→立即回 pi cancelled（不悬挂扩展；docs §4）+ui-closed(no-subscriber) 广播（无接收者=仅审计）。
+  // 作废/已答直接广播（撤框幂等 by requestId）。
+  const uiFileForGateway = (f: string): string => logicalNameWithinRoots(f, config.roots) ?? f;
   uiSink = {
     request: (file, ask) => {
-      const n = gateway.broadcastUiRequest(file, ask);
+      const logical = uiFileForGateway(file);
+      const n = gateway.broadcastUiRequest(logical, ask);
       if (n === 0) {
         void registry!.sessionFor(file).answerUi(ask.requestId, { cancelled: true })
           .then((o) => audit(`composition ui-no-subscriber file=${file} id=${ask.requestId} outcome=${o.kind}`))
           .catch((e: unknown) => audit(`composition ui-no-subscriber-error file=${file} ${String(e instanceof Error ? e.message : e)}`));
-        gateway.broadcastUiClosed(file, ask.requestId, "no-subscriber");
+        gateway.broadcastUiClosed(logical, ask.requestId, "no-subscriber");
       }
     },
-    note: (file, note) => gateway.broadcastUiNote(file, note),
-    closed: (file, requestId, reason) => gateway.broadcastUiClosed(file, requestId, reason),
+    note: (file, note) => gateway.broadcastUiNote(uiFileForGateway(file), note),
+    closed: (file, requestId, reason) => gateway.broadcastUiClosed(uiFileForGateway(file), requestId, reason),
   };
 
   const offConn = adapter.onConnection((conn, tmeta) => {

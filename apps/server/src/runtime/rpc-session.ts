@@ -37,6 +37,9 @@ export interface RpcSessionOpts {
   readonly piArgs?: readonly string[];
   /** 持久会话文件路径（默认 piArgs 的绑定源；跨回收/重启两代 spawn 必须同一文件）。 */
   readonly sessionFile?: string;
+  /** 额外 pi 参数（尾部追加；生产面=M-OPS 模型选择/安全扩展 fixture 等 spawn 选项透传，
+   * 不得用于替换 --mode/--session 基底；受控 E2E 注入 -e/--no-extensions 亦走此面）。 */
+  readonly extraPiArgs?: readonly string[];
   /** journal 路径（意图/sending/超时记录行；append-only+逐行 fdatasync）。 */
   readonly journalPath: string;
   readonly sessionId: string;
@@ -247,7 +250,7 @@ export class RpcSession {
     if (opts.piArgs === undefined && opts.sessionFile === undefined) {
       throw new Error("RpcSession：必须显式提供 sessionFile（生产持久会话）或 piArgs（测试/临时模式）——闲置回收生命周期要求跨回收重启绑定同一会话文件");
     }
-    this.piArgs = opts.piArgs ?? ["--mode", "rpc", "--session", opts.sessionFile as string];
+    this.piArgs = [...(opts.piArgs ?? ["--mode", "rpc", "--session", opts.sessionFile as string]), ...(opts.extraPiArgs ?? [])];
     const pollMs = opts.timeoutPollMs ?? 250;
     // 切片5①：闲置回收器（双条件同满足才开始连续计时；回收=EOF 优先优雅链）
     // S5-R1：登记表包装（register/complete 同步通知活动）；宿主用 this.idleRegistry 登记后回收器自动感知

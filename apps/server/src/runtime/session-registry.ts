@@ -32,6 +32,8 @@ export interface SessionRegistryOpts {
   /** 观测面（20b B2）：pi 进程 spawn 时回调（file+handle+generation）——E2E/宿主在 spawn 时即记录
    * 句柄身份，不靠事后审计反推；纯观测不参与生命周期（RpcSessionOpts.onSpawned 同源）。 */
   readonly onSpawned?: (file: string, handle: ProcessHandle, generation: number) => void;
+  /** 额外 pi 参数（透传 RpcSessionOpts.extraPiArgs；spawn 尾部追加）。 */
+  readonly extraPiArgs?: readonly string[];
   /** D3：对话族提问（file 绑定后上抛；docs/d3-ui-passthrough-design.md）。 */
   readonly onUiRequest?: (file: string, ask: UiAsk) => void;
   /** D3：即显 notify→ui-note。 */
@@ -128,6 +130,7 @@ export function createSessionRegistry(opts: SessionRegistryOpts): SessionRegistr
         ...(opts.timeoutPollMs !== undefined ? { timeoutPollMs: opts.timeoutPollMs } : {}),
         ...(opts.idleMs !== undefined ? { idleMs: opts.idleMs } : {}),
         ...(opts.eofGraceMs !== undefined ? { eofGraceMs: opts.eofGraceMs } : {}),
+        ...(opts.extraPiArgs !== undefined ? { extraPiArgs: opts.extraPiArgs } : {}),
         ...(opts.onSpawned !== undefined ? { onSpawned: (handle: ProcessHandle, generation: number) => opts.onSpawned!(file, handle, generation) } : {}),
         ...(opts.onUiRequest !== undefined ? { onUiRequest: (ask: UiAsk) => opts.onUiRequest!(file, ask) } : {}),
         ...(opts.onUiNote !== undefined ? { onUiNote: (note: UiNoteEvent) => opts.onUiNote!(file, note) } : {}),
