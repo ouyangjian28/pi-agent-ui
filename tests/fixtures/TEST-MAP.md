@@ -1082,3 +1082,17 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - **L2（P3）**：R2 用例标题/注释勘称「杀点=写入顺序断言非自冻」；新增 **R2b 落盘后未记账窗口**（GPT r2 审 P3 探针转正：origAppend 已返回、note 未更新——entered/resume 受控信号非固定延迟；r1 版此窗口第二 check 会 foreign 自冻）。单元 16→17 例。
 - **L3（P3）**：设计稿五处——服务表改「当前表现/r3 预留」两栏制（4402/not-ready.cause/writerState 不再冒称已交付）/FF-P02-3 证据层级勘正（受控交错=单元+审读探针，E2E 无 dispose 期并发注入）/W-asm-2 去「sessionFor 抛」矛盾句/§6 迭代史章节引用漂移勘正（§1.4/§4/§5）。
 - **L4（P3）**：交错1 注释「检查点②」→①（after-lock——立即 dispose 置位早于 acquire 完成）；§1.4 与守卫壳源码注释统一「可观察 release rejection 记 audit；底层吞掉的 unlink 错误可能仅留残锁」。
+
+### P0-2 r3a 帧身份批（journal 写面身份校验·帧面；基线 e73090a+8d8e255；2026-10-09）
+
+**范围**：resume 帧+prompt.generation——写帧入口身份门（恢复授权/阻断/代次）。执行面（真重发 payload+TurnGate）=r3b。审读=Kimi K3（互审制首单）。
+
+**实现**（五文件）：契约（contracts.ts）WRITE_OPEN_FRAME_TYPES+["resume"]；prompt 可选 generation?（exactWrite 探测副本剥除——v1 四字段严格形不变）；resume{requestId,file,intentId,generation}；WriteIdentityRejectCause 四因；write-resume-ack 帧+WriteResumeOutcomeDTO{identity-rejected,cause}|{execution-pending}；WriteSendOutcomeDTO 加枝 identity-rejected。宿主（rpc-write-host.ts）ResumeAuthority{reportFor,generationFor} 可选注入；resume() 身份门序=①无权威源→no-recovery-data(fail-closed 审计 source=absent)→②reportFor 抛错→stripped→4402→③report null→no-recovery-data→④resumeBlocked 优先→⑤intentId∉resendAuthorized→⑥live≠frame 代次→generation-mismatch（live=null 无活进程→放行）→⑦execution-pending（诚实占位非 not-ready 挪用）；prompt.generation=门序⑥（缺省 v1 兼容跳过）；全部拒绝零副作用（不触 sessionFor/send）。网关（ws-gateway.ts）resume 派发→resolveWithinRoots→write-resume-ack；prompt 第三参 generation 透传。装配（composition.ts）resumeAuthority 真源：reportFor=recoveryEvidence→isRecoverySnapshot→recoverFromSnapshot；generationFor=registry.statusFor(file).process.generation。端口（write-host.ts）WriteHostPort 扩展。
+
+**测试**：tests/unit/server/ws-gateway-write-resume.test.ts W-res-1..11（11 例；见设计稿 §5 W-res 表）。全仓 1456 绿。**杀点=created.n sessionFor 调用计数**（零副作用：identity-rejected 路径不触会话创建）。
+
+**实现期两缺陷**（测试首跑抓）：①prompt.generation 被 exactWrite 四字段集判「多余字段」4404（探测副本剥除修复）；②测试替身 SessionSendResult launched 形错（无 key 包装——真实={kind,key:{intentId,commandId}}，encodeSendOutcome 读 r.key.intentId）。
+
+**变异四杀**（基线 8d8e255；五步单链，注入后 git diff 验非空+定向红点名）：Mu-r3a-1 blocked 优先 if(false&&)→W-res-5；Mu-r3a-2 prompt 校验前 await sessionOf→W-res-10（created.n=1）；Mu-r3a-3 authority 缺省 if(false)→W-res-3；Mu-r3a-4 generation 校验 if(false&&)→W-res-10。全部还原复绿。
+
+**r3b 待办**：执行面（真重发 payload 读回+TurnGate 交涉→write-resume-ack 结果升格）+composition 真源接线 E2E（本批证据=tsc 类型链+W-res 替身面）。

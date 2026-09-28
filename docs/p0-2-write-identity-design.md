@@ -56,11 +56,26 @@ ws-gateway 写分支 → rpc-write-host → session-registry.sessionFor(file) �
 现有冻结序：摘 onConnection → 停轮询/SIGHUP → gateway.dispose（1000 告别+观察器解绑）→ adapter.dispose → tokens.dispose。
 本批插入：composition.dispose 实际序=registry.dispose（排空会话）→ **guardedWriters.dispose（汇合每 writer 生命周期队列含在途 boot/append+关底座+逐文件 `releaseLock()`）** → tokens.dispose——释放前写面静止由队列汇合保证（r2 根修：不再依赖调用方序）。可观察到的 release rejection 记 audit；底层吞掉的 unlink 错误可能仅留残锁（锁残留=下次启动 EEXIST 拒，可接受；r1 勘误：unlink 细节通常不可见，继承 P0-3 组件行为——r2 审 L4 措辞统一）。
 
-## §2 r2 帧身份（预告，r1 审定后细化）
+## §2 r3a 帧身份（已实现；审读点=身份门序+零副作用）
 
-- 契约 v1.1：`prompt` 帧扩 `generation`（number；客户端从 session/live 事件取当前进程代次；网关校验=当前活代匹配，旧代→4409）；新增 `resume` 开放帧形 `{t, requestId, file, intentId, generation}`。
-- resume 校验序：形校验（4404）→ 开放面（4405）→ intentId∈recovery.resendAuthorized（否则 4409 resume-not-authorized；resumeBlocked=true 时恒空=全拒提示走修复面）→ generation 匹配 → 宿主执行面（rpc-session 重发接线，授权≠执行面已定）。
-- writer-authority WS 层接线（双 tab 单写者）：r2 批评估是否同批或后移（Kimi 前端面联动）。
+**分工**：身份门在宿主面（rpc-write-host）；网关保持传输薄（形校验+转发+ack）。r3b（执行面：真重发 payload 读回+TurnGate）另批。
+
+**契约面**（contracts.ts）：`WRITE_OPEN_FRAME_TYPES+resume`；prompt 可选 `generation?`（安全整数≥0；exactWrite 探测副本剥除后四字段严格形——v1 客户端原形不变）；新 `resume{requestId,file,intentId,generation}` 帧；`WriteIdentityRejectCause = no-recovery-data | resume-blocked | resume-not-authorized | generation-mismatch`；结果帧=**`write-resume-ack`（非 4409；原预告勘正——身份拒非传输层错误）**：resume 拒走 `{kind:"identity-rejected",cause}`，通过走 `{kind:"execution-pending"}`（诚实占位，非 not-ready 挪用）；prompt.generation 拒=write-ack.outcome 加枝 `identity-rejected{generation-mismatch}`。
+
+**身份门序**（rpc-write-host.resume；全部拒绝零副作用——不触 sessionFor/send）：
+1. 无权威源（resumeAuthority 缺省）→ no-recovery-data（fail-closed，审计 source=absent）
+2. reportFor 抛错→审计+stripped→网关 4402（细节先落宿主审计再截断）
+3. report null→no-recovery-data
+4. resumeBlocked→resume-blocked（优先于授权；原预告「恒空=全拒」收敛为独立成因）
+5. intentId ∉ resendAuthorized→resume-not-authorized
+6. live generation ≠ frame.generation→generation-mismatch（无活进程 live=null→放行至执行面，无冒充对象）
+7. 全过→execution-pending（r3b 真重发）
+
+prompt.generation（同门序第 6 步）：携带代次≠活代→identity-rejected；缺省=v1 兼容跳过；无活进程→放行。
+
+**真源装配**（composition）：reportFor=recoveryEvidence provider→isRecoverySnapshot→recoverFromSnapshot→{resendAuthorized,resumeBlocked}；generationFor=registry.statusFor(file).process.generation（file 未构造/无 registry→null 放行）。**接线运行时验证入 r3b E2E**（execution-pending 真重发链一起测；本批证据=tsc 类型链+W-res 替身面+互审点验）。
+
+writer-authority WS 层接线（双 tab 单写者）：与 Kimi 前端面联动评估，不在 r3a 范围。
 
 ## §3 FF（fitness functions）
 
@@ -68,7 +83,7 @@ ws-gateway 写分支 → rpc-write-host → session-registry.sessionFor(file) �
 - **FF-P02-2 守卫全覆**：TurnGate/DispatchCoordinator 两写入口产生的全部行经守卫（测试注入探针：绕守卫直接打 FileDurability 的路径不存在——装配层唯一构造点走查+变异）。
 - **FF-P02-3 关停有序**：dispose 后无新 append 被受理；锁释放前写面已静止（证据层级=单元受控交错（R1-交错1/2+GPT r2 审探针 P4：guard-check 挂起时 dispose→在途先完成再释放，late 行拒）——组合根 E2E 无 dispose 期并发写注入，不冒称）。
 - **FF-P02-4 重启身份**：同 bootId 不重复宣誓同文件；重启（新 bootId）→新 epoch 严格递增；旧进程存活→新进程锁拒。
-- **FF-P02-5（r2）帧身份拒旧**：旧 generation/intentId 冒充→4409，零盘面写入。
+- **FF-P02-5（r3a）帧身份拒旧**：旧 generation/intentId 冒充→identity-rejected（prompt 面=write-ack 枝；resume 面=write-resume-ack），零会话创建零盘面写入（r2 预告时写作 4409，实装后勘正——身份拒非传输层错误）。
 
 ## §4 ADR
 
@@ -89,7 +104,27 @@ ws-gateway 写分支 → rpc-write-host → session-registry.sessionFor(file) �
 | W-asm-6 | E2E 真服务（A-1）：composition 起→prompt 写→dispose→实例重建续写（epoch 1→2+新 bootId+锁清）；A-2 双实例活锁拒。**边界（r1 勘称）**：实例重建≠OS 进程 SIGKILL；崩溃残留（stale 锁→运维清锁）与 SIGKILL 链=未在 E2E 验证，stale 行为由单元 W-asm-2 死锁例覆盖 | — |
 | W-asm-7 | 双实例拒：同 journal 第二实例锁拒+零写 | — |
 
+W-res 系（r3a，tests/unit/server/ws-gateway-write-resume.test.ts，11 例）：
+
+| # | 断言 | 杀点 |
+|---|---|---|
+| W-res-1 | 形校验：resume 缺/坏字段→4404（4404 累计 3→close 1002 故拆两连接）；多余字段→4404 | exactWrite 集合松→挂 |
+| W-res-2 | 只读网关（未接写宿主）→4405+close 1008（v1 冻结面不变） | 开放面越界→挂 |
+| W-res-3 | 无权威源（resumeAuthority 缺省）→no-recovery-data（fail-closed） | 缺省放行→挂（Mu-r3a-3） |
+| W-res-4 | reportFor→null→no-recovery-data | — |
+| W-res-5 | resumeBlocked 优先于授权→resume-blocked | 门序错→挂（Mu-r3a-1） |
+| W-res-6 | intentId ∉ resendAuthorized→resume-not-authorized | — |
+| W-res-7 | 旧代→generation-mismatch（审计 frame=2 live=3） | — |
+| W-res-8 | 全过→execution-pending+write-resume-ack 帧结构+requestId 槽归还 | — |
+| W-res-9 | 无活进程（generationFor→null）→放行（无冒充对象） | — |
+| W-res-10 | prompt.generation 四态：旧代拒+零副作用（created.n===0）；匹配放行；缺省 v1 兼容；无活进程放行 | 校验跳过→挂（Mu-r3a-4）；零副作用破坏→挂（Mu-r3a-2：sessionOf 前置→created.n=1） |
+| W-res-11 | reportFor 抛错→stripped（write-host-internal: resume）→4402+审计 op=resume | — |
+
+变异四杀全过（基线 8d8e255；每条=注入→git diff 非空→定向红点名→checkout 还原→复绿）：Mu-r3a-1 blocked 优先 if(false&&)→W-res-5；Mu-r3a-2 prompt 校验前 await sessionOf→W-res-10；Mu-r3a-3 authority 缺省 if(false)→W-res-3；Mu-r3a-4 generation 校验 if(false&&)→W-res-10。
+
 ## §6 迭代史
 
 - r1：装配面（GPT 审 58 NO-GO：R1 dispose 不汇合在途 boot→锁泄漏/释放后旧宣誓污染后继；R2 check→append→note 未整体串行→同写者自冻粘性；R3 bootP 无 rejection 归一化→取锁 I/O 异常 unhandled rejection 杀进程——三探针实锤 /tmp/gpt-p02-r1-probe/）。
 - r2（本批）：根修=每 writer 生命周期队列（boot/append/close 全串行临界区）+dispose 汇合队列（含在途 boot）+boot 检查点①②（装配中 dispose→零宣誓零泄漏中止）+bootP 构造即归一化（异常→failed 恒拒，永不成 unhandled）+mkdir 父目录（对齐 FileDurability）。杀点：R1-交错1/交错2、R2 并发自写、R3 子进程 EACCES exit=0。文档同步收窄（§1.4 释放序/§4 P02-D3 同步拒称/§5 W-asm-6 崩溃链边界；r2 审 L3 勘正原引用漂移）。
+- r2 尾债（98c8f11 并入 r3a 送审）：L1 E2E A-2 finally 遮蔽；L2 R2b 落盘后未记账窗口入仓；L3 设计稿五处；L4 交错1 注释勘正。
+- r3a（本批）：帧身份门（resume 帧+prompt.generation；§2 展开）。审读=Kimi K3（互审制首单，GPT 额度尽后 GLM 写→K3 审）。r3b（下批）：执行面（真重发 payload 读回+TurnGate 交涉）+composition 真源接线 E2E。
