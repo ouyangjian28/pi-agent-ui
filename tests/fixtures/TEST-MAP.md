@@ -1171,7 +1171,14 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - tests/integration/d1-live-e2e.test.ts（PI_E2E=1，20s：真 pi 一轮→delta 流+final+拼接前缀校验；修复批后复跑绿）。
 - 变异七杀全验真：Mu-d1-1（缺省窗 80→0→W-d1-3d schedule 延时断言红）/Mu-d1-2（thinking 缺省透→W-d1-2）/Mu-d1-3（final role 滤去→W-d1-6）/Mu-d1-4（disposition 门去→W-d1-8b；修复批升级为路由工厂层杀点 Mu-d1-4b）/Mu-d1-5（turn_start 复位删→W-d1-9 跨 turn 恢复红）/Mu-d1-11（byteLen 回退码元→W-d1-11 中文字节口径红）。教训：Mu-d1-4 首轮杀点缺失（门内联在 composition 闭包）→提成纯函数+makeLiveOnPiEvent 路由工厂（修复批）；checkout 误伤未提交杀点改动→**杀点补强必须先提交再注杀**（M-245 家族新变体）。
 
-**K3 复审 r2=92/100 GO（2026-10-09，D1 放行；报告=projects/pi-agent-ui/audits/k3-d1-r2-review-2026-10-09.md）**：P1/P2 全项核实闭合+变异三杀 /tmp 副本独立验真+sliceByBytes 2 万随机模糊全过。P3-c 记档：agent_settled 现过 coordinator.onPiEvent 的两个边际副作用——awaiting-response 相下占 bufferedEvents 一格+缓冲恰满时触发 gate.close("buffer-overflow")；实害=零（onBufferDrain 生产未接线，drain 出的 agent_settled 无消费者；满缓冲 close 本不可避免）。P3-a/P3-b 注释残留已清（本批）。
+**K3 复审 r2=92/100 GO（2026-10-09，D1 放行；报告=projects/pi-agent-ui/audits/k3-d1-r2-review-2026-10-09.md）**
+**D2 直播正文流式渲染（Kimi 批，GLM 审 92 GO，2026-10-09 合并 7aabbfa；审报=projects/pi-agent-ui/audits/glm-d2-review-2026-10-09.md）**：
+- apps/web/src/ws/live-stream.ts 纯态机（零依赖）：applyLiveEvent 三形分发——message-final 权威置换（textParts 清+finalText 置换，空串 final 也权威）；part-end 幂等锚（closed 仅记录渲染不依赖，未知段无操作）；事实⑤ final 后 delta=整体重置新轮累积；liveTextOf/thinkingTextOf 取值时拼接。
+- apps/web/src/components/live-stream.tsx：rAF 批处理（一帧一 setState+同值引用保持跳过，jsdom 回退宏任务）+liveEvents 长度回退整体重放（事实④）+historyEvents 增量扫 assistant 行清窗（衔接历史区防重复）+thinking 折叠可空留槽。
+- session-detail.tsx 接线：LiveStreamView 挂载；live-list 退旁路面（只收 pi-progress/turn-state/process-note 三形）。
+- 测试：tests/unit/web/live-stream.test.ts 12 例+live-stream-view.test.ts 11 例（含千级 delta 同帧合并>3000 字符、零 delta final、final 后 delta 新轮、数组重置、旁路路由）。
+- 验证：web tsc 零错；全仓 1539 passed|20 skipped。
+：P1/P2 全项核实闭合+变异三杀 /tmp 副本独立验真+sliceByBytes 2 万随机模糊全过。P3-c 记档：agent_settled 现过 coordinator.onPiEvent 的两个边际副作用——awaiting-response 相下占 bufferedEvents 一格+缓冲恰满时触发 gate.close("buffer-overflow")；实害=零（onBufferDrain 生产未接线，drain 出的 agent_settled 无消费者；满缓冲 close 本不可避免）。P3-a/P3-b 注释残留已清（本批）。
 
 **修复批（3d1b927，K3 审 80 NO-GO 全项闭合）**：P1-1 turn 预算跨 turn 复位（agent_start/turn_start 边界 turnBytes=0/overBudget=false+W-d1-9）/P2-1 disposition 门黑名单→白名单（delivered/buffered 放行，未知态拒）+文档三处口径同步/P2-2 rpc-session agent_settled 也透传 onPiEvent（清窗兑底可达，coordinator 结算序不变）/P2-3 预算/切分 UTF-8 字节口径（byteLen+sliceByBytes 二分安全切片）/P2-4 dispose 收口（liveSink=null+聚合器 dispose 撤定时器+清 Map）/P2-5 超限只发 delta 不补提前 part-end/P2-6 接线闭包提取 makeLiveOnPiEvent 工厂+W-d1-1 a/b 接线级+W-d1-8 恒真断言废→真实退订零投+W-d1-8c engine phase 门（paging 期丢/live 期投）/P3-1 onTurnEnd 死 API 删。新增测试：W-d1-9/10/11+W-d1-1 a/b+接线级白名单杀点+W-d1-8b 晚绑定+agent_settled 透传单测。全仓 1516 绿。
 
