@@ -41,6 +41,8 @@ class FakeConn {
     return { onMessage: (cb) => { this.msgCb = cb; }, onClose: (cb) => { this.closeCb = cb; }, onPong: () => {} };
   }
   async say(obj: unknown): Promise<void> { this.msgCb?.(JSON.stringify(obj), false); await tick(); await tick(); await tick(); }
+  /** 同步投递（不等泵）：杀同 tick 竞态用。 */
+  msgRaw(obj: unknown): void { this.msgCb?.(JSON.stringify(obj), false); }
   frames(): Array<Record<string, unknown>> { return this.sent.map((s) => JSON.parse(s) as Record<string, unknown>); }
   /** 模拟传输断开（走网关 transportClosed 面=订阅释放+D3 无人可答规则挂钩点）。 */
   drop(): void { this.readyState = 3; this.closeCb?.(1006); }
@@ -55,8 +57,11 @@ class EmptyHistory implements HistorySourcePort {
 class FakeUiHost implements UiHostPort {
   readonly answers: Array<{ file: string; requestId: string; payload: UiAnswerPayloadGateway }> = [];
   next: UiAnswerOutcomeGateway = { kind: "delivered" };
+  /** 延迟闸：非 null 时 answer() 挂起直到 resolve()（杀同 tick 双答原子性用）。 */
+  defer: { resolve: () => void } | null = null;
   async answer(file: string, requestId: string, payload: UiAnswerPayloadGateway): Promise<UiAnswerOutcomeGateway> {
     this.answers.push({ file, requestId, payload });
+    if (this.defer !== null) await new Promise<void>((res) => { this.defer = { resolve: res }; });
     return this.next;
   }
 }
@@ -157,6 +162,26 @@ describe("D3 扩展问答：网关面", () => {
       await c2.say({ t: "hello", protocolVersion: 1, token: "tok-ok" });
       await c2.say({ t: "ui-answer", requestId: "q-2", value: "x" });
       expect(errs(c2).some((f) => f.code === 4404)).toBe(true);
+      expect(r.host.answers.length).toBe(1);
+    } finally { await r.dispose(); }
+  });
+
+  it("W-ui-g4b 同 tick 双答原子性：host 未决时次答即拒（4404+不二次回写）——杀点=入口同步删点", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authedSub(r);
+      r.gw.broadcastUiRequest(r.file, { requestId: "q-1", method: "input" });
+      // host 首答挂起（延迟闸）：验证同步删点在异步回写前已拒次答
+      r.host.defer = { resolve: () => {} };
+      c.msgRaw({ t: "ui-answer", requestId: "q-1", value: "x" });
+      c.msgRaw({ t: "ui-answer", requestId: "q-1", value: "y" }); // 同 tick 次答
+      await tick(); await tick();
+      expect(r.host.answers.length).toBe(1); // 未决不放行次答
+      expect(r.host.answers[0]?.payload).toEqual({ value: "x" }); // 首答胜出
+      expect(errs(c).some((f) => f.code === 4404 && f.requestId === "q-1")).toBe(true);
+      // 放行：首答回流，delivered→answered 撤框广播
+      const d = r.host.defer; r.host.defer = null; d?.resolve();
+      await until(() => c.frames().some((f) => f.t === "ui-closed" && f.reason === "answered"));
       expect(r.host.answers.length).toBe(1);
     } finally { await r.dispose(); }
   });
