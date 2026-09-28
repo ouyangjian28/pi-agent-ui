@@ -38,6 +38,11 @@ class StubClient {
   resyncFromCursor(): void {
     this.calls.push("resync");
   }
+  readonly answers: Array<{ readonly requestId: string; readonly answer: unknown }> = [];
+  answerUi(requestId: string, answer: unknown): void {
+    this.calls.push(`answer:${requestId}`);
+    this.answers.push({ requestId, answer });
+  }
   push(next: SessionDetailSnapshot): void {
     this.snap = next;
     act(() => {
@@ -369,6 +374,71 @@ describe("SessionDetail 流态渲染（StubClient）", () => {
     expect(client.calls.filter((c) => c === "resync")).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "继续读取" }));
     expect(client.calls).toContain("resync");
+  });
+});
+
+describe("D3-F 扩展问答（ui-note 旁路渲染 + UiDialog 区）", () => {
+  const note = (notifyType: "info" | "warning" | "error", message: string): LiveEvent => ({
+    kind: "ui-note",
+    notifyType,
+    message,
+  });
+
+  it("ui-note 按 notifyType 三级渲染到 live-list（class+文案分级）；其余旁路事件无附加 class", () => {
+    mount(
+      new StubClient(
+        detailSnap({
+          events: [msg(1)],
+          liveEvents: [progress, note("info", "一切正常"), note("warning", "注意风险"), note("error", "出错了")],
+        }),
+      ),
+    );
+    const items = screen.getByLabelText("直播事件").querySelectorAll("li");
+    expect(items).toHaveLength(4);
+    expect(items[0]!.className).toBe(""); // pi-progress 无附加 class
+    expect(items[1]!.className).toBe("live-note live-note-info");
+    expect(items[1]!.textContent).toBe("通知：一切正常");
+    expect(items[2]!.className).toBe("live-note live-note-warning");
+    expect(items[2]!.textContent).toBe("警告：注意风险");
+    expect(items[3]!.className).toBe("live-note live-note-error");
+    expect(items[3]!.textContent).toBe("错误：出错了");
+  });
+
+  it("ui-note 不进直播正文区（append-only 旁路；正文三形缺省时 LiveStreamView 不挂载）", async () => {
+    mount(new StubClient(detailSnap({ events: [msg(1)], liveEvents: [note("info", "仅通知")] })));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20)); // 让 rAF 批处理窗口过去（无正文可提交）
+    });
+    expect(screen.queryByLabelText("直播正文")).toBeNull();
+    expect(screen.getByLabelText("直播事件").textContent).toContain("通知：仅通知");
+  });
+
+  it("快照有活跃提问即挂 UiDialog 区（无提问不占位）；作答经 client.answerUi 回传", () => {
+    const client = new StubClient(
+      detailSnap({
+        events: [msg(1)],
+        uiRequests: [
+          { requestId: "ui-1", method: "select", title: "选哪个？", options: ["甲", "乙"] },
+          { requestId: "ui-2", method: "confirm", message: "允许执行吗？" },
+        ],
+      }),
+    );
+    mount(client);
+    const stack = screen.getByLabelText("扩展提问");
+    expect(stack.querySelectorAll(".ui-dialog")).toHaveLength(2); // 多提问堆叠
+    expect(screen.getByText("允许执行吗？")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "乙" }));
+    expect(client.answers).toEqual([{ requestId: "ui-1", answer: { value: "乙" } }]);
+    fireEvent.click(screen.getByRole("button", { name: "确认" }));
+    expect(client.answers[1]).toEqual({ requestId: "ui-2", answer: { confirmed: true } });
+  });
+
+  it("身份门外不透出提问：快照 file≠目标 file 时 uiRequests 为空（旧提问不泄入新会话）", () => {
+    const view = sessionDetailViewOf(
+      detailSnap({ file: "old.jsonl", uiRequests: [{ requestId: "ui-1", method: "confirm" }] }),
+      "a.jsonl",
+    );
+    expect(view.uiRequests).toEqual([]);
   });
 });
 
