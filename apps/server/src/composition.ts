@@ -20,6 +20,8 @@ import { DualHistorySource } from "./runtime/dual-history-source.ts";
 import { createRecoveryEvidenceProvider, isRecoverySnapshot, type RecoveryEvidenceResult } from "./runtime/recovery-evidence-source.ts";
 import { recoverFromSnapshot } from "./runtime/recover.ts";
 import { createSessionRegistry, type SessionRegistry } from "./runtime/session-registry.ts";
+import type { UiAsk, UiNoteEvent } from "./runtime/rpc-session.ts";
+import type { UiClosedReason } from "@pi-agent-ui/protocol";
 import { LiveAggregator, type LiveContentEvent, makeLiveOnPiEvent } from "./runtime/live-aggregator.ts";
 import { createGuardedJournalWriterFactory } from "./runtime/guarded-journal-writer.ts";
 import { randomUUID } from "node:crypto";
@@ -240,6 +242,12 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
   // D1 直播面接线状态：per-file 聚合器+late-bound 广播槽（gateway 创建后回填）。
   const liveAggregators = new Map<string, LiveAggregator>();
   let liveSink: ((file: string, ev: LiveContentEvent) => void) | null = null;
+  // D3 扩展问答接线状态：晚绑定路由槽（同 liveSink 模式——gateway 晚于 registry 构造）。
+  let uiSink: {
+    request: (file: string, ask: UiAsk) => void;
+    note: (file: string, note: UiNoteEvent) => void;
+    closed: (file: string, requestId: string, reason: UiClosedReason) => void;
+  } | null = null;
   if (config.write !== undefined) {
     if (typeof config.write.sessionFor !== "function") {
       throw new Error("write.sessionFor 缺失或非函数：写侧无从落地会话文件，拒绝启动");
@@ -260,6 +268,14 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
       // W-d1-1（K3 审 P2-6①）：接线闭包提取为 makeLiveOnPiEvent 工厂（键归一+白名单门+晚绑定 sink），
       // 生产行为不变；接线级单测/变异杀点（Mu-d1-4）由此可达。
       onPiEvent: makeLiveOnPiEvent({ roots: config.roots, sink: () => liveSink, aggregators: liveAggregators }),
+      // D3：扩展提问三路由（docs/d3-ui-passthrough-design.md §5）。晚绑定：gateway 后构造，
+      // 回填前事件只可能发生在零订阅期（会话仅由写面拉起，而写面必经 gateway）→审计丢弃，不悬挂。
+      onUiRequest: (file, ask) => {
+        if (uiSink === null) { audit(`composition ui-request-dropped-no-gateway file=${file} id=${ask.requestId}`); return; }
+        uiSink.request(file, ask);
+      },
+      onUiNote: (file, note) => { uiSink?.note(file, note); },
+      onUiClosed: (file, requestId, reason) => { uiSink?.closed(file, requestId, reason); },
       ...(config.write.responseTimeoutMs !== undefined ? { responseTimeoutMs: config.write.responseTimeoutMs } : {}),
       ...(config.write.turnTimeoutMs !== undefined ? { turnTimeoutMs: config.write.turnTimeoutMs } : {}),
       ...(config.write.readinessTimeoutMs !== undefined ? { readinessTimeoutMs: config.write.readinessTimeoutMs } : {}),
@@ -314,6 +330,11 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
         audit,
         resumeAuthority: makeResumeAuthority({ roots: config.roots, provider: recoveryEvidence, registry: { statusFor: (f: string) => registry!.statusFor(f) }, semaphore }),
       }),
+      // D3：答案端口适配（结构同形：UiAnswerOutcome≡UiAnswerOutcomeGateway；file 即 sessionFor 键）
+      uiHost: {
+        answer: (file: string, requestId: string, payload: { value: string } | { confirmed: boolean } | { cancelled: true }) =>
+          registry!.sessionFor(file).answerUi(requestId, payload),
+      },
     } : {}),
     audit,
   });
@@ -349,6 +370,22 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
 
   // D1 直播面：gateway 就位后回填广播槽（此前事件=零订阅期丢弃无害；见上 onPiEvent 接线注）。
   liveSink = (file, ev) => gateway.broadcastLive(file, ev);
+
+  // D3 扩展问答：gateway 就位后回填路由槽。零订阅者→立即回 pi cancelled（不悬挂扩展；docs §4）
+  // +ui-closed(no-subscriber) 广播（无接收者=仅审计）。作废/已答直接广播（撤框幂等 by requestId）。
+  uiSink = {
+    request: (file, ask) => {
+      const n = gateway.broadcastUiRequest(file, ask);
+      if (n === 0) {
+        void registry!.sessionFor(file).answerUi(ask.requestId, { cancelled: true })
+          .then((o) => audit(`composition ui-no-subscriber file=${file} id=${ask.requestId} outcome=${o.kind}`))
+          .catch((e: unknown) => audit(`composition ui-no-subscriber-error file=${file} ${String(e instanceof Error ? e.message : e)}`));
+        gateway.broadcastUiClosed(file, ask.requestId, "no-subscriber");
+      }
+    },
+    note: (file, note) => gateway.broadcastUiNote(file, note),
+    closed: (file, requestId, reason) => gateway.broadcastUiClosed(file, requestId, reason),
+  };
 
   const offConn = adapter.onConnection((conn, tmeta) => {
     gateway.attach(conn, {

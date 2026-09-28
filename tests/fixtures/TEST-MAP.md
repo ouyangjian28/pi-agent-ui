@@ -1185,3 +1185,11 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 **E2E 杂项教训**：tokens.json 须 {version:1,tokens:[...]}；订阅文件须预存（4402 fail-closed）手造 writer 行；短回复整体在窗内被 final 权威吸收→prompt 要长回复（~120 字）断言 delta 流非空。
 
 **提交**：e5ee54d（基线）+9c670a9（杀点补强）+81e9a7e（TEST-MAP D1 节）+3cd454d（web 尾债）+3d1b927（修复批）。
+
+## D3 扩展问答透传（r1 后端面；2026-10-09，基线待变异补强后定版）
+
+- **面**：pi extension_ui_request（stdout）→宿主透传 web（ws）→答案回写 stdin；权限确认不弹窗=插件面提问靠本面透传。设计稿=docs/d3-ui-passthrough-design.md；契约=docs/ws-ui-contracts-v1.md §10.2（v1.2 三帧+ui-note）。
+- **落点**：process-supervisor.ts（+onGenerationEnded 恰一次回调/writeControlLine 不重试面）+rpc-session.ts（demux +extension_ui_request 分支→handleUiRequest/answerUi/closeUiForGeneration；UI_PENDING_MAX=8；对话族四法 vs 即显 notify vs 四即显法+未知=ui-unsupported）+ws/ui-host.ts（UiHostPort.answer 端口；ws 不 import runtime）+ws-gateway.ts（broadcastUiRequest/Closed/Note+handleUiAnswer+cancelPendingUiForFile 挂 releaseWatcher refs=0 分支+dispose）+session-registry.ts（三回调 file 绑定）+composition.ts（晚绑定 uiSink；零订阅→cancelled+ui-closed(no-subscriber)；uiHost.answer→sessionFor(file).answerUi）+contracts.ts（UiAnswerFrame/UiRequestFrame/UiClosedFrame/ui-note LiveEvent+UiClosedReason 含第 4 因 answered）。
+- **关键语义**：首答胜出=网关 uiPending 删点（同步先删后写）+会话 pendingUi 先删再写双保险；answer 槽即时还（inflight）防泄漏；ui-answer 非写帧（不触 journal/writerEpoch）；跨文件答案 4404 非订阅者；末订阅者断开→pending 全 cancelled（releaseWatcher 挂钩）；换代→closeUiForGeneration(process-retired)；溢出第 9 起=cancelled+overflow；notify notifyType 归一（仅 warning/error，其余 info）；宿主不设超时。
+- **测试**：tests/unit/server/rpc-session-ui.test.ts（W-ui-s1..9）+tests/unit/server/ws-gateway-ui.test.ts（W-ui-g1..9）；全仓 1557 绿双跑+tsc 零错。
+- **错题复发+新训**：①「4404 累计 3→close 1002 门」再犯（W-ui-g5 三案同连接→关闭→releaseWatcher→pending 全 cancelled→host 收 3 cancelled 假阳性）——多案形校验必拆连接（本仓第三犯，写进错题家族）；②泵=setTimeout(0) 与 setImmediate 序在负载下不保证先行——帧断言一律 until 轮询不数 tick（g9 闪断教训）；③vitest 吞 console.log——探针用 appendFileSync 落 /tmp 日志。

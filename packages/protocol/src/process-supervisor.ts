@@ -75,6 +75,9 @@ export interface SupervisorDeps {
   onStderr?(text: string, generation: number): void;
   /** spawn 成功后回调（接线层在此写 readiness 探针等自管 stdin 交互；同步签名，异步工作自行 catch）。 */
   onSpawned?(handle: ProcessHandle, generation: number): void;
+  /** D3 扩展问答：代次终结恰好一次回调（finalizeRetire 唯一生效点；retire/意外退出/EOF 交接
+   *  全路径汇此）。接线层在此撤 UI 待答提问（不写死进程 stdin）。同步签名，异常自隔离。 */
+  onGenerationEnded?(generation: number, reason: string): void;
   now(): string;
   sleep(ms: number): Promise<void>;
   /** 单调毫秒时钟（预算口径；缺省 performance.now()——非单调注入时 remainMs 钳位不放大但前跳仍过早耗尽，宿主应注入单调源）。 */
@@ -183,6 +186,24 @@ export class ProcessSupervisor {
     this.audit(`process-spawned generation=${entry.generation}`);
     this.opts.onSpawned?.(handle, entry.generation);
     return { kind: "spawned", generation: entry.generation };
+  }
+
+  /**
+   * D3 扩展问答：写一行控制帧（extension_ui_response）到当前活跃代 handle。
+   * 非 running/已退役/无 handle→false；写失败→false（调用方按作废处置，不重试——
+   * pi 对已答/过期 id 本就忽略，重试只会放大乱序面）。与 submitTurn 无锁序交互：
+   * pi 侧按行解析，控制帧与命令帧交错安全。
+   */
+  async writeControlLine(text: string): Promise<boolean> {
+    const entry = this.current;
+    if (entry === null || entry.retired || entry.handle === null || this.phase !== "running") return false;
+    try {
+      await this.opts.host.writeStdin(entry.handle, text);
+      return true;
+    } catch (e) {
+      this.audit(`control-line-write-failed generation=${entry.generation} ${String(e instanceof Error ? e.message : e)}`);
+      return false;
+    }
   }
 
   /**
@@ -403,6 +424,7 @@ export class ProcessSupervisor {
     if (entry.retired) return false;
     entry.retired = true;
     const cleared = this.opts.coordinator.onGenerationRetired(entry.generation);
+    this.opts.onGenerationEnded?.(entry.generation, reason);
     const gs = this.opts.gate.getState();
     // 三活相态都关：dispatching（旧 submit 续体→invalidated：不 send 不登记）、
     // in-flight、settling（旧 settled 续体→invalidated：held 保留不写 idle）

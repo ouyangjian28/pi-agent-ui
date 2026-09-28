@@ -10,8 +10,9 @@
 //   句柄：巡检 timer/耐久/回收器），串行执行保审计确定性；幂等；dispose 后 sessionFor 拒绝。
 import { FileDurability } from "./file-durability.ts";
 import { RpcSession } from "./rpc-session.ts";
+import type { UiAsk, UiNoteEvent } from "./rpc-session.ts";
 import { sha256Hex12 } from "@pi-agent-ui/protocol";
-import type { DurabilityPort, ProcessHandle, ProcessHostPort, SessionStatus } from "@pi-agent-ui/protocol";
+import type { DurabilityPort, ProcessHandle, ProcessHostPort, SessionStatus, UiClosedReason } from "@pi-agent-ui/protocol";
 import { isAbsolute } from "node:path";
 
 export interface SessionRegistryOpts {
@@ -31,6 +32,12 @@ export interface SessionRegistryOpts {
   /** 观测面（20b B2）：pi 进程 spawn 时回调（file+handle+generation）——E2E/宿主在 spawn 时即记录
    * 句柄身份，不靠事后审计反推；纯观测不参与生命周期（RpcSessionOpts.onSpawned 同源）。 */
   readonly onSpawned?: (file: string, handle: ProcessHandle, generation: number) => void;
+  /** D3：对话族提问（file 绑定后上抛；docs/d3-ui-passthrough-design.md）。 */
+  readonly onUiRequest?: (file: string, ask: UiAsk) => void;
+  /** D3：即显 notify→ui-note。 */
+  readonly onUiNote?: (file: string, note: UiNoteEvent) => void;
+  /** D3：提问作废（process-retired/overflow）。 */
+  readonly onUiClosed?: (file: string, requestId: string, reason: UiClosedReason) => void;
   /** D1 直播面：pi 进程事件回调（file+事件+代次+分派结果）。disposition 门=白名单制
    *  shouldBroadcastLive（delivered/buffered 放行——buffered 的记账行已在 enqueue 硬序①落；
    *  其余拒）由调用方（composition 聚合器前）把关；纯观测不参与生命周期。 */
@@ -122,6 +129,9 @@ export function createSessionRegistry(opts: SessionRegistryOpts): SessionRegistr
         ...(opts.idleMs !== undefined ? { idleMs: opts.idleMs } : {}),
         ...(opts.eofGraceMs !== undefined ? { eofGraceMs: opts.eofGraceMs } : {}),
         ...(opts.onSpawned !== undefined ? { onSpawned: (handle: ProcessHandle, generation: number) => opts.onSpawned!(file, handle, generation) } : {}),
+        ...(opts.onUiRequest !== undefined ? { onUiRequest: (ask: UiAsk) => opts.onUiRequest!(file, ask) } : {}),
+        ...(opts.onUiNote !== undefined ? { onUiNote: (note: UiNoteEvent) => opts.onUiNote!(file, note) } : {}),
+        ...(opts.onUiClosed !== undefined ? { onUiClosed: (requestId: string, reason: UiClosedReason) => opts.onUiClosed!(file, requestId, reason) } : {}),
         ...(opts.onPiEvent !== undefined ? { onPiEvent: (ev: unknown, generation: number, disposition: string) => opts.onPiEvent!(file, ev, generation, disposition) } : {}),
         ...(opts.now !== undefined ? { now: opts.now } : {}),
         audit: (l: string) => safeAudit(`rpc-session ${sessionIdOf(file)} ${l}`),

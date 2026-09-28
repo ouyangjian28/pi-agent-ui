@@ -454,3 +454,13 @@ type ServerFrame =
 - **prompt 帧**同步加可选 generation（v1 四字段严格形不变——缺省兼容跳过校验）。
 - **闸与预算**：resume 读链跨文件 ComputeSemaphore（与 get-recovery 同闸；排队超时→4409 error 帧 retryable，非 write-resume-ack）；单文件 in-flight 合并（同 file 并发读共享同次盘读）；单读合计 8MiB 预算门与 get-recovery 同源。断连口径：帧应答前断连=send 已提交不可撤（至少一次语义；write-resume-ack 可能因断连丢失但重发已生效）。
 - 权威源码=packages/protocol/src/contracts.ts+apps/server/src/ws/{rpc-write-host.ts,ws-gateway.ts}+apps/server/src/composition.ts（makeResumeAuthority）；设计=docs/p0-2-write-identity-design.md §2/§2b；测试=W-res（ws-gateway-write-resume.test.ts 18 例）/W-ra（resume-authority.test.ts 10 例）/E2E A-3。
+
+### §10.2 扩展问答透传（D3，契约 v1.2 增补；正文 v1 冻结不改写）
+
+- 权威设计=docs/d3-ui-passthrough-design.md；协议源码=packages/protocol/src/contracts.ts D3 段。三帧+一 LiveEvent：
+  - S→C `{t:"ui-request", requestId, file, method:"select"|"confirm"|"input"|"editor", title?, options?, message?, placeholder?, prefill?, timeoutMs?}`（瞬态广播，不进耐久事件流；requestId=pi extension_ui_request.id 原样）。
+  - S→C `{t:"ui-closed", requestId, reason:"process-retired"|"no-subscriber"|"overflow"|"answered"}`（撤框通知；UI 按 requestId 幂等撤框）。
+  - C→S `{t:"ui-answer", requestId, value?|confirmed?|cancelled?}`（三枝恰其一；非写帧：不触 journal、不经 writerEpoch）。
+  - LiveEvent v1.2 `{kind:"ui-note", notifyType:"info"|"warning"|"error", message}`（即显族 notify 耐久流；setStatus 等四法 v1 不透传，审计 ui-unsupported）。
+- 规则表：派发=广播给订阅 file 全部活跃连接（任意相可答）；零订阅→立即回 pi cancelled；答案=首答胜出（此后同 requestId→4404 未知或已答）；跨文件答案→4404 非订阅者；方法级校验（select→value∈options；confirm→confirmed；input/editor→value；任一法可 cancelled）违者 4404；末订阅者断开→该 file pending 全回 cancelled；进程换代→pending 全灭+ui-closed(process-retired)；每会话 pending≤8（第 9 个起立即 cancelled+overflow）；宿主不设超时（pi 侧 timeout 自治；晚答照转，pi 忽略过期 id）；ui-answer 未接线→4405。
+- 实现源码=apps/server/src/runtime/rpc-session.ts（demux/handleUiRequest/answerUi/closeUiForGeneration）+apps/server/src/ws/{ui-host.ts,ws-gateway.ts}（broadcastUi*/handleUiAnswer/cancelPendingUiForFile）+apps/server/src/composition.ts（晚绑定 uiSink+answer 端口适配）；测试=tests/unit/server/{rpc-session-ui.test.ts（W-ui-s1..9）,ws-gateway-ui.test.ts（W-ui-g1..9）}。

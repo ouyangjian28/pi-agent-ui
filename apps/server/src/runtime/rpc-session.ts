@@ -22,6 +22,8 @@ import {
   type ProcessHostPort,
   type RetireOutcome,
   type TurnKey,
+  type UiClosedReason,
+  type UiRequestMethod,
 } from "@pi-agent-ui/protocol";
 import { IdleReaper, MapRegistry } from "./idle-reaper.ts";
 
@@ -66,6 +68,13 @@ export interface RpcSessionOpts {
   readonly onSettled?: (generation: number) => void;
   /** 观测面：spawn 成功（探针之后）回调，携带进程句柄（4c：E2E 注入真实退出/诊断用）。异常被隔离。 */
   readonly onSpawned?: (handle: ProcessHandle, generation: number) => void;
+  /** D3 扩展问答（docs/d3-ui-passthrough-design.md）：对话族提问（select/confirm/input/editor）
+   *  →宿主路由层（file 绑定由注册表适配；file 不随行）。异常被隔离。 */
+  readonly onUiRequest?: (ask: UiAsk) => void;
+  /** D3 即显族 notify→ui-note 路由（LiveEvent v1.2）；其余即显四法本层审计 ui-unsupported。 */
+  readonly onUiNote?: (note: UiNoteEvent) => void;
+  /** D3 提问作废（进程退役/溢出拒收）：宿主撤 UI 框。异常被隔离。 */
+  readonly onUiClosed?: (requestId: string, reason: UiClosedReason) => void;
 }
 
 export type SessionStartResult =
@@ -77,6 +86,44 @@ export type SessionStartResult =
     | { readonly kind: "spawn-exited"; readonly generation: number; exit: Readonly<{ code: number | null; signal: string | null }> });
 
 export type SessionSendResult = LaunchOutcome | { readonly kind: "no-process" } | { readonly kind: "invalidated"; readonly stage: "first-byte" } | { readonly kind: "not-ready"; readonly cause?: string };
+
+// ---------------------------------------------------------------------------
+// D3 扩展问答（docs/d3-ui-passthrough-design.md）：会话面类型与结果。
+// ---------------------------------------------------------------------------
+/** 对话族提问（内部表示；file 不随行——由注册表/组装层绑定）。 */
+export interface UiAsk {
+  readonly requestId: string; // pi extension_ui_request.id 原样
+  readonly method: UiRequestMethod;
+  readonly title?: string;
+  readonly options?: readonly string[]; // select
+  readonly message?: string; // confirm
+  readonly placeholder?: string; // input
+  readonly prefill?: string; // editor
+  readonly timeoutMs?: number; // pi 声明 timeout(ms)；仅展示提示
+}
+
+/** 即显族 notify（→LiveEvent ui-note）。 */
+export interface UiNoteEvent {
+  readonly notifyType: "info" | "warning" | "error";
+  readonly message: string;
+}
+
+/** 答案载荷（三枝恰其一；方法级校验在网关侧带上下文执行）。 */
+export type UiAnswerPayload = { readonly value: string } | { readonly confirmed: boolean } | { readonly cancelled: true };
+
+/** answerUi 结果。delivered=已写 pi stdin（pi 可能已超时自答=晚答照转，pi 忽略过期 id）。 */
+export type UiAnswerOutcome =
+  | { readonly kind: "delivered" }
+  | { readonly kind: "unknown" } // 未知/已答 requestId（网关层首答胜出后的次答；会话层兑底）
+  | { readonly kind: "stale" } // 提问所属代次已退役——不写死进程，撤框收口
+  | { readonly kind: "write-failed" }; // stdin 写失败（进程边界异常）；撤框收口
+
+/** 每会话待答提问上限（洪泛防御；第 9 个起立即回 cancelled+overflow 作废）。 */
+export const UI_PENDING_MAX = 8;
+
+/** pi 即显法四则+未知法的 v1 口径：不透传，审计留痕（docs §3.2）。 */
+const UI_UNSUPPORTED_METHODS = new Set(["setStatus", "setWidget", "setTitle", "set_editor_text"]);
+const UI_DIALOG_METHODS = new Set<UiRequestMethod>(["select", "confirm", "input", "editor"]);
 
 /**
  * 包装登记表（S5-R1）：register/complete 转发后同步通知回收器活动——
@@ -127,6 +174,8 @@ export class RpcSession {
   private intentSeq = 0;
   private pollTimer: NodeJS.Timeout | null; // dispose 置 null
   private disposeP: Promise<void> | null = null; // 并发 dispose 共享同一关闭操作与完成结果（s4e Y-C2：不能让第二次调用提前返回——那时 close 可能仍挂起）；s4f F3：先发布后运行——同步重入（close 回调里再 dispose）也共享同一收尾，恰一次 close；注：async 签名下两次调用返回的外层 Promise 引用不保证 ===，仅共享操作与结果（s4g 契约措辞）
+  /** D3：待答提问（requestId→方法+所属代次）。换代/退役由 onGenerationEnded 撤答。 */
+  private readonly pendingUi = new Map<string, { method: UiRequestMethod; generation: number }>();
 
   constructor(private readonly opts: RpcSessionOpts) {
     const now = opts.now ?? (() => new Date().toISOString());
@@ -163,6 +212,8 @@ export class RpcSession {
       coordinator: this.coordinator,
       gate: this.gate,
       onProcessEvent: (ev, generation) => this.demux(ev, generation),
+      // D3：代次终结（retire/意外退出/EOF 交接）→撤本代全部待答提问（不写死进程 stdin）
+      onGenerationEnded: (generation, reason) => this.closeUiForGeneration(generation, reason),
       onStderr: (t, generation) => {
         try {
           opts.onStderr?.(t, generation);
@@ -297,6 +348,11 @@ export class RpcSession {
       }
       return; // 未知 id 的 response：丢弃（不进事件流）
     }
+    if (o !== null && typeof o === "object" && o.type === "extension_ui_request") {
+      // D3：扩展提问透传（docs/d3-ui-passthrough-design.md §2）——不进 onPiEvent 兜底（非 pi 事件）
+      this.handleUiRequest(ev, generation);
+      return;
+    }
     if (o !== null && typeof o === "object" && o.type === "agent_settled") {
       // P2-2（K3 审）：agent_settled 也透传 onPiEvent（D1 聚合器清窗兑底依赖它；coordinator 结算逻辑不变）
       const r = this.coordinator.onPiEvent(ev, generation);
@@ -324,6 +380,137 @@ export class RpcSession {
       if (ret instanceof Promise) void ret.catch((e: unknown) => this.safeAudit(`rpc-session pi-event-async-error ${String(e instanceof Error ? e.message : e)}`));
     } catch (e: unknown) {
       this.safeAudit(`rpc-session pi-event-error ${String(e instanceof Error ? e.message : e)}`);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // D3 扩展问答（docs/d3-ui-passthrough-design.md）：透传/作废/回答。
+  // -------------------------------------------------------------------------
+
+  /** 扩展提问处理：对话族→onUiRequest（登记 pendingUi；溢出→立即 cancelled+overflow 作废）；
+   *  notify→onUiNote；其余即显四法+未知法→审计 ui-unsupported（无阻塞风险，不透传）。 */
+  private handleUiRequest(ev: unknown, generation: number): void {
+    const o = ev as Record<string, unknown>;
+    const id = typeof o["id"] === "string" ? o["id"] : null;
+    const method = typeof o["method"] === "string" ? o["method"] : "";
+    if (id === null || id.length === 0 || id.length > 128) {
+      this.safeAudit("rpc-session ui-request-drop bad-id");
+      return;
+    }
+    if (method === "notify") {
+      if (typeof o["message"] !== "string") {
+        this.safeAudit(`rpc-session ui-notify-drop no-message id=${id}`);
+        return;
+      }
+      const raw = o["notifyType"];
+      const notifyType = raw === "warning" || raw === "error" ? raw : "info"; // 缺省/非法→info（pi 奇观：缺省 info）
+      try {
+        this.opts.onUiNote?.({ notifyType, message: o["message"] });
+      } catch (e: unknown) {
+        this.safeAudit(`rpc-session ui-note-error ${String(e instanceof Error ? e.message : e)}`);
+      }
+      return;
+    }
+    if (UI_DIALOG_METHODS.has(method as UiRequestMethod)) {
+      if (this.pendingUi.has(id)) {
+        this.safeAudit(`rpc-session ui-request-duplicate id=${id} generation=${generation}`); // pi 侧 id 唯一；防御
+        return;
+      }
+      if (this.pendingUi.size >= UI_PENDING_MAX) {
+        // 溢出：立即回 cancelled（不悬挂扩展），通知宿主撤框面；不入 pendingUi
+        void this.writeUiResponse(id, generation, { cancelled: true });
+        this.safeAudit(`rpc-session ui-overflow id=${id} generation=${generation} size=${this.pendingUi.size}`);
+        this.emitUiClosed(id, "overflow");
+        return;
+      }
+      const optStr = (k: string): { v?: string } => (typeof o[k] === "string" ? { v: o[k] as string } : {});
+      const title = optStr("title").v;
+      const message = optStr("message").v;
+      const placeholder = optStr("placeholder").v;
+      const prefill = optStr("prefill").v;
+      const timeoutRaw = o["timeout"];
+      const timeoutMs = typeof timeoutRaw === "number" && Number.isSafeInteger(timeoutRaw) && timeoutRaw > 0 ? timeoutRaw : undefined;
+      let options: readonly string[] | undefined;
+      if (method === "select") {
+        const raw = o["options"];
+        if (!Array.isArray(raw) || raw.length === 0 || !raw.every((x) => typeof x === "string")) {
+          this.safeAudit(`rpc-session ui-request-drop bad-options id=${id}`);
+          return;
+        }
+        options = raw as readonly string[];
+      }
+      this.pendingUi.set(id, { method: method as UiRequestMethod, generation });
+      try {
+        this.opts.onUiRequest?.({
+          requestId: id,
+          method: method as UiRequestMethod,
+          ...(title !== undefined ? { title } : {}),
+          ...(options !== undefined ? { options } : {}),
+          ...(message !== undefined ? { message } : {}),
+          ...(placeholder !== undefined ? { placeholder } : {}),
+          ...(prefill !== undefined ? { prefill } : {}),
+          ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+        });
+      } catch (e: unknown) {
+        this.pendingUi.delete(id); // 回调异常→回滚登记（提问不出门，不悬挂）
+        this.safeAudit(`rpc-session ui-request-error ${String(e instanceof Error ? e.message : e)}`);
+        void this.writeUiResponse(id, generation, { cancelled: true });
+        this.emitUiClosed(id, "overflow");
+        return;
+      }
+      return;
+    }
+    // setStatus/setWidget/setTitle/set_editor_text（及未知法）：v1 不透传（docs §3.2）
+    const known = UI_UNSUPPORTED_METHODS.has(method);
+    this.safeAudit(`rpc-session ui-unsupported method=${method} known=${known} id=${id}`);
+  }
+
+  /** 回答活跃提问（网关层已做方法级校验+首答胜出；本层兑底：代次活界+写 stdin）。
+   *  顺序：先删 pendingUi 再写——并发次答在入口即 unknown（首答胜出双重保险）。 */
+  async answerUi(requestId: string, payload: UiAnswerPayload): Promise<UiAnswerOutcome> {
+    const p = this.pendingUi.get(requestId);
+    if (p === undefined) return { kind: "unknown" };
+    const st = this.supervisor.getState();
+    if (st.generation !== p.generation || st.phase !== "running" || st.retired) {
+      this.pendingUi.delete(requestId);
+      this.emitUiClosed(requestId, "process-retired");
+      this.safeAudit(`rpc-session ui-answer-stale id=${requestId} pendingGen=${p.generation} liveGen=${String(st.generation)}`);
+      return { kind: "stale" };
+    }
+    this.pendingUi.delete(requestId);
+    const okW = await this.writeUiResponse(requestId, p.generation, payload);
+    if (!okW) {
+      this.emitUiClosed(requestId, "process-retired");
+      this.safeAudit(`rpc-session ui-answer-write-failed id=${requestId} generation=${p.generation}`);
+      return { kind: "write-failed" };
+    }
+    return { kind: "delivered" };
+  }
+
+  /** 写一行 extension_ui_response 到所属代次 stdin（非本代/非 running→false）。 */
+  private async writeUiResponse(id: string, generation: number, payload: UiAnswerPayload): Promise<boolean> {
+    const st = this.supervisor.getState();
+    if (st.generation !== generation || st.phase !== "running" || st.retired) return false;
+    const line = `${JSON.stringify({ type: "extension_ui_response", id, ...payload })}\n`;
+    return this.supervisor.writeControlLine(line);
+  }
+
+  /** 代次终结：本代全部待答提问作废（不写死进程 stdin；撤框通知宿主；审计每条一行）。 */
+  private closeUiForGeneration(generation: number, reason: string): void {
+    void reason; // 语义统一走 process-retired（v1 不区分意外退出/交接）
+    for (const [id, p] of [...this.pendingUi]) {
+      if (p.generation !== generation) continue;
+      this.pendingUi.delete(id);
+      this.emitUiClosed(id, "process-retired");
+      this.safeAudit(`rpc-session ui-close id=${id} generation=${generation}`);
+    }
+  }
+
+  private emitUiClosed(requestId: string, reason: UiClosedReason): void {
+    try {
+      this.opts.onUiClosed?.(requestId, reason);
+    } catch (e: unknown) {
+      this.safeAudit(`rpc-session ui-closed-error ${String(e instanceof Error ? e.message : e)}`);
     }
   }
 

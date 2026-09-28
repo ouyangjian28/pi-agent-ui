@@ -287,9 +287,10 @@ export interface UiRequestFrame {
   readonly timeoutMs?: number; // pi 声明 timeout(ms)；仅展示提示，宿主不据此作答（pi 侧自答后晚答照转、pi 忽略过期 id）
 }
 
-export type UiClosedReason = "process-retired" | "no-subscriber" | "overflow";
+/** 作废因：进程换代=process-retired；派发时零订阅=no-subscriber；pending 超 8=overflow；任一订阅者已答=answered（其余订阅者撤框；答案胜出者不再另发确认帧）。 */
+export type UiClosedReason = "process-retired" | "no-subscriber" | "overflow" | "answered";
 
-/** S→C：提问作废通知（UI 撤对话框）。进程换代=process-retired；派发时零订阅=no-subscriber；pending 超 8=overflow。 */
+/** S→C：提问作废通知（UI 撤对话框；UI 按 requestId 幂等撤框，reason 仅展示/诊断）。 */
 export interface UiClosedFrame {
   readonly t: "ui-closed";
   readonly requestId: string;

@@ -24,6 +24,7 @@ import type {
 import { LIMITS, SubscriptionEngine, validateClientFrame, validateWriteFrame, WRITE_FRAME_TYPES, defaultStreamId } from "@pi-agent-ui/protocol";
 import type { WriteClientFrame } from "@pi-agent-ui/protocol";
 import type { WriteHostPort } from "./write-host.ts";
+import type { UiHostPort, UiAskGateway } from "./ui-host.ts";
 import type { ScanRow } from "@pi-agent-ui/protocol";
 import { ReadIndexRegistry, FileOverBudgetError } from "@pi-agent-ui/protocol";
 import type { ReadIndex } from "@pi-agent-ui/protocol";
@@ -104,6 +105,8 @@ export interface WsGatewayOpts {
   readonly recoveryEvidence?: (file: string, signal: AbortSignal) => RecoveryEvidenceResult | null | Promise<RecoveryEvidenceResult | null>;
   /** 3c-1 写侧宿主（缺省=未接线：写类帧维持 v1 冻结拒绝 4405；接线后仅开放 prompt/stop）。 */
   readonly writeHost?: WriteHostPort;
+  /** D3 扩展问答答案端口（缺省=未接线：ui-answer 帧 4405 拒绝；提问/作废/notify 广播面不受影响）。 */
+  readonly uiHost?: UiHostPort;
   /** 订阅数据入口（W1-04；缺省=订阅一律 4402 fail-closed，接线归宿主/3b）。 */
   readonly historySource?: HistorySourcePort;
   /** 每会话状态源（订阅帧冻结用；缺省=unknown 状态）。 */
@@ -206,6 +209,9 @@ export class WsGateway {
    *  （barrier<seq 才投，快照已含的不重投），与引擎集合冻结解耦。 */
   private readonly publishStates = new Map<string, PublishState>();
   private readonly pendingPumps = new Set<string>();
+  /** D3：待答提问路由表（requestId→file+方法上下文；方法级校验/跨文件门/首答胜出的权威键）。
+   *  生命周期=派发时登记→作废/已答删；末订阅者断开触发 cancelPendingUiForFile（docs §4）。 */
+  private readonly uiPending = new Map<string, { file: string; method: UiAskGateway["method"]; options?: readonly string[] }>();
   private readonly handshakeTimes: number[] = []; // 单调时钟滑窗（W1-02）
   /** R6（3b-1）：per-IP 认证失败限速+退避（滑窗计数+指数退避封顶；hello 成功即清户）。 */
   private readonly authRateCfg: { limit: number; windowMs: number; baseBlockMs: number; maxBlockMs: number };
@@ -394,6 +400,7 @@ export class WsGateway {
       case "unsubscribe": this.handleUnsubscribe(st, frame); return;
       case "list-sessions": void this.handleList(st, frame); return;
       case "get-recovery": void this.handleRecovery(st, frame); return;
+      case "ui-answer": this.handleUiAnswer(st, frame); st.inflight.delete(frame.requestId); return; // D3：同步路由+即时还槽（首答胜出由 uiPending 删点保证；同 id 次答→4404 未知或已答）
     }
   }
 
@@ -999,6 +1006,105 @@ export class WsGateway {
     this.schedulePump(file);
   }
 
+  // ---- D3 扩展问答（docs/d3-ui-passthrough-design.md §4）：提问派发/作废广播/答案路由 ----
+
+  /** 提问广播：登记 uiPending→广播给订阅 file 的全部活跃连接（任意相可答）。返回送达连接数
+   *  （0=零订阅者——组装层立即回 pi cancelled，不悬挂扩展）。多订阅同弹+首答胜出自洽（docs §6.3）。 */
+  broadcastUiRequest(file: string, ask: UiAskGateway): number {
+    this.uiPending.set(ask.requestId, { file, method: ask.method, ...(ask.options !== undefined ? { options: ask.options } : {}) });
+    const w = this.watchers.get(file);
+    let n = 0;
+    if (w !== undefined) {
+      const frame: ServerFrame = {
+        t: "ui-request",
+        requestId: ask.requestId,
+        file,
+        method: ask.method,
+        ...(ask.title !== undefined ? { title: ask.title } : {}),
+        ...(ask.options !== undefined ? { options: [...ask.options] } : {}),
+        ...(ask.message !== undefined ? { message: ask.message } : {}),
+        ...(ask.placeholder !== undefined ? { placeholder: ask.placeholder } : {}),
+        ...(ask.prefill !== undefined ? { prefill: ask.prefill } : {}),
+        ...(ask.timeoutMs !== undefined ? { timeoutMs: ask.timeoutMs } : {}),
+      };
+      for (const c of w.refs) {
+        if (c.closed || !c.subs.has(file)) continue;
+        this.enqueue(c, frame);
+        n++;
+      }
+    }
+    if (n === 0) this.uiPending.delete(ask.requestId); // 无处投递：撤登记（组装层回 pi cancelled）
+    this.audit?.(`ws-gateway ui-request file=${file} id=${ask.requestId} method=${ask.method} conns=${n}`);
+    return n;
+  }
+
+  /** 作废广播：删 uiPending→向仍订阅 file 的连接发 ui-closed（无人可答时仅审计；docs §4 末订阅者规则）。 */
+  broadcastUiClosed(file: string, requestId: string, reason: "process-retired" | "overflow" | "no-subscriber" | "answered"): void {
+    this.uiPending.delete(requestId);
+    const w = this.watchers.get(file);
+    if (w === undefined) { this.audit?.(`ws-gateway ui-closed file=${file} id=${requestId} reason=${reason} conns=0`); return; }
+    const frame: ServerFrame = { t: "ui-closed", requestId, reason };
+    let n = 0;
+    for (const c of w.refs) {
+      if (c.closed || !c.subs.has(file)) continue;
+      this.enqueue(c, frame);
+      n++;
+    }
+    this.audit?.(`ws-gateway ui-closed file=${file} id=${requestId} reason=${reason} conns=${n}`);
+  }
+
+  /** 即显族 notify→耐久 live 流（LiveEvent v1.2 ui-note；重放/续读天然兼容，重复显示无害）。 */
+  broadcastUiNote(file: string, note: { notifyType: "info" | "warning" | "error"; message: string }): void {
+    this.broadcastLive(file, { kind: "ui-note", notifyType: note.notifyType, message: note.message });
+  }
+
+  /** ui-answer 路由（docs §4：方法级校验+跨文件门+首答胜出）。同步删 uiPending 后异步回写——
+   *  同 tick 次答在入口即 4404；晚答（pi 已自答）照转由 pi 忽略过期 id。 */
+  private handleUiAnswer(st: ConnState, frame: Extract<ClientFrame, { t: "ui-answer" }>): void {
+    if (this.opts.uiHost === undefined) { this.errFrame(st, 4405, "扩展问答未接线", frame.requestId); return; }
+    const entry = this.uiPending.get(frame.requestId);
+    if (entry === undefined) { this.errFrame(st, 4404, "提问未知或已答", frame.requestId); return; }
+    if (!st.subs.has(entry.file)) { this.errFrame(st, 4404, "非该会话订阅者", frame.requestId); return; } // 跨文件门（docs §6.1：活跃订阅者即答）
+    // 方法级校验（形状门已在协议校验器：恰其一+类型）
+    if ("value" in frame) {
+      if (entry.method === "confirm") { this.errFrame(st, 4404, "confirm 不接受 value", frame.requestId); return; }
+      if (entry.method === "select" && !(entry.options ?? []).includes(frame.value)) {
+        this.errFrame(st, 4404, "value 不在选项内", frame.requestId); return;
+      }
+    } else if ("confirmed" in frame && entry.method !== "confirm") {
+      this.errFrame(st, 4404, `仅 confirm 接受 confirmed`, frame.requestId); return;
+    }
+    this.uiPending.delete(frame.requestId); // 首答胜出原子点（同步删；后续同 id 答案入口即拒）
+    const payload = "value" in frame ? { value: frame.value } : "confirmed" in frame ? { confirmed: frame.confirmed } : { cancelled: true as const };
+    const f = entry.file;
+    void this.opts.uiHost
+      .answer(f, frame.requestId, payload)
+      .then((outcome) => {
+        // delivered→广播 answered（全订阅者撤框）；stale/write-failed→会话层已 emitUiClosed→组装层广播
+        // process-retired，网关不重复；unknown=会话层已答（竞态双删安全）。
+        if (outcome.kind === "delivered") this.broadcastUiClosed(f, frame.requestId, "answered");
+        else this.audit?.(`ws-gateway ui-answer id=${frame.requestId} outcome=${outcome.kind}`);
+      })
+      .catch((e: unknown) => {
+        this.audit?.(`ws-gateway ui-answer-error id=${frame.requestId} ${String(e instanceof Error ? e.message : e)}`);
+        this.broadcastUiClosed(f, frame.requestId, "process-retired"); // 端口异常→保守撤框（不悬挂 UI）
+      });
+  }
+
+  /** 末订阅者离场：file 全部待答提问回 pi cancelled（无人可答规则 docs §4）。在
+   *  releaseWatcher 摘登记之后调用（watchers 已删；广播面自空转）。 */
+  private cancelPendingUiForFile(file: string): void {
+    if (this.opts.uiHost === undefined || this.uiPending.size === 0) return;
+    for (const [id, entry] of [...this.uiPending]) {
+      if (entry.file !== file) continue;
+      this.uiPending.delete(id);
+      void this.opts.uiHost
+        .answer(file, id, { cancelled: true })
+        .then((o) => this.audit?.(`ws-gateway ui-cancel id=${id} file=${file} outcome=${o.kind}`))
+        .catch((e: unknown) => this.audit?.(`ws-gateway ui-cancel-error id=${id} ${String(e instanceof Error ? e.message : e)}`));
+    }
+  }
+
   private schedulePump(file: string): void {
     if (this.pendingPumps.has(file)) return;
     this.pendingPumps.add(file);
@@ -1041,6 +1147,7 @@ export class WsGateway {
       // 再停宿主观察；宿主清理异常不阻断。
       this.watchers.delete(file);
       this.pendingPumps.delete(file);
+      this.cancelPendingUiForFile(file); // D3：末订阅者离场→pending 全 cancelled（docs §4 无人可答规则）
       try { w.unobserve?.(); } catch { /* 宿主清理异常不阻断 */ }
     }
   }

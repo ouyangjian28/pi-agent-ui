@@ -42,8 +42,9 @@ pi 进程内扩展（安全三层防线：permission-gate / pi-verdict / filter-
 
 服务端→客户端（请求作废通知，UI 撤对话框）：
 ```
-{ t:"ui-closed", requestId, reason:"process-retired"|"no-subscriber"|"overflow" }
+{ t:"ui-closed", requestId, reason:"process-retired"|"no-subscriber"|"overflow"|"answered" }
 ```
+（answered=任一订阅者已答：其余订阅者撤框；胜出者不另发确认帧，以 ui-closed(answered) 兼作回执。）
 
 ### 3.2 即显族
 
@@ -63,7 +64,8 @@ pi 进程内扩展（安全三层防线：permission-gate / pi-verdict / filter-
 
 - **派发**：file F 的 pi 进程发出对话族请求 → 广播给「当前订阅 F 的全部活跃连接」（任意相；
   paging 期订阅者也可答）。零订阅者 → 立即回 pi `cancelled`（无人可答，不悬挂扩展）+审计。
-- **答案**：任一活跃订阅连接可答；首个合法答案胜出并回写 pi stdin；此后同 requestId → 4404。
+- **答案**：任一活跃订阅连接可答；首个合法答案胜出并回写 pi stdin；此后同 requestId → 4404，并广播
+  `ui-closed{reason:"answered"}` 给全部订阅者（含胜出者——兼作回执，UI 幂等撤框）。
   请求校验=answerer 连接须持 F 的活跃订阅（requestId 反查 file；跨文件猜测 → 4404）。
 - **无人可答规则**：连接断开使 F 失去最后一个订阅者且 F 有 pending ui-request → 全部回 pi
   `cancelled` + 向（已断的）连接外无投递（ui-closed 只发仍订阅者，无则仅审计）。
