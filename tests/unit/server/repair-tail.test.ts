@@ -950,5 +950,23 @@ describe("r8 崩溃窗结构身份持久化（GPT r7 P1-r7-1）", () => {
     expect((await readdir(e.evidenceDir)).some((f) => f.includes("repair-pending"))).toBe(true); // marker 保留
     await rm(e.roots, { recursive: true, force: true });
     await rm(e.evidenceDir, { recursive: true, force: true });
+    // 有尾+旧 marker 形：起点吻合尾在场但不可复扫取证（marker 无字段+尾≠原始尾哈希）→主函数入口门同拒
+    const e2 = await env([jl("i1")]);
+    await seedAnchor(e2);
+    await appendFile(e2.abs, `{"t":"sending","intentId":"i1","x":"y"`, "utf8");
+    await expect(repairJournalTail(OPT(e2, { openHandle: crashAfterTruncate2 }))).rejects.toThrow("crash after truncate");
+    const mp2 = join(e2.evidenceDir, `${encodeURIComponent(e2.file)}.repair-pending.json`);
+    const m2 = JSON.parse(await readFile(mp2, "utf8")) as Record<string, unknown>;
+    delete m2.fragIntentId;
+    await writeFile(mp2, JSON.stringify(m2), "utf8");
+    await appendFile(e2.abs, `{"t":"send`, "utf8"); // 有尾（起点吻合、与 marker 原尾哈希不符）
+    const before2 = await readFile(e2.abs);
+    const r3 = await repairJournalTail(OPT(e2));
+    expect(r3).toMatchObject({ kind: "aborted", reason: "repair-marker-conflict" });
+    if (r3.kind === "aborted") expect(r3.detail).toContain("旧版 marker");
+    expect((await readFile(e2.abs)).equals(before2)).toBe(true);
+    expect((await readdir(e2.evidenceDir)).some((f) => f.includes("repair-pending"))).toBe(true);
+    await rm(e2.roots, { recursive: true, force: true });
+    await rm(e2.evidenceDir, { recursive: true, force: true });
   });
 });
