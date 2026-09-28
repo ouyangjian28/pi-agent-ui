@@ -18,7 +18,7 @@ import { adjudicateJournal, type AdjudicateSubject } from "../../../apps/server/
 import { buildRecoverReport, parseJournalText, recoverFromSnapshot } from "../../../apps/server/src/runtime/recover.ts";
 import { repairJournalTail } from "../../../apps/server/src/runtime/repair-tail.ts";
 import { createRecoveryEvidenceProvider, isRecoverySnapshot, type RecoveryEvidenceSnapshot } from "../../../apps/server/src/runtime/recovery-evidence-source.ts";
-import type { JournalLine } from "@pi-agent-ui/protocol";
+import { JOURNAL_CONTRACT_VERSION, type JournalLine } from "@pi-agent-ui/protocol";
 
 const sha = (b: Buffer | string): string => createHash("sha256").update(b).digest("hex");
 const jl = (i: string) => JSON.stringify({ t: "enqueue", intentId: i, sessionId: "q", generation: 1, leafId: "L", matchKey: { textHash: "h", attachmentIdentity: "a", ordinal: 1 }, payload: { kind: "prompt", rawText: "t", attachments: [], sentAt: "1" } });
@@ -825,6 +825,24 @@ describe("r8 abandon verdict 一致门负例（N-abandon-official 转正）", ()
     expect(await readFile(e.abs)).toEqual(before);
     const r2 = await adjudicateJournal(opts(e, fragSubject(H, 30, 66, at, "i1"), "abandon"));
     expect(r2.kind).toBe("adjudicated"); // 一致归因放行
+    await cleanup(e);
+  });
+});
+
+// r3（GPT r2 R2-F4）：默认契约版本精确断言—— adjudicate 默认写版本必须跟随常量
+// （变异 `?? 2` 退回旧默认时本断言红；历史 fixture 的 v2 手造行不受影响）。
+describe("r3 默认契约版本断言（Mu-extra-F4 锁）", () => {
+  it("写出的 adjudicate 行 contractVersion===JOURNAL_CONTRACT_VERSION（默认路径无显式传入）", async () => {
+    const torn = '{"t":"sending","intentId":"i1","x":"y"';
+    const H = sha(torn); const at = "2026-10-05T00:00:00.000Z";
+    const e = await env([jl("i1"), send("i1"), repairRow(30, 66, H)]);
+    await seedAnchor(e);
+    const r = await adjudicateJournal(opts(e, repairSubject(H, 30, 66), "resend"));
+    expect(r.kind).toBe("adjudicated");
+    const raw = await readFile(e.abs, "utf8");
+    const adjLine = raw.split("\n").find((l) => l.includes('"t":"adjudicate"'));
+    expect(adjLine).toBeTruthy();
+    expect(JSON.parse(adjLine as string).contractVersion).toBe(JOURNAL_CONTRACT_VERSION);
     await cleanup(e);
   });
 });

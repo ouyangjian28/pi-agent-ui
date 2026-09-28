@@ -11,6 +11,7 @@ import {
   acquireJournalLock,
   appendWriterOath,
   WriterGuard,
+  type LockHolderInfo,
 } from "../../../apps/server/src/runtime/writer-oath.ts";
 import { parseJournalText, buildRecoverReport } from "../../../apps/server/src/runtime/recover.ts";
 import { journalLineSchemaError, replayIntents, scanWriterEpoch, type JournalLine } from "@pi-agent-ui/protocol";
@@ -49,7 +50,7 @@ describe("W-oath-1 排他锁（FF-1 单例互斥；O_EXCL+pid 探活）", () => 
     expect(a.ok).toBe(false);
     if (!a.ok) {
       expect(a.reason).toBe("held");
-      expect(a.stale).toBe(true); // 诊断=可安全人工清理
+      expect(a.stale).toBe(true); // 诊断=可人工清理（前提：停服务+禁并发拉起+同命名空间，见设计稿 §3）
       expect(a.holder?.bootId).toBe("boot-dead");
     }
     // 锁文件一字未动（无人 unlink——r1 探活→unlink→重建的 TOCTOU 抢占窗已删）
@@ -108,7 +109,7 @@ describe("W-oath-3 写前守卫（FF-3 旧写者停写；冻结粘性；增量�
     const { dir, path } = await tmpJournal(`${writerRow(1, "boot-a")}\n`);
     const raw1 = await readFile(path, "utf8");
     const g = new WriterGuard(path, 1, "boot-a");
-    g.initialize(Buffer.byteLength(raw1, "utf8"));
+    g.initialize({ byteEnd: Buffer.byteLength(raw1, "utf8") });
     expect((await g.checkBeforeAppend()).ok).toBe(true); // 无变化=放行
     // 外部：新写者宣誓 epoch=2
     const fh = await import("node:fs/promises").then((m) => m.open(path, "a"));
@@ -117,8 +118,8 @@ describe("W-oath-3 写前守卫（FF-3 旧写者停写；冻结粘性；增量�
     const v = await g.checkBeforeAppend();
     expect(v.ok).toBe(false);
     if (!v.ok) expect(v.reason).toBe("writer-superseded");
-    // 粘性：盘面不再变化后续 check 仍拒；initialize/noteAppended 不解冻
-    g.initialize(99999);
+    // 粘性：盘面不再变化后续 check 仍拒；initialize/noteAppended 不解冻不重置
+    expect(g.initialize({ byteEnd: 99999 })).toBe(false);
     g.noteAppended(5);
     const v2 = await g.checkBeforeAppend();
     expect(v2.ok).toBe(false);
@@ -129,13 +130,14 @@ describe("W-oath-3 写前守卫（FF-3 旧写者停写；冻结粘性；增量�
     const { dir, path } = await tmpJournal(`${writerRow(1, "boot-a")}\n`);
     const g = new WriterGuard(path, 1, "boot-a");
     const raw0 = await readFile(path, "utf8");
-    g.initialize(Buffer.byteLength(raw0, "utf8"));
+    g.initialize({ byteEnd: Buffer.byteLength(raw0, "utf8") });
     expect((await g.checkBeforeAppend()).ok).toBe(true);
     // B 宣誓 epoch=2（并发他写）
     const fh = await import("node:fs/promises").then((m) => m.open(path, "a"));
     await fh.appendFile(`${writerRow(2, "boot-b")}\n`);
     await fh.close();
-    // A 自己 append 业务行+fsync 后按增量记账（r1 缺陷形：按全盘 stat 回写会把 B 的宣誓吞进基线）
+    // A 自己 append 业务行后按增量记账（r1 缺陷形：按全盘 stat 回写会把 B 的宣誓吞进基线；
+    // 注：本测试 append 后仅 close 未 sync——逻辑记账覆盖即有效，不作为 fsync 顺序证据）
     const myRow = `${settledRow("i1")}\n`;
     const fh2 = await import("node:fs/promises").then((m) => m.open(path, "a"));
     await fh2.appendFile(myRow);
@@ -157,7 +159,7 @@ describe("W-oath-3 写前守卫（FF-3 旧写者停写；冻结粘性；增量�
     expect(v0b.reason).toBe("uninitialized"); // 粘性（与吞字节同界：冻结后不再演化）
     // 独立实例：正常建基线后 journal 消失
     const g2 = new WriterGuard(path, 1, "boot-a");
-    g2.initialize(10);
+    g2.initialize({ byteEnd: 10 });
     await rm(path, { force: true });
     const v = await g2.checkBeforeAppend();
     expect(v.ok).toBe(false);
@@ -168,7 +170,7 @@ describe("W-oath-3 写前守卫（FF-3 旧写者停写；冻结粘性；增量�
   it("无宣誓他写（异常盘面）→foreign-write-detected 保守冻结", async () => {
     const { dir, path } = await tmpJournal(`${writerRow(1, "boot-a")}\n`);
     const g = new WriterGuard(path, 1, "boot-a");
-    g.initialize(Buffer.byteLength(await readFile(path, "utf8"), "utf8"));
+    g.initialize({ byteEnd: Buffer.byteLength(await readFile(path, "utf8"), "utf8") });
     const fh = await import("node:fs/promises").then((m) => m.open(path, "a"));
     await fh.appendFile(`${settledRow("iX")}\n`); // 他写业务行无宣誓（违反 INV-1 的异常面）
     await fh.close();
@@ -214,6 +216,96 @@ describe("W-oath-4 重放兼容+schema+读面呈现（FF-4）", () => {
     const report = buildRecoverReport(parsed.lines, "q", { fragments: [], blocked: false });
     expect(report.writerState.legacyHead).toBe(false);
     expect(report.writerState.maxEpoch).toBe(2);
+  });
+});
+
+describe("W-r3-1 release 单次共享（GPT r2 R2-F1 回归）", () => {
+  it("重叠调用至多一次读-删序列：B 持有时重复/并发 release 不删 B 的锁→C 拒起", async () => {
+    const { dir, path } = await tmpJournal("");
+    let holderCalls = 0;
+    let releaseFirst!: (h: LockHolderInfo | null) => void;
+    // 真读（测试内联：读锁文件+解析；与模块内实现同形）
+    const realRead = async (p: string): Promise<LockHolderInfo | null> => {
+      try {
+        const parsed = JSON.parse(await readFile(p, "utf8")) as Record<string, unknown>;
+        if (typeof parsed.pid !== "number" || typeof parsed.bootId !== "string") return null;
+        return { pid: parsed.pid, bootId: parsed.bootId, at: typeof parsed.at === "string" ? parsed.at : null };
+      } catch {
+        return null;
+      }
+    };
+    // 接缝：首次读锁挂起（模拟 release-1 在读回后 unlink 前被调度暂停）
+    const deferredRead = (p: string): Promise<LockHolderInfo | null> => {
+      if (p !== `${path}.writer.lock`) return realRead(p);
+      holderCalls += 1;
+      if (holderCalls === 1) return new Promise((res) => { releaseFirst = (h) => res(h); });
+      return realRead(p);
+    };
+    const a = await acquireJournalLock({ journalPath: path, bootId: "boot-a", readLockHolder: deferredRead });
+    expect(a.ok).toBe(true);
+    if (!a.ok) throw new Error("unreachable");
+    const p1 = a.release(); // 进入读回，挂起
+    await new Promise((r) => setTimeout(r, 5));
+    const p2 = a.release(); // 重叠调用——共享在途，不发起第二次读回
+    await new Promise((r) => setTimeout(r, 5));
+    expect(holderCalls).toBe(1); // 杀点：无共享时此处已 2 次
+    releaseFirst({ pid: 1, bootId: "boot-a", at: "T" }); // release-1 恢复：归属校验过→unlink A 锁（仅一次）
+    await Promise.all([p1, p2]);
+    const b = await acquireJournalLock({ journalPath: path, bootId: "boot-b" });
+    expect(b.ok).toBe(true); // A 释放后 B 可拿
+    const p3 = a.release(); // 完成后重复调用——不再发起读-删
+    await p3;
+    expect(holderCalls).toBe(1); // 杀点：无共享时重复调用再读回
+    const c = await acquireJournalLock({ journalPath: path, bootId: "boot-c" });
+    expect(c.ok).toBe(false); // B 仍持有——A 的 release 不得删到 B 的锁（交错双持有反例正式化）
+    if (!c.ok) expect(c.holder?.bootId).toBe("boot-b");
+    await rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe("W-r3-2 初始化绑定宣誓边界（GPT r2 R2-F2 回归）", () => {
+  it("A 宣誓→B 并发宣誓→A 按自身 byteEnd 建基线→check 杀出 superseded（吞字节无限 ok 反例转正）", async () => {
+    const { dir, path } = await tmpJournal("");
+    const oathA = await appendWriterOath({ journalPath: path, epoch: 1, bootId: "boot-a", at: "TA" });
+    expect(oathA.ok).toBe(true);
+    const oathB = await appendWriterOath({ journalPath: path, epoch: 2, bootId: "boot-b", at: "TB" }); // 并发他者宣誓（模拟）
+    expect(oathB.ok).toBe(true);
+    if (!oathA.ok || !oathB.ok) throw new Error("unreachable");
+    const g = new WriterGuard(path, 1, "boot-a");
+    expect(g.initialize(oathA)).toBe(true); // 基线=自身宣誓边界（不含 B 字节）
+    // 拒重复重置（未冻结时）：二次 initialize 不重置基线——若可重置，基线含 B 字节→check 放行（杀点）
+    expect(g.initialize({ byteEnd: oathB.byteEnd })).toBe(false);
+    const v = await g.checkBeforeAppend();
+    expect(v.ok).toBe(false); // 杀点①：全盘 stat 基线含 B 字节→sizeNow==基线→ok（无限放行）
+    if (!v.ok) expect(v.reason).toBe("writer-superseded");
+    // 冻结后同样无效（粘性）
+    expect(g.initialize({ byteEnd: oathB.byteEnd })).toBe(false);
+    const v2 = await g.checkBeforeAppend();
+    expect(v2.ok).toBe(false); // 冻结粘性
+    await rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe("W-r3-3 at 写读一致（GPT r2 R2-F3 回归）", () => {
+  it("at 空串→invalid-oath 且零 I/O（读盘前拦）；缺省 at 可写可读", async () => {
+    const { dir, path } = await tmpJournal(`${writerRow(1, "boot-a")}\n`);
+    let reads = 0;
+    const spyRead = async (p: string) => {
+      reads += 1;
+      return readFile(p, "utf8");
+    };
+    const r = await appendWriterOath({ journalPath: path, epoch: 2, bootId: "boot-b", at: "", readFile: spyRead });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("invalid-oath");
+    expect(reads).toBe(0); // 杀点：显式校验删除时 selfCheck 兜底仍拦但 reads≥1（分层证明）
+    // 缺省 at：默认 ISO 时间戳，写出行 schema 可读
+    const r2 = await appendWriterOath({ journalPath: path, epoch: 2, bootId: "boot-b", readFile: spyRead });
+    expect(r2.ok).toBe(true);
+    const parsed = parseJournalText(await readFile(path, "utf8"));
+    expect(parsed.bad.length).toBe(0);
+    const writerRows = parsed.lines.filter((l) => l.t === "writer");
+    expect(writerRows.at(-1)?.at).toBeTruthy();
+    await rm(dir, { recursive: true, force: true });
   });
 });
 

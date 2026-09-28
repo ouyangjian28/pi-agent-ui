@@ -49,6 +49,8 @@ export interface LockOptions {
   /** 测试接缝：pid 探活（默认 process.kill(pid,0)；ESRCH=死，其余含 EPERM=活）。 */
   readonly alive?: (pid: number) => boolean;
   readonly now?: () => string;
+  /** 测试接缝：锁文件读回（r3/F1：release 交错测试可控）。 */
+  readonly readLockHolder?: (path: string) => Promise<LockHolderInfo | null>;
 }
 
 /** 锁文件内容。 */
@@ -107,15 +109,25 @@ export async function acquireJournalLock(opts: LockOptions): Promise<LockAcquire
     }
     return {
       ok: true,
-      release: async () => {
-        // 归属校验后删（只删自己的锁；fail-closed 下持有期内无人可换锁——他者 EEXIST 即拒不删）
-        const h = await readLockHolder(path);
-        if (h && h.bootId === opts.bootId) await unlink(path).catch(() => undefined);
-      },
+      release: (() => {
+        // 单次共享（r3/GPT r2 R2-F1）：重叠/重复调用共享同一在途 Promise——至多一次「读回校验→
+        // unlink」序列。无共享时交错（release-1 读回暂停→release-2 读+unlink 完成→B 拿锁→
+        // release-1 恢复再删=B 的锁被删→C 拿锁=双持有）。前置：调用方保证 release 后写面静止
+        // （装配层约束：先关写面再释放锁，见设计稿 §3 r3）。
+        let started: Promise<void> | null = null;
+        return () => {
+          started ??= (async () => {
+            const readHolder = opts.readLockHolder ?? readLockHolder;
+            const h = await readHolder(path);
+            if (h && h.bootId === opts.bootId) await unlink(path).catch(() => undefined);
+          })();
+          return started;
+        };
+      })(),
     };
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-    const holder = await readLockHolder(path);
+    const holder = await (opts.readLockHolder ?? readLockHolder)(path);
     if (holder === null) return { ok: false, reason: "held", holder: null, stale: false }; // 锁文件不可读=无证据，保守拒起（人工处置）
     const holderAlive = alive(holder.pid);
     return { ok: false, reason: "held", holder, stale: !holderAlive }; // 死=stale 诊断仍拒（显式恢复面）
@@ -161,6 +173,10 @@ export async function appendWriterOath(opts: OathOptions): Promise<OathAppendRes
     return { ok: false, reason: "invalid-oath", detail: `epoch 非正安全整数：${String(opts.epoch)}` };
   if (typeof opts.bootId !== "string" || opts.bootId.length === 0)
     return { ok: false, reason: "invalid-oath", detail: "bootId 空" };
+  // r3/GPT r2 R2-F3：at 显式提供时空串拒（写出 schema 不接受的行=写读不一致）；
+  // 组装行另做 parseJournalText 自证（成功返回不得掩盖自造 schema 非法行）——均在任何 I/O 前。
+  if (opts.at !== undefined && (typeof opts.at !== "string" || opts.at.length === 0))
+    return { ok: false, reason: "invalid-oath", detail: "at 空串" };
   let raw: string;
   const readRaw = opts.readFile ?? ((p: string) => readFile(p, "utf8"));
   try {
@@ -176,6 +192,9 @@ export async function appendWriterOath(opts: OathOptions): Promise<OathAppendRes
   if (parsed.bad.length > 0) return { ok: false, reason: "bad-tail" };
   const line = { t: "writer", epoch: opts.epoch, bootId: opts.bootId, at: opts.at ?? new Date().toISOString() };
   const appended = `${JSON.stringify(line)}\n`;
+  const selfCheck = parseJournalText(appended);
+  if (selfCheck.bad.length > 0)
+    return { ok: false, reason: "invalid-oath", detail: `宣誓行 schema 自检失败：${selfCheck.bad[0]?.error ?? "unknown"}` };
   const byteStart = Buffer.byteLength(raw, "utf8");
   let fh: FileHandle;
   try {
@@ -213,6 +232,7 @@ export type GuardVerdict =
 export class WriterGuard {
   private lastKnownSize: number | null = null;
   private frozen: GuardVerdict | null = null;
+  private initialized = false;
 
   constructor(
     private readonly journalPath: string,
@@ -221,10 +241,14 @@ export class WriterGuard {
     private readonly deps: { stat?: (p: string) => Promise<{ size: number }>; readFile?: (p: string) => Promise<string> } = {},
   ) {}
 
-  /** 宣誓 fsync 成功后显式建基线（此 stat 值可信：自己刚写完，进程内串行前提下无人插写）。 */
-  initialize(size: number): void {
-    if (this.frozen) return; // 冻结后拒绝基线重置（不解冻）
-    this.lastKnownSize = size;
+  /** 建基线（一次性）。入参=appendWriterOath 成功结果（r3/GPT r2 R2-F2：可信自身宣誓边界=自己
+   *  写的字节终点 byteEnd——用全盘 stat 会把并发他者宣誓字节吞进基线，守卫永续放行；二次
+   *  initialize 可重置基线同样吞字节）。已初始化/冻结后调用=无效返回 false（拒重复重置）。 */
+  initialize(oath: { readonly byteEnd: number }): boolean {
+    if (this.frozen || this.initialized) return false;
+    this.initialized = true;
+    this.lastKnownSize = oath.byteEnd;
+    return true;
   }
 
   /** 每次 append+fsync 成功后记账（增量：基线+自写字节数；勿用全盘 stat——会吞并发他者写）。 */

@@ -15,7 +15,7 @@
 - **T1 部署双实例**：同机双 systemd 单元/手动+服务并存 → 同 journal 文件双写者，行交错撕裂。
 - **T2 重启竞态**：旧 server 收尾写 vs 新 server 恢复写（关闭超时/强杀后 systemd 立即拉新）。
 - **T3 旧写者复活**：SIGSTOP 解除/长停顿（VM 暂停恢复/swap 颠簸）后旧 server 继续写——新 server 已接管。
-- **T4 共享存储双挂**（NFS/双机同卷）：flock 语义弱或不可用。当前部署=单机 systemd（非现实面），但判据不依赖单机假设（纵深防御）。
+- **T4 共享存储双挂**（NFS/双机同卷）：flock 语义弱或不可用。当前部署=单机 systemd（非现实面）。防御定位=纵深异常检测，不构成跨机写权防护；多机共享存储=不支持形态（§6 D2）。
 
 ## 3. 方案：两道防线
 
@@ -24,13 +24,13 @@
 > **r2 勘误（GPT r1 F1/F8，2026-10-09）**：设计时设想 flock，落地时改 O_EXCL 锁文件+pid 探活——两者不等价（flock 由 OS 回收崩溃锁，锁文件不会）。r1 实现的「探活死→unlink→重建抢占」有 TOCTOU 窗（两竞争者交错 unlink 可互删对方新锁→双持有者，确定性探针复现）。**r2 拍板：fail-closed 无抢占**——stale 锁同样拒起+stale 诊断；崩溃残留恢复=宿主/运维显式清锁（宁拒起不可双写）。ADR-D2 同步勘误。
 
 启动时创建锁文件 `${journalPath}.writer.lock`（O_EXCL 原子创建，写 {pid,bootId,at}+fsync）：
-- 创建成功 → 持有；release 读回校验 bootId 后删（只删自己的；fail-closed 下持有期内无人可换锁，持有者是唯一删除者——自然消灭 TOCTOU）。
-- EEXIST → 探活（process.kill(pid,0)：ESRCH=死，EPERM=活保守）：活=held 拒；死=held 拒+stale:true 诊断（供运维安全清理）；锁不可读=held+holder:null 保守拒。**任何分支都不 unlink 不重试**。
-- 挡 T1/T2（同机）。T4 共享存储（NFS）上 O_EXCL 弱语义→L2 兜底（非存储端 fencing，见 §6 ADR-D2）。
+- 创建成功 → 持有；release 读回校验 bootId 后删（只删自己的）。**条件保证（r3/GPT r2 R2-F1）**：release=单次共享（重叠/重复调用共享同一在途 Promise，至多一次「读回→unlink」序列；无共享时重叠调用可删到下一任持有者的锁→双持有）+调用方保证释放前写面静止（装配层约束：先关写面再释放锁）+信任域排除外部路径替换——「持有者唯一删除者、无 TOCTOU」是这三项前提下的结论，非无条件性质。
+- EEXIST → 探活（process.kill(pid,0)：ESRCH=死，EPERM=活保守）：活=held 拒；死=held 拒+stale:true 诊断（供运维清理：前提=停服务+禁并发拉起+同命名空间——stale 本身不自动等于清理安全）；锁不可读=held+holder:null 保守拒。**任何分支都不 unlink 不重试**。
+- 挡 T1/T2（同机）。T4 共享存储（NFS）上 O_EXCL 弱语义→L2 为**异常检测**（非写权防护、非存储端 fencing；多机共享存储=不支持形态，需另做存储端 fencing，见 §6 ADR-D2）。
 
 ### L2 持久代次宣誓（writer 行，跨锁防线）
 
-**flock 失效场景的兜底**（T3 复活写者锁已丢？——T3 旧进程 fd 还开着锁没丢……真正场景：flock 在 NFS 上弱语义/锁被系统释放/绕过锁路径的写）。核心机制：
+**锁防线外的第二道检测（历史稿称「flock 失效场景的兜底」——L1 落地已非 flock，见 §3 r2 勘误；真正场景：锁被误删/绕锁路径写/T3 复活写者）**。核心机制：
 
 **新行型 `writer`（宣誓行）**：
 
@@ -43,13 +43,13 @@
 
 **启动恢复硬序（宣誓前不开写面）**：
 
-1. flock（L1，失败即拒起）；
+1. O_EXCL 锁文件 acquire（L1，失败即拒起）；
 2. 走既有恢复链（repair/adjudicate/对账——recover.ts，不改）；
 3. 全扫 journal：取最高 writer 行 epoch=N（无数=null）；
 4. 自 epoch=N+1，bootId=新 UUID，追加 writer 宣誓行（fsync）；
 5. 开放写面（写通道受理）。
 
-**旧写者写前检查（停写面；r2 起增量基线）**：写者在宣誓 fsync 后 `initialize(stat size)` 建基线，此后每次 append+fsync 成功 `noteAppended(自写字节数)` 增量记账——**禁用全盘 stat 回写基线**（r1 缺陷形 F2：写后按全盘 stat 重建基线会把并发他者宣誓字节吞进自身基线，守卫永续放行）。未 initialize 即 check=uninitialized 拒（r1 缺陷形：未初始化默认放行）。每次业务 append 前 stat：size ≠ 基线 → 从尾回扫 writer 行：发现 `epoch ≥ 自身` 的异已宣誓（bootId ≠ 自己）→ **冻结写面**（后续 append 一律拒+告警，进入 writer-superseded 状态；冻结粘性，initialize/noteAppended 不解冻）+保留诊断；扫不到异已宣誓（合法写者必先宣誓，无宣誓他写=异常盘面）→ 同样冻结（foreign-write-detected，保守）。check→append 窗口内的他写=检测非预防（L2 界限，文件头注）。
+**旧写者写前检查（停写面；r2 起增量基线，r3 起绑定宣誓边界）**：写者以 `initialize(oath.byteEnd)` 建基线（r3/GPT r2 R2-F2：入参=appendWriterOath 成功结果的 byteEnd=自身宣誓字节终点，类型上拿不到宣誓结果就不能建基线；全盘 stat 会吞并发他者宣誓字节进基线守卫永续放行；一次性，重复调用无效返回 false 拒重置），此后每次 append+fsync 成功 `noteAppended(自写字节数)` 增量记账。未 initialize 即 check=uninitialized 拒（r1 缺陷形：未初始化默认放行）。每次业务 append 前 stat：size ≠ 基线 → 从尾回扫 writer 行：发现 `epoch ≥ 自身` 的异已宣誓（bootId ≠ 自己）→ **冻结写面**（后续 append 一律拒+告警，进入 writer-superseded 状态；冻结粘性，initialize/noteAppended 不解冻）+保留诊断；扫不到异已宣誓（合法写者必先宣誓，无宣誓他写=异常盘面）→ 同样冻结（foreign-write-detected，保守）。check→append 窗口内的他写=检测非预防（L2 界限，文件头注；在途 check 的 await 返回 ok 后新 check 已冻结的交错=装配层串行承诺，见 §7 r3）。
 
 **不变式**：
 - INV-1（先宣誓后业务）：journal 中任何业务行（有 intentId 的行）之前必有 writer 行；行归属=最近前置 writer 行的 epoch。
@@ -71,20 +71,21 @@
 ## 5. 测试面预排（实现批展开）
 
 - W-oath-1/2/3/4/5 对应 FF-1..5 正例；负例与变异：
-  - Mu：flock 门删→FF-1 杀；宣誓后置（业务行先写）→FF-2 杀；写前检查删→FF-3 杀；writer 行参与聚合（漏忽略）→FF-4 杀；legacy 拒读→FF-5 杀。
+  - Mu：flock 门删→FF-1 杀；宣誓后置（业务行先写）→FF-2 杀；写前检查删→FF-3 杀；writer 行参与聚合（漏忽略）→FF-4 杀；legacy 拒读→FF-5 杀。（预排；实际变异谱与分批记录=TEST-MAP P0-3 节权威）
 
 ## 6. ADR（落 projects/pi-agent-ui/decisions）
 
 - **D1 宣誓入 journal（append 行）而非 sidecar 文件**：单一事实源；恢复链/读面复用；无第二原子域（sidecar 与 journal 跨域=新撕裂面）。翻案条件：journal 行体积/解析成本成为瓶颈且宣誓频率高（>1/min）。
-- **D2 flock 主互斥+epoch 行兜底（r2 勘误：落地为 O_EXCL 锁文件，非 flock 等价）**：O_EXCL 同机硬、快、零成本；但**崩溃锁不自动回收**（flock 会）——r1 抢占式回收有 TOCTOU，r2 改 fail-closed（stale 同拒+诊断，显式清锁恢复）。epoch 行慢但跨锁/跨机成立；共享存储（NFS）上 O_EXCL 弱语义→epoch 行非存储端 fencing（写前检查是检测非预防，见 writer-oath.ts 头注）——单机部署下双防线够用，多机共享存储需另做 fencing（超本片范围）。翻案条件：部署形态改为多机共享存储。
+- **D2 flock 主互斥+epoch 行兜底（r2 勘误：落地为 O_EXCL 锁文件，非 flock 等价）**：O_EXCL 同机硬、快、零成本；但**崩溃锁不自动回收**（flock 会）——r1 抢占式回收有 TOCTOU，r2 改 fail-closed（stale 同拒+诊断，显式清锁恢复）。epoch 行慢但跨锁成立（锁被绕过/误删后仍能检测）；**跨机共享存储不成立**（写前检查是检测非预防，无存储端原子拒旧写）——单机部署下双防线够用，多机共享存储=不支持形态（需另做存储端 fencing，超本片范围）。翻案条件：部署形态改为多机共享存储。
 - **D3 bootId 复用读面概念**：一次启动一个身份，读写面统一。翻案条件：无（命名统一项）。
 - **D4 契约版本 2→3，legacy 兼容读+写前补宣誓**：行型联合扩展必 bump；存量 v2 journal 无 writer 行≠错误。翻案条件：无。
 
 ## 7. 实现批对照（2026-10-08 落库 11bc0df+1b6a8d4；TEST-MAP P0-3 节权威）
 
-- FF-1..5 ↔ W-oath-1..5 全落地（12 例全绿；全仓 1422 绿）。变异五点全杀：Mu-1 活锁拒起门/Mu-2 bad-tail 盘面门/Mu-3 superseded 判定/Mu-4 INV-2 anomaly/Mu-5 legacyHead 反写（双杀）。教训：sed 注入后 `git diff --stat` 空=未命中（Mu-5 首跑行号差一），必须验 diff 非空再判杀。
+- FF-1..5 ↔ W-oath-1..5 全落地（实现批时点 12 例全绿；全仓 1422 绿——历史记录；r2 后=14 例、r3 后=17 例，见下）。变异五点全杀：Mu-1 活锁拒起门/Mu-2 bad-tail 盘面门/Mu-3 superseded 判定/Mu-4 INV-2 anomaly/Mu-5 legacyHead 反写（双杀）。教训：sed 注入后 `git diff --stat` 空=未命中（Mu-5 首跑行号差一），必须验 diff 非空再判杀。
 - **L1 落地差异**：Node 无 flock 绑定→O_EXCL 锁文件+pid 探活（**非语义等价**，见 §3 r2 勘误：flock 由 OS 回收崩溃锁、锁文件不会——r2 起 fail-closed，stale 同拒+诊断，无 unlink 抢占；release 读回校验 bootId，持有者=唯一删除者）。锁文件=`${journalPath}.writer.lock`。
-- **契约 2→3 连带决策（D4 展开）**：repair 行写面 contractVersion=JOURNAL_CONTRACT_VERSION 常量注入；**repair-tail 旧行形枚举三形**（r2/F3）：①新形（随常量）②v2 无身份（fix11..P0-1b r7 窗口，固定 v2）③**v2+身份过渡形**（P0-1b r8..r10 窗口实际形态：fragIntentId 已落而契约仍 v2，11bc0df^ 历史实证；缺此枚举过渡窗残局被误判 conflict 拒）。buildRepairRow 加 contractVersion 入参——枚举=历史兼容面不随常量漂移，未来版本升级只追加枚举不改旧形。schema contractVersion≥1 安全整数=v2/v3 兼容读。测试 helper 拆 mrowOf（当前契约形态）/mrowLegacyOf（固定 v2 历史形）/mrowV2FragOf（过渡形）。
+- **契约 2→3 连带决策（D4 展开）**：repair 行写面 contractVersion=JOURNAL_CONTRACT_VERSION 常量注入；**repair-tail 旧行形枚举三形**（r2/F3；r3/GPT r2 R2-F6 时间线勘误——生产行型与 marker 是两条时间线）：①新形（随常量）②v2 无身份（fix11..8ce8d3b^ 即 P0-1b r7 前，固定 v2）③**v2+身份过渡形**（8ce8d3b..11bc0df^ 即 P0-1b r7..r10：r7 起生产行型已带 fragIntentId 而契约仍 v2；marker 携身份另自 r8 6eb761f 起，11bc0df^ 历史实证；缺此枚举过渡窗残局被误判 conflict 拒）。buildRepairRow 加 contractVersion 入参——枚举=历史兼容面不随常量漂移，未来版本升级只追加枚举不改旧形。schema contractVersion≥1 安全整数=v2/v3 兼容读。测试 helper 拆 mrowOf（当前契约形态）/mrowLegacyOf（固定 v2 历史形）/mrowV2FragOf（过渡形）。
 - **r2 修复批（GPT r1 审后，2026-10-09）**：①F1 锁 fail-closed（§3 勘误）②F2 WriterGuard 增量基线（initialize/noteAppended 替 noteSize；uninitialized 拒；冻结粘性）③F3 枚举三形（上条）④F4 adjudicate-journal 生产默认 `?? JOURNAL_CONTRACT_VERSION`（残留字面量 2 会写错版本）⑤F5 appendWriterOath 写前参数校验（epoch 耗尽/非正安全整数/bootId 空→invalid-oath 零改盘）⑥F7 schema writer 行 at 非空。测试 W-oath-1/3 重写+W-oath-6 新增；RT37 形二a 过渡形。
+- **r3 修复批（GPT r2 审 77 NO-GO 后，2026-10-09）**：①R2-F1 release 单次共享（重叠/重复调用共享在途 Promise；W-r3-1）②R2-F2 initialize 绑定宣誓边界（入参改 oath 结果对象，类型层封死 stat 吞字节；一次性拒重置；W-r3-2）③R2-F3 at 空串写前拒+组装行 parseJournalText 自证（零 I/O；W-r3-3）④R2-F4 变异锁面补强（adjudicate 默认版本精确断言 Mu-extra-F4；at 空 Mu-extra-F7；W3 注释失实勘误）⑤R2-F5 文档降界五处（本节上下改动）。组件级约束（单次 release/初始化证据/进程内串行）在服务装配批验证真实重启/关闭重入。
 - **实现切面**：scanWriterEpoch 放 protocol 层（writer-oath.ts 与 recover.ts 共用，破 recover↔writer-oath 循环依赖）；WriterGuard 写前检查=stat size 快路径+变化时重读慢路径；writerState 并入 RecoverReport（异常呈现不阻断恢复）。
 - **未接线面（后续批）**：ws-gateway 服务启动序（acquire→恢复→宣誓→开写面）与业务行写面 WriterGuard 接线=写面装配批（P0-2 前）；本批=纯增量（协议+工具+读面呈现），不改既有写路径行为。
