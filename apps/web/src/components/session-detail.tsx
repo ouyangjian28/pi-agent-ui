@@ -12,12 +12,15 @@
 // C4：stopped 终局诚实标注恢复入口=上层重选文件（当前版本无重建按钮，不做自动重发/自动重订）。
 // D2 直播正文面：LiveStreamView 流式渲染 v1.1 三形（final 权威/增量 rAF 批合/正文落历史即清本轮）；
 // live-list 退为旁路面——只收 pi-progress/turn-state/process-note 三形，正文三形不再文本化占位。
+// D3-F：旁路面增 ui-note（LiveEvent v1.2，按 notifyType 三级配色 class）；直播区附近挂 UiDialog 区
+// （快照 uiRequests→四法对话框，答案经 client.answerUi 回 ui-answer 帧）。
 
 import React from "react";
 import { useSessionDetail } from "../ws/use-session-detail";
 import type { SubscribeClientSurface } from "../ws/subscribe-client";
 import { WriteComposer } from "./write-composer";
 import { LiveStreamView } from "./live-stream";
+import { UiDialog } from "./ui-dialog";
 import type { WriteClientSurface } from "../ws/write-client";
 import type { HistoryEvent, LiveEvent } from "@pi-agent-ui/protocol/src/contracts";
 
@@ -64,22 +67,36 @@ function HistoryRow({ event }: { event: HistoryEvent }) {
   );
 }
 
-/** 直播三形以外的旁路事件（进度/回合/进程）——D2 起正文三形由 LiveStreamView 流式渲染，不再走文本化列表。 */
-type ProgressLiveEvent = Exclude<
+/** 直播三形以外的旁路事件（进度/回合/进程 + D3 ui-note 即显通知）——正文三形由 LiveStreamView 流式渲染。 */
+type SideLiveEvent = Exclude<
   LiveEvent,
   { readonly kind: "message-delta" } | { readonly kind: "message-part-end" } | { readonly kind: "message-final" }
 >;
 
-function isProgressEvent(event: LiveEvent): event is ProgressLiveEvent {
-  return event.kind === "pi-progress" || event.kind === "turn-state" || event.kind === "process-note";
+function isSideLiveEvent(event: LiveEvent): event is SideLiveEvent {
+  return (
+    event.kind === "pi-progress" || event.kind === "turn-state" || event.kind === "process-note" || event.kind === "ui-note"
+  );
 }
 
-function liveEventText(event: ProgressLiveEvent): string {
+const NOTE_LABELS: Readonly<Record<"info" | "warning" | "error", string>> = {
+  info: "通知",
+  warning: "警告",
+  error: "错误",
+};
+
+function liveEventText(event: SideLiveEvent): string {
   switch (event.kind) {
     case "pi-progress": return `进度 ${event.piType}（${event.note}）`;
     case "turn-state": return `回合状态：${event.turn.state}`;
     case "process-note": return `进程${event.phase === "running" ? "运行" : "停止"}通知`;
+    case "ui-note": return `${NOTE_LABELS[event.notifyType]}：${event.message}`;
   }
+}
+
+/** ui-note 三级配色 class（info/warning/error）；其余旁路事件无附加 class。 */
+function liveEventClass(event: SideLiveEvent): string | undefined {
+  return event.kind === "ui-note" ? `live-note live-note-${event.notifyType}` : undefined;
 }
 
 export function SessionDetail({
@@ -101,6 +118,13 @@ export function SessionDetail({
     writeClient !== null && file !== null &&
     (view.status === "empty" || view.status === "streaming" || view.status === "resync-needed" || view.status === "stopped");
   const composer = composerVisible ? <WriteComposer key={file} client={writeClient} file={file} /> : null;
+
+  // D3-F 扩展问答区（直播区附近的稳定槽位）：快照有活跃提问即堆叠渲染；答案经 client.answerUi 发
+  // ui-answer 帧并本地移除。连接/订阅终局时客户端已清空 uiRequests，无需按视图态过滤。
+  const dialog =
+    view.uiRequests.length > 0 ? (
+      <UiDialog requests={view.uiRequests} onAnswer={(requestId, answer) => client.answerUi(requestId, answer)} />
+    ) : null;
 
   // 槽位 0（视图体）：空态族=div.empty（role/aria 语义保留）；内容族=Fragment 包裹的既有结构。
   let body: React.ReactNode;
@@ -186,10 +210,10 @@ export function SessionDetail({
           </p>
         ) : null}
         <LiveStreamView liveEvents={view.liveEvents} historyEvents={view.events} />
-        {view.liveEvents.some(isProgressEvent) ? (
+        {view.liveEvents.some(isSideLiveEvent) ? (
           <ul className="live-list" aria-live="polite" aria-label="直播事件">
-            {view.liveEvents.filter(isProgressEvent).map((event, index) => (
-              <li key={index}>{liveEventText(event)}</li>
+            {view.liveEvents.filter(isSideLiveEvent).map((event, index) => (
+              <li key={index} className={liveEventClass(event)}>{liveEventText(event)}</li>
             ))}
           </ul>
         ) : null}
@@ -199,6 +223,7 @@ export function SessionDetail({
   return (
     <section className="session-detail" aria-label="会话详情">
       {body}
+      {dialog}
       {composer}
     </section>
   );

@@ -59,7 +59,8 @@ export function clearLiveStream(state: LiveStreamState): void {
 }
 
 /**
- * 应用一条 LiveEvent。非直播三形（pi-progress/turn-state/process-note）与正文面无关，忽略。
+ * 应用一条 LiveEvent。非直播三形（pi-progress/turn-state/process-note/ui-note）与正文面无关，忽略。
+ * （D3 ui-note=即显通知，渲染入口在 session-detail 旁路面 live-list，不经本组装器。）
  * 幂等口径：空 delta 忽略；part-end 重复/对未知段到达均安全；final 可重复（同值覆盖）。
  */
 export function applyLiveEvent(state: LiveStreamState, event: LiveEvent): void {
@@ -86,7 +87,7 @@ export function applyLiveEvent(state: LiveStreamState, event: LiveEvent): void {
       return;
     }
     default:
-      return; // pi-progress / turn-state / process-note：正文面不消费
+      return; // pi-progress / turn-state / process-note / ui-note：正文面不消费
   }
 }
 
