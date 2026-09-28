@@ -1215,3 +1215,9 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - **P2-A（真缺陷，已修 a7f2323）**：ui-answer 派发缺同步抛接待——handleUiAnswer 内 answer() 端口同步抛（关停窗 registry dispose→sessionFor 拒绝）会①穿透消息回调=进程级未捕获异常风险②跳过 inflight 还槽→4 次即「在途请求超限」4404 锁死连接。修复=内层 try/catch（同步抛=端口异常同待遇：审计 ui-answer-sync-error+保守撤框 process-retired）+case 层 try/finally 还槽（纵深防御，无独立杀点已如实标注）。W-ui-g10（同步抛 host 非 async 实现在调用点 throw）11/11 绿；Mu-r2a-1（catch 吞掉）真杀 1 红。
 - **r2 其余采信**：转录整理版忠实性抽查三条全属实（双删点互补/cap8 会话级/writeControlLine 同 tick 捕获无跨代写）；修复批 P2-1/P3-1 闭合确认（24 绿实跑）。P3 清单：①「4 例」口径勘误=实际 3 个 it() 块 16 断言覆盖 4 类场景（本节更正）②断言加固=三合法形 frame 全等+cancelled 归一 true 护栏+多余键长值不回显（P3-2/P3-4 已随 a7f2323 后续小批加固）③contracts.ts UiAnswerFrame 注释「至少其一」→「恰其一」（同批更正）④任务书路径勘误=实为 tests/unit/contracts-validate.test.ts（无 protocol/ 子目录）⑤§7 尾债语境=指 a2d37c8 时点，master 已清偿。
 - **P2-B（审报面债，已补）**：转录整理版漏收 K3 原 P2（=P2-A）与 ≥3 条 P3（overflow 因语义误用/requestIdPattern 128 vs 契约 64 耦合/TEST-MAP 表头措辞陈旧）→audits 补「未收录清单」附录，读者不再误判 P2 清单穷尽。overflow 因语义与 requestIdPattern 两条降为具名留观（见 audits 附录）。
+
+**D3-T1 E2E 批审读（2026-10-10，deepseek-flash 1M 应急通道；reasoner 版上下文过压猝死重派）**：88/100 **GO**（无 P1）。核心修复（键归一双向/互斥门/E-ui-3 不变量/官方协议对照）零扣分；变异四杀声明静态自洽未重注（纪律）；E-ui-4 真腿审读方独立复跑 6/6 通过。当日修复批=6d49c98：
+- **P2-1（已修）**：extraPiArgs「不得替换 --mode/--session 基底」仅注释承诺，pi 参数 last-wins 可静默换会话文件→registry 身份锚（mapped/sessionIdOf/恢复证据链/fingerprints 配对全按 sessionFile）劈裂且无显式报错。修复=composition 拒启门（--mode/--session/--session-id）+E-ui-0b 三项负向。
+- **P2-2（已修）**：composition 适配层 note 方向归一（原仅 opt-in E-ui-4 覆盖）与零订阅回 cancelled 分支（原零测试）两支恰为本批修复缺陷类。修复=E-ui-1b（notify→live ui-note 帧断言）+E-ui-2b（断开后新提问→无帧+stdin cancelled 恰一次+no-subscriber 审计）；顺带删 161 行恒真 until（谓词被 148 行包含=零信号）。
+- **P3 处置**：P3-1 tests/integration 已入根 tsconfig（本批文件零错；既存 33 错+tests/unit 既存 38 错=71 根段欠账**具名留观**：typecheck 根段红属既存面，非本批引入，待专项批）/P3-2 恒真断言已删/P3-4 E-ui-0 改 dispose-then-assert 干净红/P3-3 mark 切片边界+P3-5 多根同名歧义（既存面，filePattern 禁 / 无法根限名消歧）具名留观。
+- 审读人署名勘误：报告自署「GLM」有误，实际通道=deepseek-flash（存档已披露更正）。
