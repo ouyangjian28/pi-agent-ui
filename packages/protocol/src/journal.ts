@@ -43,9 +43,71 @@ export type JournalLine =
       readonly commandId: number;
     }
   | RepairLine // P0-1a 修复留痕（无 intentId；重放聚合不参与，报告侧作持久修复事实呈现）
-  | AdjudicateLine; // P0-1b 裁决留痕（宿主人工裁决；重放聚合不参与，报告侧作持久裁决事实参与配对解锁）
+  | AdjudicateLine // P0-1b 裁决留痕（宿主人工裁决；重放聚合不参与，报告侧作持久裁决事实参与配对解锁）
+  | WriterOathLine; // P0-3 写权宣誓（无 intentId；重放聚合不参与，报告侧呈现当前写者+代次异常）
 
-export const JOURNAL_CONTRACT_VERSION = 2;
+/** P0-3 写权宣誓行（journal 写权代次）：server 启动恢复后、开放写面前的持久宣誓。
+ *  身份=epoch（单调 +1）+bootId（server 启动身份，读写面统一概念）。
+ *  不变式：INV-1 任何业务行之前必有 writer 行（行归属=最近前置 writer 行 epoch）；
+ *  INV-2 epoch 严格递增；INV-3 同 epoch 不现两 bootId（违反=脑裂已发生，读面呈现）。 */
+export interface WriterOathLine {
+  readonly t: "writer";
+  /** journal 写权代次（首次宣誓=1；旧写者读到 ≥ 自身 epoch 的异已宣誓即冻结写面）。 */
+  readonly epoch: number;
+  /** server 启动身份（UUID；一次启动一个身份）。 */
+  readonly bootId: string;
+  /** 宣誓时刻（ISO8601；展示用，不参与判据）。 */
+  readonly at: string;
+}
+
+export const JOURNAL_CONTRACT_VERSION = 3; // v3=P0-3 加 writer 行（先例：v2=P0-1a RepairLine）；legacy v2 盘面兼容读，恢复时补宣誓转 v3 域
+
+// ---------------------------------------------------------------------------
+// P0-3 写权代次扫描（纯逻辑；读面呈现/恢复/写前守卫共用）
+// ---------------------------------------------------------------------------
+
+export type WriterAnomaly =
+  | { readonly kind: "epoch-non-monotonic"; readonly epoch: number } // INV-2
+  | { readonly kind: "same-epoch-two-boots"; readonly epoch: number }; // INV-3（脑裂已发生的证据呈现）
+
+export interface WriterEpochScan {
+  /** 最高 writer epoch（无任何 writer 行=null：legacy v2 盘面，恢复时补宣誓 epoch=1）。 */
+  readonly maxEpoch: number | null;
+  readonly latestBootId: string | null;
+  readonly anomalies: readonly WriterAnomaly[];
+  /** INV-1 呈现：首个业务行（有 intentId 的行）出现在首个 writer 行之前（或全无 writer 行）——legacy 段，非错误。 */
+  readonly legacyHead: boolean;
+}
+
+/** journal 行流 → writer 代次状态（不变量机检：违反=呈现不崩溃）。 */
+export function scanWriterEpoch(lines: readonly JournalLine[]): WriterEpochScan {
+  let maxEpoch: number | null = null;
+  let latestBootId: string | null = null;
+  const anomalies: WriterAnomaly[] = [];
+  const seenBootIds = new Map<number, string>(); // epoch → 首见 bootId（INV-3 检测）
+  let firstWriterIdx: number | null = null;
+  let firstBusinessIdx: number | null = null;
+  lines.forEach((line, i) => {
+    if (line.t === "writer") {
+      if (firstWriterIdx === null) firstWriterIdx = i;
+      if (maxEpoch !== null && line.epoch <= maxEpoch) {
+        anomalies.push({ kind: "epoch-non-monotonic", epoch: line.epoch });
+      }
+      if (line.epoch > (maxEpoch ?? 0)) {
+        maxEpoch = line.epoch;
+        latestBootId = line.bootId;
+      }
+      const seen = seenBootIds.get(line.epoch);
+      if (seen === undefined) seenBootIds.set(line.epoch, line.bootId);
+      else if (seen !== line.bootId) anomalies.push({ kind: "same-epoch-two-boots", epoch: line.epoch });
+      return;
+    }
+    // 业务行=有 intentId 的行（repair/adjudicate=宿主工具行，独立信任域，不计 INV-1）
+    if ("intentId" in line && firstBusinessIdx === null) firstBusinessIdx = i;
+  });
+  const legacyHead = firstBusinessIdx !== null && (firstWriterIdx === null || firstBusinessIdx < firstWriterIdx);
+  return { maxEpoch, latestBootId, anomalies, legacyHead };
+}
 
 /** P0-1a 修复留痕行（P0 冻结序①）：宿主显式撕裂尾截断修复的持久记录。
  *  位置+字节边界+buildId+契约版本绑定——修复时 byteStart..byteEnd 段已物理移除，
@@ -170,6 +232,7 @@ export function replayIntents(lines: readonly JournalLine[], sessionId: SessionI
     switch (line.t) {
       case "repair": break; // P0-1a：修复留痕行无 intentId，聚合面显式无操作（GPT r1 B6/L1：真实 case，非注释宣称）
       case "adjudicate": break; // P0-1b：裁决留痕行无顶层 intentId，聚合面无操作（报告侧由 buildRecoverReport 派生配对）
+      case "writer": break; // P0-3：写权宣誓行无 intentId，聚合面无操作（报告侧由 buildRecoverReport 呈现写者/代次异常）
       case "sending":
         byId.set(rec.intentId, { ...rec, sending: true });
         break;

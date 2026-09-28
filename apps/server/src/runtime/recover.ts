@@ -25,7 +25,7 @@
 //   宿主必须呈现 unavailable(no-evidence-snapshot)，不得以 resumable 假安全替代。
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { journalLineSchemaError, replayIntents, type IntentId, type IntentRecord, type JournalLine, type RecoverySummary, type SessionId } from "@pi-agent-ui/protocol";
+import { journalLineSchemaError, replayIntents, scanWriterEpoch, type IntentId, type IntentRecord, type JournalLine, type RecoverySummary, type SessionId, type WriterEpochScan } from "@pi-agent-ui/protocol";
 
 /** 坏行/撕裂尾记录：raw=原始文本（撕裂尾可能是不完整 UTF-8→以 utf8 读入后含替换符，字节面由宿主另行核对）。 */
 export interface BadJournalEntry {
@@ -108,7 +108,12 @@ export interface RecoverReport {
   /** P0-1a 持久修复事实（盘面 repair 行派生；顺序=盘面序）：宿主显式撕裂尾截断修复的留痕。
  *  与快照内存标记 repaired 互补——本表=耐久事实（跨重启），内存标记=同靴修复中过渡态。 */
   readonly repairLog: readonly RepairFact[];
+  /** P0-3 写权代次状态（writer 行扫描；呈现当前写者+不变量异常+legacy 段）。 */
+  readonly writerState: WriterStateReport;
 }
+
+/** P0-3 写权代次呈现（writer 行扫描结果直投；异常=呈现不阻断恢复——脑裂证据交宿主）。 */
+export type WriterStateReport = WriterEpochScan;
 
 /** P0-1a 修复留痕事实（repair 行的读面呈现形态）。fragIntentId=r7 结构归因留痕（缺省=存量行）。 */
 export interface RepairFact {
@@ -380,6 +385,7 @@ export interface RecoverOptions {
 export function buildRecoverReport(lines: readonly JournalLine[], sessionId: SessionId, opts: RecoverOptions = {}): RecoverReport {
   const fragments = opts.fragments ?? [];
   const diskBlocked = opts.blocked ?? fragments.length > 0;
+  const writerScan = scanWriterEpoch(lines);
   const repairLog: RepairFact[] = lines
     .filter((l): l is Extract<JournalLine, { t: "repair" }> => l.t === "repair")
     .map((l) => ({ byteStart: l.byteStart, byteEnd: l.byteEnd, removedSha256: l.removedSha256, buildId: l.buildId, contractVersion: l.contractVersion, at: l.at, ...(l.fragIntentId !== undefined ? { fragIntentId: l.fragIntentId } : {}) }));
@@ -556,6 +562,7 @@ export function buildRecoverReport(lines: readonly JournalLine[], sessionId: Ses
     attributedFragments: verdicts,
     derivedAdjudications,
     repairLog,
+    writerState: writerScan,
   };
 }
 

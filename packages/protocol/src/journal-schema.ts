@@ -143,6 +143,13 @@ export function journalLineSchemaError(obj: UnknownRecord): string | null {
         return "缺字段/错类型 contractVersion";
       return str("at");
     }
+    case "writer": {
+      // P0-3：写权宣誓行——epoch 安全整数≥1；bootId/at 非空 string。多余字段不拒（同其余行型口径）。
+      if (typeof obj["epoch"] !== "number" || !Number.isSafeInteger(obj["epoch"] as number) || (obj["epoch"] as number) < 1)
+        return "缺字段/错类型 epoch";
+      if (typeof obj["bootId"] !== "string" || (obj["bootId"] as string).length === 0) return "缺字段/错类型 bootId";
+      return str("at");
+    }
     default:
       return `未知行型 ${String(t)}`;
   }
