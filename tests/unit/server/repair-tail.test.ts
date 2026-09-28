@@ -691,7 +691,6 @@ describe("P0-1a GPT r3 阻断修复批（B3a/B3b/B6）", () => {
   const markerOf = async (e: Env) => JSON.parse(await readFile(join(e.evidenceDir, `${encodeURIComponent(e.file)}.repair-pending.json`), "utf8")) as { byteStart: number; byteEnd: number; removedSha256: string; startedAt: string };
   const mrowOf = (m: { byteStart: number; byteEnd: number; removedSha256: string; startedAt: string }) =>
     Buffer.from(JSON.stringify({ t: "repair", reason: "torn-tail", byteStart: m.byteStart, byteEnd: m.byteEnd, removedSha256: m.removedSha256, buildId: "build-rt", contractVersion: 2, at: m.startedAt }) + "\n", "utf8");
-  const cleanup = async (e: Env) => { await rm(e.roots, { recursive: true, force: true }); await rm(e.evidenceDir, { recursive: true, force: true }); };
 
   it("RT42-B6/r4 交叉起点：marker 起点后多一条完整合法行+尾恰为 repair 严格前缀→conflict+盘面逐字节不变（起点对齐杀手）", async () => {
     const e = await env([jl("i1")]);
