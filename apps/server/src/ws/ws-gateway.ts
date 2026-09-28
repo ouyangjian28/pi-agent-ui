@@ -991,6 +991,14 @@ export class WsGateway {
     }
   }
 
+  /** D1 直播面：pi 回复增量广播（composition 聚合器出口）。与 journal 观察无关——不验 watcher
+   *  identity（非观察回调，无旧闭包风险）；无活跃订阅=零开销早退。背压/慢客户端=engine.onLiveEvent
+   *  →pushBacklog 超限 4431（既有语义）。 */
+  broadcastLive(file: string, ev: LiveEvent): void {
+    this.forEachEngine(file, (e) => e.onLiveEvent(ev));
+    this.schedulePump(file);
+  }
+
   private schedulePump(file: string): void {
     if (this.pendingPumps.has(file)) return;
     this.pendingPumps.add(file);

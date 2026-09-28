@@ -20,6 +20,7 @@ import { DualHistorySource } from "./runtime/dual-history-source.ts";
 import { createRecoveryEvidenceProvider, isRecoverySnapshot, type RecoveryEvidenceResult } from "./runtime/recovery-evidence-source.ts";
 import { recoverFromSnapshot } from "./runtime/recover.ts";
 import { createSessionRegistry, type SessionRegistry } from "./runtime/session-registry.ts";
+import { LiveAggregator, type LiveContentEvent } from "./runtime/live-aggregator.ts";
 import { createGuardedJournalWriterFactory } from "./runtime/guarded-journal-writer.ts";
 import { randomUUID } from "node:crypto";
 import { PiProcessHost } from "./host/process-host.ts";
@@ -236,6 +237,9 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
   const writerBootId = randomUUID();
   const guardedWriters = createGuardedJournalWriterFactory({ bootId: writerBootId, audit: (l) => audit(l) });
   let registry: SessionRegistry | null = null;
+  // D1 直播面接线状态：per-file 聚合器+late-bound 广播槽（gateway 创建后回填）。
+  const liveAggregators = new Map<string, LiveAggregator>();
+  let liveSink: ((file: string, ev: LiveContentEvent) => void) | null = null;
   if (config.write !== undefined) {
     if (typeof config.write.sessionFor !== "function") {
       throw new Error("write.sessionFor 缺失或非函数：写侧无从落地会话文件，拒绝启动");
@@ -248,6 +252,23 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
       host,
       sessionFor: config.write.sessionFor,
       durabilityFor: (file: string) => guardedWriters.writerFor(file), // P0-2 r1：守卫壳统一接管两写入口（FF-P02-2）
+      // D1 直播面：pi 事件→per-file 聚合器→gateway.broadcastLive。gateway 晚于 registry 构造，
+      // 经 late-bound 槽转发（下方 gateway 创建后回填；构造前事件=零订阅期，丢弃无害）。
+      // disposition 门（E2E 修正）：buffered/delivered 均广播（buffered=response 未回绑的正常回复期，
+      // 记账行已在 enqueue 时落——非未记账）；dropped-stale-generation（旧代事件）/overflow-closed
+      // （gate 溢出已弃）不广播。旧「只 delivered」门把回复期事件全滤掉了（D1-E2E 探针实证）。
+      onPiEvent: (file: string, ev: unknown, _generation: number, disposition: string) => {
+        if (disposition === "dropped-stale-generation" || disposition === "overflow-closed") return;
+        if (liveSink === null) return;
+        // 键归一（r3a 修复批同款）：registry 面=journal 绝对路径；watchers 面=roots 相对逻辑名。
+        const logical = logicalNameWithinRoots(file, config.roots) ?? file;
+        let agg = liveAggregators.get(logical);
+        if (agg === undefined) {
+          agg = new LiveAggregator();
+          liveAggregators.set(logical, agg);
+        }
+        agg.onPiEvent(ev, (le) => liveSink!(logical, le));
+      },
       ...(config.write.responseTimeoutMs !== undefined ? { responseTimeoutMs: config.write.responseTimeoutMs } : {}),
       ...(config.write.turnTimeoutMs !== undefined ? { turnTimeoutMs: config.write.turnTimeoutMs } : {}),
       ...(config.write.readinessTimeoutMs !== undefined ? { readinessTimeoutMs: config.write.readinessTimeoutMs } : {}),
@@ -334,6 +355,9 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     ...(httpServer !== null ? { server: httpServer } : {}),
     audit,
   });
+
+  // D1 直播面：gateway 就位后回填广播槽（此前事件=零订阅期丢弃无害；见上 onPiEvent 接线注）。
+  liveSink = (file, ev) => gateway.broadcastLive(file, ev);
 
   const offConn = adapter.onConnection((conn, tmeta) => {
     gateway.attach(conn, {

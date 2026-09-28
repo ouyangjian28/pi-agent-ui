@@ -115,7 +115,7 @@ interface SessionStatus {
 ### 3.1 两域模型（c3 认可+修订）
 
 - **history 域（持久坐标、可续读）**：`HistoryEvent` 统一编排（§1.3）。订阅持续期新编入事件（快照后落盘的两源事件）经 events 帧 origin:"history" 投递——**不是只发 live**（C3-R03）。
-- **live 域（订阅实例内、不可重放）**：`LiveEvent` 只投进度与状态旁路；**v1 无正文 delta**（脱敏无法安全处理流式增量；终局正文预览以 history `message` 呈现）。live 缺口不承诺恢复。
+- **live 域（订阅实例内、不可重放）**：`LiveEvent` 只投进度与状态旁路；~~**v1 无正文 delta**（脱敏无法安全处理流式增量；终局正文预览以 history `message` 呈现）~~ **v1.1 修订（D1）**：新增 message-delta/message-part-end/message-final 三形——只透 assistant 正文+thinking 缺省滤（详见 §3.4 D1 语义面）。终局正文预览以 history `message` 呈现。live 缺口不承诺恢复。
 - 两域 DTO 分立（§3.3/§3.4）；origin 字面量统一 `"history" | "live"`。
 
 ### 3.2 journal 全行投影（与 JournalLine 一一闭合）
@@ -139,17 +139,29 @@ interface HistoryEventBase {
 // kind 联合=§3.2 + §3.5 消息/异常事件；payload 判别绑定 kind
 ```
 
-### 3.4 LiveEvent（C3-R03 修订：受控枚举+statusVersion）
+### 3.4 LiveEvent（C3-R03 修订：受控枚举+statusVersion；D1 扩三形）
 
 ```ts
 type LiveEvent =
   | { kind: "pi-progress"; piType: PiEventType; note: ProgressNote }   // 无自由文本（模板枚举）
   | { kind: "turn-state"; statusVersion: StatusVersion; turn: TurnState }  // 携带版本防旧覆盖新
-  | { kind: "process-note"; phase: "running" | "stopping" };
+  | { kind: "process-note"; phase: "running" | "stopping" }
+  // D1 直播面（docs/d1-live-stream-design.md）：pi 回复增量透传（v1.1 新增）
+  | { kind: "message-delta"; part: "text" | "thinking"; contentIndex: number; delta: string }   // 节流窗内同段合并（80ms/8KiB）
+  | { kind: "message-part-end"; part: "text" | "thinking"; contentIndex: number }               // 段闭锚（text_end/thinking_end）
+  | { kind: "message-final"; role: "assistant"; text: string };                                  // message_end 终局全文（只 assistant）
 
 type PiEventType = "agent_start"|"turn_start"|"message_start"|"message_update"|"message_end"|"turn_end"|"agent_end"|"agent_settled";
 type ProgressNote = "thinking" | "tool-start" | "tool-end" | "compacting" | "message-start" | "message-end";  // 受控模板；禁正文透传
 ```
+
+**D1 语义与安全面**（v1 「无正文 delta」修订——脱敏无法安全处理流式增量的旧约束由 D1 接管）：
+- **只透 assistant 正文**：user 已知无价值；system 事件含全系统提示/工具清单不外泄（探针实证）。
+- **thinking 缺省不透**（服务端聚合器过滤；开关 server 侧配置，非协议面）。
+- **节流**：同 (part, contentIndex) 增量 80ms 窗合并；单帧 ≤8KiB 超长切分；单 turn 广播总量 2MiB 软上限（超限停 delta，final 仍发）。
+- **delivered 门**：未记账轮次（buffered/overflow）不广播。
+- **背压**：慢订阅=引擎积压门 4431（既有语义，不杀进程不断其他订阅）。
+- message-final 到达=窗内残留丢弃（终局全文权威）；前端拼接以 final 为准（增量流可能缺尾，重同步不承诺恢复 delta）。
 
 - `liveSeq`：订阅实例内每 LiveEvent 递增（首=1）；status 帧不占；**非恢复游标**；重同步重置。**帧语义（精确）**：events 帧的 liveSeq=本批末项序号——帧内首项=liveSeq-events.length+1（客户端呈现须按此回推）。`refSeq`：history 分支=本批末项 seq（帧内首项同法回推）；live 分支=**显式 null 字段**（非「无字段」——判别联合两分支均携带，序列化恒出现）。
 

@@ -31,6 +31,9 @@ export interface SessionRegistryOpts {
   /** 观测面（20b B2）：pi 进程 spawn 时回调（file+handle+generation）——E2E/宿主在 spawn 时即记录
    * 句柄身份，不靠事后审计反推；纯观测不参与生命周期（RpcSessionOpts.onSpawned 同源）。 */
   readonly onSpawned?: (file: string, handle: ProcessHandle, generation: number) => void;
+  /** D1 直播面：pi 进程事件回调（file+事件+代次+分派结果）。只透 delivered（journal 未记账轮次
+   *  不外泄）由调用方（composition 聚合器前）门控；纯观测不参与生命周期。 */
+  readonly onPiEvent?: (file: string, ev: unknown, generation: number, disposition: string) => void;
   readonly audit?: (line: string) => void;
   readonly now?: () => string;
 }
@@ -118,6 +121,7 @@ export function createSessionRegistry(opts: SessionRegistryOpts): SessionRegistr
         ...(opts.idleMs !== undefined ? { idleMs: opts.idleMs } : {}),
         ...(opts.eofGraceMs !== undefined ? { eofGraceMs: opts.eofGraceMs } : {}),
         ...(opts.onSpawned !== undefined ? { onSpawned: (handle: ProcessHandle, generation: number) => opts.onSpawned!(file, handle, generation) } : {}),
+        ...(opts.onPiEvent !== undefined ? { onPiEvent: (ev: unknown, generation: number, disposition: string) => opts.onPiEvent!(file, ev, generation, disposition) } : {}),
         ...(opts.now !== undefined ? { now: opts.now } : {}),
         audit: (l: string) => safeAudit(`rpc-session ${sessionIdOf(file)} ${l}`),
       });

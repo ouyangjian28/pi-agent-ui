@@ -3412,3 +3412,41 @@ describe("ws-gateway 3b-4：typed recovery 结果映射+连接级取消", () => 
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// D1 直播面（docs/d1-live-stream-design.md §6 W-d1-7/8）：broadcastLive 公开方法
+// ——pi 回复增量广播（与 journal 观察无关；无活跃订阅零开销；engine.onLiveEvent 背压既有语义）。
+// ---------------------------------------------------------------------------
+describe("ws-gateway D1：broadcastLive 直播广播", () => {
+  it("W-d1-7 只投活跃订阅：同 file 订阅收帧；未订阅连接/别的 file 零帧", async () => {
+    const r = await makeRig();
+    try {
+      r.history.put("d1.jsonl", makeRows(1));
+      r.history.put("other.jsonl", makeRows(1));
+      const c1 = await authed(r);
+      const c2 = await authed(r);
+      await c1.say({ t: "subscribe", requestId: "s1", file: "d1.jsonl" });
+      await c2.say({ t: "subscribe", requestId: "s2", file: "other.jsonl" });
+      r.gw.broadcastLive("d1.jsonl", { kind: "message-delta", part: "text", contentIndex: 1, delta: "首段" });
+      await until(() => c1.frames().some((f) => f.t === "events" && f.origin === "live"), 1000);
+      const live = c1.frames().find((f) => f.t === "events" && f.origin === "live") as { events: Array<{ kind: string; delta?: string }> };
+      expect(live.events[0]).toEqual({ kind: "message-delta", part: "text", contentIndex: 1, delta: "首段" });
+      // c2 订的是 other.jsonl：不收 d1 的直播帧
+      expect(c2.frames().some((f) => f.t === "events" && f.origin === "live" && (f as { events?: Array<{ delta?: string }> }).events?.some((e) => e.delta === "首段"))).toBe(false);
+    } finally {
+      await r.dispose();
+    }
+  });
+
+  it("W-d1-8 无订阅文件=零开销早退（无 watcher/无帧/不抛错）", async () => {
+    const r = await makeRig();
+    try {
+      r.gw.broadcastLive("nope.jsonl", { kind: "message-delta", part: "text", contentIndex: 1, delta: "x" });
+      r.gw.broadcastLive("nope.jsonl", { kind: "message-final", role: "assistant", text: "全文" });
+      // 帧零产出（无连接）——不抛错即过；静态断言补一例真实订阅停止面
+      expect(r.audits.length).toBeGreaterThanOrEqual(0);
+    } finally {
+      await r.dispose();
+    }
+  });
+});

@@ -177,7 +177,15 @@ export type ProgressNote = "thinking" | "tool-start" | "tool-end" | "compacting"
 export type LiveEvent =
   | { readonly kind: "pi-progress"; readonly piType: PiEventType; readonly note: ProgressNote }
   | { readonly kind: "turn-state"; readonly statusVersion: StatusVersion; readonly turn: TurnState }
-  | { readonly kind: "process-note"; readonly phase: "running" | "stopping" };
+  | { readonly kind: "process-note"; readonly phase: "running" | "stopping" }
+  // D1 直播面（docs/d1-live-stream-design.md §2）：pi 回复增量透传。安全面：只透 assistant 正文
+  // （user 已知/system 含系统提示不外泄）；thinking 缺省不透（opts 开关，见 live-aggregator）。
+  | { readonly kind: "message-delta"; readonly part: "text" | "thinking";
+      readonly contentIndex: number; readonly delta: string } // 节流窗内同段增量合并
+  | { readonly kind: "message-part-end"; readonly part: "text" | "thinking";
+      readonly contentIndex: number } // 段闭（text_end/thinking_end；即时 flush 锚）
+  | { readonly kind: "message-final"; readonly role: "assistant";
+      readonly text: string }; // message_end 终局全文（漂移校准/断线补齐；只 assistant）
 
 // ---------------------------------------------------------------------------
 // 组3.6 快照
