@@ -297,7 +297,7 @@ export interface UiClosedFrame {
   readonly reason: UiClosedReason;
 }
 
-/** C→S：答案。字段互斥且至少其一；方法级校验在网关侧带上下文执行：select→value∈options，confirm→confirmed，input/editor→value；任一方法可 cancelled。 */
+/** C→S：答案。字段互斥且恰其一（零枝即 4404）；方法级校验在网关侧带上下文执行：select→value∈options，confirm→confirmed，input/editor→value；任一方法可 cancelled。 */
 export interface UiAnswerFrame {
   readonly t: "ui-answer";
   readonly requestId: string;

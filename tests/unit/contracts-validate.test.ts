@@ -85,11 +85,12 @@ describe("入站帧校验", () => {
     expect(validateClientFrame({ t: "list-sessions", requestId: "r 1" })).toMatchObject({ ok: false, code: 4404 });
   });
 
-  it("ui-answer 三合法形（value/confirmed/cancelled 恰其一）→剪裁后原样；答案枝并存→4404（歧义安全门）", () => {
+  it("ui-answer 三合法形（value/confirmed/cancelled 恰其一）→剪裁后原样（含 cancelled 归一字面量 true）；答案枝并存→4404（歧义安全门）", () => {
     expect(validateClientFrame({ t: "ui-answer", requestId: "r-1", value: "甲" })).toMatchObject({ ok: true, frame: { t: "ui-answer", requestId: "r-1", value: "甲" } });
-    expect(validateClientFrame({ t: "ui-answer", requestId: "r-1", confirmed: true })).toMatchObject({ ok: true });
-    expect(validateClientFrame({ t: "ui-answer", requestId: "r-1", confirmed: false })).toMatchObject({ ok: true });
-    expect(validateClientFrame({ t: "ui-answer", requestId: "r-1", cancelled: true })).toMatchObject({ ok: true });
+    // r2 P3-2/P3-4：三合法形逐一断言返回 frame 全等（含 cancelled 归一为字面量 true 的护拦）
+    expect(validateClientFrame({ t: "ui-answer", requestId: "r-1", confirmed: true })).toEqual({ ok: true, frame: { t: "ui-answer", requestId: "r-1", confirmed: true } });
+    expect(validateClientFrame({ t: "ui-answer", requestId: "r-1", confirmed: false })).toEqual({ ok: true, frame: { t: "ui-answer", requestId: "r-1", confirmed: false } });
+    expect(validateClientFrame({ t: "ui-answer", requestId: "r-1", cancelled: true })).toEqual({ ok: true, frame: { t: "ui-answer", requestId: "r-1", cancelled: true } });
     expect(validateClientFrame({ t: "ui-answer", requestId: "r-1", value: "x", confirmed: true })).toMatchObject({ ok: false, code: 4404 });
     expect(validateClientFrame({ t: "ui-answer", requestId: "r-1", value: "x", cancelled: true })).toMatchObject({ ok: false, code: 4404 });
     expect(validateClientFrame({ t: "ui-answer", requestId: "r-1", confirmed: true, cancelled: true })).toMatchObject({ ok: false, code: 4404 });
@@ -105,9 +106,9 @@ describe("入站帧校验", () => {
   it("ui-answer requestId 缺失/超长/多余键→4404；多余键不回显", () => {
     expect(validateClientFrame({ t: "ui-answer", value: "x" })).toMatchObject({ ok: false, code: 4404 });
     expect(validateClientFrame({ t: "ui-answer", requestId: "r".repeat(129), value: "x" })).toMatchObject({ ok: false, code: 4404 });
-    const r = validateClientFrame({ t: "ui-answer", requestId: "r-1", value: "x", extra: 1 });
+    const r = validateClientFrame({ t: "ui-answer", requestId: "r-1", value: "x", extra: "w".repeat(40) });
     expect(r).toMatchObject({ ok: false, code: 4404 });
-    if (!r.ok) expect(r.message ?? "").not.toContain("extra");
+    if (!r.ok) { expect(r.message ?? "").not.toContain("extra"); expect(r.message ?? "").not.toContain("wwww"); } // P3-4：键名与长值都不回显
   });
   it("estimateFrameBytes：ASCII/中文/代理对 UTF-8 字节", () => {
     const empty = estimateFrameBytes({ t: "events", subscriptionId: "s", origin: "history", refSeq: 0, events: [] });
