@@ -185,7 +185,9 @@ export type LiveEvent =
   | { readonly kind: "message-part-end"; readonly part: "text" | "thinking";
       readonly contentIndex: number } // 段闭（text_end/thinking_end；即时 flush 锚）
   | { readonly kind: "message-final"; readonly role: "assistant";
-      readonly text: string }; // message_end 终局全文（漂移校准/断线补齐；只 assistant）
+      readonly text: string } // message_end 终局全文（漂移校准/断线补齐；只 assistant）
+  // D3 扩展问答（docs/d3-ui-passthrough-design.md §3.2）：扩展 notify 即显通知进耐久流（重放无害）。
+  | { readonly kind: "ui-note"; readonly notifyType: "info" | "warning" | "error"; readonly message: string };
 
 // ---------------------------------------------------------------------------
 // 组3.6 快照
@@ -259,9 +261,49 @@ export type ClientFrame =
   | SubscribeFrame
   | { readonly t: "unsubscribe"; readonly requestId: string; readonly subscriptionId: SubscriptionId }
   | { readonly t: "get-recovery"; readonly requestId: string; readonly file: string; readonly offset?: number; readonly evidenceHash?: string }
-  | { readonly t: "ping"; readonly nonce: string };
+  | { readonly t: "ping"; readonly nonce: string }
+  | UiAnswerFrame;
 
 export type ResyncReason = "server-side-gap" | "stream-replaced";
+
+// ---------------------------------------------------------------------------
+// D3 扩展问答帧（docs/d3-ui-passthrough-design.md §3，契约 v1.2）：pi 进程内扩展提问透传。
+// 对话族=瞬态请求/响应（不进耐久事件流；ui-request 广播给当前订阅该 file 的活跃连接）；
+// 即显族 notify 走 LiveEvent ui-note；setStatus 等四法 v1 不透传（审计 ui-unsupported）。
+// ---------------------------------------------------------------------------
+export type UiRequestMethod = "select" | "confirm" | "input" | "editor";
+
+/** S→C：对话族提问（瞬态广播）。requestId=pi extension_ui_request.id 原样透传（绑定与校验键）。 */
+export interface UiRequestFrame {
+  readonly t: "ui-request";
+  readonly requestId: string;
+  readonly file: string;
+  readonly method: UiRequestMethod;
+  readonly title?: string;
+  readonly options?: readonly string[]; // select
+  readonly message?: string; // confirm 正文
+  readonly placeholder?: string; // input
+  readonly prefill?: string; // editor
+  readonly timeoutMs?: number; // pi 声明 timeout(ms)；仅展示提示，宿主不据此作答（pi 侧自答后晚答照转、pi 忽略过期 id）
+}
+
+export type UiClosedReason = "process-retired" | "no-subscriber" | "overflow";
+
+/** S→C：提问作废通知（UI 撤对话框）。进程换代=process-retired；派发时零订阅=no-subscriber；pending 超 8=overflow。 */
+export interface UiClosedFrame {
+  readonly t: "ui-closed";
+  readonly requestId: string;
+  readonly reason: UiClosedReason;
+}
+
+/** C→S：答案。字段互斥且至少其一；方法级校验在网关侧带上下文执行：select→value∈options，confirm→confirmed，input/editor→value；任一方法可 cancelled。 */
+export interface UiAnswerFrame {
+  readonly t: "ui-answer";
+  readonly requestId: string;
+  readonly value?: string;
+  readonly confirmed?: boolean;
+  readonly cancelled?: true;
+}
 
 export type ServerFrame =
   | { readonly t: "welcome"; readonly serverBootId: string; readonly serverBuildId: string; readonly protocolVersion: 1 }
@@ -278,7 +320,9 @@ export type ServerFrame =
   | { readonly t: "pong"; readonly nonce: string }
   | { readonly t: "write-ack"; readonly requestId: string; readonly file: string; readonly outcome: WriteSendOutcomeDTO }
   | { readonly t: "write-stop-ack"; readonly requestId: string; readonly file: string; readonly outcome: WriteStopOutcomeDTO }
-  | { readonly t: "write-resume-ack"; readonly requestId: string; readonly file: string; readonly outcome: WriteResumeOutcomeDTO }; // v1.1（r3a）
+  | { readonly t: "write-resume-ack"; readonly requestId: string; readonly file: string; readonly outcome: WriteResumeOutcomeDTO } // v1.1（r3a）
+  | UiRequestFrame // v1.2（D3）
+  | UiClosedFrame;
 
 export interface SessionSummaryDTO {
   readonly sessionId: string | null;
@@ -395,6 +439,17 @@ export function validateClientFrame(raw: unknown): FrameCheck {
       let evidenceHash: string | undefined;
       if (has(obj, "evidenceHash")) { const h = obj["evidenceHash"]; if (typeof h !== "string" || !/^[0-9a-f]{64}$/.test(h)) return bad(4404, "evidenceHash 非法"); evidenceHash = h; }
       return ok({ t: "get-recovery", requestId, file, ...(offset !== undefined ? { offset } : {}), ...(evidenceHash !== undefined ? { evidenceHash } : {}) });
+    }
+    case "ui-answer": {
+      // D3：形状级校验（互斥/恰其一/类型）；方法级（value∈options 等）在网关带 pending 上下文执行。
+      const r0 = requireExact(obj, ["t", "requestId", ...extraKeys(obj, ["value", "confirmed", "cancelled"])]); if (r0) return r0;
+      const requestId = reqId(obj); if (!isStr(requestId)) return requestId;
+      const hasV = has(obj, "value"), hasC = has(obj, "confirmed"), hasX = has(obj, "cancelled");
+      if ((hasV ? 1 : 0) + (hasC ? 1 : 0) + (hasX ? 1 : 0) !== 1) return bad(4404, "ui-answer 答案字段互斥且须恰其一");
+      if (hasV && typeof obj["value"] !== "string") return bad(4404, "value 必须是字符串");
+      if (hasC && typeof obj["confirmed"] !== "boolean") return bad(4404, "confirmed 必须是布尔");
+      if (hasX && obj["cancelled"] !== true) return bad(4404, "cancelled 必须为 true");
+      return ok({ t: "ui-answer", requestId, ...(hasV ? { value: obj["value"] as string } : {}), ...(hasC ? { confirmed: obj["confirmed"] as boolean } : {}), ...(hasX ? { cancelled: true } : {}) });
     }
     case "ping": {
       const r0 = requireExact(obj, ["t", "nonce"]); if (r0) return r0;

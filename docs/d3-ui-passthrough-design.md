@@ -37,7 +37,7 @@ pi 进程内扩展（安全三层防线：permission-gate / pi-verdict / filter-
 { t:"ui-answer", requestId, value?: string, confirmed?: boolean, cancelled?: true }
 ```
 - 按方法校验：select→`value∈options` 或 cancelled；confirm→`confirmed:boolean` 或 cancelled；
-  input/editor→`value:string` 或 cancelled。畸形→4403（沿用网关校验错码）。
+  input/editor→`value:string` 或 cancelled。畸形→4404（帧形状错码惯例；§5.3 第 2 级同口径）。
 - `requestId` 未知/已答/已闭 → 4404（晚答诚实拒绝，幂等：首个合法答案胜出）。
 
 服务端→客户端（请求作废通知，UI 撤对话框）：
