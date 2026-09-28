@@ -1203,3 +1203,10 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - **教训**：并行分工下「协议先行批」之后新增的枚举值必须双向同步——审者要专门核对「枚举闭合面跨批是否一致」（本批审出点）。
 
 **D3 r1 K3 审（转录整理版，2026-10-09）+修复批**：审报=projects/pi-agent-ui/audits/k3-d3-r1-review-2026-10-09.md（原报未落盘事故=M-253 披露；审读 worktree 被误删后 K3 靠只读工具完成 95%）。无 P1；P2-1=validateClientFrame ui-answer 形状门分支零测试→已补 4 例（并存歧义/类型错/零枝/requestId+多余键，contracts-validate 24 绿）；P2-2=设计稿 §7 E2E 腿未交付→登记尾债 D3-T1（D3-E2E 批补）；P3-1=§7「畸形 4403」勘误为 4404。K3 验证面（首答胜出双删点互补/生命周期闭合/cap8/审计无敏感内容/非写帧声明/协议字段一致）全过。前端风险提示=4404×3→close 1002（晚答三连关连接；前端 ui-closed 及时撤框+4404 静默已缓解，禁做重试答）。
+
+**D3-T1 E2E 批（2026-10-10，提交 7b2dfed）——尾债收口+composition 键归一真缺陷修复**
+- **接缝三件**（M-OPS 模型选择同面）：RpcSessionOpts.extraPiArgs（spawn 尾部追加，不得替换 --mode/--session 基底）/SessionRegistryOpts 透传/WriteWiringOpts.host+extraPiArgs（受控替身注入缝；host 与 piBin 同供=拒启互斥门）。
+- **E2E 五腿**（tests/integration/ui-passthrough-e2e.test.ts）：E-ui-0 互斥门；E-ui-1 问答往返（ui-request 帧→ui-answer→extension_ui_response 落 stdin+answered 撤框+spawn 基底/追加项断言）；E-ui-2 末订阅者断开→cancelled 恰一次落 stdin；E-ui-3 stop 退役→ui-closed(process-retired)+stdin 零 ui-response（**换代不写死进程 stdin**=closeUiForGeneration 设计不变量，测试断其反）；E-ui-4（PI_E2E=1）真 pi+fixture 扩展（tests/fixtures/e2e-ui-extension.mjs，before_agent_start 弹 select 90s timeout）→ui-note 回执帧→stop 收口。全仓 1592 绿+双 tsc 零错。
+- **真缺陷（E2E 首跑即抓）**：composition uiSink 回调携 journal 绝对路径，网关 watchers 键=订阅逻辑名→两宇宙劈裂（r3a resume 面同族缺陷，K3 曾抓）→广播全落空 n=0→自动 cancelled。修复=uiFileForGateway（logicalNameWithinRoots，abs→logical）+uiHost.answer 适配器反向 resolveWithinRoots（logical→abs）——**两方向必须成对改，单改任一=劈裂**。
+- **变异四杀**：Mu-e2e-1 去归一→3 红；Mu-e2e-2 extraPiArgs 丢弃（语义级删展开，勿造成语法碎）→spawn 断言红；Mu-e2e-3 answer 反向映射去→2 红（副作用=registry 以逻辑名錯建会话→cwd 落 ui-e2e.jsonl 碎屑，变异期限定）；Mu-e2e-4 互斥门去→1 红。M-245 纪律全程（基线 7b2dfed 先提交→注杀→定向红→checkout→复绿）。
+- **测试基建坑**：①重连腿必须按连接分段等帧（frames 切片 mark 起算——旧连接的 snapshot 会让 connect() 提前返回→emit 早于订阅生效→n=0 假失败）；②FakeRpcHost.stop() 同步 emitExit(0)——retire 链 stop→exit 确认→write-stop-ack confirmed 全通。
