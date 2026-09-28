@@ -93,20 +93,24 @@ const d = describe.skipIf(!RUN)("P0-2 r1 W-asm-6 装配面 E2E（真服务重启
   });
   afterAll(async () => { if (dir !== "") await rm(dir, { recursive: true, force: true }).catch(() => {}); });
 
-  it("A-1 真重启续写：两代 writer 行 epoch 1→2+两轮业务行共存+锁文件清", { timeout: 300_000 }, async () => {
+  it("A-1 真重启续写（实例重建）：两代 writer 行 epoch 1→2+两轮业务行共存+锁文件清", { timeout: 300_000 }, async () => {
+    // R4 勘称：同进程内两次 startServer 实例重建（非 OS 进程 SIGKILL/重启）——崩溃残留链=运维清锁面，另册
     const f1 = "s1.jsonl";
+    let l2: Live | null = null;
     const l1 = await boot();
+    try {
     const i1 = await promptRound(l1, f1, "a1-r1", "只回复两个字：收到");
     const ls1 = await readJournal(f1);
     const w1 = ls1.filter((l) => l.t === "writer");
     expect(w1).toHaveLength(1);
+    expect(w1[0]!.epoch).toBe(1); // R4：精确断言（includes 可被 epoch=10 误匹配）
     const epoch1 = w1[0]!.epoch, boot1 = w1[0]!.bootId!;
     await shutdown(l1);
     // dispose 序释放锁：锁文件必清（下一实例可装配）；journal 本体留存（两代共存前提）
     expect(ls1.length).toBeGreaterThanOrEqual(4);
     await expect(readFile(join(dir, `${f1}.writer.lock`), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     // 重启（新进程身份）：同文件续写
-    const l2 = await boot();
+    l2 = await boot();
     const i2 = await promptRound(l2, f1, "a1-r2", "只回复三个字：收到了");
     const ls2 = await readJournal(f1);
     const writers = ls2.filter((l) => l.t === "writer");
@@ -120,11 +124,14 @@ const d = describe.skipIf(!RUN)("P0-2 r1 W-asm-6 装配面 E2E（真服务重启
     expect(audits.some((l) => l.startsWith("guarded-writer ready") && l.includes("epoch=1"))).toBe(true);
     expect(audits.some((l) => l.startsWith("guarded-writer ready") && l.includes("epoch=2"))).toBe(true);
     await shutdown(l2);
+    } finally { await shutdown(l1); await shutdown(l2 ?? null); }
   });
 
   it("A-2 双实例活锁拒：他实例持锁→写 gate-failed(enqueue)+零新业务行", { timeout: 300_000 }, async () => {
     const f2 = "s2.jsonl";
     const l3 = await boot();
+    let l4: Live | null = null;
+    try {
     await promptRound(l3, f2, "a2-r1", "只回复两个字：在的"); // server3 装配持锁+一轮业务
     const before = (await readJournal(f2)).length;
     const l4 = await boot(); // 第二实例（同 dir 同 roots）
@@ -142,7 +149,7 @@ const d = describe.skipIf(!RUN)("P0-2 r1 W-asm-6 装配面 E2E（真服务重启
     expect(audits.slice(audits4Start).some((l) => l.startsWith("guarded-writer lock-held"))).toBe(true);
     expect(audits.slice(audits4Start).some((l) => l.startsWith("write-host-gate-failed-detail") && l.includes("writer-lock-held"))).toBe(true);
     await shutdown(l4);
-    await shutdown(l3); // 先关后来者再关持有者（顺序无假设，双关）
+    } finally { await shutdown(l4 ?? null); await shutdown(l3); }
   });
 });
 

@@ -1,11 +1,18 @@
-// P0-2 r1 装配面：journal 写路径守卫壳（设计稿 docs/p0-2-write-identity-design.md §1.2）。
+// P0-2 装配面：journal 写路径守卫壳（设计稿 docs/p0-2-write-identity-design.md §1.2/§3）。
 // 职责：把 P0-3 组件（acquireJournalLock/appendWriterOath/WriterGuard）装进生产 DurabilityPort——
 // RpcSession 的 TurnGate/DispatchCoordinator 两写入口共用本壳，统一被守（FF-P02-2）。
-// 装配序（每 journal 文件一次，懒触发=工厂 writerFor）：acquireJournalLock → 读盘扫描 maxEpoch →
-// appendWriterOath(epoch=maxEpoch+1, bootId) → guard.initialize(oath) → 开写面。
-// append 序（每行）：await boot → guard.checkBeforeAppend → inner.append → noteAppended(serializeJournalLine 实长)。
-// 失败语义 fail-closed：锁 held（活/死同拒）/bad-tail/oath 写失败 → 该文件写面永不开放，append 恒 reject。
-import { readFile } from "node:fs/promises";
+// r2 根修（GPT r1 审 R1/R2/R3）：每 writer 一条生命周期队列——boot/append/close 全串行，
+// dispose 汇合全部队列（含在途 boot）后才释放锁；装配中 dispose 在检查点中止（零宣誓零泄漏）；
+// bootP 从构造即归一化（任何异常→failed 结果，永不成 unhandled rejection——GPT R3）。
+// 装配序（每 journal 文件一次，懒触发=工厂 writerFor）：
+//   mkdir 父目录（对齐 FileDurability 递归建目录）→ acquireJournalLock → disposed 检查点①
+//   → 读盘扫描 maxEpoch → disposed 检查点② → appendWriterOath(epoch=maxEpoch+1, bootId)
+//   → guard.initialize(oath) → 开写面。
+// append 序（每行，全程队列临界区）：disposed 判 → 装配结果判（fail-closed 恒拒）
+//   → guard.checkBeforeAppend → inner.append → noteAppended(serializeJournalLine 实长)。
+// 失败语义 fail-closed：锁 held（活/死同拒）/bad-tail/oath 写失败/装配 I/O 异常 → 该文件写面永不开放，append 恒 reject。
+import { mkdir, readFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { scanWriterEpoch, serializeJournalLine, type DurabilityPort, type JournalLine } from "@pi-agent-ui/protocol";
 import { parseJournalText } from "./recover.ts";
 import { FileDurability } from "./file-durability.ts";
@@ -31,7 +38,7 @@ export interface GuardedWriterFactoryOpts {
 export interface GuardedWriterFactory {
   /** 每 journal 文件一个守卫写者（同文件幂等返回同一实例——TurnGate/Coordinator 共用）。 */
   writerFor(journalPath: string): DurabilityPort;
-  /** 释放全部已获取锁（前提=写面已静止：调用方须先停会话排空在途——composition dispose 序保证）。 */
+  /** 汇合全部写者生命周期队列（含在途 boot/append）→ close 底座 → 释放锁（dispose 返回后写面静止、无残锁）。 */
   dispose(): Promise<void>;
 }
 
@@ -41,25 +48,45 @@ type BootResult =
   | { readonly kind: "failed"; readonly failure: GuardedBootFailure };
 
 export function createGuardedJournalWriterFactory(opts: GuardedWriterFactoryOpts): GuardedWriterFactory {
-  const writers = new Map<string, DurabilityPort>();
-  const releases: Array<() => Promise<void>> = [];
-  let disposed = false;
+  const writers = new Map<string, GuardedJournalWriter>();
+  const releases = new Map<string, () => Promise<void>>(); // journalPath→release（dispose 归口释放；boot 检查点中止时当场释放）
+  let disposed = false; // 工厂层：置位后 writerFor 拒新构造；boot 检查点读此标志中止装配
   const audit = (line: string): void => { try { opts.audit?.(line); } catch { /* 审计异常不阻断 */ } };
   const readJournal = opts.readJournal ?? ((p: string) => readFile(p, "utf8"));
 
-  /** 装配链（每文件一次）：锁 → 扫描 → 宣誓 → guard。全 async 内聚，无跨文件共享可变态。 */
+  /** 装配链（每文件一次，进该 writer 队列执行）：目录 → 锁 → 检查点① → 扫描 → 检查点② → 宣誓 → guard。 */
   const bootFile = async (journalPath: string): Promise<BootResult> => {
-    // ① L1 锁（fail-closed：活/死同拒——stale 诊断不抢占；EEXIST 探针活死同拒）
-    const lock = await acquireJournalLock({
-      journalPath,
-      bootId: opts.bootId,
-      ...(opts.now !== undefined ? { now: opts.now } : {}),
-    });
-    if (!lock.ok) {
-      audit(`guarded-writer lock-held file=${journalPath} stale=${lock.stale} holderPid=${lock.holder?.pid ?? "unknown"}`);
-      return { kind: "failed", failure: { kind: "writer-lock-held", stale: lock.stale, holderPid: lock.holder?.pid ?? null } };
+    // ⓪ 目录准备（GPT R3：FileDurability 会递归建父目录，锁先跑须对齐——否则 ENOENT 杀装配）
+    try {
+      await mkdir(dirname(journalPath), { recursive: true });
+    } catch (e) {
+      audit(`guarded-writer mkdir-failed file=${journalPath} detail=${String(e)}`);
+      return { kind: "failed", failure: { kind: "writer-oath-failed", detail: `目录准备失败：${String(e)}` } };
     }
-    releases.push(lock.release);
+    // ① L1 锁（fail-closed：活/死同拒——stale 诊断不抢占；EEXIST 探针活死同拒）
+    let lockRelease: (() => Promise<void>) | null = null;
+    try {
+      const lock = await acquireJournalLock({
+        journalPath,
+        bootId: opts.bootId,
+        ...(opts.now !== undefined ? { now: opts.now } : {}),
+      });
+      if (!lock.ok) {
+        audit(`guarded-writer lock-held file=${journalPath} stale=${lock.stale} holderPid=${lock.holder?.pid ?? "unknown"}`);
+        return { kind: "failed", failure: { kind: "writer-lock-held", stale: lock.stale, holderPid: lock.holder?.pid ?? null } };
+      }
+      lockRelease = lock.release;
+    } catch (e) {
+      // 取锁 I/O 异常（非 EEXIST 业务面）：归一装配失败——永不向上抛（GPT R3：unhandled rejection 杀进程）
+      audit(`guarded-writer lock-io-failed file=${journalPath} detail=${String(e)}`);
+      return { kind: "failed", failure: { kind: "writer-oath-failed", detail: `取锁 I/O 失败：${String(e)}` } };
+    }
+    if (disposed) { // 检查点①：装配中 dispose → 当场释放（dispose 循环不认未登记的锁）+零宣誓
+      try { await lockRelease(); } catch (e) { audit(`guarded-writer release-error file=${journalPath} detail=${String(e)}`); }
+      audit(`guarded-writer boot-aborted-disposed file=${journalPath} stage=after-lock`);
+      return { kind: "failed", failure: { kind: "writer-oath-failed", detail: "disposed-mid-boot(after-lock)" } };
+    }
+    releases.set(journalPath, lockRelease);
     // ② 盘面扫描（只读 writer 行历史定代次——修复/裁决/恢复链不入装配链，ADR-P02-D4）
     let raw: string;
     try {
@@ -73,6 +100,10 @@ export function createGuardedJournalWriterFactory(opts: GuardedWriterFactoryOpts
     }
     const scan = scanWriterEpoch(parseJournalText(raw).lines);
     const epoch = (scan.maxEpoch ?? 0) + 1;
+    if (disposed) { // 检查点②：锁已登记——dispose 循环统一释放；零宣誓
+      audit(`guarded-writer boot-aborted-disposed file=${journalPath} stage=pre-oath`);
+      return { kind: "failed", failure: { kind: "writer-oath-failed", detail: "disposed-mid-boot(pre-oath)" } };
+    }
     // ③ 宣誓（自带 bad-tail 门+参数门+自证；fsync 完成即身份在盘）
     const oath = await appendWriterOath({
       journalPath,
@@ -99,43 +130,67 @@ export function createGuardedJournalWriterFactory(opts: GuardedWriterFactoryOpts
   };
 
   class GuardedJournalWriter implements DurabilityPort {
-    private readonly bootP: Promise<BootResult>;
+    /** 生命周期队列（r2 R2 根修）：boot/append/close 全部串行——check→append→note 为不可分临界区，
+     *  同写者并发 append 不再被误判 foreign（datasync 窗口内外无第二个 check 在飞）。 */
+    private queueTail: Promise<unknown> = Promise.resolve();
     private guard: WriterGuard | null = null;
     private failure: GuardedBootFailure | null = null;
-    /** 工厂 dispose 置位（FF-P02-3：dispose 后无新 append 受理——在途已排空的调用方序前提）；
-     *  装配中 dispose→boot 完成但 append 仍拒（写面未开放过，零业务行保证不破）。 */
-    disposed = false;
+    private readonly writerBooted: Promise<BootResult>;
+    /** 写面关停标志：队列临界区内判（含工厂 dispose 汇合）。 */
+    private closed = false;
 
     constructor(readonly journalPath: string, private readonly inner: DurabilityPort) {
-      this.bootP = bootFile(journalPath).then((r) => {
-        if (r.kind === "failed") this.failure = r.failure;
-        else this.guard = r.guard;
-        return r;
+      // boot 进队列+从构造即归一化（GPT R3：rejection 永不逃逸成 unhandled——任何异常→failed 结果）
+      this.writerBooted = this.enqueue(() => bootFile(journalPath)).then(
+        (r) => { if (r.kind === "failed") this.failure = r.failure; else this.guard = r.guard; return r; },
+        (e: unknown) => {
+          // 防御深度：bootFile 自身已 try/catch 归一，此处兜底不可预期异常（仍归一失败，不杀进程）
+          const failure: GuardedBootFailure = { kind: "writer-oath-failed", detail: `装配不可预期异常：${String(e)}` };
+          this.failure = failure;
+          return { kind: "failed", failure } as const;
+        },
+      );
+    }
+
+    /** 入队：op 与前序临界区串行；队列推进不因前序失败而卡死。返回 op 自身的终局 Promise。 */
+    private enqueue<T>(op: () => Promise<T>): Promise<T> {
+      const p = this.queueTail.then(op, op);
+      this.queueTail = p.then(() => undefined, () => undefined);
+      return p;
+    }
+
+    /** 工厂 dispose 汇合点：进队列置 closed+关底座——返回即该 writer 全部生命周期操作已排空。 */
+    drainAndClose(): Promise<void> {
+      return this.enqueue(async () => {
+        this.closed = true;
+        await this.inner.close?.();
       });
     }
 
     async append(line: JournalLine): Promise<void> {
-      if (this.disposed) throw new Error("guarded-writer:disposed（写面已关，拒绝追加）");
-      const boot = await this.bootP;
-      if (this.disposed) throw new Error("guarded-writer:disposed（写面已关，拒绝追加）"); // await 窗口内 dispose 竞态
-      const guard = boot.kind === "ready" ? this.guard : null;
-      if (guard === null) {
-        // 装配失败（fail-closed 恒拒）或竞态缺 guard（防御深度，boot ready 则 guard 必在）
-        const f = this.failure;
-        throw new Error(
-          `guarded-writer:${f !== null ? (f.kind === "writer-oath-failed" ? `${f.kind}:${f.detail}` : f.kind) : "not-ready"}`,
-        );
-      }
-      const verdict = await guard.checkBeforeAppend();
-      if (!verdict.ok) {
-        throw new Error(`guarded-writer:${verdict.reason}${verdict.detail !== undefined ? `:${verdict.detail}` : ""}`);
-      }
-      await this.inner.append(line);
-      guard.noteAppended(serializeJournalLine(line).length); // P02-D1：记账与实写同源
+      return this.enqueue(async () => {
+        if (this.closed) throw new Error("guarded-writer:disposed（写面已关，拒绝追加）");
+        const boot = await this.writerBooted; // 已入队前置：boot 恒先于任何 append 临界区（构造即首发）
+        if (this.closed) throw new Error("guarded-writer:disposed（写面已关，拒绝追加）"); // await 窗口内关停竞态
+        const guard = boot.kind === "ready" ? this.guard : null;
+        if (guard === null) {
+          // 装配失败（fail-closed 恒拒）或竞态缺 guard（防御深度，boot ready 则 guard 必在）
+          const f = this.failure;
+          throw new Error(
+            `guarded-writer:${f !== null ? (f.kind === "writer-oath-failed" ? `${f.kind}:${f.detail}` : f.kind) : "not-ready"}`,
+          );
+        }
+        const verdict = await guard.checkBeforeAppend();
+        if (!verdict.ok) {
+          throw new Error(`guarded-writer:${verdict.reason}${verdict.detail !== undefined ? `:${verdict.detail}` : ""}`);
+        }
+        await this.inner.append(line);
+        guard.noteAppended(serializeJournalLine(line).length); // P02-D1：记账与实写同源
+      });
     }
 
-    async close(): Promise<void> {
-      await this.inner.close?.();
+    close(): Promise<void> {
+      return this.drainAndClose();
     }
   }
 
@@ -150,14 +205,17 @@ export function createGuardedJournalWriterFactory(opts: GuardedWriterFactoryOpts
       return w;
     },
     async dispose(): Promise<void> {
-      disposed = true; // 同步置位：销毁后拒新建立即生效
-      for (const w of writers.values()) if (w instanceof GuardedJournalWriter) w.disposed = true; // FF-P02-3：现存写者全关写面
+      disposed = true; // 同步置位：销毁后拒新 writerFor + boot 检查点中止
+      // 汇合每个 writer 的生命周期队列（含在途 boot/append），close 底座——返回后写面静止
+      await Promise.all([...writers.values()].map((w) => w.drainAndClose().catch((e: unknown) => {
+        audit(`guarded-writer drain-error file=${w.journalPath} detail=${String(e)}`);
+      })));
       writers.clear();
-      // 写面已静止（调用方序保证：registry.dispose 排空会话后才到此处）——逐文件释放锁
-      for (const [i, release] of releases.entries()) {
-        try { await release(); } catch (e) { audit(`guarded-writer release-error #${i}: ${String(e)}`); }
+      // 写面静止后释放全部锁（按文件归口；释放失败不吞清理——audit 留痕，锁自然残留下次 fail-closed）
+      for (const [file, release] of releases) {
+        try { await release(); } catch (e) { audit(`guarded-writer release-error file=${file} detail=${String(e)}`); }
       }
-      releases.length = 0;
+      releases.clear();
     },
   };
 }

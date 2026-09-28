@@ -8,6 +8,16 @@ import { scanWriterEpoch, type DurabilityPort, type JournalLine } from "@pi-agen
 import { parseJournalText } from "../../../apps/server/src/runtime/recover.ts";
 import { createGuardedJournalWriterFactory } from "../../../apps/server/src/runtime/guarded-journal-writer.ts";
 import { acquireJournalLock } from "../../../apps/server/src/runtime/writer-oath.ts";
+import { FileDurability } from "../../../apps/server/src/runtime/file-durability.ts";
+
+import { spawnSync } from "node:child_process";
+import { chmod, mkdir as mkdirRaw } from "node:fs/promises";
+async function mkdirRecursive(p: string): Promise<void> { await mkdirRaw(p, { recursive: true }); }
+function spawnSyncNode(script: string, args: string[]): { status: number | null; stdout: string } {
+  const r = spawnSync(process.execPath, ["--experimental-transform-types", script, ...args], { encoding: "utf8", timeout: 45_000 });
+  return { status: r.status, stdout: String(r.stdout ?? "") + String(r.stderr ?? "") };
+}
+
 
 let dir: string;
 let journal: string;
@@ -168,5 +178,107 @@ describe("守卫壳杂项（bad-tail 面+同实例幂等）", () => {
     await w.append(businessLine);
     expect(appended).toEqual([businessLine]); // 守卫门外底座恰收一行
     await f.dispose();
+  });
+});
+
+describe("r2 根修：生命周期队列（GPT r1 审 R1/R2/R3 杀点）", () => {
+  it("R1-交错1 boot 在途 dispose：检查点中止零宣誓+锁当场释放+后继工厂可写", async () => {
+    // 放大窗口：readJournal 暂停（acquire 已完成、oath 未跑——检查点②拦截位）
+    let resumeRead: (() => void) | null = null;
+    const gate = new Promise<void>((res) => { resumeRead = res; });
+    const f = createGuardedJournalWriterFactory({
+      bootId: "boot-a", now: () => "2026-10-09T00:00:00.000Z",
+      readJournal: async (p) => { if (p === journal) await gate; return readFile(p, "utf8").catch(() => ""); },
+    });
+    const w = f.writerFor(journal);
+    const bootP = (w as unknown as { writerBooted: Promise<unknown> }).writerBooted; // 观察在途
+    const disposing = f.dispose(); // boot 在途时关停（不 await——观察交错）
+    await new Promise((r) => setTimeout(r, 20)); // dispose 置位+drainAndClose 入队等待
+    resumeRead!(); // 放行 boot：恢复后见 disposed → 检查点② 中止
+    await Promise.all([bootP, disposing]);
+    // 断言：零宣誓（journal 不存在或空）+锁已清
+    await expect(readFile(journal, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(`${journal}.writer.lock`, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    // 后继工厂可正常装配写（无锁污染）
+    const g = createGuardedJournalWriterFactory({ bootId: "boot-b", now: () => "2026-10-09T00:00:01.000Z" });
+    await g.writerFor(journal).append(businessLine);
+    const ls = await lines(journal);
+    expect(ls.filter((l) => l.t === "writer")).toHaveLength(1); // 恰一代（无旧 boot 污染）
+    expect(ls.some((l) => l.t === "enqueue" && l.intentId === "i1")).toBe(true); // businessLine 落盘
+    await g.dispose();
+  });
+
+  it("R1-交错2 旧 boot 恢复不污染新持有者：read 暂停→dispose 完成→新工厂写→旧 boot 只得 failed", async () => {
+    let resumeRead: (() => void) | null = null;
+    const gate = new Promise<void>((res) => { resumeRead = res; });
+    const fA = createGuardedJournalWriterFactory({
+      bootId: "boot-a", now: () => "2026-10-09T00:00:00.000Z",
+      readJournal: async (p) => { if (p === journal) await gate; return readFile(p, "utf8").catch(() => ""); },
+    });
+    const wA = fA.writerFor(journal);
+    const disposed = fA.dispose().then(() => { resumeRead!(); }); // dispose 完成后才放行旧 boot（GPT P2 探针交错）
+    await disposed; // 旧 boot 仍在 read 暂停中（gate 已放行但微任务序让 boot 后续恢复）
+    // 新工厂 B 接管同文件：锁可获取+正常写一轮
+    const fB = createGuardedJournalWriterFactory({ bootId: "boot-b", now: () => "2026-10-09T00:00:01.000Z" });
+    const wB = fB.writerFor(journal);
+    await wB.append(businessLine);
+    // 旧 boot 恢复：检查点②（disposed 已置）→failed 零宣誓——B 的盘面不被污染
+    const bootA = (wA as unknown as { writerBooted: Promise<{ kind: string }> }).writerBooted;
+    await expect(bootA).resolves.toMatchObject({ kind: "failed" });
+    const ls = await lines(journal);
+    expect(ls.filter((l) => l.t === "writer")).toHaveLength(1); // 恰 B 一代（无 A 旧 epoch 污染）
+    // B 后续仍可写（未被 foreign 冻结）
+    await wB.append({ t: "settled", intentId: "i-b2" });
+    expect((await lines(journal)).some((l) => l.t === "settled" && l.intentId === "i-b2")).toBe(true);
+    await fB.dispose();
+  });
+
+  it("R2 同写者并发 append 不自冻：A 在 datasync 窗口 B 紧随——两行都成+无 foreign 冻结", async () => {
+    // 真底座包延迟层放大窗口：首 append 落盘慢返（替身不写盘会致记账/盘面脱节——真 fdatasync 语义）
+    let firstInFlight: (() => void) | null = null;
+    const release = new Promise<void>((res) => { firstInFlight = res; });
+    const real = new FileDurability(journal);
+    const origAppend = real.append.bind(real);
+    let appendCount = 0;
+    const appended: JournalLine[] = [];
+    real.append = async (l: JournalLine): Promise<void> => {
+      appendCount += 1;
+      if (appendCount === 1) { firstInFlight!(); await new Promise<void>((r) => setTimeout(r, 40)); } // 首行慢返（落盘前）
+      await origAppend(l);
+      appended.push(l);
+    };
+    const f = createGuardedJournalWriterFactory({
+      bootId: "boot-a", now: () => "2026-10-09T00:00:00.000Z",
+      durabilityFor: () => real,
+    });
+    const w = f.writerFor(journal);
+    const p1 = w.append({ t: "settled", intentId: "i-1" });
+    await release; // 首行已进底座未返回
+    const p2 = w.append({ t: "settled", intentId: "i-2" }); // 紧随（r1 版此处自冻）
+    await Promise.all([p1, p2]);
+    expect(appended.map((l) => (l as { intentId?: string }).intentId)).toEqual(["i-1", "i-2"]);
+    await w.append({ t: "settled", intentId: "i-3" }); // 无粘性冻结：第三行仍可写
+    expect(appended).toHaveLength(3);
+    await f.dispose();
+  });
+
+  it("R3 装配 I/O 异常不杀进程（无 append 消费者）：子进程实跑 exit=0+后续 append 恒拒", { timeout: 60_000 }, async () => {
+    // GPT boot-reject 探针复现口径：writerFor 后不 await 不 append——若 bootP rejection 逃逸=unhandled 杀进程（r1 实锤 exit=1）
+    const script = join(dir, "boot-reject-probe.mts");
+    await writeFile(script, `import { createGuardedJournalWriterFactory } from ${JSON.stringify(new URL("file:///home/yyj/ai/repos/pi-agent-ui/apps/server/src/runtime/guarded-journal-writer.ts").href)};
+const f = createGuardedJournalWriterFactory({ bootId: "boot-a", now: () => "2026-10-09T00:00:00.000Z" });
+const w = f.writerFor(process.argv[2]!); // 父目录 EACCES：取锁 I/O 失败
+await new Promise((r) => setTimeout(r, 200)); // 给 unhandled rejection 逃逸窗口
+try { await w.append({ t: "settled", intentId: "x" }); console.log("APPEND-OK（意外）"); } catch (e) { console.log("APPEND-REJECT " + String(e).slice(0, 60)); }
+await f.dispose();
+console.log("SURVIVED");
+`, "utf8");
+    const locked = join(dir, "noaccess", "s.jsonl");
+    await mkdirRecursive(join(dir, "noaccess"));
+    await chmod(join(dir, "noaccess"), 0o555); // 无写：acquire open(O_EXCL|O_CREAT) EACCES
+    const r = spawnSyncNode(script, [locked]);
+    expect(r.status).toBe(0); // r1 版此处 exit=1（unhandled rejection 杀进程）
+    expect(r.stdout).toContain("SURVIVED");
+    expect(r.stdout).toContain("APPEND-REJECT"); // fail-closed：写面恒拒
   });
 });

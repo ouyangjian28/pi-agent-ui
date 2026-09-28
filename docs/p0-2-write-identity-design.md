@@ -54,7 +54,7 @@ ws-gateway 写分支 → rpc-write-host → session-registry.sessionFor(file) �
 ### 1.4 关停序（composition dispose 插位）
 
 现有冻结序：摘 onConnection → 停轮询/SIGHUP → gateway.dispose（1000 告别+观察器解绑）→ adapter.dispose → tokens.dispose。
-本批插入：session-registry dispose 现由 gateway/write-host 链触发（既有）；**锁释放**=新增尾段（tokens.dispose 后）逐文件 `releaseLock()`——此时写面已关（registry dispose 排空在途）、连接已断，满足 P0-3「释放前写面静止」。释放失败=audit（锁残留=下次启动 EEXIST 拒，可接受）。
+本批插入：composition.dispose 实际序=registry.dispose（排空会话）→ **guardedWriters.dispose（汇合每 writer 生命周期队列含在途 boot/append+关底座+逐文件 `releaseLock()`）** → tokens.dispose——释放前写面静止由队列汇合保证（r2 根修：不再依赖调用方序）。释放失败=audit（锁残留=下次启动 EEXIST 拒，可接受；r1 勘误：unlink 细节通常不可见=「部分失败可能静默残锁」，继承 P0-3 组件行为）。
 
 ## §2 r2 帧身份（预告，r1 审定后细化）
 
@@ -74,21 +74,22 @@ ws-gateway 写分支 → rpc-write-host → session-registry.sessionFor(file) �
 
 - **P02-D1 序列化单一来源**：serializeJournalLine 入 protocol；FileDurability 守卫壳共用。防：字节计数与实写格式漂移（noteAppended 记账错=守卫假阳性冻结/假阴性放行）。
 - **P02-D2 bootId 全局单次**：一次 server 启动一 UUID，多文件共享。弃逐文件独立 bootId：跨文件写权属同一进程身份，读面 INV-3（同 epoch 两 bootId=脑裂）按文件判即可，共享 bootId 让「同次启动」跨文件可识别。
-- **P02-D3 守卫壳不改 sessionFor 同步契约**：懒异步装配+入口同步拒（not-ready）。弃 sessionFor 异步化：侵入 ws-gateway/rpc-write-host 全调用面，收益零（RpcSession.send 本就异步冷启动，首写前装配必已完成或已失败）。
+- **P02-D3 守卫壳不改 sessionFor 同步契约**：懒异步装配，append 入队后 await boot 结果（失败=reject「guarded-writer:…」恒拒，RpcSession 面=durability-failure；非「同步拒」——r1 文档过称勘误）。弃 sessionFor 异步化：侵入 ws-gateway/rpc-write-host 全调用面，收益零（RpcSession.send 本就异步冷启动，首写前装配必已完成或已失败）。
 - **P02-D4 恢复链不入装配批**：装配只读 writer 行历史（scanWriterEpoch）；修复/裁决/恢复扫描（resumeBlocked 面）=既有懒路径不动。理由：装配批最小化（GPT r3 五项必验聚焦），恢复链行为已有 1a/1b 全套审链。
 
 ## §5 测试计划（W-asm 系；变异纪律=基线先提交+五步单链+杀点点验）
 
 | # | 断言 | 杀点 |
 |---|---|---|
-| W-asm-1 | 装配硬序：首 append 前 writer 行已在盘（读盘断言）；装配中 append→not-ready 拒 | 去装配 await→挂 |
+| W-asm-1 | 装配硬序：首 append 前 writer 行已在盘（读盘断言）；装配失败 append→reject 恒拒（fail-closed） | 去装配 await→挂 |
 | W-asm-2 | 锁失败零写：EEXIST（活/死同拒）→sessionFor 抛/写全拒+零业务行 | 去锁检查→挂 |
 | W-asm-3 | 守卫接线：check 冻结后 append 拒（superseded 注入异已宣誓行）| 壳绕过（直接 inner.append）→挂 |
 | W-asm-4 | 字节记账：noteAppended=序列化实长（serializeJournalLine 共用断言） | 计数偏移→后续 check 误冻/误放→挂 |
 | W-asm-5 | 关停序：dispose 后 append 拒+锁已释放（文件不存在）；释放前写面静止 | 释放提前→挂 |
-| W-asm-6 | E2E 真服务：composition 起→prompt 写→盘面 writer 行+业务行；SIGKILL→重启（stale 锁拒开写面）→运维清锁→重启（新 epoch+新 bootId）正常写 | — |
+| W-asm-6 | E2E 真服务（A-1）：composition 起→prompt 写→dispose→实例重建续写（epoch 1→2+新 bootId+锁清）；A-2 双实例活锁拒。**边界（r1 勘称）**：实例重建≠OS 进程 SIGKILL；崩溃残留（stale 锁→运维清锁）与 SIGKILL 链=未在 E2E 验证，stale 行为由单元 W-asm-2 死锁例覆盖 | — |
 | W-asm-7 | 双实例拒：同 journal 第二实例锁拒+零写 | — |
 
 ## §6 迭代史
 
-- r1（本批）：装配面。GPT r3 五项必验逐项对应：oath 唯一流入 initialize（W-asm-1+装配层走查）/启动失败不开写面（W-asm-2）/check→append→fsync→记账串行（W-asm-3/4+FileDurability 既有队列）/关闭先禁新写排空在途再 release（W-asm-5）/真实重启+崩溃残留 E2E（W-asm-6）。
+- r1：装配面（GPT 审 58 NO-GO：R1 dispose 不汇合在途 boot→锁泄漏/释放后旧宣誓污染后继；R2 check→append→note 未整体串行→同写者自冻粘性；R3 bootP 无 rejection 归一化→取锁 I/O 异常 unhandled rejection 杀进程——三探针实锤 /tmp/gpt-p02-r1-probe/）。
+- r2（本批）：根修=每 writer 生命周期队列（boot/append/close 全串行临界区）+dispose 汇合队列（含在途 boot）+boot 检查点①②（装配中 dispose→零宣誓零泄漏中止）+bootP 构造即归一化（异常→failed 恒拒，永不成 unhandled）+mkdir 父目录（对齐 FileDurability）。杀点：R1-交错1/交错2、R2 并发自写、R3 子进程 EACCES exit=0。文档同步收窄（§5 释放序/§3 同步拒称/§6 崩溃链边界）。
