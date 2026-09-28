@@ -512,6 +512,22 @@ hr {
   font-family: var(--font-mono);
 }
 
+/* D2 直播正文区：等宽+保留换行（增量按段拼接，段间 \n）；思考折叠区弱化一档 */
+.session-detail .live-stream {
+  font-family: var(--font-mono);
+}
+.session-detail .live-stream-text {
+  white-space: pre-wrap;
+  margin: var(--sp-2) 0;
+}
+.session-detail .live-stream-thinking {
+  color: var(--c-muted);
+  font-size: 0.9em;
+}
+.session-detail .live-stream-thinking-body {
+  white-space: pre-wrap;
+}
+
 @keyframes list-select-in {
   from {
     transform: translateX(-4px);

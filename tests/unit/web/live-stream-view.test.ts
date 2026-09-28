@@ -6,6 +6,8 @@ import React from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { LiveStreamView } from "../../../apps/web/src/components/live-stream";
+import { SessionDetail } from "../../../apps/web/src/components/session-detail";
+import type { SessionDetailSnapshot } from "../../../apps/web/src/ws/subscribe-client";
 import type { HistoryEvent, LiveEvent } from "@pi-agent-ui/protocol/src/contracts";
 
 const delta = (part: "text" | "thinking", contentIndex: number, d: string): LiveEvent => ({
@@ -157,5 +159,77 @@ describe("LiveStreamView 直播正文渲染", () => {
     );
     await flushFrame();
     expect(screen.getByLabelText("直播正文").textContent).toBe("新一轮增量");
+  });
+});
+
+/** SessionDetail 接线级最小存根：快照由测试推进（与 use-session-detail.test.ts 同模式）。 */
+class StubClient {
+  private readonly listeners = new Set<() => void>();
+  constructor(private snap: SessionDetailSnapshot) {}
+  readonly subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+  readonly getSnapshot = (): SessionDetailSnapshot => this.snap;
+  subscribeSession(): void {}
+  unsubscribeSession(): void {}
+  resyncFromCursor(): void {}
+  push(next: SessionDetailSnapshot): void {
+    this.snap = next;
+    act(() => {
+      for (const listener of this.listeners) listener();
+    });
+  }
+}
+
+function detailSnap(patch: Partial<SessionDetailSnapshot>): SessionDetailSnapshot {
+  return {
+    connState: "ready",
+    errorKind: null,
+    errorMessage: null,
+    streamNote: null,
+    file: "a.jsonl",
+    phase: "live",
+    subscriptionId: "sub-1",
+    events: [],
+    liveEvents: [],
+    status: null,
+    cursor: null,
+    ...patch,
+  };
+}
+
+describe("SessionDetail 接线：D2 直播正文面", () => {
+  it("message 三形进直播正文区、不进 live-list 文本占位；旁路事件仍走 live-list", async () => {
+    const stub = new StubClient(detailSnap({}));
+    render(React.createElement(SessionDetail, { client: stub, file: "a.jsonl" }));
+    stub.push(
+      detailSnap({
+        liveEvents: [
+          { kind: "pi-progress", piType: "message_update", note: "thinking" },
+          delta("text", 0, "流式正文"),
+          final("流式正文终局"),
+        ],
+      }),
+    );
+    await flushFrame();
+    // 正文区=final 权威全文
+    expect(screen.getByLabelText("直播正文").textContent).toBe("流式正文终局");
+    // live-list 只剩旁路事件；D1 文本化占位（［正文增量］/［助手全文］）已退役
+    const liveList = screen.getByLabelText("直播事件");
+    expect(liveList.textContent).toContain("进度 message_update");
+    expect(liveList.textContent).not.toContain("增量");
+    expect(liveList.textContent).not.toContain("助手全文");
+  });
+
+  it("直播三形独占时 live-list 不挂载（无旁路事件）", async () => {
+    const stub = new StubClient(detailSnap({}));
+    render(React.createElement(SessionDetail, { client: stub, file: "a.jsonl" }));
+    stub.push(detailSnap({ liveEvents: [delta("text", 0, "只有正文")] }));
+    await flushFrame();
+    expect(screen.getByLabelText("直播正文").textContent).toBe("只有正文");
+    expect(screen.queryByLabelText("直播事件")).toBeNull();
   });
 });
