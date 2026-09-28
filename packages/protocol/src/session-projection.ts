@@ -16,13 +16,14 @@
 // 孤儿 toolResult（无 toolCallId）→intentId:null（契约）。
 // final 逐项映射=契约冻结表（stop/length/aborted→true；toolUse→false；user→true；toolCall→false）
 // +实现方补全未列举角色（toolResult→false 等待续答；system→true 独立完整——PROJECT 冻结案标注待 GPT 确认）。
-// 时间面（v1 披露，与 journal 投影一致）：ts=null（message.timestamp 展示级映射留后续）；
+// 时间面（v1 披露→D4 §4.1c 修订）：session 源 message 事件 ts=行级 timestamp（ISO 8601）→epoch ms，
+// 解析失败回退 null 不抛；journal 源 ts=null 保持（不对称写入契约——两投影文件头部声明同步）。
 // seq=0 占位——ReadIndex.append 以分配值覆盖。lengthHash 派生=fnv1a64Hex(raw 行)
 // （写侧 journal consumed intervalEnd 须同构——跨侧派生冻结点，待 GPT 确认）。
-import { fnv1a64Hex, sanitizeText } from "./sanitizer.ts";
-import { attributeSessionEntries, type ConsumedInterval } from "./session-attribution.ts";
+import { fnv1a64Hex, sanitizeText } from "./sanitizer.ts";import { attributeSessionEntries, type ConsumedInterval } from "./session-attribution.ts";
 import type { ScanRow } from "./read-index.ts";
-import type { HistoryEvent, SanitizedText } from "./contracts.ts";
+import type { EntryBlock, HistoryEvent, SanitizedText } from "./contracts.ts";
+import { capEncodedBytes, ENTRY_ARGS_PREVIEW_MAX_BYTES } from "./entry-frame.ts";
 import { attachmentIdentity, intentEntersReconciliation, normalizeText, textHash, type AttachmentMultiset, type IntentMatchKey, type IntentKind } from "./identity.ts";
 import { journalLineSchemaError, type UnknownRecord } from "./journal-schema.ts";
 import { sha256Hex12 } from "./sha256.ts";
@@ -43,9 +44,12 @@ export interface SessionProjectionInput {
   readonly enqueues: readonly SessionEnqueueRef[];
   /** consumed 区间（journal 行序——宿主保证）。 */
   readonly consumed: readonly ConsumedInterval[];
+  /** D4 §4.5a：thinking 门控单一真值源的服务端值（服务级 config；默认 false）。门开=事件置
+   *  hasThinking（thinkingCount>0 时）+entry 面产出 thinking 块；门关=存在性不泄露。 */
+  readonly thinkingVisible?: boolean;
 }
 
-/** 消息行形状校验后的最小投影（内部中间结构）。 */
+/** 消息行形状校验后的最小投影（内部中间结构；D4：+ts 行级时间戳+stats 可见块计数）。 */
 interface MessageEntry {
   readonly entryId: string;
   readonly role: "user" | "assistant" | "toolResult" | "system";
@@ -54,6 +58,11 @@ interface MessageEntry {
   readonly toolCallId: string | null;
   readonly raw: string;
   readonly offset: number;
+  /** D4 §4.1a：ts=行级 timestamp→epoch ms（ISO 解析失败回退 null 不抛）。 */
+  readonly ts: number | null;
+  /** D4 §4.1a：可见块计数（blockCount=text+toolCall+attachment 不含 thinking；thinkingCount 内部恒算，
+   *  外发字段受 thinkingVisible 门控——stats 本身不入任何导出面）。 */
+  readonly stats: { readonly blockCount: number; readonly thinkingCount: number };
 }
 
 type Block =
@@ -91,21 +100,24 @@ function canonicalJson(v: unknown): string {
 }
 
 /** content 归一为块数组：字符串=单 text 块；数组=逐块投影（text→text；toolCall→toolCall；
- *  thinking 不投影；其余对象块→attachment（user 附图/未知媒体——附件身份源）；非对象元素忽略）。 */
-function blocksOf(content: unknown): Block[] {
-  if (typeof content === "string") return [{ kind: "text", text: content }];
-  if (!Array.isArray(content)) return [];
+ *  thinking 不投影但计数（D4 stats——行为等价：仍不入共享投影块集）；其余对象块→attachment
+ *  （user 附图/未知媒体——附件身份源）；非对象元素忽略。D4：同時返 thinkingCount（共享面
+ *  调用点与导出面不变，仅内部多返回一个计数）。 */
+function blocksOf(content: unknown): { blocks: Block[]; thinkingCount: number } {
+  if (typeof content === "string") return { blocks: [{ kind: "text", text: content }], thinkingCount: 0 };
+  if (!Array.isArray(content)) return { blocks: [], thinkingCount: 0 };
   const out: Block[] = [];
+  let thinkingCount = 0;
   for (const c of content) {
     if (typeof c !== "object" || c === null) continue;
     const r = c as Record<string, unknown>;
     const t = typeof r["type"] === "string" ? r["type"] : "";
     if (t === "text") out.push({ kind: "text", text: typeof r["text"] === "string" ? r["text"] : "" });
     else if (t === "toolCall") out.push({ kind: "toolCall", toolCallId: typeof r["id"] === "string" ? r["id"] : null });
-    else if (t === "thinking") continue;
+    else if (t === "thinking") { thinkingCount += 1; continue; }
     else out.push({ kind: "attachment", id: attachmentIdOfBlock(t, r) });
   }
-  return out;
+  return { blocks: out, thinkingCount };
 }
 
 /** 单行解析：message 行→MessageEntry；非 message 行→"not-message"（占位分支归 unknown-line）；
@@ -134,7 +146,19 @@ function parseMessageLine(raw: string, offset: number): MessageEntry | "not-mess
     : null;
   const tcRaw = msg["toolCallId"];
   const toolCallId = typeof tcRaw === "string" && tcRaw !== "" ? tcRaw : null;
-  return { entryId: id, role: role as MessageEntry["role"], content: blocksOf(msg["content"]), stopReason, toolCallId, raw, offset };
+  const { blocks, thinkingCount } = blocksOf(msg["content"]);
+  return {
+    entryId: id, role: role as MessageEntry["role"], content: blocks, stopReason, toolCallId, raw, offset,
+    ts: lineTsOf(line["timestamp"]),
+    stats: { blockCount: blocks.length, thinkingCount },
+  };
+}
+
+/** D4 §4.1c：行级 timestamp→epoch ms（ISO 8601；非字符串/解析失败/NaN→null 不抛）。 */
+function lineTsOf(v: unknown): number | null {
+  if (typeof v !== "string" || v.length === 0) return null;
+  const t = Date.parse(v);
+  return Number.isFinite(t) ? t : null;
 }
 
 /** final 逐项映射（契约 §3.5 冻结表+两角色补全——见文件头）。 */
@@ -151,6 +175,64 @@ function finalOf(role: MessageEntry["role"], stopReason: MessageEntry["stopReaso
 
 function textBlocksOf(blocks: readonly Block[]): string {
   return blocks.filter((b): b is Extract<Block, { kind: "text" }> => b.kind === "text").map((b) => b.text).join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// D4 全文读面（docs/d4-fulltext-design.md §4.1a/§4.4/§4.5）：独立全文块投影器+净化。
+// ---------------------------------------------------------------------------
+/** §4.4 denylist：键名（含嵌套）匹配（不区分大小写）→值替换 "[redacted]"。
+ *  仅作用于 argsPreview 的 JSON 序列化前——toolResult 正文=纯文本无键名，只 sanitizeText（另路）。 */
+const DENYLIST_KEY_RE = /token|secret|password|passwd|key|authorization|cookie|credential/i;
+
+function redactForPreview(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(redactForPreview);
+  if (typeof v === "object" && v !== null) {
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      out[k] = DENYLIST_KEY_RE.test(k) ? "[redacted]" : redactForPreview(val);
+    }
+    return out;
+  }
+  return v;
+}
+
+/** D4 §4.1a：独立全文块投影器——输入=parseMessageLine 已校验行的全量 content（同一解析结果的
+ *  另一投影面，非第二解析器；行 schema 校验/身份判定/digest 全部只在共享路径发生一次），
+ *  输出=全文块四形（EntryBlock）。净化两路（§4.5）：①argsPreview=denylist 键名替换+512 编码后
+ *  字节截（argsTruncated 置位）；②toolResult 正文=纯文本无键名→sanitizeText（秘密模式遮蔽；
+ *  不限长——预算截断归装帧器 truncatedAt 面）+UI 展开区风险提示头（前端面）。thinking 块仅门开
+ *  产出（门关零暴露——存在性不泄露）；thinkingSignature 永不投。 */
+export function entryBlocksOf(
+  content: unknown,
+  opts: { readonly thinkingVisible: boolean; readonly role?: "user" | "assistant" | "toolResult" | "system" },
+): EntryBlock[] {
+  const out: EntryBlock[] = [];
+  const push = (b: EntryBlock): void => { out.push(b); };
+  const cleanText = (t: string): string =>
+    opts.role === "toolResult" ? sanitizeText(t, Number.MAX_SAFE_INTEGER).text : t;
+  if (typeof content === "string") { push({ kind: "text", text: cleanText(content) }); return out; }
+  if (!Array.isArray(content)) return out;
+  for (const c of content) {
+    if (typeof c !== "object" || c === null) continue;
+    const r = c as Record<string, unknown>;
+    const t = typeof r["type"] === "string" ? r["type"] : "";
+    if (t === "text") push({ kind: "text", text: cleanText(typeof r["text"] === "string" ? r["text"] : "") });
+    else if (t === "thinking") {
+      if (opts.thinkingVisible) push({ kind: "thinking", text: typeof r["text"] === "string" ? r["text"] : "" });
+    } else if (t === "toolCall") {
+      const argsRaw = r["arguments"];
+      const full = argsRaw === undefined ? "" : JSON.stringify(redactForPreview(argsRaw));
+      const { text, truncated } = capEncodedBytes(full, ENTRY_ARGS_PREVIEW_MAX_BYTES);
+      push({
+        kind: "toolCall",
+        toolCallId: typeof r["id"] === "string" ? r["id"] : null,
+        toolName: typeof r["name"] === "string" ? r["name"] : null,
+        argsPreview: text,
+        ...(truncated ? { argsTruncated: true as const } : {}),
+      });
+    } else push({ kind: "attachment", attachmentId: attachmentIdOfBlock(t, r) });
+  }
+  return out;
 }
 
 /** user 三元组匹配（全量单趟）：文件内同（textHash+attachmentIdentity）组 0 基序号→与 enqueue
@@ -262,7 +344,12 @@ export function sessionToScanRows(input: SessionProjectionInput): ScanRow[] {
         : msg.role === "toolResult" && msg.toolCallId === null ? null
         : intervalAttr.get(msg.entryId) ?? null;
       const generation = um !== undefined ? um.generation : null;
-      const base = { seq: 0, ts: null as number | null, generation, intentId };
+      const base = { seq: 0, ts: msg.ts, generation, intentId };
+      const gate = input.thinkingVisible ?? false;
+      const marks = {
+        ...(gate && msg.stats.thinkingCount > 0 ? { hasThinking: true as const } : {}),
+        blockCount: msg.stats.blockCount,
+      };
       const preview = textBlocksOf(msg.content);
       // 3b2b-R6：stopReason=length 的正文被模型截断——textPreview.truncated 合并真实
       //（即便预览未达限也置位；契约 §3.5「length 加 textPreview.truncated」）；
@@ -277,7 +364,7 @@ export function sessionToScanRows(input: SessionProjectionInput): ScanRow[] {
           ...(pv !== undefined ? { textPreview: pv } : {}),
           ...(msg.stopReason !== null ? { stopReason: msg.stopReason } : {}),
           ...(msg.toolCallId !== null ? { toolCallId: msg.toolCallId } : {}),
-          final: finalOf(msg.role, msg.stopReason) } satisfies HistoryEvent,
+          ...marks, final: finalOf(msg.role, msg.stopReason) } satisfies HistoryEvent,
       });
       let tcIndex = 0;
       for (const b of msg.content) {
@@ -285,7 +372,7 @@ export function sessionToScanRows(input: SessionProjectionInput): ScanRow[] {
         rows.push({
           source: "session" as const, locator, raw,
           event: { ...base, kind: "message" as const, entryId: msg.entryId, blockIndex: tcIndex, role: "toolCall" as const,
-            ...(b.toolCallId !== null ? { toolCallId: b.toolCallId } : {}), final: false } satisfies HistoryEvent,
+            ...(b.toolCallId !== null ? { toolCallId: b.toolCallId } : {}), ...marks, final: false } satisfies HistoryEvent,
         });
         tcIndex += 1;
       }

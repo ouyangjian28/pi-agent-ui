@@ -53,6 +53,11 @@ export class ReadIndex {
   readonly streamId: StreamId;
   readonly file: string;
   private readonly events: IndexedEvent[] = [];
+  /** D4 §4.2 全文读面索引：entryId→首个 message 事件（source:entryId 键，首见为准——与归因面
+   *  同纪律；corrupt 占位/unknown-line 不在 events 里以 message 形态出现，天然不登；system 不登
+   *  （姿态继承：请求已登记 system entryId=4414 unknown-entry）。值为 append 时点快照
+   *  {source, locator, digest, event}——locator 侚 readLineAt 定点读。 */
+  private readonly entryIndex = new Map<string, IndexedEvent>();
   /** 源文件指纹（整文件 SHA-256；空=未记录）。语义（Y-04 钉死）：值=最后事件编入/装载时点摘要，
    * 非实时版本（撕裂尾不推进）；信息性+变更检测触发器，恢复面禁用。 */
   journalFingerprint = "";
@@ -69,8 +74,20 @@ export class ReadIndex {
   append(source: EventSource, locator: string, raw: string, event: HistoryEvent): number {
     const seq = this.events.length + 1;
     const unified: HistoryEvent = { ...event, seq };
-    this.events.push({ seq, source, locator, digest: fnv1a64Hex(JSON.stringify([source, locator, raw])), event: unified });
+    const digest = fnv1a64Hex(JSON.stringify([source, locator, raw]));
+    const row: IndexedEvent = { seq, source, locator, digest, event: unified };
+    this.events.push(row);
+    // D4 登记：message 事件且非 system（首见为准；toolCall 子事件同 entryId 不覆盖本体的登记）。
+    if (unified.kind === "message" && unified.role !== "system") {
+      const k = `${source}:${unified.entryId}`;
+      if (!this.entryIndex.has(k)) this.entryIndex.set(k, row);
+    }
     return seq;
+  }
+
+  /** D4 §4.2：entryId 查询（网关 entry-get 索引命中面）。未登记=undefined（含 system/未扫到）。 */
+  entryOf(source: EventSource, entryId: string): IndexedEvent | undefined {
+    return this.entryIndex.get(`${source}:${entryId}`);
   }
 
   /** 读 [fromSeq..toSeqInclusive]（≤max 条）。 */

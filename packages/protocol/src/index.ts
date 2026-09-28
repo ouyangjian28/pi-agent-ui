@@ -16,6 +16,7 @@ export * from "./read-index.ts";
 export * from "./subscription-engine.ts";
 export * from "./session-attribution.ts";
 export * from "./session-projection.ts";
+export * from "./entry-frame.ts";
 export * from "./sha256.ts";
 export * from "./projection-frames.ts";
 export * from "./journal-schema.ts";

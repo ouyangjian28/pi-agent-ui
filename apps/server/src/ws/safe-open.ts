@@ -146,3 +146,55 @@ export async function readSafeWithin(
     await fh.close().catch(() => {});
   }
 }
+
+// ---------------------------------------------------------------------------
+// D4 全文读面（docs/d4-fulltext-design.md §4.3）：offset 定点读行器。
+// ---------------------------------------------------------------------------
+export type ReadLineResult =
+  | { readonly ok: true; readonly raw: string } // raw=行内容不含终止 \n（与扫描期按 \n 切分同口径）
+  | { readonly ok: false; readonly reason: "bad-start" | "oversized" | "torn" | "invalid-utf8" };
+
+/** D4 §4.3 readLineAt：在已安全打开的句柄上从字节偏移 offset 读一行。
+ *  三条命中判据（缺一=不命中；调用方对 digest 对账后定 4414 stale）：
+ *  ①行首判定：offset===0，或前一字节（position:offset-1 读 1B）===0x0A——否则 bad-start
+ *    （重写后中段残片）；
+ *  ②行界判定：读窗内行以 \n 结束（撕裂尾拒——与扫描期 complete 同式）；窗口满 maxBytes+1
+ *    字节无 \n→oversized（行硬读限=1MiB 产品取值）；EOF 无 \n→torn；
+ *  ③解码纪律：TextDecoder(fatal:true, ignoreBOM:true)（同 history-source.ts:73-90）失败
+ *    →invalid-utf8。
+ *  I/O 错→SafeOpenError("read-failed")。 */
+export async function readLineAt(
+  fh: BoundedReadHandle,
+  offset: number,
+  maxBytes: number,
+  file: string,
+): Promise<ReadLineResult> {
+  // 判据①：行首（offset===0 免读前字节）。
+  if (offset !== 0) {
+    const prev = Buffer.allocUnsafe(1);
+    let n1: number;
+    try {
+      n1 = (await fh.read(prev, 0, 1, offset - 1)).bytesRead;
+    } catch (e) {
+      throw new SafeOpenError("read-failed", file, String(e));
+    }
+    if (n1 === 0 || prev[0] !== 0x0a) return { ok: false, reason: "bad-start" };
+  }
+  // 判据②：读窗 maxBytes+1（+1=容纳不含 \n 的 maxBytes 行 + 终止符；无 \n→oversized/torn）。
+  const win = Buffer.allocUnsafe(maxBytes + 1);
+  let n2: number;
+  try {
+    n2 = (await fh.read(win, 0, win.length, offset)).bytesRead;
+  } catch (e) {
+    throw new SafeOpenError("read-failed", file, String(e));
+  }
+  const nl = win.subarray(0, n2).indexOf(0x0a);
+  if (nl === -1) return { ok: false, reason: n2 < win.length ? "torn" : "oversized" }; // EOF 无 \n=撕裂尾；窗满无 \n=超行硬限
+  const lineBytes = win.subarray(0, nl); // 不含 \n（raw 契约）
+  // 判据③：完整前缀 fatal 解码（撕裂尾不在本面——判据②已拒）。
+  try {
+    return { ok: true, raw: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(lineBytes) };
+  } catch {
+    return { ok: false, reason: "invalid-utf8" };
+  }
+}

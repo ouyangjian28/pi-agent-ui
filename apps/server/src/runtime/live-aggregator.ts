@@ -95,6 +95,9 @@ export function makeLiveOnPiEvent(deps: {
   /** sink 取值器（每事件重取——late-bound：composition dispose 后恒 null） */
   sink: () => ((file: string, ev: LiveContentEvent) => void) | null;
   aggregators: Map<string, LiveAggregator>;
+  /** D4 §4.5a：thinking 门控（服务级 config，默认 false）——聚合器构造注入（与扫描面/entry 面
+   *  同源同值；门关零行为变更）。 */
+  thinkingVisible?: boolean;
 }): (file: string, ev: unknown, generation: number, disposition: string) => void {
   return (file, ev, _generation, disposition) => {
     if (!shouldBroadcastLive(disposition)) return; // 白名单门（P2-1 fail-closed）
@@ -102,7 +105,7 @@ export function makeLiveOnPiEvent(deps: {
     const logical = logicalNameWithinRoots(file, deps.roots) ?? file; // 键归一（r3a 同款）
     let agg = deps.aggregators.get(logical);
     if (agg === undefined) {
-      agg = new LiveAggregator();
+      agg = deps.thinkingVisible === true ? new LiveAggregator({ thinkingVisible: true }) : new LiveAggregator();
       deps.aggregators.set(logical, agg);
     }
     agg.onPiEvent(ev, (le) => deps.sink()!(logical, le));

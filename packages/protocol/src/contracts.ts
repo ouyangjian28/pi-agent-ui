@@ -52,7 +52,7 @@ export const LIMITS = {
   noteLimit: 120,
 } as const;
 
-export type ErrorCode = 4401 | 4402 | 4403 | 4404 | 4405 | 4409 | 4413 | 4429 | 4431 | 4432;
+export type ErrorCode = 4401 | 4402 | 4403 | 4404 | 4405 | 4409 | 4413 | 4414 | 4429 | 4431 | 4432;
 
 /** 写类帧 t 集合（§5.3 第 4 级；冻结枚举） */
 export const WRITE_FRAME_TYPES: readonly string[] = ["prompt", "send", "stop", "resume", "takeover", "write", "execute", "spawn", "kill"];
@@ -165,6 +165,11 @@ export type HistoryEvent = HistoryEventBase & (
       readonly textPreview?: SanitizedText;
       readonly stopReason?: "stop" | "length" | "aborted" | "toolUse";
       readonly toolCallId?: string;
+      /** D4（§4.1a/§4.4）：仅门开（thinkingVisible）且 thinkingCount>0 时携带（存在性不泄露——门关不置）。
+       *  唯一产生位=扫描面 sessionToScanRows；事件面与展开面同源同值。 */
+      readonly hasThinking?: true;
+      /** D4：可见块数（text+toolCall+attachment，不含 thinking；toolCall 子事件与本体同值）。 */
+      readonly blockCount?: number;
       readonly final: boolean }
 );
 
@@ -262,7 +267,8 @@ export type ClientFrame =
   | { readonly t: "unsubscribe"; readonly requestId: string; readonly subscriptionId: SubscriptionId }
   | { readonly t: "get-recovery"; readonly requestId: string; readonly file: string; readonly offset?: number; readonly evidenceHash?: string }
   | { readonly t: "ping"; readonly nonce: string }
-  | UiAnswerFrame;
+  | UiAnswerFrame
+  | EntryGetFrame;
 
 export type ResyncReason = "server-side-gap" | "stream-replaced";
 
@@ -306,6 +312,43 @@ export interface UiAnswerFrame {
   readonly cancelled?: true;
 }
 
+// ---------------------------------------------------------------------------
+// D4 全文读面帧（docs/d4-fulltext-design.md v5.1，契约冻结 2026-10-10）：历史条目按需取全文。
+// ---------------------------------------------------------------------------
+/** D4：C→S 全文请求（只读）。file=逻辑名（订阅口径）；entryId=session 源条目 id（journal 无展开面）。 */
+export interface EntryGetFrame {
+  readonly t: "entry-get";
+  readonly requestId: string;
+  readonly file: string;
+  readonly entryId: string;
+}
+
+/** D4：全文块四形（entryBlocksOf 投影输出/entry 帧载荷）。truncatedAt=可见文本内代码单元切位
+ *  （与 SESSION_PREVIEW_LIMIT 同口径）；argsPreview 已过 denylist 净化+512 编码后字节限。 */
+export type EntryBlock =
+  | { readonly kind: "text"; readonly text: string; readonly truncatedAt?: number }
+  | { readonly kind: "thinking"; readonly text: string; readonly truncatedAt?: number }
+  | { readonly kind: "toolCall"; readonly toolCallId: string | null; readonly toolName: string | null; readonly argsPreview: string; readonly argsTruncated?: true }
+  | { readonly kind: "attachment"; readonly attachmentId: string };
+
+/** D4：4414 reason 载体（六值）。retryable 档位：stale/in-flight=true，余 false。 */
+export type EntryErrorReason = "stale" | "unknown-entry" | "oversized" | "index-evicted" | "not-subscribed" | "in-flight";
+
+/** D4：S→C 全文响应。state 仅 ok/truncated（oversized 归 4414 错误面，成功帧永无 oversized 态）；
+ *  rawBytes 仅 ok 态携带（truncated 帧 wire 级缺席——v5.1 P2-N1'）；totalBlockCount=可见块总口径。 */
+export interface EntryFrame {
+  readonly t: "entry";
+  readonly requestId: string;
+  readonly entryId: string;
+  readonly source: "session";
+  readonly digest: string;
+  readonly state: "ok" | "truncated";
+  readonly blocks: readonly EntryBlock[];
+  readonly stopReason?: "stop" | "length" | "aborted" | "toolUse";
+  readonly rawBytes?: number;
+  readonly totalBlockCount?: number;
+}
+
 export type ServerFrame =
   | { readonly t: "welcome"; readonly serverBootId: string; readonly serverBuildId: string; readonly protocolVersion: 1 }
   | { readonly t: "sessions"; readonly requestId: string; readonly sessions: readonly SessionSummaryDTO[]; readonly total: number; readonly offset: number; readonly hasMore: boolean; readonly listVersion: number;
@@ -317,13 +360,16 @@ export type ServerFrame =
   | { readonly t: "status"; readonly subscriptionId: SubscriptionId; readonly status: SessionStatus }
   | ({ readonly t: "recovery"; readonly requestId: string; readonly file: string } & RecoveryInfo)
   | { readonly t: "resync-required"; readonly subscriptionId: SubscriptionId; readonly reason: ResyncReason }
-  | { readonly t: "error"; readonly code: ErrorCode; readonly message: string; readonly retryable: boolean; readonly requestId?: string; readonly subscriptionId?: SubscriptionId }
+  | { readonly t: "error"; readonly code: ErrorCode; readonly message: string; readonly retryable: boolean; readonly requestId?: string; readonly subscriptionId?: SubscriptionId;
+      /** D4：4414 专用 reason 载体（六值；其余码缺省）。 */
+      readonly reason?: EntryErrorReason }
   | { readonly t: "pong"; readonly nonce: string }
   | { readonly t: "write-ack"; readonly requestId: string; readonly file: string; readonly outcome: WriteSendOutcomeDTO }
   | { readonly t: "write-stop-ack"; readonly requestId: string; readonly file: string; readonly outcome: WriteStopOutcomeDTO }
   | { readonly t: "write-resume-ack"; readonly requestId: string; readonly file: string; readonly outcome: WriteResumeOutcomeDTO } // v1.1（r3a）
   | UiRequestFrame // v1.2（D3）
-  | UiClosedFrame;
+  | UiClosedFrame
+  | EntryFrame; // v1.3（D4）
 
 export interface SessionSummaryDTO {
   readonly sessionId: string | null;
@@ -451,6 +497,15 @@ export function validateClientFrame(raw: unknown): FrameCheck {
       if (hasC && typeof obj["confirmed"] !== "boolean") return bad(4404, "confirmed 必须是布尔");
       if (hasX && obj["cancelled"] !== true) return bad(4404, "cancelled 必须为 true");
       return ok({ t: "ui-answer", requestId, ...(hasV ? { value: obj["value"] as string } : {}), ...(hasC ? { confirmed: obj["confirmed"] as boolean } : {}), ...(hasX ? { cancelled: true } : {}) });
+    }
+    case "entry-get": {
+      // D4：形状级校验（四字段恰具；file=订阅口径逻辑名；entryId 非空≤256）。业务层（订阅权/索引命中）归网关。
+      const r0 = requireExact(obj, ["t", "requestId", "file", "entryId"]); if (r0) return r0;
+      const requestId = reqId(obj); if (!isStr(requestId)) return requestId;
+      const file = fileName(obj); if (!isStr(file)) return file;
+      const eid = obj["entryId"];
+      if (typeof eid !== "string" || eid.length === 0 || eid.length > 256) return bad(4404, "entryId 非法");
+      return ok({ t: "entry-get", requestId, file, entryId: eid });
     }
     case "ping": {
       const r0 = requireExact(obj, ["t", "nonce"]); if (r0) return r0;

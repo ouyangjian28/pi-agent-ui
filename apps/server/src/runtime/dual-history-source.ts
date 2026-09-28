@@ -33,6 +33,9 @@ export interface DualHistorySourceOpts {
   readonly watcher?: HistoryWatcherPort;
   readonly maxScanBytes?: number;
   readonly audit?: (line: string) => void;
+  /** D4 §4.5a：thinking 门控单一真值源（服务级 config，默认 false）。扫描面连线点=本类
+   *  projector 闭包（sessionToScanRows 唯一生产调用点）；直播面=makeLiveOnPiEvent 另接。 */
+  readonly thinkingVisible?: boolean;
 }
 
 /** 3b2b-R1：装载重试上限（等待窗内 journal 换代/改写的有界重装；超出=fail-closed null）。 */
@@ -116,7 +119,12 @@ export class DualHistorySource implements HistorySourcePort {
           // 归因键=该 session 快照所属逻辑 file 的 journal 盘面（journalFor 缺省=同路径）
           const journalPath = journalFor !== undefined ? journalFor(file) : file;
           const { enqueues, consumed } = await readAttribution(journalPath);
-          return sessionToScanRows({ sessionText, enqueues, consumed });
+          return sessionToScanRows({
+            sessionText,
+            enqueues,
+            consumed,
+            ...(opts.thinkingVisible === true ? { thinkingVisible: true } : {}),
+          });
         },
       });
     }

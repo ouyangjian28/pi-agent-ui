@@ -56,6 +56,10 @@ export interface ServerConfig {
   readonly requireTlsOffLoopback?: boolean;
   /** 单文件扫描预算（默认 8MiB，DEFAULT_MAX_SCAN_BYTES）。 */
   readonly maxScanBytes?: number;
+  /** D4 §4.5a：thinking 门控服务级 config（单一真值源；默认 false）。三面落线：扫描面
+   *  （DualHistorySource→SessionProjectionInput）/直播面（makeLiveOnPiEvent→LiveAggregator）/
+   *  entry 面（网关 entry 读路径，批②接）。门关零行为变更（存在性不泄露）。 */
+  readonly thinkingVisible?: boolean;
   /** 恢复投影合计入口预算 journal+session（默认 8MiB，DEFAULT_RECOVERY_COMBINED_BYTES）。 */
   readonly maxRecoveryCombinedBytes?: number;
   /** 恢复首捕授权（B12-1）：默认 false=锚点缺失→no-evidence-snapshot（fail-closed）。宿主显式
@@ -285,7 +289,7 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
       // （gate 溢出已弃）不广播。旧「只 delivered」门把回复期事件全滤掉了（D1-E2E 探针实证）。
       // W-d1-1（K3 审 P2-6①）：接线闭包提取为 makeLiveOnPiEvent 工厂（键归一+白名单门+晚绑定 sink），
       // 生产行为不变；接线级单测/变异杀点（Mu-d1-4）由此可达。
-      onPiEvent: makeLiveOnPiEvent({ roots: config.roots, sink: () => liveSink, aggregators: liveAggregators }),
+      onPiEvent: makeLiveOnPiEvent({ roots: config.roots, sink: () => liveSink, aggregators: liveAggregators, ...(config.thinkingVisible === true ? { thinkingVisible: true } : {}) }),
       // D3：扩展提问三路由（docs/d3-ui-passthrough-design.md §5）。晚绑定：gateway 后构造，
       // 回填前事件只可能发生在零订阅期（会话仅由写面拉起，而写面必经 gateway）→审计丢弃，不悬挂。
       onUiRequest: (file, ask) => {
@@ -313,6 +317,7 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     ...(config.sessionRoots !== undefined ? { sessionRoots: config.sessionRoots } : {}),
     ...(config.sessionFor !== undefined ? { sessionFor: config.sessionFor } : {}),
     ...(config.maxScanBytes !== undefined ? { maxScanBytes: config.maxScanBytes } : {}),
+    ...(config.thinkingVisible === true ? { thinkingVisible: true } : {}),
     audit,
   });
 
