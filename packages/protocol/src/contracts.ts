@@ -266,7 +266,8 @@ export type ServerFrame =
   | { readonly t: "error"; readonly code: ErrorCode; readonly message: string; readonly retryable: boolean; readonly requestId?: string; readonly subscriptionId?: SubscriptionId }
   | { readonly t: "pong"; readonly nonce: string }
   | { readonly t: "write-ack"; readonly requestId: string; readonly file: string; readonly outcome: WriteSendOutcomeDTO }
-  | { readonly t: "write-stop-ack"; readonly requestId: string; readonly file: string; readonly outcome: WriteStopOutcomeDTO };
+  | { readonly t: "write-stop-ack"; readonly requestId: string; readonly file: string; readonly outcome: WriteStopOutcomeDTO }
+  | { readonly t: "write-resume-ack"; readonly requestId: string; readonly file: string; readonly outcome: WriteResumeOutcomeDTO }; // v1.1（r3a）
 
 export interface SessionSummaryDTO {
   readonly sessionId: string | null;
@@ -436,13 +437,14 @@ function cursorOf(raw: unknown): { ok: true; value: EventCursor } | { ok: false 
 // v1 只读部署（网关未接 writeHost）行为不变——写类帧仍一律 4405+close 1008。
 // ---------------------------------------------------------------------------
 /** 本片开放的写类帧 t（WRITE_FRAME_TYPES 的子集）。 */
-export const WRITE_OPEN_FRAME_TYPES: readonly string[] = ["prompt", "stop"];
+export const WRITE_OPEN_FRAME_TYPES: readonly string[] = ["prompt", "stop", "resume"];
 /** prompt.text 上限（UTF-8 字节；frameMaxBytes 包络之内的显式域限）。 */
 export const WRITE_TEXT_MAX_BYTES = 65_536;
 
 export type WriteClientFrame =
-  | { readonly t: "prompt"; readonly requestId: string; readonly file: string; readonly text: string }
-  | { readonly t: "stop"; readonly requestId: string; readonly file: string };
+  | { readonly t: "prompt"; readonly requestId: string; readonly file: string; readonly text: string; readonly generation?: number } // v1.1 帧身份：可选进程代次（提供则网关校验活代匹配——v1 客户端缺省跳过）
+  | { readonly t: "stop"; readonly requestId: string; readonly file: string }
+  | { readonly t: "resume"; readonly requestId: string; readonly file: string; readonly intentId: string; readonly generation: number }; // v1.1：恢复意图重发（身份门：授权/阻断/代次三校验）
 
 export type WriteFrameCheck =
   | { readonly ok: true; readonly frame: WriteClientFrame }
@@ -457,13 +459,32 @@ export function validateWriteFrame(raw: unknown): WriteFrameCheck {
   if (typeof t !== "string") return badWrite(4404, "t 必须是字符串");
   if (!WRITE_OPEN_FRAME_TYPES.includes(t)) return badWrite(4405, "写类帧未开放");
   if (t === "prompt") {
-    const r0 = exactWrite(obj, ["t", "requestId", "file", "text"]); if (r0) return r0;
+    // v1.1：generation 为可选域——先从探测副本剥除，再走四字段集合等值（v1 帧仍严格原形）。
+    const probe: Record<string, unknown> = has(obj, "generation") ? { ...obj } : obj;
+    if (probe !== obj) delete probe["generation"];
+    const r0 = exactWrite(probe, ["t", "requestId", "file", "text"]); if (r0) return r0;
     const rid = ridWrite(obj); if (typeof rid !== "string") return rid;
     const file = fileWrite(obj); if (typeof file !== "string") return file;
     const text = obj["text"];
     if (typeof text !== "string" || text.length === 0) return badWrite(4404, "text 非法");
     if (byteLength(text) > WRITE_TEXT_MAX_BYTES) return badWrite(4404, "text 超字节上限");
-    return okFrame({ t: "prompt", requestId: rid, file, text });
+    let generation: number | undefined; // v1.1 可选：安全整数；提供则身份门校验
+    if (has(obj, "generation")) {
+      const g = obj["generation"];
+      if (typeof g !== "number" || !Number.isSafeInteger(g) || g < 0) return badWrite(4404, "generation 非法");
+      generation = g;
+    }
+    return okFrame(generation === undefined ? { t: "prompt", requestId: rid, file, text } : { t: "prompt", requestId: rid, file, text, generation });
+  }
+  if (t === "resume") {
+    const r0 = exactWrite(obj, ["t", "requestId", "file", "intentId", "generation"]); if (r0) return r0;
+    const rid = ridWrite(obj); if (typeof rid !== "string") return rid;
+    const file = fileWrite(obj); if (typeof file !== "string") return file;
+    const intentId = obj["intentId"];
+    if (typeof intentId !== "string" || intentId.length === 0 || intentId.length > 256) return badWrite(4404, "intentId 非法");
+    const g = obj["generation"];
+    if (typeof g !== "number" || !Number.isSafeInteger(g) || g < 0) return badWrite(4404, "generation 非法");
+    return okFrame({ t: "resume", requestId: rid, file, intentId, generation: g });
   }
   const r0 = exactWrite(obj, ["t", "requestId", "file"]); if (r0) return r0;
   const rid = ridWrite(obj); if (typeof rid !== "string") return rid;
@@ -501,7 +522,21 @@ export type WriteSendOutcomeDTO =
   | { readonly kind: "gate-failed"; readonly stage: "enqueue" | "sending" }
   | { readonly kind: "invalidated"; readonly stage: "enqueue" | "sending" | "post-send" | "first-byte" }
   | { readonly kind: "no-process" }
-  | { readonly kind: "not-ready"; readonly cause?: string };
+  | { readonly kind: "not-ready"; readonly cause?: string }
+  | { readonly kind: "identity-rejected"; readonly cause: "generation-mismatch" }; // v1.1：prompt 携旧代次→恒拒（零副作用）
+
+/** v1.1 写侧身份拒细节（identity-rejected.cause）。 */
+export type WriteIdentityRejectCause =
+  | "no-recovery-data" // resume：该 file 无恢复面数据（恢复报告不存在）
+  | "resume-blocked" // resume：盘面阻断/未裁决证据在场——授权恒空，先走修复面
+  | "resume-not-authorized" // resume：intentId ∉ resendAuthorized（未获重发授权）
+  | "generation-mismatch"; // prompt/resume：客户端所见代次≠当前活代（旧代冒充面）
+
+/** v1.1 写侧恢复重发结果 DTO（write-resume-ack.outcome）。身份门=r3a 交付；
+ * execution-pending=授权已证、重发执行面（payload 读回+TurnGate 接线）r3b 交付——诚实占位非 not-ready 挪用。 */
+export type WriteResumeOutcomeDTO =
+  | { readonly kind: "identity-rejected"; readonly cause: WriteIdentityRejectCause }
+  | { readonly kind: "execution-pending" };
 
 /** 写侧停止结果 DTO（write-stop-ack.outcome）。 */
 export type WriteStopOutcomeDTO =

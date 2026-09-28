@@ -363,6 +363,7 @@ export class WsGateway {
       if (st.inflight.size >= LIMITS.inFlightRequestsPerConn) { this.errFrame(st, 4404, "在途请求超限", rid); return; }
       st.inflight.add(rid);
       if (wf.t === "prompt") void this.handleWritePrompt(st, wf);
+      else if (wf.t === "resume") void this.handleWriteResume(st, wf);
       else void this.handleWriteStop(st, wf);
       return;
     }
@@ -403,11 +404,29 @@ export class WsGateway {
     try {
       const abs = resolveWithinRoots(file, this.opts.roots);
       if (abs === null) { this.errFrame(st, 4404, "file 越界", rid); return; }
-      const outcome = await this.opts.writeHost!.sendPrompt(abs, frame.text);
+      const outcome = await this.opts.writeHost!.sendPrompt(abs, frame.text, frame.generation); // v1.1：可选代次透传身份门
       this.audit(`write-frame conn=${st.id} t=prompt file=${file} outcome=${outcome.kind}`);
       this.enqueue(st, { t: "write-ack", requestId: rid, file, outcome });
     } catch (e: unknown) {
       this.audit(`write-frame-error conn=${st.id} t=prompt file=${file} ${String(e instanceof Error ? e.message : e)}`);
+      this.errFrame(st, 4402, "写宿主不可用", rid);
+    } finally {
+      st.inflight.delete(rid);
+    }
+  }
+
+  // v1.1（r3a）：resume 帧——身份门在写宿主面（授权/阻断/代次）；结果统一 write-resume-ack。
+  private async handleWriteResume(st: ConnState, frame: Extract<WriteClientFrame, { t: "resume" }>): Promise<void> {
+    const rid = frame.requestId;
+    const file = frame.file;
+    try {
+      const abs = resolveWithinRoots(file, this.opts.roots);
+      if (abs === null) { this.errFrame(st, 4404, "file 越界", rid); return; }
+      const outcome = await this.opts.writeHost!.resume(abs, frame.intentId, frame.generation);
+      this.audit(`write-frame conn=${st.id} t=resume file=${file} intentId=${frame.intentId} outcome=${outcome.kind}${outcome.kind === "identity-rejected" ? ` cause=${outcome.cause}` : ""}`);
+      this.enqueue(st, { t: "write-resume-ack", requestId: rid, file, outcome });
+    } catch (e: unknown) {
+      this.audit(`write-frame-error conn=${st.id} t=resume file=${file} intentId=${frame.intentId} ${String(e instanceof Error ? e.message : e)}`);
       this.errFrame(st, 4402, "写宿主不可用", rid);
     } finally {
       st.inflight.delete(rid);

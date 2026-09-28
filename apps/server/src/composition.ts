@@ -17,7 +17,8 @@ import { TokenAuthority } from "./ws/token-auth.ts";
 import { WsGateway } from "./ws/ws-gateway.ts";
 import { ComputeSemaphore } from "./ws/compute-semaphore.ts";
 import { DualHistorySource } from "./runtime/dual-history-source.ts";
-import { createRecoveryEvidenceProvider } from "./runtime/recovery-evidence-source.ts";
+import { createRecoveryEvidenceProvider, isRecoverySnapshot } from "./runtime/recovery-evidence-source.ts";
+import { recoverFromSnapshot } from "./runtime/recover.ts";
 import { createSessionRegistry, type SessionRegistry } from "./runtime/session-registry.ts";
 import { createGuardedJournalWriterFactory } from "./runtime/guarded-journal-writer.ts";
 import { randomUUID } from "node:crypto";
@@ -219,7 +220,22 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     recoveryEvidence,
     ...(registry !== null ? { statusFor: (file: string) => registry!.statusFor(resolveWithinRoots(file, config.roots) ?? file) } : {}),
     ...(config.writeHost !== undefined ? { writeHost: config.writeHost } : {}),
-    ...(registry !== null ? { writeHost: createRpcWriteHost({ sessionFor: (file: string) => registry!.sessionFor(file), audit }) } : {}),
+    // P0-2 r3a：帧身份权威源——报告=恢复证据链（与 get-recovery 同源同适配）；代次=registry 真源。
+    ...(registry !== null ? {
+      writeHost: createRpcWriteHost({
+        sessionFor: (file: string) => registry!.sessionFor(file),
+        audit,
+        resumeAuthority: {
+          reportFor: async (file: string) => {
+            const snap = await recoveryEvidence(file, new AbortController().signal); // r3a：身份门读取（无用户取消面——进程内即答；provider 预算保护同源）
+            if (snap === null || !isRecoverySnapshot(snap)) return null;
+            const r = recoverFromSnapshot(snap);
+            return { resendAuthorized: [...r.resendAuthorized], resumeBlocked: r.resumeBlocked };
+          },
+          generationFor: (file: string) => registry!.statusFor(file).process.generation,
+        },
+      }),
+    } : {}),
     audit,
   });
 

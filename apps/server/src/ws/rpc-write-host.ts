@@ -12,7 +12,7 @@
 //   （W9 已锁路径）；不吞错不造 kind（编造 outcome 比异常更危险）。
 // - 两层契约（与 write-host.ts:3-4 端口注统一）：可预期业务结果→outcome kind；内部异常→剥离重抛→4402。
 // - 不在本层：RpcSession 实例构造（composition 接线）、statusFor 映射、并发队列（TurnGate 已有）。
-import type { WriteSendOutcomeDTO, WriteStopOutcomeDTO, RetireOutcome } from "@pi-agent-ui/protocol";
+import type { WriteSendOutcomeDTO, WriteStopOutcomeDTO, WriteResumeOutcomeDTO, RetireOutcome } from "@pi-agent-ui/protocol";
 import type { SessionSendResult } from "../runtime/rpc-session.ts";
 import type { WriteHostPort } from "./write-host.ts";
 
@@ -27,6 +27,18 @@ export interface RpcWriteHostOpts {
   sessionFor(file: string): RpcLikeSession | Promise<RpcLikeSession>;
   /** 宿主审计（内部异常/gate-failed 细节唯一出口；格式化与回调异常均被隔离）。 */
   audit?(line: string): void;
+  /** v1.1 帧身份权威源（r3a）：resume/prompt-generation 身份门数据。缺省=恒 no-recovery-data
+   *  （resume 面 fail-closed；prompt.generation 缺省不受影响，提供则恒拒 generation-mismatch——
+   *  无权威源时不放行任何代次断言）。 */
+  resumeAuthority?: ResumeAuthority;
+}
+
+/** v1.1 帧身份权威源（r3a 身份门接缝；真源=composition 接线恢复报告+活进程代次）。 */
+export interface ResumeAuthority {
+  /** 恢复面数据（授权集/阻断位）；无该 file 数据=null。 */
+  reportFor(file: string): { readonly resendAuthorized: readonly string[]; readonly resumeBlocked: boolean } | null | Promise<{ readonly resendAuthorized: readonly string[]; readonly resumeBlocked: boolean } | null>;
+  /** 当前活进程代次；无活进程=null（resume 放行至执行面——拉起时新代；prompt 校验跳过）。 */
+  generationFor(file: string): number | null;
 }
 
 /** SessionSendResult→WriteSendOutcomeDTO（穷尽映射；error/generation 在此截断）。 */
@@ -62,7 +74,7 @@ export function gateFailedDetail(r: SessionSendResult): string | null {
   return `write-host-gate-failed-detail stage=${r.stage} detail=${d}`;
 }
 
-function stripped(op: "prompt" | "stop"): Error {
+function stripped(op: "prompt" | "stop" | "resume"): Error {
   return new Error(`write-host-internal: ${op}`);
 }
 
@@ -99,8 +111,16 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
     return creating;
   };
   return {
-    async sendPrompt(file: string, text: string): Promise<WriteSendOutcomeDTO> {
+    async sendPrompt(file: string, text: string, generation?: number): Promise<WriteSendOutcomeDTO> {
       try {
+        // v1.1 帧身份门（prompt 面）：客户端携带代次≠当前活代→恒拒（零副作用：不触 sessionFor/send）
+        if (generation !== undefined) {
+          const live = opts.resumeAuthority?.generationFor(file) ?? null;
+          if (live !== null && live !== generation) {
+            auditSafe(() => `write-identity-reject op=prompt file=${file} cause=generation-mismatch frame=${generation} live=${live}`);
+            return { kind: "identity-rejected", cause: "generation-mismatch" };
+          }
+        }
         const raw = await (await sessionOf(file)).send(text);
         const g = gateFailedDetail(raw);
         if (g !== null) auditSafe(() => g);
@@ -117,6 +137,41 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
         auditSafe(() => `write-host-error op=stop file=${file} ${errText(e)}`);
         throw stripped("stop");
       }
+    },
+    async resume(file: string, intentId: string, generation: number): Promise<WriteResumeOutcomeDTO> {
+      // v1.1 身份门（r3a）：校验序=恢复数据在场→未阻断→授权→代次；任何拒绝=零副作用（不触 sessionFor）。
+      // 执行面（重发 payload 读回+TurnGate 接线）=r3b；通过→execution-pending 诚实占位。
+      const authority = opts.resumeAuthority;
+      if (authority === undefined) {
+        auditSafe(() => `write-resume file=${file} intentId=${intentId} outcome=identity-rejected cause=no-recovery-data source=absent`);
+        return { kind: "identity-rejected", cause: "no-recovery-data" };
+      }
+      let report: Awaited<ReturnType<ResumeAuthority["reportFor"]>>;
+      try {
+        report = await authority.reportFor(file);
+      } catch (e: unknown) {
+        auditSafe(() => `write-host-error op=resume file=${file} ${errText(e)}`);
+        throw stripped("resume");
+      }
+      if (report === null) {
+        auditSafe(() => `write-resume file=${file} intentId=${intentId} outcome=identity-rejected cause=no-recovery-data`);
+        return { kind: "identity-rejected", cause: "no-recovery-data" };
+      }
+      if (report.resumeBlocked) {
+        auditSafe(() => `write-resume file=${file} intentId=${intentId} outcome=identity-rejected cause=resume-blocked`);
+        return { kind: "identity-rejected", cause: "resume-blocked" };
+      }
+      if (!report.resendAuthorized.includes(intentId)) {
+        auditSafe(() => `write-resume file=${file} intentId=${intentId} outcome=identity-rejected cause=resume-not-authorized`);
+        return { kind: "identity-rejected", cause: "resume-not-authorized" };
+      }
+      const live = authority.generationFor(file);
+      if (live !== null && live !== generation) {
+        auditSafe(() => `write-resume file=${file} intentId=${intentId} outcome=identity-rejected cause=generation-mismatch frame=${generation} live=${live}`);
+        return { kind: "identity-rejected", cause: "generation-mismatch" };
+      }
+      auditSafe(() => `write-resume file=${file} intentId=${intentId} outcome=execution-pending generation=${generation}`);
+      return { kind: "execution-pending" };
     },
   };
 }
