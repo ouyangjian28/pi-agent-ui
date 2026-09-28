@@ -261,6 +261,14 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     if (config.write.host !== undefined && config.write.piBin !== undefined) {
       throw new Error("write.host 与 write.piBin 同供：受控替身注入缝与生产二进制互斥，配置歧义拒启");
     }
+    // E2E 审 P2-1（DS 2026-10-10）：pi 参数 last-wins——extraPiArgs 携 --mode/--session/--session-id
+    // 会静默替换基底，会话文件身份锚（registry mapped/sessionIdOf/恢复证据链全按 sessionFile 算）
+    // 与 pi 实际写盘文件劈裂，跨回收不变量看似成立实则落空且无显式报错。与 host/piBin 互斥门同构拒启。
+    const forbidden = new Set(["--mode", "--session", "--session-id"]);
+    const bad = (config.write.extraPiArgs ?? []).find((a) => forbidden.has(a));
+    if (bad !== undefined) {
+      throw new Error(`write.extraPiArgs 含基底替换项 ${bad}：--mode/--session/--session-id 由 RpcSession 统一铸造，配置面禁止覆盖`);
+    }
     const host: ProcessHostPort = config.write.host ?? new PiProcessHost({
       ...(config.write.piBin !== undefined ? { piBin: config.write.piBin } : {}),
       onAudit: (l) => audit(l),

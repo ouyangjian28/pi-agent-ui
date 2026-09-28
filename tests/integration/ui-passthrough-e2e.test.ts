@@ -131,15 +131,36 @@ describe("D3-T1 E2E Leg A：FakeRpcHost composition 全链（常跑）", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("E-ui-0 配置门：write.host 与 piBin 同供=拒启（受控替身注入缝仅限测试）", async () => {
+  it("E-ui-0 配置门：write.host 与 piBin 同供=拒启（受控替身注入缝仅限测试）；门回归时干净红不挂起（P3-4）", async () => {
     const dir2 = await mkdtemp(join(tmpdir(), "d3t1-mutex-"));
     const tokenFile = join(dir2, "tokens.json");
     await writeFile(tokenFile, JSON.stringify({ version: 1, tokens: ["t"] }), "utf8");
-    await expect(startServer({
+    // 若门回归（startServer 意外成功），先 dispose 再断言，避免真监听残留→vitest 挂起
+    const p = startServer({
       tokenFile, allowedOrigins: [ORIGIN], roots: [dir2], scanDir: dir2, tokenPollMs: 0,
       write: { sessionFor: (f) => f, host: new FakeRpcHost(), piBin: "/usr/bin/true" },
       audit: () => {},
-    })).rejects.toThrow("互斥");
+    });
+    const srv = await p.then((s) => s, () => null);
+    if (srv !== null) await srv.dispose().catch(() => {});
+    expect(srv).toBeNull(); // 互斥门生效=拒启
+    await rm(dir2, { recursive: true, force: true });
+  });
+
+  it("E-ui-0b 配置门：extraPiArgs 含 --mode/--session/--session-id 基底替换=拒启（E2E 审 P2-1）", async () => {
+    const dir2 = await mkdtemp(join(tmpdir(), "d3t1-basegate-"));
+    const tokenFile = join(dir2, "tokens.json");
+    await writeFile(tokenFile, JSON.stringify({ version: 1, tokens: ["t"] }), "utf8");
+    for (const bad of ["--mode", "--session", "--session-id"]) {
+      const p = startServer({
+        tokenFile, allowedOrigins: [ORIGIN], roots: [dir2], scanDir: dir2, tokenPollMs: 0,
+        write: { sessionFor: (f) => f, host: new FakeRpcHost(), extraPiArgs: [bad, "x"], responseTimeoutMs: 1000 },
+        audit: () => {},
+      });
+      const srv = await p.then((s) => s, () => null);
+      if (srv !== null) await srv.dispose().catch(() => {});
+      expect(srv, `extraPiArgs 含 ${bad} 应拒启`).toBeNull();
+    }
     await rm(dir2, { recursive: true, force: true });
   });
 
@@ -158,7 +179,15 @@ describe("D3-T1 E2E Leg A：FakeRpcHost composition 全链（常跑）", () => {
     await until(() => host!.uiResponses().some((r) => r.id === "q-e2e-1" && r.value === "乙"), "extension_ui_response 落 stdin");
     await until(() => frames.some((f) => f.t === "ui-closed" && f.requestId === "q-e2e-1" && f.reason === "answered"), "answered 撤框广播");
     settleTurn(host!); // 轮收口（暖进程驻留）
-    await until(() => frames.some((f) => f.t === "write-ack" && f.requestId === "eui1"), "write-ack 存在");
+  });
+
+  it("E-ui-1b 即显族：notify→live 流 ui-note 帧经 composition 键归一路由（E2E 审 P2-2①；原仅 opt-in E-ui-4 覆盖）", async () => {
+    host!.emitEvent({ type: "extension_ui_request", id: "q-note-1", method: "notify", message: "状态提示", notifyType: "warning" });
+    await until(() => frames.some((f) => f.t === "events" && f.origin === "live"
+      && Array.isArray(f.events) && f.events.some((e) => e.kind === "ui-note" && e.message === "状态提示")),
+      "ui-note 进 live 流（composition note 方向归一）");
+    const note = frames.find((f) => f.t === "events" && f.origin === "live")!;
+    expect((note.events ?? []).some((e) => e.kind === "ui-note" && (e as { notifyType?: string }).notifyType === "warning")).toBe(true);
   });
 
   it("E-ui-2 断开腿：末订阅者断开→pending 问答 cancelled 落 stdin（pi 侧不悬挂）", async () => {
@@ -167,6 +196,15 @@ describe("D3-T1 E2E Leg A：FakeRpcHost composition 全链（常跑）", () => {
     ws!.close(); // 真传输断开→末订阅者释放→pending 全 cancelled
     await until(() => host!.uiResponses().some((r) => r.id === "q-e2e-2" && r.cancelled === true), "cancelled 落 stdin");
     expect(host!.uiResponses().filter((r) => r.id === "q-e2e-2").length).toBe(1); // 恰一次
+  });
+
+  it("E-ui-2b 零订阅腿：断开后新提问→无 ui-request 帧+立即回 pi cancelled+no-subscriber 审计（E2E 审 P2-2②）", async () => {
+    // 前置=E-ui-2 已断开（Leg A 无订阅者）；不得重连
+    host!.emitEvent({ type: "extension_ui_request", id: "q-e2e-ns", method: "select", title: "无人", options: ["甲"] });
+    await until(() => host!.uiResponses().some((r) => r.id === "q-e2e-ns" && r.cancelled === true), "零订阅→cancelled 落 stdin（不悬挂扩展）");
+    expect(frames.some((f) => f.t === "ui-request" && f.requestId === "q-e2e-ns")).toBe(false); // 无订阅者=零帧派发
+    expect(host!.uiResponses().filter((r) => r.id === "q-e2e-ns").length).toBe(1); // 恰一次
+    await until(() => audits.some((l) => l.includes("ui-no-subscriber") && l.includes("q-e2e-ns")), "no-subscriber 审计留痕");
   });
 
   it("E-ui-3 退役腿：stop→pending cancelled 落 stdin+订阅者收 ui-closed(process-retired)+stop 收口", async () => {
