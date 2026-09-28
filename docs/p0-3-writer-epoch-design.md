@@ -77,3 +77,11 @@
 - **D2 flock 主互斥+epoch 行兜底**：flock 同机硬、快、零成本；epoch 行慢但跨锁/跨机成立。双防线纵深，不互替。翻案条件：部署形态改为多机共享存储（flock 全废，epoch 行升主位）。
 - **D3 bootId 复用读面概念**：一次启动一个身份，读写面统一。翻案条件：无（命名统一项）。
 - **D4 契约版本 2→3，legacy 兼容读+写前补宣誓**：行型联合扩展必 bump；存量 v2 journal 无 writer 行≠错误。翻案条件：无。
+
+## 7. 实现批对照（2026-10-08 落库 11bc0df+1b6a8d4；TEST-MAP P0-3 节权威）
+
+- FF-1..5 ↔ W-oath-1..5 全落地（12 例全绿；全仓 1422 绿）。变异五点全杀：Mu-1 活锁拒起门/Mu-2 bad-tail 盘面门/Mu-3 superseded 判定/Mu-4 INV-2 anomaly/Mu-5 legacyHead 反写（双杀）。教训：sed 注入后 `git diff --stat` 空=未命中（Mu-5 首跑行号差一），必须验 diff 非空再判杀。
+- **L1 落地差异**：Node 无 flock 绑定→O_EXCL 锁文件+pid 探活（语义等价：EEXIST=held；探活死=unlink+重试一次抢占；读失败=holder:null 保守拒；release 读回校验 bootId 防误删他锁）。锁文件=`${journalPath}.writer.lock`。
+- **契约 2→3 连带决策（D4 展开）**：repair 行写面 contractVersion=JOURNAL_CONTRACT_VERSION 常量注入；**repair-tail legacyMrow 旧行形枚举固定 v2**（历史最后一版=r7 前形），buildRepairRow 加 contractVersion 入参——枚举=历史兼容面不随常量漂移，未来版本升级只追加枚举不改旧形。schema contractVersion≥1 安全整数=v2/v3 兼容读。测试 helper 拆 mrowOf（当前契约形态）/mrowLegacyOf（固定 v2 历史形）。
+- **实现切面**：scanWriterEpoch 放 protocol 层（writer-oath.ts 与 recover.ts 共用，破 recover↔writer-oath 循环依赖）；WriterGuard 写前检查=stat size 快路径+变化时重读慢路径（fsync 后 noteSize）；writerState 并入 RecoverReport（异常呈现不阻断恢复）。
+- **未接线面（后续批）**：ws-gateway 服务启动序（acquire→恢复→宣誓→开写面）与业务行写面 WriterGuard 接线=写面装配批（P0-2 前）；本批=纯增量（协议+工具+读面呈现），不改既有写路径行为。
