@@ -743,3 +743,179 @@ describe("G6 composer 写挂面（真实链）", () => {
     expect((screen.getByLabelText("写入消息内容") as HTMLTextAreaElement).disabled).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// v1.1 resume 面：帧形/校验/ack 配对/4409 排队超时/断连终局/坏帧零副作用
+// ---------------------------------------------------------------------------
+
+describe("resume 面", () => {
+  const RESUME_LAUNCHED = { kind: "launched", intentId: "i-9", commandId: 3 } as const;
+
+  it("resume 帧形状+ack 配对：resume{requestId,file,intentId,generation}→write-resume-ack 同 requestId resolve+快照两账", async () => {
+    const { client, ws } = ready();
+    let settled: unknown = null;
+    void client.resume("a.jsonl", "i-1", 2).then((outcome) => {
+      settled = outcome;
+    });
+    expect(ws.frames()[1]).toEqual({
+      t: "resume",
+      requestId: "wr-r-1",
+      file: "a.jsonl",
+      intentId: "i-1",
+      generation: 2,
+    });
+    expect(client.getSnapshot().resumeState).toEqual({ phase: "resuming", files: ["a.jsonl"] });
+    expect(client.getSnapshot().inflight).toEqual([]); // resume 独立账，不混入 prompt/stop 在途视图
+    ws.receive({ t: "write-resume-ack", requestId: "wr-r-1", file: "a.jsonl", outcome: RESUME_LAUNCHED });
+    await Promise.resolve();
+    expect(settled).toEqual(RESUME_LAUNCHED);
+    expect(client.getSnapshot().resumeState).toEqual({ phase: "idle" });
+    expect(client.getSnapshot().lastResumeResult).toEqual({ ok: true, file: "a.jsonl", outcome: RESUME_LAUNCHED });
+  });
+
+  it("两失败枝+执行七枝 outcome 正常 resolve（identity-rejected 四 cause/execution-failed/not-ready）", async () => {
+    const { client, ws } = ready();
+    const outcomes: unknown[] = [
+      { kind: "identity-rejected", cause: "no-recovery-data" },
+      { kind: "identity-rejected", cause: "resume-blocked" },
+      { kind: "identity-rejected", cause: "resume-not-authorized" },
+      { kind: "identity-rejected", cause: "generation-mismatch" },
+      { kind: "execution-failed", cause: "payload-unavailable" },
+      { kind: "busy" },
+      { kind: "gate-rejected", reason: "closed" },
+      { kind: "gate-failed", stage: "sending" },
+      { kind: "invalidated", stage: "post-send" },
+      { kind: "no-process" },
+      { kind: "not-ready", cause: "x" },
+      { kind: "not-ready" },
+    ];
+    for (let i = 0; i < outcomes.length; i++) {
+      const p = client.resume("a.jsonl", "i-1", 1);
+      ws.receive({ t: "write-resume-ack", requestId: `wr-r-${i + 1}`, file: "a.jsonl", outcome: outcomes[i] });
+      await expect(p).resolves.toEqual(outcomes[i]);
+    }
+  });
+
+  it("ack 三重交叉验证：requestId 匹配但 file 回显不符/错 kind 帧冒名=零消费（在途保留，合法帧照常结算）", async () => {
+    const { client, ws } = ready();
+    const promise = client.resume("a.jsonl", "i-1", 1);
+    ws.receive({ t: "write-resume-ack", requestId: "wr-r-1", file: "OTHER.jsonl", outcome: RESUME_LAUNCHED }); // file 不符
+    ws.receive({ t: "write-ack", requestId: "wr-r-1", file: "a.jsonl", outcome: LAUNCHED }); // write-ack 冒名 resume 请求
+    expect(client.getSnapshot().resumeState).toEqual({ phase: "resuming", files: ["a.jsonl"] });
+    ws.receive({ t: "write-resume-ack", requestId: "wr-r-1", file: "a.jsonl", outcome: RESUME_LAUNCHED });
+    await expect(promise).resolves.toEqual(RESUME_LAUNCHED);
+  });
+
+  it("参数校验零帧本地拒：file 非法/intentId 越形/generation 非正整数（0/-1/1.5/NaN）", async () => {
+    const { client, ws } = ready();
+    const e1 = await expectWriteError(client.resume("a/b.jsonl", "i-1", 1));
+    expect(e1.kind).toBe("local-invalid");
+    const e2 = await expectWriteError(client.resume("a.jsonl", "bad id!", 1)); // 空格+叹号越 intentIdPattern
+    expect(e2.kind).toBe("local-invalid");
+    expect(e2.message).toContain("意图标识非法");
+    for (const g of [0, -1, 1.5, Number.NaN]) {
+      const e = await expectWriteError(client.resume("a.jsonl", "i-1", g));
+      expect(e.kind).toBe("local-invalid");
+      expect(e.message).toContain("进程代次非法");
+    }
+    expect(ws.sent.length).toBe(1); // 全部零帧（仅 hello）
+  });
+
+  it("未 ready/同 file 在途重复=本地拒（他 file 可并行；同 file prompt×resume 并行合法）", async () => {
+    const { client, ws } = setup();
+    ws.open(); // authenticating 未 ready
+    const e0 = await expectWriteError(client.resume("a.jsonl", "i-1", 1));
+    expect(e0.kind).toBe("not-ready");
+    ws.receive(WELCOME);
+    void client.resume("a.jsonl", "i-1", 1);
+    const dup = await expectWriteError(client.resume("a.jsonl", "i-2", 1));
+    expect(dup.kind).toBe("in-flight");
+    expect(dup.message).toContain("恢复重发已在途");
+    void client.resume("b.jsonl", "i-3", 4); // 他 file 并行
+    void client.sendPrompt("a.jsonl", "hi"); // 同 file prompt×resume 并行（kind 分账）
+    expect(ws.sent.length).toBe(4); // hello+resume(a)+resume(b)+prompt(a)
+    expect(client.getSnapshot().resumeState).toEqual({ phase: "resuming", files: ["a.jsonl", "b.jsonl"] }); // 跨 file 在途集合同账
+  });
+
+  it("4409 排队超时（requestId 匹配在途 resume）：记「计算排队超时，可重试」结果——非硬错：连接 ready+可显式重试", async () => {
+    const { client, ws } = ready();
+    const promise = client.resume("a.jsonl", "i-1", 1);
+    ws.receive({ t: "error", code: 4409, message: "compute gate queue timeout", retryable: true, requestId: "wr-r-1" });
+    const error = await expectWriteError(promise);
+    expect(error.kind).toBe("server");
+    expect(error.code).toBe(4409);
+    expect(error.message).toBe("计算排队超时，可重试（4409）"); // 专用受控文案（非 writeFaceErrorText 4409 游标措辞）
+    const snap = client.getSnapshot();
+    expect(snap.connState).toBe("ready"); // 连接存活
+    expect(snap.resumeState).toEqual({ phase: "idle" });
+    expect(snap.lastResumeResult).toEqual({ ok: false, file: "a.jsonl", message: "计算排队超时，可重试（4409）" });
+    // 可显式重试：重发照常走帧+ack 结算
+    const retry = client.resume("a.jsonl", "i-1", 1);
+    expect(ws.frames()[2]).toMatchObject({ t: "resume", requestId: "wr-r-2", file: "a.jsonl" });
+    ws.receive({ t: "write-resume-ack", requestId: "wr-r-2", file: "a.jsonl", outcome: RESUME_LAUNCHED });
+    await expect(retry).resolves.toEqual(RESUME_LAUNCHED);
+  });
+
+  it("resume 在途遇 prompt 的 4409：prompt 仍按通用受控文案结算（游标措辞不误染 resume 专用面）", async () => {
+    const { client, ws } = ready();
+    const p = client.sendPrompt("a.jsonl", "hi");
+    const r = client.resume("a.jsonl", "i-1", 1);
+    ws.receive({ t: "error", code: 4409, message: "cursor", retryable: true, requestId: "wr-p-1" });
+    const error = await expectWriteError(p);
+    expect(error.message).toBe(writeFaceText4409Prompt());
+    expect(client.getSnapshot().resumeState).toEqual({ phase: "resuming", files: ["a.jsonl"] }); // resume 在途不受影响
+    ws.receive({ t: "write-resume-ack", requestId: "wr-r-2", file: "a.jsonl", outcome: RESUME_LAUNCHED });
+    await expect(r).resolves.toEqual(RESUME_LAUNCHED);
+  });
+
+  it("断连终局：resume 在途统一 transport 拒+resumeState 归 idle+lastResumeResult 落账", async () => {
+    const { client, ws } = ready();
+    const promise = client.resume("a.jsonl", "i-1", 1);
+    ws.serverClose(1006);
+    const error = await expectWriteError(promise);
+    expect(error.kind).toBe("transport");
+    expect(error.message).toContain("连接已断开");
+    const snap = client.getSnapshot();
+    expect(snap.resumeState).toEqual({ phase: "idle" });
+    expect(snap.lastResumeResult).toMatchObject({ ok: false, file: "a.jsonl" });
+    expect(snap.connState).toBe("closed");
+  });
+
+  it("坏帧零副作用：畸形 write-resume-ack（outcome 越域/缺字段）不消费在途，合法帧照常结算", async () => {
+    const { client, ws } = ready();
+    const promise = client.resume("a.jsonl", "i-1", 1);
+    ws.receive({
+      t: "write-resume-ack",
+      requestId: "wr-r-1",
+      file: "a.jsonl",
+      outcome: { kind: "identity-rejected", cause: "unknown-cause" },
+    }); // cause 越域
+    ws.receive({
+      t: "write-resume-ack",
+      requestId: "wr-r-1",
+      file: "a.jsonl",
+      outcome: { kind: "execution-failed", cause: "other" },
+    }); // cause 越域
+    ws.receive({ t: "write-resume-ack", requestId: "wr-r-1", file: "a.jsonl" }); // 缺 outcome
+    ws.receive({ t: "write-resume-ack", requestId: "wr-r-99", file: "a.jsonl", outcome: RESUME_LAUNCHED }); // 陌生 requestId
+    expect(client.getSnapshot().resumeState).toEqual({ phase: "resuming", files: ["a.jsonl"] }); // 零消费
+    ws.receive({ t: "write-resume-ack", requestId: "wr-r-1", file: "a.jsonl", outcome: RESUME_LAUNCHED });
+    await expect(promise).resolves.toEqual(RESUME_LAUNCHED);
+  });
+
+  it("close()：在途 resume 以 closed 受控拒+resumeState 归 idle", async () => {
+    const { client } = ready();
+    const promise = client.resume("a.jsonl", "i-1", 1);
+    client.close();
+    const error = await expectWriteError(promise);
+    expect(error.kind).toBe("closed");
+    expect(client.getSnapshot().resumeState).toEqual({ phase: "idle" });
+    const after = await expectWriteError(client.resume("a.jsonl", "i-1", 1));
+    expect(after.kind).toBe("closed");
+  });
+});
+
+/** prompt 面 4409 通用受控文案（writeFaceErrorText 私有，镜像期望值防回归漂移）。 */
+function writeFaceText4409Prompt(): string {
+  return "请求游标或状态已过期（4409）";
+}

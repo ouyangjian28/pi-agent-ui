@@ -33,12 +33,16 @@ import type {
   ErrorCode,
   ServerFrame,
   WriteClientFrame,
+  WriteResumeOutcomeDTO,
   WriteSendOutcomeDTO,
   WriteStopOutcomeDTO,
 } from "@pi-agent-ui/protocol/src/contracts";
 
-/** 本客户端允许发送的帧（握手 hello+写面两帧；其余客户端帧类型层不可达）。 */
+/** 本客户端允许发送的帧（握手 hello+写面三帧 prompt/stop/resume；其余客户端帧类型层不可达）。 */
 type OutgoingFrame = Extract<ClientFrame, { readonly t: "hello" }> | WriteClientFrame;
+
+/** 写动作三 kind（在途分账单位：file×kind 唯一；prompt×stop×resume 同 file 可并行）。 */
+type WriteOpKind = "prompt" | "stop" | "resume";
 
 /** 连接级五态（同 ws-client 惯例）：connecting→authenticating→ready；任一前置态可落 closed/error。 */
 export type WriteConnState = "connecting" | "authenticating" | "ready" | "closed" | "error";
@@ -75,6 +79,15 @@ export type WriteLastResult =
   | { readonly ok: true; readonly kind: "stop"; readonly file: string; readonly outcome: WriteStopOutcomeDTO }
   | { readonly ok: false; readonly kind: "prompt" | "stop"; readonly file: string; readonly message: string };
 
+/** 最近一次已终结恢复重发（快照视图面；独立账不混入 lastResult——resume 面状态自含）。 */
+export type WriteResumeResult =
+  | { readonly ok: true; readonly file: string; readonly outcome: WriteResumeOutcomeDTO }
+  | { readonly ok: false; readonly file: string; readonly message: string };
+
+/** resume 在途态（快照视图面）：idle=无在途（共享常量保引用稳定）；resuming=在途 file 集合
+ * （跨 file 可并行，与 file×kind 分账同哲学；空集合即归 idle）。 */
+export type WriteResumeState = { readonly phase: "idle" } | { readonly phase: "resuming"; readonly files: readonly string[] };
+
 /**
  * 写面快照（不可变；每次变更整体替换——useSyncExternalStore getSnapshot 缓存语义，未变即引用相等）。
  * inflight/lastResult 驱动 hook 态机与结果展示；errorMessage 只承载受控文案。
@@ -87,6 +100,10 @@ export interface WriteSnapshot {
   readonly inflight: readonly WriteInflightEntry[];
   /** 最近一次已终结请求（null=尚无）。 */
   readonly lastResult: WriteLastResult | null;
+  /** resume 在途态（v1.1 恢复重发面；独立账，不混入 inflight——prompt/stop 视图语义不变）。 */
+  readonly resumeState: WriteResumeState;
+  /** 最近一次已终结恢复重发（null=尚无；含 4409 排队超时等受控失败结果）。 */
+  readonly lastResumeResult: WriteResumeResult | null;
 }
 
 /** 可注入的 WebSocket 最小面（与 ws-client/subscribe-client 同形；测试用假 socket 顶替）。 */
@@ -110,12 +127,16 @@ const defaultFactory: WebSocketFactory = (url) => {
   return new Ctor(url);
 };
 
+const RESUME_IDLE: WriteResumeState = { phase: "idle" };
+
 const INITIAL_SNAPSHOT: WriteSnapshot = {
   connState: "connecting",
   errorKind: null,
   errorMessage: null,
   inflight: [],
   lastResult: null,
+  resumeState: RESUME_IDLE,
+  lastResumeResult: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -130,6 +151,7 @@ type WelcomeFrame = Extract<ServerFrame, { readonly t: "welcome" }>;
 type ErrorFrame = Extract<ServerFrame, { readonly t: "error" }>;
 type WriteAckFrame = Extract<ServerFrame, { readonly t: "write-ack" }>;
 type WriteStopAckFrame = Extract<ServerFrame, { readonly t: "write-stop-ack" }>;
+type WriteResumeAckFrame = Extract<ServerFrame, { readonly t: "write-resume-ack" }>;
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -164,8 +186,29 @@ function isSendOutcome(v: unknown): v is WriteSendOutcomeDTO {
       return v["stage"] === "enqueue" || v["stage"] === "sending" || v["stage"] === "post-send" || v["stage"] === "first-byte";
     case "not-ready":
       return v["cause"] === undefined || isString(v["cause"]);
+    case "identity-rejected": // v1.1：prompt 携代次断言的身份拒（cause 空间仅两枝，勿与 resume 面四枝并集）
+      return v["cause"] === "no-recovery-data" || v["cause"] === "generation-mismatch";
     default:
       return false;
+  }
+}
+
+/** WriteResumeOutcomeDTO 全域判别校验（v1.1 r3b 终形：两失败枝+执行七枝；
+ * 执行七枝与 send 面同构——委托 isSendOutcome 复核，两失败枝本地判）。 */
+function isResumeOutcome(v: unknown): v is WriteResumeOutcomeDTO {
+  if (!isPlainObject(v)) return false;
+  switch (v["kind"]) {
+    case "identity-rejected":
+      return (
+        v["cause"] === "no-recovery-data" ||
+        v["cause"] === "resume-blocked" ||
+        v["cause"] === "resume-not-authorized" ||
+        v["cause"] === "generation-mismatch"
+      );
+    case "execution-failed":
+      return v["cause"] === "payload-unavailable";
+    default: // 执行七枝：launched/busy/gate-rejected/gate-failed/invalidated/no-process/not-ready
+      return isSendOutcome(v);
   }
 }
 
@@ -221,6 +264,13 @@ function parseWriteStopAck(v: Record<string, unknown>): WriteStopAckFrame | null
   return { t: "write-stop-ack", requestId: v.requestId, file: v.file, outcome: v.outcome };
 }
 
+/** write-resume-ack 形状门：同 write-ack（outcome 换 resume 判别联合）。 */
+function parseWriteResumeAck(v: Record<string, unknown>): WriteResumeAckFrame | null {
+  if (!isString(v.requestId) || !isString(v.file)) return null;
+  if (!isResumeOutcome(v.outcome)) return null;
+  return { t: "write-resume-ack", requestId: v.requestId, file: v.file, outcome: v.outcome };
+}
+
 // ---------------------------------------------------------------------------
 // 错误文案受控映射（锚点⑤）：code 域封闭=内嵌安全；远端 message 仅服务端审计用，前端不留存。
 // 与 ws-client/subscribe-client 同惯例，4402/4404 措辞按写面语义调整（写宿主/在途重复）。
@@ -245,7 +295,7 @@ function writeFaceErrorText(code: number): string {
 /** 在途记账（内部）：requestId→结算回调+file/kind。 */
 interface PendingWrite {
   readonly file: string;
-  readonly kind: "prompt" | "stop";
+  readonly kind: WriteOpKind;
   readonly resolve: (outcome: never) => void; // 泛型在 Map 存储处擦除；结算入口按 kind 分派强类型
   readonly reject: (error: WriteSendError) => void;
 }
@@ -305,6 +355,59 @@ export class WriteClient {
   }
 
   /**
+   * 恢复重发（v1.1 §10.1：resume{requestId,file,intentId,generation}→write-resume-ack{outcome}）。
+   * 本地预校验（不满足即本地拒、零帧成本）：连接 ready；file 过 filePattern；intentId 过
+   * LIMITS.intentIdPattern（^\w-]{1,64}$，服务端同判 4404）；generation 为正整数（UI 默认 1）；
+   * 同 file 无在途 resume。不排队不自动重发：4409 排队超时等失败由用户显式重试。
+   * 快照口径：在途记 resumeState=resuming{file}（独立账）；结算记 lastResumeResult
+   * （成功=outcome DTO；失败=受控文案）。
+   */
+  resume(file: string, intentId: string, generation: number): Promise<WriteResumeOutcomeDTO> {
+    if (this.stopped) {
+      return Promise.reject(new WriteSendError("closed", "写连接已关闭，请求未完成"));
+    }
+    if (this.snapshot.connState !== "ready") {
+      return Promise.reject(new WriteSendError("not-ready", "写连接未就绪，暂不能发送"));
+    }
+    if (!LIMITS.filePattern.test(file)) {
+      return Promise.reject(new WriteSendError("local-invalid", "文件名非法，无法发送"));
+    }
+    if (!LIMITS.intentIdPattern.test(intentId)) {
+      return Promise.reject(new WriteSendError("local-invalid", "意图标识非法，无法恢复重发"));
+    }
+    if (!Number.isSafeInteger(generation) || generation < 1) {
+      return Promise.reject(new WriteSendError("local-invalid", "进程代次非法（须为正整数），无法恢复重发"));
+    }
+    if (this.snapshot.resumeState.phase === "resuming" && this.snapshot.resumeState.files.includes(file)) {
+      return Promise.reject(new WriteSendError("in-flight", "恢复重发已在途，请等待结果"));
+    }
+    const requestId = this.nextRequestId("resume");
+    return new Promise<WriteResumeOutcomeDTO>((resolve, reject) => {
+      // 占位先于发帧（同 launch 口径：同步占位防同刻重入）
+      this.pending.set(requestId, { file, kind: "resume", resolve: resolve as (outcome: never) => void, reject });
+      const cur = this.snapshot.resumeState;
+      this.publish({ resumeState: { phase: "resuming", files: cur.phase === "resuming" ? [...cur.files, file] : [file] } });
+      try {
+        this.emit({ t: "resume", requestId, file, intentId, generation });
+      } catch {
+        // K5-C2 同口径：socket.send 同步抛错→受控结算：出表+resumeState/lastResumeResult 同步清理
+        this.pending.delete(requestId);
+        const error = new WriteSendError("transport", "发送失败：连接传输异常");
+        this.publish({ resumeState: this.resumeStateWithout(file), lastResumeResult: { ok: false, file, message: error.message } });
+        reject(error);
+      }
+    });
+  }
+
+  /** resume 在途集合减 file（空即归 idle 共享常量）；调用方把结果并入同一次 publish。 */
+  private resumeStateWithout(file: string): WriteResumeState {
+    const cur = this.snapshot.resumeState;
+    if (cur.phase !== "resuming") return cur;
+    const files = cur.files.filter((f) => f !== file);
+    return files.length === 0 ? RESUME_IDLE : { phase: "resuming", files };
+  }
+
+  /**
    * 主动关闭（锚点⑥）：立即置不可逆停止位并物理释放 socket（未 connect/connecting/error 均可关）。
    * 在途请求统一以 closed 受控文案拒绝（服务端连接同断，无迟到结算窗口）；error 态保留错误文案。
    */
@@ -332,9 +435,10 @@ export class WriteClient {
   // 内部：派发与在途记账
   // -------------------------------------------------------------------------
 
-  private nextRequestId(kind: "prompt" | "stop"): string {
+  private nextRequestId(kind: WriteOpKind): string {
     this.reqSeq += 1;
-    return `wr-${kind === "prompt" ? "p" : "s"}-${this.reqSeq}`; // §5.7 requestIdPattern=/^[\w-]{1,64}$/
+    const prefix = ({ prompt: "p", stop: "s", resume: "r" } as const)[kind];
+    return `wr-${prefix}-${this.reqSeq}`; // §5.7 requestIdPattern=/^[\w-]{1,64}$/
   }
 
   /** 出帧（停止屏障后/无连接/非 OPEN 一律静默不发——调帧处已先行本地拒绝，此处为迟到防御）。 */
@@ -398,7 +502,7 @@ export class WriteClient {
   /** 定位并出表匹配的在途请求（锚点②：requestId 唯一定账+kind/file 三重交叉验证）；不匹配=零副作用
    * 返回 null（在途表与快照均不动——畸形关联帧不消费在途，等合法 ack/匹配 error/连接终局结算）。
    * 不做快照变更：调用方把 inflightView 并入同一次 publish（一次结算=一次通知）。 */
-  private takePending(requestId: string, kind: "prompt" | "stop", file: string): { entry: PendingWrite; inflightView: readonly WriteInflightEntry[] } | null {
+  private takePending(requestId: string, kind: WriteOpKind, file: string): { entry: PendingWrite; inflightView: readonly WriteInflightEntry[] } | null {
     const entry = this.pending.get(requestId);
     if (entry === undefined) return null;
     if (entry.kind !== kind || entry.file !== file) return null; // ② kind/file 回显不一致=畸形关联，零消费
@@ -414,10 +518,22 @@ export class WriteClient {
     const entries = [...this.pending.values()];
     this.pending.clear();
     let lastResult: WriteLastResult | null = this.snapshot.lastResult;
+    let lastResumeResult: WriteResumeResult | null = this.snapshot.lastResumeResult;
+    let hadResume = false;
     for (const entry of entries) {
-      lastResult = { ok: false, kind: entry.kind, file: entry.file, message: error.message };
+      if (entry.kind === "resume") {
+        hadResume = true;
+        lastResumeResult = { ok: false, file: entry.file, message: error.message };
+      } else {
+        lastResult = { ok: false, kind: entry.kind, file: entry.file, message: error.message };
+      }
     }
-    this.publish({ inflight: [], lastResult });
+    this.publish({
+      inflight: [],
+      lastResult,
+      lastResumeResult,
+      resumeState: hadResume ? RESUME_IDLE : this.snapshot.resumeState,
+    });
     for (const entry of entries) entry.reject(error);
   }
 
@@ -461,6 +577,18 @@ export class WriteClient {
         (taken.entry.resolve as (outcome: WriteStopOutcomeDTO) => void)(frame.outcome);
         return;
       }
+      case "write-resume-ack": {
+        const frame = parseWriteResumeAck(parsed);
+        if (frame === null) return; // ③ 畸形整帧忽略（不消费在途；合法帧可恢复结算）
+        const taken = this.takePending(frame.requestId, "resume", frame.file);
+        if (taken === null) return; // ② 无关联/迟到/回显不符：零消费（在途保留）
+        this.publish({
+          resumeState: this.resumeStateWithout(frame.file),
+          lastResumeResult: { ok: true, file: frame.file, outcome: frame.outcome },
+        });
+        (taken.entry.resolve as (outcome: WriteResumeOutcomeDTO) => void)(frame.outcome);
+        return;
+      }
       case "error":
         this.handleError(parsed);
         return;
@@ -491,12 +619,19 @@ export class WriteClient {
     if (!connEnvelope) {
       const entry = this.pending.get(frame.requestId);
       if (entry !== undefined) {
-        const message = writeFaceErrorText(frame.code);
+        // §10.1：resume 读链 ComputeSemaphore 排队超时以 error 4409 retryable 到（非 write-resume-ack）——
+        // 闸忙非硬错：记「计算排队超时，可重试」受控结果，用户可显式重试（不自动重发）。
+        const message =
+          entry.kind === "resume" && frame.code === 4409 ? "计算排队超时，可重试（4409）" : writeFaceErrorText(frame.code);
         this.pending.delete(frame.requestId);
-        this.publish({
-          inflight: this.snapshot.inflight.filter((e) => !(e.file === entry.file && e.kind === entry.kind)),
-          lastResult: { ok: false, kind: entry.kind, file: entry.file, message },
-        });
+        if (entry.kind === "resume") {
+          this.publish({ resumeState: this.resumeStateWithout(entry.file), lastResumeResult: { ok: false, file: entry.file, message } });
+        } else {
+          this.publish({
+            inflight: this.snapshot.inflight.filter((e) => !(e.file === entry.file && e.kind === entry.kind)),
+            lastResult: { ok: false, kind: entry.kind, file: entry.file, message },
+          });
+        }
         entry.reject(new WriteSendError("server", message, frame.code));
         return;
       }
@@ -546,5 +681,5 @@ function utf8Bytes(s: string): number {
   return utf8Encoder.encode(s).length;
 }
 
-/** 组件/hook 所需客户端面（subscribe/getSnapshot 对齐 useSyncExternalStore；sendPrompt/sendStop 为写动作）。 */
-export type WriteClientSurface = Pick<WriteClient, "subscribe" | "getSnapshot" | "sendPrompt" | "sendStop">;
+/** 组件/hook 所需客户端面（subscribe/getSnapshot 对齐 useSyncExternalStore；sendPrompt/sendStop/resume 为写动作）。 */
+export type WriteClientSurface = Pick<WriteClient, "subscribe" | "getSnapshot" | "sendPrompt" | "sendStop" | "resume">;

@@ -18,12 +18,14 @@ import { useCallback, useRef, useState, useSyncExternalStore } from "react";
 import type {
   WriteClientSurface,
   WriteLastResult,
+  WriteResumeResult,
   WriteSnapshot,
 } from "./write-client";
 import { WriteSendError } from "./write-client";
 
-/** 写视图态机：idle=可发送；sending=prompt 在途；stopping=stop 在途（可叠加 sending）；error=硬/瞬态错误。 */
-export type WritePhase = "idle" | "sending" | "stopping" | "error";
+/** 写视图态机：idle=可发送；sending=prompt 在途；stopping=stop 在途（可叠加 sending）；
+ * resuming=resume 在途（独立账）；error=硬/瞬态错误。 */
+export type WritePhase = "idle" | "sending" | "stopping" | "resuming" | "error";
 
 /** 写面视图（纯派生产物；errorMessage 恒为受控文案）。 */
 export interface WriteView {
@@ -33,8 +35,12 @@ export interface WriteView {
   readonly ready: boolean;
   readonly sending: boolean;
   readonly stopping: boolean;
+  /** resume 在途（v1.1 恢复重发面；file 身份门：他 file 在途不透出）。 */
+  readonly resuming: boolean;
   /** 本文件最近一次已终结请求（锚点① file 身份门：他文件结果不透出）。 */
   readonly lastResult: WriteLastResult | null;
+  /** 本文件最近一次已终结恢复重发（同 file 身份门；4409 排队超时等受控失败也在此呈现）。 */
+  readonly lastResumeResult: WriteResumeResult | null;
   /** 受控错误文案（连接级硬错误或最近一次发送失败）。 */
   readonly errorMessage: string | null;
 }
@@ -43,12 +49,15 @@ export interface WriteView {
 export function writeViewOf(snap: WriteSnapshot, file: string | null, localError: string | null): WriteView {
   const hasPrompt = file !== null && snap.inflight.some((e) => e.file === file && e.kind === "prompt");
   const hasStop = file !== null && snap.inflight.some((e) => e.file === file && e.kind === "stop");
+  const hasResume = file !== null && snap.resumeState.phase === "resuming" && snap.resumeState.files.includes(file);
   const connError = snap.connState === "error" ? snap.errorMessage : null;
   const lastResult = snap.lastResult !== null && snap.lastResult.file === file ? snap.lastResult : null;
+  const lastResumeResult = snap.lastResumeResult !== null && snap.lastResumeResult.file === file ? snap.lastResumeResult : null;
   let phase: WritePhase;
   if (connError !== null) phase = "error"; // 连接级硬错误优先（在途已被连接面统一结算清空）
   else if (hasStop) phase = "stopping"; // 后发动作优先呈现
   else if (hasPrompt) phase = "sending";
+  else if (hasResume) phase = "resuming";
   else if (localError !== null) phase = "error";
   else phase = "idle";
   return {
@@ -57,7 +66,9 @@ export function writeViewOf(snap: WriteSnapshot, file: string | null, localError
     ready: snap.connState === "ready",
     sending: hasPrompt,
     stopping: hasStop,
+    resuming: hasResume,
     lastResult,
+    lastResumeResult,
     errorMessage: connError ?? localError,
   };
 }
@@ -82,6 +93,8 @@ export interface UseWrite {
   readonly view: WriteView;
   readonly send: (text: string) => Promise<boolean>;
   readonly stop: () => Promise<boolean>;
+  /** 恢复重发（v1.1）：intentId+generation 由调用方提供（演示位手输；默认 generation=1）。 */
+  readonly resume: (intentId: string, generation: number) => Promise<boolean>;
 }
 
 /** 挂接写面：file=null 时视图照常派生（idle/连接级态），send/stop 直接 false（组合层保证不触达）。 */
@@ -130,8 +143,20 @@ export function useWrite(client: WriteClientSurface, file: string | null): UseWr
     [client, file],
   );
 
+  const resume = useCallback(
+    (intentId: string, generation: number): Promise<boolean> => {
+      if (file === null) return Promise.resolve(false);
+      const seq = beginAttempt();
+      return client.resume(file, intentId, generation).then(
+        () => true,
+        (error: unknown) => recordFailure(seq, file, error),
+      );
+    },
+    [client, file],
+  );
+
   // 派生期身份门（锚点③）：瞬态错误仅当属当前 client×file 身份时透出；file=null 全隐。
   const visibleFailure =
     failure !== null && failure.client === client && failure.file === file ? failure.message : null;
-  return { view: writeViewOf(snap, file, visibleFailure), send, stop };
+  return { view: writeViewOf(snap, file, visibleFailure), send, stop, resume };
 }

@@ -64,7 +64,16 @@ function writeHarness(file = "a.jsonl"): { client: WriteClient; ws: FakeWebSocke
 }
 
 function writeSnap(patch: Partial<WriteSnapshot>): WriteSnapshot {
-  return { connState: "ready", errorKind: null, errorMessage: null, inflight: [], lastResult: null, ...patch };
+  return {
+    connState: "ready",
+    errorKind: null,
+    errorMessage: null,
+    inflight: [],
+    lastResult: null,
+    resumeState: { phase: "idle" },
+    lastResumeResult: null,
+    ...patch,
+  };
 }
 
 /** 顶 WriteClientSurface 的存根：快照可推进；send 动作记入 calls，可注入拒绝。 */
@@ -87,6 +96,10 @@ class StubWriteClient {
   sendStop(file: string): Promise<unknown> {
     this.calls.push(`stop:${file}`);
     return this.rejectWith === null ? Promise.resolve({ kind: "no-process" }) : Promise.reject(this.rejectWith);
+  }
+  resume(file: string, intentId: string, generation: number): Promise<unknown> {
+    this.calls.push(`resume:${file}:${intentId}:${generation}`);
+    return this.rejectWith === null ? Promise.resolve(LAUNCHED) : Promise.reject(this.rejectWith);
   }
   push(next: WriteSnapshot): void {
     this.snap = next;
@@ -136,7 +149,17 @@ function detailSnap(patch: Partial<SessionDetailSnapshot>): SessionDetailSnapsho
 }
 
 function msg(seq: number): HistoryEvent {
-  return { seq, ts: null, generation: null, intentId: null, kind: "message", entryId: `e-${seq}`, role: "user", final: true, textPreview: { text: `消息 ${seq}`, truncated: false } };
+  return {
+    seq,
+    ts: null,
+    generation: null,
+    intentId: null,
+    kind: "message",
+    entryId: `e-${seq}`,
+    role: "user",
+    final: true,
+    textPreview: { text: `消息 ${seq}`, truncated: false },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -145,25 +168,70 @@ function msg(seq: number): HistoryEvent {
 
 describe("writeViewOf 派生（纯函数）", () => {
   it("基础态机：无在途→idle；prompt 在途→sending；stop 在途→stopping（叠加时 stop 优先）；ready=connState", () => {
-    expect(writeViewOf(writeSnap({}), "a.jsonl", null)).toMatchObject({ phase: "idle", ready: true, sending: false, stopping: false });
-    expect(writeViewOf(writeSnap({ inflight: [{ file: "a.jsonl", kind: "prompt" }] }), "a.jsonl", null)).toMatchObject({ phase: "sending", sending: true, stopping: false });
-    expect(writeViewOf(writeSnap({ inflight: [{ file: "a.jsonl", kind: "stop" }] }), "a.jsonl", null)).toMatchObject({ phase: "stopping", stopping: true });
-    const both = writeViewOf(writeSnap({ inflight: [{ file: "a.jsonl", kind: "prompt" }, { file: "a.jsonl", kind: "stop" }] }), "a.jsonl", null);
+    expect(writeViewOf(writeSnap({}), "a.jsonl", null)).toMatchObject({
+      phase: "idle",
+      ready: true,
+      sending: false,
+      stopping: false,
+    });
+    expect(writeViewOf(writeSnap({ inflight: [{ file: "a.jsonl", kind: "prompt" }] }), "a.jsonl", null)).toMatchObject({
+      phase: "sending",
+      sending: true,
+      stopping: false,
+    });
+    expect(writeViewOf(writeSnap({ inflight: [{ file: "a.jsonl", kind: "stop" }] }), "a.jsonl", null)).toMatchObject({
+      phase: "stopping",
+      stopping: true,
+    });
+    const both = writeViewOf(
+      writeSnap({
+        inflight: [
+          { file: "a.jsonl", kind: "prompt" },
+          { file: "a.jsonl", kind: "stop" },
+        ],
+      }),
+      "a.jsonl",
+      null,
+    );
     expect(both.phase).toBe("stopping"); // 后发动作优先呈现
-    expect(writeViewOf(writeSnap({ connState: "connecting" }), "a.jsonl", null)).toMatchObject({ phase: "idle", ready: false });
+    expect(writeViewOf(writeSnap({ connState: "connecting" }), "a.jsonl", null)).toMatchObject({
+      phase: "idle",
+      ready: false,
+    });
   });
 
   it("file 身份门：他 file 在途/结果不透出（identity gate）", () => {
-    const view = writeViewOf(writeSnap({ inflight: [{ file: "b.jsonl", kind: "prompt" }], lastResult: { ok: true, kind: "prompt", file: "b.jsonl", outcome: LAUNCHED } }), "a.jsonl", null);
+    const view = writeViewOf(
+      writeSnap({
+        inflight: [{ file: "b.jsonl", kind: "prompt" }],
+        lastResult: { ok: true, kind: "prompt", file: "b.jsonl", outcome: LAUNCHED },
+      }),
+      "a.jsonl",
+      null,
+    );
     expect(view.phase).toBe("idle");
     expect(view.lastResult).toBeNull();
-    expect(writeViewOf(writeSnap({ lastResult: { ok: true, kind: "prompt", file: "a.jsonl", outcome: LAUNCHED } }), "a.jsonl", null).lastResult).not.toBeNull();
+    expect(
+      writeViewOf(
+        writeSnap({ lastResult: { ok: true, kind: "prompt", file: "a.jsonl", outcome: LAUNCHED } }),
+        "a.jsonl",
+        null,
+      ).lastResult,
+    ).not.toBeNull();
   });
 
   it("错误双源：连接级（硬）优先于在途/瞬态；瞬态（localError）只在无在途时呈 error", () => {
-    expect(writeViewOf(writeSnap({ connState: "error", errorKind: "auth-failed", errorMessage: "认证失败（4401）" }), "a.jsonl", null)).toMatchObject({ phase: "error", errorMessage: "认证失败（4401）", ready: false });
+    expect(
+      writeViewOf(
+        writeSnap({ connState: "error", errorKind: "auth-failed", errorMessage: "认证失败（4401）" }),
+        "a.jsonl",
+        null,
+      ),
+    ).toMatchObject({ phase: "error", errorMessage: "认证失败（4401）", ready: false });
     expect(writeViewOf(writeSnap({}), "a.jsonl", "该会话已有发送中的消息").phase).toBe("error");
-    expect(writeViewOf(writeSnap({ inflight: [{ file: "a.jsonl", kind: "stop" }] }), "a.jsonl", "旧错误").phase).toBe("stopping"); // 在途优先于瞬态
+    expect(writeViewOf(writeSnap({ inflight: [{ file: "a.jsonl", kind: "stop" }] }), "a.jsonl", "旧错误").phase).toBe(
+      "stopping",
+    ); // 在途优先于瞬态
   });
 });
 
@@ -261,8 +329,18 @@ describe("WriteComposer 组件（真实链）", () => {
       ws.receive({ t: "write-ack", requestId: "wr-p-1", file: "a.jsonl", outcome: LAUNCHED });
     });
     expect(textarea.value).toBe(""); // ack 后清空
-    expect(screen.getAllByRole("status").map((n) => n.textContent).join()).toContain("可发送");
-    expect(screen.getAllByRole("status").map((n) => n.textContent).join()).toContain("已入队（intentId=i-1）");
+    expect(
+      screen
+        .getAllByRole("status")
+        .map((n) => n.textContent)
+        .join(),
+    ).toContain("可发送");
+    expect(
+      screen
+        .getAllByRole("status")
+        .map((n) => n.textContent)
+        .join(),
+    ).toContain("已入队（intentId=i-1）");
   });
 
   it("错误横幅：超 64KiB 本地拒（零帧）→role=alert 受控文案；文本保留可改后重试", async () => {
@@ -292,9 +370,19 @@ describe("WriteComposer 组件（真实链）", () => {
     expect(ws.sentFrames()[1]).toEqual({ t: "stop", requestId: "wr-s-1", file: "a.jsonl" });
     expect((screen.getByRole("button", { name: "停止" }) as HTMLButtonElement).disabled).toBe(true); // 停止在途
     await act(async () => {
-      ws.receive({ t: "write-stop-ack", requestId: "wr-s-1", file: "a.jsonl", outcome: { kind: "confirmed", exit: { code: 1, signal: "SIGTERM" } } });
+      ws.receive({
+        t: "write-stop-ack",
+        requestId: "wr-s-1",
+        file: "a.jsonl",
+        outcome: { kind: "confirmed", exit: { code: 1, signal: "SIGTERM" } },
+      });
     });
-    expect(screen.getAllByRole("status").map((n) => n.textContent).join()).toContain("已停止");
+    expect(
+      screen
+        .getAllByRole("status")
+        .map((n) => n.textContent)
+        .join(),
+    ).toContain("已停止");
     expect((screen.getByRole("button", { name: "停止" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });
@@ -308,12 +396,24 @@ describe("SessionDetail 集成写面", () => {
     const sub = new StubSubscribeClient();
     sub.push(detailSnap({ phase: "live", events: [] })); // 空会话
     const { client } = writeHarness();
-    render(React.createElement(SessionDetail, { client: sub as unknown as SubscribeClientSurface, file: "a.jsonl", writeClient: client }));
+    render(
+      React.createElement(SessionDetail, {
+        client: sub as unknown as SubscribeClientSurface,
+        file: "a.jsonl",
+        writeClient: client,
+      }),
+    );
     expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
     cleanup();
 
     sub.push(detailSnap({ phase: "live", events: [msg(1)] })); // 内容视图（streaming）
-    render(React.createElement(SessionDetail, { client: sub as unknown as SubscribeClientSurface, file: "a.jsonl", writeClient: client }));
+    render(
+      React.createElement(SessionDetail, {
+        client: sub as unknown as SubscribeClientSurface,
+        file: "a.jsonl",
+        writeClient: client,
+      }),
+    );
     expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
     cleanup();
 
@@ -349,7 +449,12 @@ describe("K5 B1：草稿身份门（ack 清空仅限本次发送对应的未编�
       ws.receive({ t: "write-ack", requestId: "wr-p-1", file: "a.jsonl", outcome: LAUNCHED });
     });
     expect(textarea.value).toBe("new unsent draft"); // B1：ack 只清本次发送对应草稿，不吞在途新输入
-    expect(screen.getAllByRole("status").map((n) => n.textContent).join()).toContain("已入队（intentId=i-1）");
+    expect(
+      screen
+        .getAllByRole("status")
+        .map((n) => n.textContent)
+        .join(),
+    ).toContain("已入队（intentId=i-1）");
   });
 
   it("在途改回同文本（A→B→A）=版本已替换：ack 不清空（版本边界，不做字符串比较）", async () => {
@@ -422,7 +527,12 @@ describe("K5 B2：composer 稳定挂载（空态↔内容态不丢草稿/在途/
     });
     expect(textarea.value).toBe(""); // ack 清空（无在途编辑）
     expect(screen.getByText(/#1 消息/)).toBeTruthy(); // 内容呈现
-    expect(screen.getAllByRole("status").map((n) => n.textContent).join()).toContain("已入队（intentId=i-1）");
+    expect(
+      screen
+        .getAllByRole("status")
+        .map((n) => n.textContent)
+        .join(),
+    ).toContain("已入队（intentId=i-1）");
   });
 
   it("内容→空回切：草稿保留（双向稳定）", () => {
@@ -544,5 +654,177 @@ describe("K5 B3：瞬态错误身份门（client×file 绑定+动作序号迟到
     expect(probeB3?.view.errorMessage).toBeNull();
     view.rerender(React.createElement(ProbeB3, { client, file: "a.jsonl" }));
     expect(probeB3?.view.phase).toBe("idle"); // 回 A 也不出现（根本未落账）
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v1.1 resume 面：writeViewOf resuming 态机 + useWrite resume 动作 + composer 恢复重发演示位
+// ---------------------------------------------------------------------------
+
+describe("resume 面：writeViewOf resuming 派生", () => {
+  it("resumeState resuming{files}→resuming 态；file 身份门：他 file 不透出；优先级在 sending/stopping 之后", () => {
+    const resuming = writeSnap({ resumeState: { phase: "resuming", files: ["a.jsonl"] } });
+    expect(writeViewOf(resuming, "a.jsonl", null)).toMatchObject({ phase: "resuming", resuming: true });
+    expect(writeViewOf(resuming, "b.jsonl", null)).toMatchObject({ phase: "idle", resuming: false }); // 身份门
+    expect(writeViewOf(resuming, null, null).resuming).toBe(false);
+    // 优先级：连接级错误 > stopping > sending > resuming > 瞬态错误
+    const withPrompt = writeSnap({
+      resumeState: { phase: "resuming", files: ["a.jsonl"] },
+      inflight: [{ file: "a.jsonl", kind: "prompt" }],
+    });
+    expect(writeViewOf(withPrompt, "a.jsonl", null)).toMatchObject({ phase: "sending", resuming: true });
+    const withStop = writeSnap({
+      resumeState: { phase: "resuming", files: ["a.jsonl"] },
+      inflight: [{ file: "a.jsonl", kind: "stop" }],
+    });
+    expect(writeViewOf(withStop, "a.jsonl", null).phase).toBe("stopping");
+    expect(writeViewOf(resuming, "a.jsonl", "旧错误").phase).toBe("resuming"); // 在途优先于瞬态
+  });
+
+  it("lastResumeResult file 身份门：本文件可见；他文件/file=null 不透出", () => {
+    const snap = writeSnap({ lastResumeResult: { ok: true, file: "a.jsonl", outcome: LAUNCHED } });
+    expect(writeViewOf(snap, "a.jsonl", null).lastResumeResult).toMatchObject({ ok: true, file: "a.jsonl" });
+    expect(writeViewOf(snap, "b.jsonl", null).lastResumeResult).toBeNull();
+    expect(writeViewOf(snap, null, null).lastResumeResult).toBeNull();
+  });
+});
+
+describe("resume 面：useWrite resume 动作", () => {
+  let probeResume: {
+    view: WriteView;
+    resume: (intentId: string, generation: number) => Promise<boolean>;
+  } | null = null;
+  function ProbeResume({ client, file }: { client: StubWriteClient; file: string | null }): React.ReactElement {
+    const { view, resume } = useWrite(client, file);
+    probeResume = { view, resume };
+    return React.createElement("div");
+  }
+
+  it("成功=true 且帧参数透传（file/intentId/generation）；被拒→瞬态错误进视图（resolve false）；新尝试清除", async () => {
+    const client = new StubWriteClient();
+    render(React.createElement(ProbeResume, { client, file: "a.jsonl" }));
+    let ok = false;
+    await act(async () => {
+      ok = await probeResume!.resume("i-1", 1);
+    });
+    expect(ok).toBe(true);
+    expect(client.calls).toEqual(["resume:a.jsonl:i-1:1"]);
+    client.rejectWith = new WriteSendError("server", "计算排队超时，可重试（4409）", 4409);
+    await act(async () => {
+      ok = await probeResume!.resume("i-1", 1);
+    });
+    expect(ok).toBe(false); // 恒不 reject
+    expect(probeResume?.view.phase).toBe("error");
+    expect(probeResume?.view.errorMessage).toBe("计算排队超时，可重试（4409）");
+    client.rejectWith = null;
+    await act(async () => {
+      ok = await probeResume!.resume("i-2", 3);
+    });
+    expect(ok).toBe(true);
+    expect(probeResume?.view.phase).toBe("idle"); // 新尝试清除瞬态错误
+  });
+
+  it("file=null：直接 false 且零调用", async () => {
+    const client = new StubWriteClient();
+    render(React.createElement(ProbeResume, { client, file: null }));
+    let ok = true;
+    await act(async () => {
+      ok = await probeResume!.resume("i-1", 1);
+    });
+    expect(ok).toBe(false);
+    expect(client.calls).toEqual([]);
+  });
+
+  it("快照推进 resumeState→视图切 resuming（真客户端快照语义）", () => {
+    const client = new StubWriteClient();
+    render(React.createElement(ProbeResume, { client, file: "a.jsonl" }));
+    client.push(writeSnap({ resumeState: { phase: "resuming", files: ["a.jsonl"] } }));
+    expect(probeResume?.view.phase).toBe("resuming");
+    expect(probeResume?.view.resuming).toBe(true);
+    client.push(
+      writeSnap({
+        resumeState: { phase: "idle" },
+        lastResumeResult: { ok: false, file: "a.jsonl", message: "计算排队超时，可重试（4409）" },
+      }),
+    );
+    expect(probeResume?.view.phase).toBe("idle");
+    expect(probeResume?.view.lastResumeResult).toMatchObject({ ok: false, message: "计算排队超时，可重试（4409）" });
+  });
+});
+
+describe("resume 面：composer 恢复重发演示位（真实链）", () => {
+  it("手输 intentId+generation→resume 帧发出；ack 后结果文案呈现；resuming 期间按钮禁用", async () => {
+    const { client, ws } = writeHarness();
+    render(React.createElement(WriteComposer, { client, file: "a.jsonl" }));
+    const resumeButton = () => screen.getByRole("button", { name: "恢复重发" }) as HTMLButtonElement;
+    expect(resumeButton().disabled).toBe(true); // 空 intentId 不可发
+    fireEvent.change(screen.getByLabelText("恢复重发意图标识"), { target: { value: "i-1" } });
+    expect(resumeButton().disabled).toBe(false); // generation 默认 1
+    fireEvent.change(screen.getByLabelText("恢复重发进程代次"), { target: { value: "2" } });
+    fireEvent.click(resumeButton());
+    expect(ws.sentFrames()[1]).toEqual({
+      t: "resume",
+      requestId: "wr-r-1",
+      file: "a.jsonl",
+      intentId: "i-1",
+      generation: 2,
+    });
+    expect(resumeButton().disabled).toBe(true); // resuming 在途禁用
+    expect(
+      screen
+        .getAllByRole("status")
+        .map((n) => n.textContent)
+        .join(),
+    ).toContain("恢复重发中…");
+    await act(async () => {
+      ws.receive({
+        t: "write-resume-ack",
+        requestId: "wr-r-1",
+        file: "a.jsonl",
+        outcome: { kind: "launched", intentId: "i-9", commandId: 3 },
+      });
+    });
+    expect(resumeButton().disabled).toBe(false);
+    expect(
+      screen
+        .getAllByRole("status")
+        .map((n) => n.textContent)
+        .join(),
+    ).toContain("已重发入队（intentId=i-9）");
+  });
+
+  it("identity-rejected 结果文案按 cause 映射；4409 排队超时走受控瞬态错误横幅（可重试）", async () => {
+    const { client, ws } = writeHarness();
+    render(React.createElement(WriteComposer, { client, file: "a.jsonl" }));
+    fireEvent.change(screen.getByLabelText("恢复重发意图标识"), { target: { value: "i-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "恢复重发" }));
+    await act(async () => {
+      ws.receive({
+        t: "write-resume-ack",
+        requestId: "wr-r-1",
+        file: "a.jsonl",
+        outcome: { kind: "identity-rejected", cause: "resume-not-authorized" },
+      });
+    });
+    expect(
+      screen
+        .getAllByRole("status")
+        .map((n) => n.textContent)
+        .join(),
+    ).toContain("恢复重发被拒：该意图未获重发授权");
+    // 再发→4409 排队超时：瞬态错误横幅（受控文案，可重试不锁死入口）
+    fireEvent.click(screen.getByRole("button", { name: "恢复重发" }));
+    expect(ws.sentFrames()[2]).toMatchObject({ t: "resume", requestId: "wr-r-2" });
+    await act(async () => {
+      ws.receive({
+        t: "error",
+        code: 4409,
+        message: "compute gate queue timeout",
+        retryable: true,
+        requestId: "wr-r-2",
+      });
+    });
+    expect(screen.getByRole("alert").textContent).toBe("计算排队超时，可重试（4409）");
+    expect((screen.getByRole("button", { name: "恢复重发" }) as HTMLButtonElement).disabled).toBe(false); // 可重试
   });
 });

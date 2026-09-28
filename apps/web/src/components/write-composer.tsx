@@ -19,8 +19,8 @@
 
 import React, { useRef, useState } from "react";
 import { useWrite } from "../ws/use-write";
-import type { WriteClientSurface, WriteLastResult } from "../ws/write-client";
-import type { WriteSendOutcomeDTO, WriteStopOutcomeDTO } from "@pi-agent-ui/protocol/src/contracts";
+import type { WriteClientSurface, WriteLastResult, WriteResumeResult } from "../ws/write-client";
+import type { WriteResumeOutcomeDTO, WriteSendOutcomeDTO, WriteStopOutcomeDTO } from "@pi-agent-ui/protocol/src/contracts";
 
 /** prompt 结果文案（kind 域内映射；not-ready.cause=服务端自由文本，不渲染）。 */
 function promptOutcomeText(outcome: WriteSendOutcomeDTO): string {
@@ -49,6 +49,37 @@ function stopOutcomeText(outcome: WriteStopOutcomeDTO): string {
   }
 }
 
+/** resume 结果文案（kind 域内映射；not-ready.cause=服务端自由文本，不渲染）。 */
+function resumeOutcomeText(outcome: WriteResumeOutcomeDTO): string {
+  switch (outcome.kind) {
+    case "identity-rejected": {
+      const cause = {
+        "no-recovery-data": "该会话无恢复数据",
+        "resume-blocked": "恢复面阻断，请先走修复面",
+        "resume-not-authorized": "该意图未获重发授权",
+        "generation-mismatch": "进程代次已变更",
+      }[outcome.cause];
+      return `恢复重发被拒：${cause}`;
+    }
+    case "execution-failed": return "恢复重发失败：原意图载荷不可用";
+    case "launched": return `已重发入队（intentId=${outcome.intentId}）`;
+    case "busy": return "未重发：写宿主忙";
+    case "gate-rejected": return outcome.reason === "busy" ? "被写门拒绝：宿主忙" : "被写门拒绝：会话已关闭";
+    case "gate-failed": return `写门失败（${outcome.stage === "enqueue" ? "入队" : "发送"}阶段）`;
+    case "invalidated": {
+      const stage = { "enqueue": "入队", "sending": "发送", "post-send": "发送后", "first-byte": "首字节前" }[outcome.stage];
+      return `重发已作废（${stage}阶段）`;
+    }
+    case "no-process": return "未重发：无写进程";
+    case "not-ready": return "未重发：会话未就绪";
+  }
+}
+
+/** resume 最近结果行文案：成功分支走 outcome 映射；失败分支=write-client 受控文案。 */
+function resumeResultText(result: WriteResumeResult): string {
+  return result.ok ? resumeOutcomeText(result.outcome) : result.message;
+}
+
 /** 最近结果行文案：成功分支走 outcome 映射；失败分支=write-client 受控文案。 */
 function lastResultText(result: WriteLastResult): string | null {
   if (result.ok) return result.kind === "prompt" ? promptOutcomeText(result.outcome) : stopOutcomeText(result.outcome);
@@ -56,8 +87,11 @@ function lastResultText(result: WriteLastResult): string | null {
 }
 
 export function WriteComposer({ client, file }: { client: WriteClientSurface; file: string | null }) {
-  const { view, send, stop } = useWrite(client, file);
+  const { view, send, stop, resume } = useWrite(client, file);
   const [text, setText] = useState("");
+  // 恢复重发演示位（v1.1 最小面：手输 intentId+generation 默认 1；完整恢复面板不在本批）
+  const [resumeIntentId, setResumeIntentId] = useState("");
+  const [resumeGeneration, setResumeGeneration] = useState("1");
   // K5-B1 草稿身份门：draftVersion 每次编辑递增（含改回同文本）；identityRef 每次渲染刷新为当前
   // client/file（旧发送的迟到 ack 闭包读到的旧身份与之比对）。ref 而非 state：ack 回调需读最新值，
   // 且版本递增不应触发额外重渲染。
@@ -75,10 +109,14 @@ export function WriteComposer({ client, file }: { client: WriteClientSurface; fi
 
   const canSend = file !== null && view.ready && !view.sending && !view.stopping && text.length > 0;
   const canStop = file !== null && view.ready && !view.stopping;
+  const generationNum = Number(resumeGeneration);
+  const canResume =
+    file !== null && view.ready && !view.resuming && resumeIntentId.length > 0 && Number.isSafeInteger(generationNum) && generationNum >= 1;
 
   const phaseText =
     view.phase === "sending" ? "发送中…"
     : view.phase === "stopping" ? "停止中…"
+    : view.phase === "resuming" ? "恢复重发中…"
     : view.phase === "error" ? "写连接异常"
     : file === null ? "未选择会话"
     : view.ready ? "可发送"
@@ -138,6 +176,43 @@ export function WriteComposer({ client, file }: { client: WriteClientSurface; fi
       {view.lastResult !== null ? (
         <p role="status">{lastResultText(view.lastResult)}</p>
       ) : null}
+      <details className="resume-demo">
+        <summary>恢复重发</summary>
+        <div className="resume-fields">
+          <label>
+            意图标识
+            <input
+              type="text"
+              value={resumeIntentId}
+              onChange={(event) => setResumeIntentId(event.target.value)}
+              aria-label="恢复重发意图标识"
+              placeholder="如 i-1"
+              disabled={file === null || !view.ready}
+            />
+          </label>
+          <label>
+            进程代次
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={resumeGeneration}
+              onChange={(event) => setResumeGeneration(event.target.value)}
+              aria-label="恢复重发进程代次"
+              disabled={file === null || !view.ready}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => void resume(resumeIntentId, generationNum)}
+            disabled={!canResume}
+          >
+            恢复重发
+          </button>
+        </div>
+        {view.resuming ? <p role="status">恢复重发中…</p> : null}
+        {view.lastResumeResult !== null ? <p role="status">{resumeResultText(view.lastResumeResult)}</p> : null}
+      </details>
     </section>
   );
 }
