@@ -1106,3 +1106,15 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 **测试**：W-ra-1..5（resume-authority.test.ts：键口径五案——abs→逻辑名/无匹配透传/null 短路/recoverFromSnapshot 真映射/generationFor 直查）+W-res-12（prompt 无权威源 fail-closed+零副作用+v1 兼容照写）+W-res-1 补两形案（换行注入/空串——**又踩 4404 累计 3→close：第三案须再拆连接 c3**）。全仓 1462 绿。
 
 **变异三杀**（基线 8eec8a4；五步单链）：Mu-fix-1 sendPrompt fail-closed 门 if(false&&)→W-res-12；Mu-fix-2 归一破坏（直透传）→W-ra-1；Mu-fix-3 intentIdPattern→/^.*/→W-res-1 注入形。全部还原复绿。
+
+### P0-2 r3b 执行面批（真重发+composition 真源 E2E；基线待提交；2026-09-28）
+
+**范围**：executeFor 执行点读（同快照复核+payload 读回）+generationFor 执行点重查+send 接线（TurnGate 天然内嵌）+write-resume-ack 终形（七枝同构）+composition makeResumeAuthority executeFor+A-3 E2E（K3 审附条件后半实证）。
+
+**实现**（五文件）：契约（contracts.ts）WriteResumeOutcomeDTO=identity-rejected|execution-failed{payload-unavailable}|launched{intentId,commandId}|busy|gate-rejected|gate-failed|invalidated|no-process|not-ready{cause?}——删 execution-pending；七枝独立声明不嵌套复用（cause 空间两帧面不同，嵌套并集松化；同构自证=赋值兼容无 as）。宿主（rpc-write-host.ts）ResumeAuthority 扩 executeFor(file,intentId)；resume() 执行序=复核拒（审计 source=execute-recheck）→payload null→execution-failed→执行点 generationFor 重查→send(rawText)→encodeSendOutcome 映射；launched 审计带 newIntentId。装配（composition.ts）executeFor=同 readOnce 归一链→recoverFromSnapshot→intents 查 payload.rawText；**per-file in-flight Map 合并完成即删不缓存**（无失效钩子下缓存快照跨 send 不失效→同 matchKey 双发面正确性否决）；资源闸=evidence-source 8MiB 同源。端口（write-host.ts）注释同步。
+
+**测试**：W-res-8 改真执行断言（launched+payload 透传 sends=["re-hi"]+created=1+审计 newIntentId）+新增 W-res-13..17（执行点复核拦/payload null/executeFor 抛错 4402→no-recovery-data source=execute/执行点代次复核/send 结果透传）→ws-gateway-write-resume 17 例；W-ra-6..9（executeFor 键归一+payload 真映射+intents 缺 id 防御 null+in-flight 并发合并）→resume-authority 9 例。E2E A-3（p02-assembly-e2e.test.ts）=真 composition 接线：手造 journal→resume→identity-rejected{resume-not-authorized}（非 no-recovery-data=键归一+真 provider 真盘+恢复算法全通）+零新行断言。全 E2E 3/3 绿（真 pi 30.9s）。
+
+**E2E 排障两教训**：①provider 首捕需 trustFirstCapture（B12-1 冷启动权威门：未登记 file 默认 no-evidence-snapshot）→E2E boot 加 trustFirstRecoveryCapture:true（composition config 字段同名；生产=宿主显式声明）。②IntentMatchKey.attachmentIdentity 是 **string**（identity.ts:56，空附件=""，=排序 join(",")）非数组——手造 journal 用 [] 会 schema 拒（嵌套非法 matchKey.attachmentIdentity.attachmentIdentity）致 resumeBlocked。
+
+**变异**：待补（基线提交后五步单链）。

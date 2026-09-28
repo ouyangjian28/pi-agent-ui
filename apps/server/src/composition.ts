@@ -131,22 +131,50 @@ function requireAbsPaths(name: string, paths: readonly string[]): readonly strin
 /** resumeAuthority 真源工厂（P0-2 r3a P1 修复/K3 审，导出供装配层测试）。
 * 键口径：reportFor 入参=网关传来的 journal 绝对路径→归一为逻辑名再喂 provider（与 get-recovery
 * 同键；seen-store/锚点持久键单一宇宙，B13-2 一致性）；generationFor 入参=绝对路径直查 registry
-* （write 面口径——sendPrompt/stop/sessionFor 链全是绝对路径键）。 */
+* （write 面口径——sendPrompt/stop/sessionFor 链全是绝对路径键）。
+* r3b 资源面（K3 审 P2-3）：per-file in-flight 合并（并发读共享同次 provider 调用；**完成即删不缓存**
+* ——无失效钩子下缓存 resume #1 快照跨 send 不失效→同 matchKey 双发面，正确性否决缓存）；
+* 断连取消=r3a 同口径不提供（帧应答前断连=send 已提交不可撤，读取消意义小）；预算闸=evidence-source
+* 合计 8MiB 入口门（同源）。 */
 export function makeResumeAuthority(deps: {
   roots: readonly string[];
   provider: (file: string, signal: AbortSignal) => Promise<RecoveryEvidenceResult | null>;
   registry: { statusFor(file: string): { process: { generation: number | null } } };
 }): ResumeAuthority {
   const { roots, provider, registry } = deps;
+  const inflight = new Map<string, Promise<RecoveryEvidenceResult | null>>();
+  const readOnce = (logical: string): Promise<RecoveryEvidenceResult | null> => {
+    const hit = inflight.get(logical);
+    if (hit !== undefined) return hit; // 并发合并：同 file 并发 resume/reportFor 只做一次盘读
+    const p = provider(logical, new AbortController().signal)
+      .finally(() => { if (inflight.get(logical) === p) inflight.delete(logical); }); // 完成即删（不缓存）
+    inflight.set(logical, p);
+    return p;
+  };
+  const reportOf = async (file: string) => {
+    const logical = logicalNameWithinRoots(file, roots) ?? file;
+    const snap = await readOnce(logical); // r3a：身份门读取（无用户取消面——进程内即答；provider 预算保护同源）
+    if (snap === null || !isRecoverySnapshot(snap)) return null;
+    const r = recoverFromSnapshot(snap);
+    return { report: r, snapValid: true as const };
+  };
   return {
     reportFor: async (file: string) => {
-      const logical = logicalNameWithinRoots(file, roots) ?? file;
-      const snap = await provider(logical, new AbortController().signal); // r3a：身份门读取（无用户取消面——进程内即答；provider 预算保护同源）
-      if (snap === null || !isRecoverySnapshot(snap)) return null;
-      const r = recoverFromSnapshot(snap);
-      return { resendAuthorized: [...r.resendAuthorized], resumeBlocked: r.resumeBlocked };
+      const got = await reportOf(file);
+      if (got === null) return null;
+      return { resendAuthorized: [...got.report.resendAuthorized], resumeBlocked: got.report.resumeBlocked };
     },
     generationFor: (file: string) => registry.statusFor(file).process.generation,
+    executeFor: async (file: string, intentId: string) => {
+      const got = await reportOf(file);
+      if (got === null) return null;
+      const rec = got.report.intents.find((i) => i.intentId === intentId);
+      // 授权在则 intents 必含该 id（resendKeys 从 intents 派生）；缺=证据不完整（防御 null，非身份错）
+      return {
+        report: { resendAuthorized: [...got.report.resendAuthorized], resumeBlocked: got.report.resumeBlocked },
+        payload: rec === undefined ? null : { rawText: rec.payload.rawText },
+      };
+    },
   };
 }
 

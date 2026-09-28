@@ -39,6 +39,15 @@ export interface ResumeAuthority {
   reportFor(file: string): { readonly resendAuthorized: readonly string[]; readonly resumeBlocked: boolean } | null | Promise<{ readonly resendAuthorized: readonly string[]; readonly resumeBlocked: boolean } | null>;
   /** 当前活进程代次；无活进程=null（resume 放行至执行面——拉起时新代；prompt 校验跳过）。 */
   generationFor(file: string): number | null;
+  /** r3b 执行点读：同一快照同出复核报告+目标载荷（门序→执行间隔的授权撤销/代次变化在此收敛；
+   * payload=授权在但 enqueue 载荷读不回时 null——证据不完整非身份错）。 */
+  executeFor(file: string, intentId: string): {
+    readonly report: { readonly resendAuthorized: readonly string[]; readonly resumeBlocked: boolean };
+    readonly payload: { readonly rawText: string } | null;
+  } | null | Promise<{
+    readonly report: { readonly resendAuthorized: readonly string[]; readonly resumeBlocked: boolean };
+    readonly payload: { readonly rawText: string } | null;
+  } | null>;
 }
 
 /** SessionSendResult→WriteSendOutcomeDTO（穷尽映射；error/generation 在此截断）。 */
@@ -146,7 +155,7 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
     },
     async resume(file: string, intentId: string, generation: number): Promise<WriteResumeOutcomeDTO> {
       // v1.1 身份门（r3a）：校验序=恢复数据在场→未阻断→授权→代次；任何拒绝=零副作用（不触 sessionFor）。
-      // 执行面（重发 payload 读回+TurnGate 接线）=r3b；通过→execution-pending 诚实占位。
+      // 执行面（r3b）：门序通过→executeFor 执行点读（同快照出复核+载荷）→generationFor 重查→send。
       const authority = opts.resumeAuthority;
       if (authority === undefined) {
         auditSafe(() => `write-resume file=${file} intentId=${intentId} outcome=identity-rejected cause=no-recovery-data source=absent`);
@@ -182,8 +191,60 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
         auditSafe(() => `write-resume file=${file} intentId=${intentId} outcome=identity-rejected cause=generation-mismatch frame=${generation} live=${live}`);
         return { kind: "identity-rejected", cause: "generation-mismatch" };
       }
-      auditSafe(() => `write-resume file=${file} intentId=${intentId} outcome=execution-pending generation=${generation}`);
-      return { kind: "execution-pending" };
+      // ── r3b 执行面 ─────────────────────────────────────────────────────
+      // 执行点读：同快照出复核报告+载荷（门序→执行间隔内新裁决/阻断到达在此收敛；残余窗口=读完成→send
+      // 提交，彻底闭环属写面原子化（P0-4 后 TECH 债条目），本批明示窄窗+审计留痕。
+      let exec: Awaited<ReturnType<ResumeAuthority["executeFor"]>>;
+      try {
+        exec = await authority.executeFor(file, intentId);
+      } catch (e: unknown) {
+        auditSafe(() => `write-host-error op=resume file=${file} ${errText(e)}`);
+        throw stripped("resume");
+      }
+      if (exec === null) {
+        auditSafe(() => `write-resume file=${file} intentId=${intentId} outcome=identity-rejected cause=no-recovery-data source=execute`);
+        return { kind: "identity-rejected", cause: "no-recovery-data" };
+      }
+      if (exec.report.resumeBlocked) {
+        auditSafe(() => `write-resume file=${file} intentId=${intentId} outcome=identity-rejected cause=resume-blocked source=execute-recheck`);
+        return { kind: "identity-rejected", cause: "resume-blocked" };
+      }
+      if (!exec.report.resendAuthorized.includes(intentId)) {
+        auditSafe(() => `write-resume file=${file} intentId=${intentId} outcome=identity-rejected cause=resume-not-authorized source=execute-recheck`);
+        return { kind: "identity-rejected", cause: "resume-not-authorized" };
+      }
+      if (exec.payload === null) {
+        auditSafe(() => `write-resume file=${file} intentId=${intentId} outcome=execution-failed cause=payload-unavailable`);
+        return { kind: "execution-failed", cause: "payload-unavailable" };
+      }
+      // 执行点代次复核：拦「门序→send 间进程重启换代」（内存查；换代后 send 会打到新进程=语义错配）。
+      let live2: number | null;
+      try {
+        live2 = authority.generationFor(file);
+      } catch (e: unknown) {
+        auditSafe(() => `write-host-error op=resume file=${file} ${errText(e)}`);
+        throw stripped("resume");
+      }
+      if (live2 !== null && live2 !== generation) {
+        auditSafe(() => `write-resume file=${file} intentId=${intentId} outcome=identity-rejected cause=generation-mismatch frame=${generation} live=${live2} source=execute-recheck`);
+        return { kind: "identity-rejected", cause: "generation-mismatch" };
+      }
+      // 执行：send 接线（TurnGate 交涉天然在 session.send 内；结果映射同 prompt 面——launched.intentId
+      // =重发新意图，原意图关联在审计行；journal 面不因 resume 加行型，新 enqueue 即无辜新意图）。
+      try {
+        const raw = await (await sessionOf(file)).send(exec.payload.rawText);
+        const g = gateFailedDetail(raw);
+        if (g !== null) auditSafe(() => g);
+        if (raw.kind === "launched") {
+          auditSafe(() => `write-resume file=${file} intentId=${intentId} outcome=launched newIntentId=${raw.key.intentId}`);
+        } else {
+          auditSafe(() => `write-resume file=${file} intentId=${intentId} outcome=${raw.kind}`);
+        }
+        return encodeSendOutcome(raw); // 同构自证：WriteSendOutcomeDTO 全枝（含 prompt 面 identity-rejected 子集）可赋 WriteResumeOutcomeDTO，无 as
+      } catch (e: unknown) {
+        auditSafe(() => `write-host-error op=resume file=${file} ${errText(e)}`);
+        throw stripped("resume");
+      }
     },
   };
 }

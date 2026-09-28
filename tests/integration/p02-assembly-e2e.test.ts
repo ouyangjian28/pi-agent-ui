@@ -6,7 +6,7 @@
 // 不重复：stale 死锁/撕裂尾/oath 参数面（单元 W-asm-2/杂项已证）。
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { spawnSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, rm, readFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
@@ -51,6 +51,7 @@ const d = describe.skipIf(!RUN)("P0-2 r1 W-asm-6 装配面 E2E（真服务重启
         readinessTimeoutMs: 20_000,
       },
       audit: (l) => audits.push(l),
+      trustFirstRecoveryCapture: true, // A-3：测试仓首捕信任（生产=宿主显式声明；不传则新文件恒 no-evidence-snapshot）
     });
     const ws = new WebSocket(`ws://127.0.0.1:${server.port}`, { origin: ORIGIN });
     await new Promise<void>((res, rej) => { ws.on("open", res); ws.on("error", (e) => rej(e as Error)); });
@@ -79,6 +80,10 @@ const d = describe.skipIf(!RUN)("P0-2 r1 W-asm-6 装配面 E2E（真服务重启
       return raw.map((l) => { try { return JSON.parse(l) as JLine; } catch { return { t: "<corrupt>" }; } });
     } catch { return []; }
   }
+  const send = async (ws: WebSocket, frame: Record<string, unknown>): Promise<void> => {
+    ws.send(JSON.stringify(frame));
+    await new Promise((r) => setTimeout(r, 50));
+  };
 
   beforeAll(async () => {
     const v = spawnSync(PI_BIN, ["--version"], { encoding: "utf8" });
@@ -125,6 +130,34 @@ const d = describe.skipIf(!RUN)("P0-2 r1 W-asm-6 装配面 E2E（真服务重启
     expect(audits.some((l) => l.startsWith("guarded-writer ready") && l.includes("epoch=2"))).toBe(true);
     await shutdown(l2);
     } finally { await shutdown(l1); await shutdown(l2 ?? null); }
+  });
+
+  it("A-3 r3b composition 真源接线：resume 帧→真 provider 真恢复算法（未授权→resume-not-authorized；键归一实证）", { timeout: 60_000 }, async () => {
+    // P1 实证（K3 审附条件后半）：网关传 journal 绝对路径→makeResumeAuthority 归一逻辑名→
+    // provider resolveWithinRoots 命中→真读真解析。若归一坏（abs 直透）→provider 判根外
+    // file-unreadable→no-recovery-data——收到 not-authorized 即证键链路通+恢复算法真跑。
+    // 未授权零副作用不触 pi 进程（sessionFor 只在放行后）——无需真 pi。
+    const f = "r3b-s1.jsonl";
+    // 手造 journal：writer 宣誓行+enqueue 行（schema 全字段）——无裁决→resendAuthorized 空
+    const mk = (h: string): string => JSON.stringify({ t: "enqueue", intentId: `i-${h}`, sessionId: "r3b-s1", generation: 1, leafId: `l-${h}`, matchKey: { textHash: h, attachmentIdentity: "", ordinal: 0 }, payload: { kind: "prompt", rawText: `文本-${h}`, attachments: [], sentAt: "2026-01-01T00:00:00Z" } });
+    const lines = [
+      JSON.stringify({ t: "writer", epoch: 1, bootId: "b-e2e-r3b", at: "2026-01-01T00:00:00Z" }),
+      mk("a1"),
+      mk("a2"),
+    ];
+    await writeFile(join(dir, f), lines.join("\n") + "\n");
+    const l = await boot();
+    try {
+      await send(l.ws, { t: "resume", requestId: "a3-r1", file: f, intentId: "i-a1", generation: 1 });
+      void send;
+      await until(() => l.frames.some((x) => x.t === "write-resume-ack"), "write-resume-ack");
+      const ack = l.frames.find((x) => x.t === "write-resume-ack")!;
+      expect(ack.outcome).toEqual({ kind: "identity-rejected", cause: "resume-not-authorized" }); // 非no-recovery-data=真读到了
+      expect(audits.some((x) => x.includes("cause=resume-not-authorized"))).toBe(true);
+      // journal 零新行（未授权零副作用）
+      const after = (await readFile(join(dir, f), "utf8")).split("\n").filter((x) => x.length > 0);
+      expect(after.length).toBe(lines.length);
+    } finally { await shutdown(l); }
   });
 
   it("A-2 双实例活锁拒：他实例持锁→写 gate-failed(enqueue)+零新业务行", { timeout: 300_000 }, async () => {

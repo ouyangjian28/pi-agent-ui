@@ -77,3 +77,53 @@ describe("P0-2 r3a P1（K3 审）：makeResumeAuthority 键口径", () => {
     expect(r.calls).toEqual(["/srv/j/s1.jsonl"]); // 不归一——registry 键=write 面绝对路径
   });
 });
+
+describe("P0-2 r3b：executeFor 执行点读+资源面", () => {
+  // 最小真快照（含两条 enqueue：i-1 授权可重发、i-2 已 settled）
+  function snapWithIntents(): RecoveryEvidenceResult {
+    const lines = [
+      { t: "enqueue", intentId: "i-1", sessionId: "sess-x", generation: 1, leafId: "l1", matchKey: { textHash: "h1", attachmentIdentity: [], ordinal: 0 }, payload: { kind: "prompt", rawText: "重发我", attachments: [], sentAt: "2026-01-01T00:00:00Z" } },
+      { t: "enqueue", intentId: "i-2", sessionId: "sess-x", generation: 1, leafId: "l2", matchKey: { textHash: "h2", attachmentIdentity: [], ordinal: 1 }, payload: { kind: "prompt", rawText: "已完成", attachments: [], sentAt: "2026-01-01T00:00:01Z" } },
+      { t: "settled", intentId: "i-2" },
+    ];
+    return { version: 1, file: "s1.jsonl", sessionId: "sess-x", lines, bad: [], attributedFragments: [], repaired: false, pendingRepair: false, createdAt: 1_700_000_000_000 } as unknown as RecoveryEvidenceResult;
+  }
+
+  it("W-ra-6 executeFor 键归一同 reportFor（abs→逻辑名）+payload 真映射（intents 查 rawText）；report 与 reportFor 同快照一致", async () => {
+    const p = fakeProvider();
+    p.set(snapWithIntents());
+    const r = fakeRegistry(null);
+    const a = makeResumeAuthority({ roots: ["/srv/j"], provider: p.fn, registry: r.impl });
+    const got = await a.executeFor("/srv/j/s1.jsonl", "i-1");
+    expect(p.calls).toEqual(["s1.jsonl"]); // 与 reportFor 同键归一
+    expect(got).not.toBe(null);
+    const rep = await a.reportFor("/srv/j/s1.jsonl"); // 授权语义面=recover 算法专属测试（resendAuthorized 需完整裁决链）；此处只锁同快照一致性
+    expect(got!.report).toEqual(rep);
+    expect(got!.payload).toEqual({ rawText: "重发我" }); // enqueue 载荷读回（i-1 intents 在场）
+  });
+
+  it("W-ra-7 intents 缺该 id（授权集与 intents 不一致防御）→payload null", async () => {
+    const p = fakeProvider();
+    p.set(snapWithIntents());
+    const a = makeResumeAuthority({ roots: ["/srv/j"], provider: p.fn, registry: fakeRegistry(null).impl });
+    const got = await a.executeFor("/srv/j/s1.jsonl", "i-404");
+    expect(got!.payload).toBe(null); // 证据不完整非身份错→上层 execution-failed
+  });
+
+  it("W-ra-8 in-flight 合并：并发 reportFor+executeFor 同 file=一次 provider 调用；串行不缓存（两次读）", async () => {
+    const p = fakeProvider();
+    p.set(snapWithIntents());
+    const a = makeResumeAuthority({ roots: ["/srv/j"], provider: p.fn, registry: fakeRegistry(null).impl });
+    await Promise.all([a.reportFor("/srv/j/s1.jsonl"), a.executeFor("/srv/j/s1.jsonl", "i-1")]);
+    expect(p.calls.length).toBe(1); // 并发共享同次盘读
+    await a.reportFor("/srv/j/s1.jsonl");
+    expect(p.calls.length).toBe(2); // 完成即删不缓存（无失效钩子下缓存=双发面，正确性否决）
+  });
+
+  it("W-ra-9 executeFor→null 同源：provider null/非 snapshot→null", async () => {
+    const p = fakeProvider();
+    p.set(null);
+    const a = makeResumeAuthority({ roots: ["/srv/j"], provider: p.fn, registry: fakeRegistry(null).impl });
+    expect(await a.executeFor("/srv/j/s1.jsonl", "i-1")).toBe(null);
+  });
+});

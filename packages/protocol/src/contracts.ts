@@ -535,11 +535,22 @@ export type WriteIdentityRejectCause =
   | "resume-not-authorized" // resume：intentId ∉ resendAuthorized（未获重发授权）
   | "generation-mismatch"; // prompt/resume：客户端所见代次≠当前活代（旧代冒充面）
 
-/** v1.1 写侧恢复重发结果 DTO（write-resume-ack.outcome）。身份门=r3a 交付；
- * execution-pending=授权已证、重发执行面（payload 读回+TurnGate 接线）r3b 交付——诚实占位非 not-ready 挪用。 */
+/** v1.1 写侧恢复重发结果 DTO（write-resume-ack.outcome）。身份门=r3a；执行面=r3b——
+ * execution-pending 占位已删除（r3b 真交付）：门序拒绝→identity-rejected（零副作用）；
+ * 授权在但载荷读不回→execution-failed（证据不完整，非身份错）；执行结果枝与 prompt 面
+ * WriteSendOutcomeDTO 同构声明（不嵌套复用：identity-rejected 的 cause 空间两帧面不同，
+ * 嵌套会并集松化类型）。launched.intentId=重发新意图（原意图关联在宿主审计行，
+ * journal 面=无享新 enqueue 行，重放语义不因 resume 改变）。 */
 export type WriteResumeOutcomeDTO =
   | { readonly kind: "identity-rejected"; readonly cause: WriteIdentityRejectCause }
-  | { readonly kind: "execution-pending" };
+  | { readonly kind: "execution-failed"; readonly cause: "payload-unavailable" }
+  | { readonly kind: "launched"; readonly intentId: string; readonly commandId: number }
+  | { readonly kind: "busy" }
+  | { readonly kind: "gate-rejected"; readonly reason: "busy" | "closed" }
+  | { readonly kind: "gate-failed"; readonly stage: "enqueue" | "sending" }
+  | { readonly kind: "invalidated"; readonly stage: "enqueue" | "sending" | "post-send" | "first-byte" }
+  | { readonly kind: "no-process" }
+  | { readonly kind: "not-ready"; readonly cause?: string };
 
 /** 写侧停止结果 DTO（write-stop-ack.outcome）。 */
 export type WriteStopOutcomeDTO =

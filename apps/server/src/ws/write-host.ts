@@ -16,6 +16,7 @@ export interface WriteHostPort {
   /** 停止会话进程（stop 帧）。 */
   stop(file: string): Promise<WriteStopOutcomeDTO>;
   /** v1.1 恢复意图重发（resume 帧）。身份门四校验（恢复数据在场/未阻断/授权/代次）在宿主面；
-   * 通过→execution-pending（重发执行面 r3b）；拒绝→identity-rejected（零副作用）。 */
+   * 拒绝→identity-rejected（零副作用）；通过→r3b 执行面：payload 读回→执行点复核→send 接线，
+   * 结果=launched/busy/…（与 prompt 面同构）或 execution-failed（载荷缺失）。 */
   resume(file: string, intentId: string, generation: number): Promise<WriteResumeOutcomeDTO>;
 }

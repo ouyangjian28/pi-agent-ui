@@ -7,7 +7,8 @@
 //  W-res-5  resumeBlocked 优先于授权判定→resume-blocked
 //  W-res-6  intentId ∉ resendAuthorized→resume-not-authorized
 //  W-res-7  generation 不匹配→generation-mismatch
-//  W-res-8  全过→execution-pending（r3b 执行面占位）+write-resume-ack 帧结构+requestId 槽归还
+//  W-res-8  全过→执行面：launched+payload 透传 send+审计 newIntentId+槽归还（r3b）
+//  W-res-9  无活进程→放行至执行；代次匹配→放行执行
 //  W-res-9  无活进程（generationFor→null）→放行（无冒充对象）
 //  W-res-10 prompt.generation：旧代→identity-rejected（write-ack 面）+零副作用；缺省→放行（v1 兼容）；无活进程→放行
 //  W-res-11 authority.reportFor 抛错→stripped（write-host-internal: resume）→网关 4402
@@ -56,7 +57,15 @@ interface Rig {
   dir: string;
   inFile: string;
   created: { n: number }; // sessionFor 调用计数（零副作用杀点：身份拒必须不触会话创建）
-  authority: { report: { resendAuthorized: readonly string[]; resumeBlocked: boolean } | null; liveGen: number | null; throwReport: boolean };
+  authority: {
+    report: { resendAuthorized: readonly string[]; resumeBlocked: boolean } | null;
+    liveGen: number | null;
+    throwReport: boolean;
+    throwExec: boolean;
+    execNull: boolean; // executeFor→null（执行点无数据面）
+    execReport: { resendAuthorized: readonly string[]; resumeBlocked: boolean } | null; // 执行点复核报告（缺省复用门序报告）
+    payload: { rawText: string } | null; // 执行点载荷（null=payload-unavailable）
+  };
   dispose(): Promise<void>;
 }
 
@@ -64,7 +73,15 @@ async function makeRig(): Promise<Rig> {
   const d = await mkdtemp(join(tmpdir(), "ws-resume-"));
   const audits: string[] = [];
   const session = new RecordingSession();
-  const authority = { report: { resendAuthorized: ["i-auth"], resumeBlocked: false } as { resendAuthorized: readonly string[]; resumeBlocked: boolean } | null, liveGen: 3 as number | null, throwReport: false };
+  const authority = {
+    report: { resendAuthorized: ["i-auth"], resumeBlocked: false } as { resendAuthorized: readonly string[]; resumeBlocked: boolean } | null,
+    liveGen: 3 as number | null,
+    throwReport: false,
+    throwExec: false,
+    execNull: false,
+    execReport: null as { resendAuthorized: readonly string[]; resumeBlocked: boolean } | null,
+    payload: { rawText: "re-hi" } as { rawText: string } | null,
+  };
   const created = { n: 0 };
   const resumeAuthority: ResumeAuthority = {
     reportFor: async () => {
@@ -72,6 +89,11 @@ async function makeRig(): Promise<Rig> {
       return authority.report;
     },
     generationFor: () => authority.liveGen,
+    executeFor: async () => {
+      if (authority.throwExec) throw new Error("boom-exec");
+      if (authority.execNull) return null;
+      return { report: authority.execReport ?? authority.report ?? { resendAuthorized: [], resumeBlocked: false }, payload: authority.payload };
+    },
   };
   const writeHost = createRpcWriteHost({
     sessionFor: () => { created.n++; return session; },
@@ -211,28 +233,30 @@ describe("P0-2 r3a 帧身份门：resume/prompt.generation", () => {
     } finally { await r.dispose(); }
   });
 
-  it("W-res-8 全过→execution-pending+帧结构+槽归还", async () => {
+  it("W-res-8 全过→执行面：launched+payload 透传 send+审计 newIntentId+槽归还", async () => {
     const r = await makeRig();
     try {
       const c = await authed(r);
       await c.say({ t: "resume", requestId: "r1", file: r.inFile, intentId: "i-auth", generation: 3 });
       const ack = resumeAck(c);
-      expect(ack).toMatchObject({ t: "write-resume-ack", requestId: "r1", file: r.inFile, outcome: { kind: "execution-pending" } });
+      expect(ack).toMatchObject({ t: "write-resume-ack", requestId: "r1", file: r.inFile, outcome: { kind: "launched", intentId: "i-x", commandId: 1 } });
+      expect(r.session.sends).toEqual(["re-hi"]); // 执行点载荷透传 send
+      expect(r.created.n).toBe(1); // 执行面触会话创建
       // 槽归还：同 requestId 可复用
       await c.say({ t: "resume", requestId: "r1", file: r.inFile, intentId: "i-auth", generation: 3 });
       expect(resumeAck(c)).toBeDefined();
-      expect(r.session.sends.length).toBe(0); // 执行面 r3b：身份门通过也不触 send（诚实占位）
-      expect(r.audits.some((l) => l.includes("outcome=execution-pending"))).toBe(true);
+      expect(r.audits.some((l) => l.includes("outcome=launched") && l.includes("newIntentId=i-x"))).toBe(true); // 原意图→新意图关联在审计行
     } finally { await r.dispose(); }
   });
 
-  it("W-res-9 无活进程（generationFor→null）→放行（无冒充对象）；代次匹配→放行", async () => {
+  it("W-res-9 无活进程（generationFor→null）→放行至执行（无冒充对象）；代次匹配→放行执行", async () => {
     const r = await makeRig();
     try {
       r.authority.liveGen = null;
       const c = await authed(r);
       await c.say({ t: "resume", requestId: "r1", file: r.inFile, intentId: "i-auth", generation: 99 }); // 任意代次
-      expect(resumeAck(c)?.["outcome"]).toEqual({ kind: "execution-pending" });
+      expect(resumeAck(c)?.["outcome"]).toMatchObject({ kind: "launched" });
+      expect(r.session.sends).toEqual(["re-hi"]);
     } finally { await r.dispose(); }
   });
 
@@ -302,5 +326,97 @@ describe("P0-2 r3a 帧身份门：resume/prompt.generation", () => {
       expect(ack2?.["outcome"]).not.toEqual({ kind: "identity-rejected", cause: "no-recovery-data" });
       expect(session.sends.length).toBe(1);
     } finally { gw.dispose(); await rm(d, { recursive: true, force: true }); }
+  });
+});
+
+describe("P0-2 r3b 执行面：执行点读+复核+send 接线", () => {
+  it("W-res-13 执行点复核：门序后新阻断/授权撤销→identity-rejected（零副作用；审计 source=execute-recheck）", async () => {
+    const r = await makeRig();
+    try {
+      // 门序通过但执行点快照变：新阻断到达
+      r.authority.execReport = { resendAuthorized: ["i-auth"], resumeBlocked: true };
+      let c = await authed(r);
+      await c.say({ t: "resume", requestId: "r1", file: r.inFile, intentId: "i-auth", generation: 3 });
+      expect(resumeAck(c)?.["outcome"]).toEqual({ kind: "identity-rejected", cause: "resume-blocked" });
+      expect(r.session.sends.length).toBe(0);
+      expect(r.created.n).toBe(0); // 复核拒也在 sessionFor 之前
+      expect(r.audits.some((l) => l.includes("cause=resume-blocked") && l.includes("source=execute-recheck"))).toBe(true);
+      // 授权撤销（新裁决 abandon 到达）
+      r.authority.execReport = { resendAuthorized: [], resumeBlocked: false };
+      c = await authed(r);
+      await c.say({ t: "resume", requestId: "r2", file: r.inFile, intentId: "i-auth", generation: 3 });
+      expect(resumeAck(c)?.["outcome"]).toEqual({ kind: "identity-rejected", cause: "resume-not-authorized" });
+      expect(r.audits.some((l) => l.includes("cause=resume-not-authorized") && l.includes("source=execute-recheck"))).toBe(true);
+      expect(r.created.n).toBe(0);
+    } finally { await r.dispose(); }
+  });
+
+  it("W-res-14 授权在但载荷读不回→execution-failed{payload-unavailable}（零副作用）", async () => {
+    const r = await makeRig();
+    try {
+      r.authority.payload = null;
+      const c = await authed(r);
+      await c.say({ t: "resume", requestId: "r1", file: r.inFile, intentId: "i-auth", generation: 3 });
+      expect(resumeAck(c)?.["outcome"]).toEqual({ kind: "execution-failed", cause: "payload-unavailable" });
+      expect(r.session.sends.length).toBe(0);
+      expect(r.created.n).toBe(0);
+      expect(r.audits.some((l) => l.includes("outcome=execution-failed cause=payload-unavailable"))).toBe(true);
+    } finally { await r.dispose(); }
+  });
+
+  it("W-res-15 executeFor 抛错→stripped→4402；executeFor→null→no-recovery-data source=execute", async () => {
+    const r = await makeRig();
+    try {
+      r.authority.execNull = true;
+      let c = await authed(r);
+      await c.say({ t: "resume", requestId: "r1", file: r.inFile, intentId: "i-auth", generation: 3 });
+      expect(resumeAck(c)?.["outcome"]).toEqual({ kind: "identity-rejected", cause: "no-recovery-data" });
+      expect(r.audits.some((l) => l.includes("source=execute"))).toBe(true);
+      expect(r.session.sends.length).toBe(0);
+      r.authority.execNull = false;
+      r.authority.throwExec = true;
+      c = await authed(r);
+      await c.say({ t: "resume", requestId: "r2", file: r.inFile, intentId: "i-auth", generation: 3 });
+      expect(errs(c).some((f) => f.code === 4402)).toBe(true);
+      expect(r.audits.some((l) => l.includes("write-host-error op=resume") && l.includes("boom-exec"))).toBe(true);
+    } finally { await r.dispose(); }
+  });
+
+  it("W-res-16 执行点代次复核：门序后换代→generation-mismatch source=execute-recheck（send 不触）", async () => {
+    // 单元面直测（同一 host 逻辑；网关帧面已由 W-res-8 锁）：门序首查=3、执行点重查=4（进程重启换代）
+    const host = createRpcWriteHost({
+      sessionFor: () => { throw new Error("must-not-create"); },
+      audit: () => {},
+      resumeAuthority: {
+        reportFor: async () => ({ resendAuthorized: ["i-auth"], resumeBlocked: false }),
+        generationFor: (() => { let n = 0; return () => { n++; return n === 1 ? 3 : 4; }; })(),
+        executeFor: async () => ({ report: { resendAuthorized: ["i-auth"], resumeBlocked: false }, payload: { rawText: "x" } }),
+      },
+    });
+    const out = await host.resume("f.jsonl", "i-auth", 3);
+    expect(out).toEqual({ kind: "identity-rejected", cause: "generation-mismatch" });
+  });
+
+  it("W-res-17 send 执行结果透传：busy/gate-rejected/not-ready 同形映射", async () => {
+    const r = await makeRig();
+    try {
+      const outcomes: SessionSendResult[] = [
+        { kind: "busy" },
+        { kind: "gate-rejected", reason: "busy" },
+        { kind: "no-process" },
+      ];
+      let i = 0;
+      (r.session as unknown as { send: (m: string) => Promise<SessionSendResult> }).send = async () => {
+        const o = outcomes[i];
+        i++;
+        return o;
+      };
+      for (let k = 0; k < outcomes.length; k++) {
+        const c = await authed(r);
+        await c.say({ t: "resume", requestId: `r${k}`, file: r.inFile, intentId: "i-auth", generation: 3 });
+        expect(resumeAck(c)?.["outcome"]).toEqual(outcomes[k]);
+      }
+      expect(r.audits.some((l) => l.includes("intentId=i-auth outcome=busy"))).toBe(true);
+    } finally { await r.dispose(); }
   });
 });

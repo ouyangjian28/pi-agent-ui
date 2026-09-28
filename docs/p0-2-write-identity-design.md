@@ -79,7 +79,21 @@ prompt.generation（同门序第六步；**K3 审 P2-1 拍板 fail-closed**）�
 
 writer-authority WS 层接线（双 tab 单写者）：与 Kimi 前端面联动评估，不在 r3a 范围。
 
-## §3 FF（fitness functions）
+## §2b r3b 执行面（已实现；审读点=执行点读一致面+结果映射+窄窗口明示）
+
+**执行序**（门序四校验通过后）：
+1. `executeFor(file, intentId)`（ResumeAuthority 新方法）：**同一快照**同出复核报告+目标载荷——门序→执行间隔内新阻断/授权撤销在此收敛（快照原子面）；残余窗口=读完成→send 提交，彻底闭环属写面原子化（P0-4 后 TECH 债条目，不在本批）。复核拒→identity-rejected（cause 同枚举，审计 source=execute-recheck）。
+2. `payload===null`→`execution-failed{cause:"payload-unavailable"}`（授权在但 enqueue 载荷读不回——证据不完整，非身份错；零副作用）。
+3. `generationFor` 执行点重查（内存廉价）：拦「门序→执行点间进程重启换代」（send 打到新进程=语义错配）→generation-mismatch。
+4. `sessionOf(file).send(rawText)`：TurnGate 交涉天然在 session.send 内；结果=SessionSendResult 映射（launched/busy/gate-rejected/gate-failed/invalidated/no-process/not-ready 同 prompt 面）。
+
+**契约终形**：WriteResumeOutcomeDTO 删 execution-pending（占位被真交付替换）→identity-rejected|execution-failed|（与 prompt 面同构的七枝独立声明，不嵌套复用——identity-rejected 的 cause 空间两帧面不同，嵌套会并集松化类型；同构性由赋值兼容自证，无 as）。launched.intentId=重发新意图；原意图→新意图关联在宿主审计行（write-resume outcome=launched newIntentId=…）；**journal 面不因 resume 加行型**——新 enqueue 即无辜新意图，重放语义不变（幂等保护=matchKey 同文本重发已有语义）。
+
+**composition 接线**：makeResumeAuthority 加 executeFor=同 readOnce 归一链→recoverFromSnapshot→intents 查 payload.rawText（授权在则 intents 必含该 id；缺=防御 null）。
+
+**资源面（K3 审 P2-3 定案）**：per-file in-flight 合并（并发读共享同次 provider 调用；完成即删）——**不缓存**：无失效钩子下缓存 resume #1 快照跨 send 不失效→同 matchKey 双发面，正确性否决；断连取消=r3a 同口径不提供（帧应答前断连=send 已提交不可撤）；预算闸=evidence-source 合计 8MiB 入口门（同源）。
+
+**E2E（A-3）**：真 composition 接线实证（K3 附条件后半）——手造 journal（writer+enqueue）→resume 帧→identity-rejected{resume-not-authorized}：收到 not-authorized（非 no-recovery-data）即证归一键链通+真 provider 读到真盘+恢复算法真跑；零新行断言=零副作用。首捕信任=测试仓显式 trustFirstRecoveryCapture:true（生产=宿主声明，不传则新文件恒 no-evidence-snapshot——B12-1 冷启动权威门）。
 
 - **FF-P02-1 装配硬序**：任一 journal 业务行写入前该文件必有 writer 宣誓行且 guard 就绪；装配失败=零业务行写入（E2E 断言盘面）。
 - **FF-P02-2 守卫全覆**：TurnGate/DispatchCoordinator 两写入口产生的全部行经守卫（测试注入探针：绕守卫直接打 FileDurability 的路径不存在——装配层唯一构造点走查+变异）。
