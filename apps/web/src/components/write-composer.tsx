@@ -35,6 +35,7 @@ function promptOutcomeText(outcome: WriteSendOutcomeDTO): string {
     }
     case "no-process": return "未入队：无写进程";
     case "not-ready": return "未入队：会话未就绪";
+    case "identity-rejected": return `未入队：写面身份校验拒（${outcome.cause}）`; // r3c 契约枝（web 面补齐）
   }
 }
 

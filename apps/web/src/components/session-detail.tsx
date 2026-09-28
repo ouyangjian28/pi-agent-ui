@@ -66,6 +66,10 @@ function liveEventText(event: LiveEvent): string {
     case "pi-progress": return `进度 ${event.piType}（${event.note}）`;
     case "turn-state": return `回合状态：${event.turn.state}`;
     case "process-note": return `进程${event.phase === "running" ? "运行" : "停止"}通知`;
+    // D1 直播三形（v1.1）：文本化占位——D2 渲染批替换为真流式正文渲染
+    case "message-delta": return `［${event.part === "text" ? "正文" : "思考"}增量］${event.delta}`;
+    case "message-part-end": return `［${event.part === "text" ? "正文" : "思考"}段尾］`;
+    case "message-final": return `［助手全文］${event.text}`;
   }
 }
 
