@@ -210,14 +210,18 @@ describe("r2 根修：生命周期队列（GPT r1 审 R1/R2/R3 杀点）", () =>
 
   it("R1-交错2 旧 boot 恢复不污染新持有者：read 暂停→dispose 完成→新工厂写→旧 boot 只得 failed", async () => {
     let resumeRead: (() => void) | null = null;
+    let signalEntered: (() => void) | null = null;
     const gate = new Promise<void>((res) => { resumeRead = res; });
+    const enteredRead = new Promise<void>((res) => { signalEntered = res; });
     const fA = createGuardedJournalWriterFactory({
       bootId: "boot-a", now: () => "2026-10-09T00:00:00.000Z",
-      readJournal: async (p) => { if (p === journal) await gate; return readFile(p, "utf8").catch(() => ""); },
+      readJournal: async (p) => { if (p === journal) { signalEntered!(); await gate; } return readFile(p, "utf8").catch(() => ""); },
     });
     const wA = fA.writerFor(journal);
-    const disposed = fA.dispose().then(() => { resumeRead!(); }); // dispose 完成后才放行旧 boot（GPT P2 探针交错）
-    await disposed; // 旧 boot 仍在 read 暂停中（gate 已放行但微任务序让 boot 后续恢复）
+    await enteredRead; // 时序锚：boot 已进 readJournal（检查点①已过、disposed 尚 false）——本杀点真走检查点②
+    const disposed = fA.dispose(); // 置位 disposed（汇合挂起等 boot）；放行不依赖 dispose 完成（自造死锁=接缝反模式）
+    resumeRead!();
+    await disposed;
     // 新工厂 B 接管同文件：锁可获取+正常写一轮
     const fB = createGuardedJournalWriterFactory({ bootId: "boot-b", now: () => "2026-10-09T00:00:01.000Z" });
     const wB = fB.writerFor(journal);
