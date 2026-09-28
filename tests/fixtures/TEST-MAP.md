@@ -1135,6 +1135,16 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 
 **r3c 待办**（K3 审第五节建议）：①send 携带期望代次收窄 TOCTOU 窗口至零（执行点二查→send 内部代次断言）②A-4 正路径 E2E（授权 intent→真 composition launched+新 enqueue 落盘）③断连取消分层（读段复用连接 abortCtl 排队取消；send 段至少一次语义文档化）④资源面四件成表收官（合并/8MiB/跨文件闸/取消口径）。
 
+### P0-2 r3c 收窗收官（GLM 写·待 K3 审；2026-09-28）
+
+**范围**（K3 审 r3b 四建议全落）：①send 期望代次两层把关（supervisor.submitTurn 第四参同步比对=零窗口权威点；rpc-session.send 第二参早拒）②ResumeAuthority/reportFor/executeFor/WriteHostPort.resume 加 signal?——ws-gateway handleWriteResume 传 st.abortCtl.signal（3b-4 同源连接级信号）→makeResumeAuthority readOnce(logical, signal?)（gate 排队中 abort→acq.cancel；读段=provider 步骤间观察）③A-4 正路径 E2E ④资源面四件表入设计稿 §2b+断连取消口径（信号不覆盖 send 执行——发送后归 TurnGate，断连撤 send=已 enqueue 意图凭空消失反不可审计）。
+
+**关键语义（防回归点）**：resume/prompt 传 send 的期望代次=**门验活代**（live/live2）非帧代次——live=null 冷启动拉起→传 undefined 无断言放行（传帧代次=冷启动 resume 全拒回归，r3b 语义破坏）。
+
+**测试**：supervisor r3c 例（不匹配 invalidated{first-byte}+零 stdin 写+审计行；匹配 launched；v1 无断言兼容——轮次串行注意：同进程下一轮前须 onRpcResponse+onSettled，否则 busy）→process-supervisor 31 例；W-res-19（sendCalls[0].expectedGeneration=活代/冷启动 undefined——RecordingSession 替身加 sendCalls 记录面）+W-res-20（reportSignals[0] instanceof AbortSignal——Rig 暴露 reportSignals）→ws-gateway-write-resume 20 例；W-ra-11（单槽占住+异 file 排队中 abort→ComputeGateQueueTimeout 且未等满前者读；已 aborted 同面）+W-ra-12（同 file 后到者携 aborted 信号命中 in-flight 合并不 reject——合并优先于信号隔离）→resume-authority 12 例；A-4（手造四行：writer+enqueue{i-a1,rawText=重发正文}+repair{torn-tail}+adjudicate{fragment,resend}→promptRound 拉真 pi→resume(gen=1)→launched 新 intentId→journal 新 enqueue.rawText 断言→settled；探针验证形 bad=0/authorized=[i-a1]）→integration 4 例（PI_E2E=1，31s）。
+
+**类型链**：rpc-write-host 内 Session 端口接口 send 同步加第二参（apps/server tsc 门）；design §2c 新节+§2b 资源面四件表。
+
 ### P0-2 前端批（K3 写·GLM 审 93 GO；2026-09-28，a7439bb 合并）
 
 **范围**：write-client resume() 客户端全链路+use-write resuming 态+composer 折叠演示位（完整恢复面板=后续批）。红线=只 apps/web+tests/unit/web ✓。

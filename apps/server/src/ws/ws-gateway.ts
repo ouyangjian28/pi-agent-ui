@@ -422,7 +422,7 @@ export class WsGateway {
     try {
       const abs = resolveWithinRoots(file, this.opts.roots);
       if (abs === null) { this.errFrame(st, 4404, "file 越界", rid); return; }
-      const outcome = await this.opts.writeHost!.resume(abs, frame.intentId, frame.generation);
+      const outcome = await this.opts.writeHost!.resume(abs, frame.intentId, frame.generation, st.abortCtl.signal); // r3c：连接级取消信号透传（断连→读链停）
       this.audit(`write-frame conn=${st.id} t=resume file=${file} intentId=${frame.intentId} outcome=${outcome.kind}${outcome.kind === "identity-rejected" ? ` cause=${outcome.cause}` : ""}`);
       this.enqueue(st, { t: "write-resume-ack", requestId: rid, file, outcome });
     } catch (e: unknown) {

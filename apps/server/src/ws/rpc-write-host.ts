@@ -19,7 +19,7 @@ import { ComputeGateQueueTimeout } from "./compute-semaphore.ts";
 
 /** 编码面所需的最小会话形状（结构化依赖：测试可替身，不锁 RpcSession 类）。 */
 export interface RpcLikeSession {
-  send(message: string): Promise<SessionSendResult>;
+  send(message: string, expectedGeneration?: number): Promise<SessionSendResult>; // r3c：期望代次断言（live=null 冷启动面传 undefined）
   stop(): Promise<RetireOutcome>;
 }
 
@@ -36,13 +36,15 @@ export interface RpcWriteHostOpts {
 
 /** v1.1 帧身份权威源（r3a 身份门接缝；真源=composition 接线恢复报告+活进程代次）。 */
 export interface ResumeAuthority {
-  /** 恢复面数据（授权集/阻断位）；无该 file 数据=null。 */
-  reportFor(file: string): { readonly resendAuthorized: readonly string[]; readonly resumeBlocked: boolean } | null | Promise<{ readonly resendAuthorized: readonly string[]; readonly resumeBlocked: boolean } | null>;
+  /** 恢复面数据（授权集/阻断位）；无该 file 数据=null。signal=r3c 连接级取消信号（断连→排
+   * 队中取消+读中停读；语义同 get-recovery provider——provider 只在步骤间观察，不中断挂起 I/O）。 */
+  reportFor(file: string, signal?: AbortSignal): { readonly resendAuthorized: readonly string[]; readonly resumeBlocked: boolean } | null | Promise<{ readonly resendAuthorized: readonly string[]; readonly resumeBlocked: boolean } | null>;
   /** 当前活进程代次；无活进程=null（resume 放行至执行面——拉起时新代；prompt 校验跳过）。 */
   generationFor(file: string): number | null;
   /** r3b 执行点读：同一快照同出复核报告+目标载荷（门序→执行间隔的授权撤销/代次变化在此收敛；
-   * payload=授权在但 enqueue 载荷读不回时 null——证据不完整非身份错）。 */
-  executeFor(file: string, intentId: string): {
+   * payload=授权在但 enqueue 载荷读不回时 null——证据不完整非身份错）。signal=r3c 连接级取消信号
+   * （语义同 reportFor）。 */
+  executeFor(file: string, intentId: string, signal?: AbortSignal): {
     readonly report: { readonly resendAuthorized: readonly string[]; readonly resumeBlocked: boolean };
     readonly payload: { readonly rawText: string } | null;
   } | null | Promise<{
@@ -124,6 +126,7 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
     async sendPrompt(file: string, text: string, generation?: number): Promise<WriteSendOutcomeDTO> {
       try {
         // v1.1 帧身份门（prompt 面）：客户端携带代次≠当前活代→恒拒（零副作用：不触 sessionFor/send）
+        let liveGen: number | null = null; // r3c：门验过的活代传给 send（期望代次断言收窗；live=null 冷启动放行）
         if (generation !== undefined) {
           // K3 审 P2-1：无权威源=身份断言不可验证→fail-closed（对齐端口注释承诺；v1 缺省 generation 不受影响）。
           const auth0 = opts.resumeAuthority;
@@ -131,13 +134,13 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
             auditSafe(() => `write-identity-reject op=prompt file=${file} cause=no-recovery-data source=absent`);
             return { kind: "identity-rejected", cause: "no-recovery-data" };
           }
-          const live = auth0.generationFor(file);
-          if (live !== null && live !== generation) {
-            auditSafe(() => `write-identity-reject op=prompt file=${file} cause=generation-mismatch frame=${generation} live=${live}`);
+          liveGen = auth0.generationFor(file);
+          if (liveGen !== null && liveGen !== generation) {
+            auditSafe(() => `write-identity-reject op=prompt file=${file} cause=generation-mismatch frame=${generation} live=${liveGen}`);
             return { kind: "identity-rejected", cause: "generation-mismatch" };
           }
         }
-        const raw = await (await sessionOf(file)).send(text);
+        const raw = await (await sessionOf(file)).send(text, liveGen ?? undefined); // r3c：期望代次=门验活代（null=无断言，冷启动拉起兼容）
         const g = gateFailedDetail(raw);
         if (g !== null) auditSafe(() => g);
         return encodeSendOutcome(raw);
@@ -154,7 +157,7 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
         throw stripped("stop");
       }
     },
-    async resume(file: string, intentId: string, generation: number): Promise<WriteResumeOutcomeDTO> {
+    async resume(file: string, intentId: string, generation: number, signal?: AbortSignal): Promise<WriteResumeOutcomeDTO> {
       // v1.1 身份门（r3a）：校验序=恢复数据在场→未阻断→授权→代次；任何拒绝=零副作用（不触 sessionFor）。
       // 执行面（r3b）：门序通过→executeFor 执行点读（同快照出复核+载荷）→generationFor 重查→send。
       const authority = opts.resumeAuthority;
@@ -164,7 +167,7 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
       }
       let report: Awaited<ReturnType<ResumeAuthority["reportFor"]>>;
       try {
-        report = await authority.reportFor(file);
+        report = await authority.reportFor(file, signal);
       } catch (e: unknown) {
         if (e instanceof ComputeGateQueueTimeout) throw e; // r3b-fix：闸忙≠宿主错——网关转 4409 retryable
         auditSafe(() => `write-host-error op=resume file=${file} ${errText(e)}`);
@@ -198,7 +201,7 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
       // 提交，彻底闭环属写面原子化（P0-4 后 TECH 债条目），本批明示窄窗+审计留痕。
       let exec: Awaited<ReturnType<ResumeAuthority["executeFor"]>>;
       try {
-        exec = await authority.executeFor(file, intentId);
+        exec = await authority.executeFor(file, intentId, signal);
       } catch (e: unknown) {
         if (e instanceof ComputeGateQueueTimeout) throw e; // r3b-fix：闸忙≠宿主错
         auditSafe(() => `write-host-error op=resume file=${file} ${errText(e)}`);
@@ -234,8 +237,10 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
       }
       // 执行：send 接线（TurnGate 交涉天然在 session.send 内；结果映射同 prompt 面——launched.intentId
       // =重发新意图，原意图关联在审计行；journal 面不因 resume 加行型，新 enqueue 即无辜新意图）。
+      // r3c：send 期望代次=执行点重查活代 live2（≠null 时断言收窗；live2=null=无活进程冷启动拉起，
+      // 无断言放行——与门序⑥「live=null 放行至执行面」语义同源，非回归）。
       try {
-        const raw = await (await sessionOf(file)).send(exec.payload.rawText);
+        const raw = await (await sessionOf(file)).send(exec.payload.rawText, live2 ?? undefined);
         const g = gateFailedDetail(raw);
         if (g !== null) auditSafe(() => g);
         if (raw.kind === "launched") {

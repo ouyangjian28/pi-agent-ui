@@ -147,15 +147,27 @@ export function makeResumeAuthority(deps: {
 }): ResumeAuthority {
   const { roots, provider, registry, semaphore: gate } = deps;
   const inflight = new Map<string, Promise<RecoveryEvidenceResult | null>>();
-  const readOnce = (logical: string): Promise<RecoveryEvidenceResult | null> => {
+  const readOnce = (logical: string, signal?: AbortSignal): Promise<RecoveryEvidenceResult | null> => {
+    // r3c：连接级取消信号（断连→排队中取消+读中停读）。同 file 并发已合并不继承后来者信号
+    //（先到者的读继续服务多连接：in-flight 合并优先于信号隔离；取消者走结果丢弃=幂等面）。
     const hit = inflight.get(logical);
     if (hit !== undefined) return hit; // 并发合并：同 file 并发 resume/reportFor 只做一次盘读
     const run = async (): Promise<RecoveryEvidenceResult | null> => {
-      if (gate === undefined) return provider(logical, new AbortController().signal);
+      if (gate === undefined) return provider(logical, signal ?? new AbortController().signal);
       const acq = gate.acquire();
-      const r = await acq.promise;
-      if (!r.ok) throw new ComputeGateQueueTimeout(); // kind=timeout/canceled 皆=忙面（cancel 由读幂等性兜底）
-      try { return await provider(logical, new AbortController().signal); }
+      const onAbort = (): void => { acq.cancel(); }; // 排队中取消（grant 后不再挂——读段信号由 provider 步骤间消费）
+      let r: Awaited<typeof acq.promise>;
+      try {
+        if (signal !== undefined) {
+          if (signal.aborted) acq.cancel();
+          else signal.addEventListener("abort", onAbort, { once: true });
+        }
+        r = await acq.promise;
+      } finally {
+        if (signal !== undefined) signal.removeEventListener("abort", onAbort); // 幂等（触发后 once 已移除，再调无害）
+      }
+      if (!r.ok) throw new ComputeGateQueueTimeout(); // kind=timeout/canceled 皆=忙面（断连取消同面——连接已亡，4409 帧丢弃即零副作用）
+      try { return await provider(logical, signal ?? new AbortController().signal); }
       finally { r.release(); }
     };
     const p = run()
@@ -163,22 +175,22 @@ export function makeResumeAuthority(deps: {
     inflight.set(logical, p);
     return p;
   };
-  const reportOf = async (file: string) => {
+  const reportOf = async (file: string, signal?: AbortSignal) => {
     const logical = logicalNameWithinRoots(file, roots) ?? file;
-    const snap = await readOnce(logical); // r3a：身份门读取（无用户取消面——进程内即答；provider 预算保护同源）
+    const snap = await readOnce(logical, signal); // r3c：取消信号透传（无信号=进程内即答；provider 预算保护同源）
     if (snap === null || !isRecoverySnapshot(snap)) return null;
     const r = recoverFromSnapshot(snap);
     return { report: r, snapValid: true as const };
   };
   return {
-    reportFor: async (file: string) => {
-      const got = await reportOf(file);
+    reportFor: async (file: string, signal?: AbortSignal) => {
+      const got = await reportOf(file, signal);
       if (got === null) return null;
       return { resendAuthorized: [...got.report.resendAuthorized], resumeBlocked: got.report.resumeBlocked };
     },
     generationFor: (file: string) => registry.statusFor(file).process.generation,
-    executeFor: async (file: string, intentId: string) => {
-      const got = await reportOf(file);
+    executeFor: async (file: string, intentId: string, signal?: AbortSignal) => {
+      const got = await reportOf(file, signal);
       if (got === null) return null;
       const rec = got.report.intents.find((i) => i.intentId === intentId);
       // 授权在则 intents 必含该 id（resendKeys 从 intents 派生）；缺=证据不完整（防御 null，非身份错）

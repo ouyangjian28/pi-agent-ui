@@ -149,4 +149,42 @@ describe("P0-2 r3b：executeFor 执行点读+资源面", () => {
     await expect(a2.reportFor("/srv/j/s2.jsonl")).rejects.toBeInstanceOf(ComputeGateQueueTimeout);
     await hold;
   });
+
+  it("W-ra-11 排队取消（r3c）：gate 排队中 signal abort→acq.cancel→ComputeGateQueueTimeout（不占槽等待）；已 aborted 同面", async () => {
+    const slowFn = async (_file: string, _signal: AbortSignal): Promise<RecoveryEvidenceResult | null> => {
+      await new Promise((res) => setTimeout(res, 40)); return null;
+    };
+    const sem = new ComputeSemaphore(1, 60_000);
+    const a = makeResumeAuthority({ roots: ["/srv/j"], provider: slowFn, registry: fakeRegistry(null).impl, semaphore: sem });
+    const hold = a.reportFor("/srv/j/s1.jsonl"); // 占槽（40ms 读）
+    await new Promise((res) => setTimeout(res, 5)); // 确保前者已 grant（进入 provider）
+    const t0 = Date.now();
+    const ctl = new AbortController();
+    const queued = a.reportFor("/srv/j/s2.jsonl", ctl.signal); // 排队（异 file 不合并）
+    setTimeout(() => ctl.abort(), 5, undefined); // 排队中 abort
+    await expect(queued).rejects.toBeInstanceOf(ComputeGateQueueTimeout);
+    expect(Date.now() - t0).toBeLessThan(35); // 未等满前者的 40ms 槽（排队即取消）
+    await hold;
+    // 已 aborted signal：acquire 后立即取消，同面
+    const ctl2 = new AbortController(); ctl2.abort();
+    const hold2 = a.reportFor("/srv/j/s1.jsonl"); // 重新占槽
+    await new Promise((res) => setTimeout(res, 5));
+    await expect(a.reportFor("/srv/j/s3.jsonl", ctl2.signal)).rejects.toBeInstanceOf(ComputeGateQueueTimeout);
+    await hold2;
+  });
+
+  it("W-ra-12 in-flight 合并不继承后来者信号（r3c）：同 file 后到者携 aborted signal→命中合并不取消先到者读", async () => {
+    const p = fakeProvider(); p.set(null);
+    const slowFn = async (file: string, _signal: AbortSignal): Promise<RecoveryEvidenceResult | null> => {
+      await new Promise((res) => setTimeout(res, 30)); return p.fn(file, _signal);
+    };
+    const sem = new ComputeSemaphore(1, 60_000);
+    const a = makeResumeAuthority({ roots: ["/srv/j"], provider: slowFn, registry: fakeRegistry(null).impl, semaphore: sem });
+    const first = a.reportFor("/srv/j/s1.jsonl"); // 先到（无信号）进闸读
+    await new Promise((res) => setTimeout(res, 3));
+    const dead = new AbortController(); dead.abort();
+    const second = a.reportFor("/srv/j/s1.jsonl", dead.signal); // 同 file：命中 in-flight 合并
+    await expect(second).resolves.toBeNull(); // 不 reject（合并不继承信号；先到者读完成服务两调用）
+    await expect(first).resolves.toBeNull();
+  });
 });

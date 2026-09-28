@@ -251,6 +251,24 @@ describe("进程代次监管器（ProcessSupervisor，切片3）", () => {
     await h.coord.onSettledEvent({ generation: 1, commandId: 102 });
   });
 
+  it("r3c 期望代次断言：submitTurn(expectedGeneration≠活代)→invalidated{first-byte}（零窗口权威点，不写 stdin）；匹配→正常 launched", async () => {
+    const h = makeHarness();
+    expect(h.sup.spawnNext(["pi", "--mode", "json"])).toEqual({ kind: "spawned", generation: 1 });
+    const bad = await h.sup.submitTurn(intent("i-b1"), 201, "stale\n", 2); // 期望 2 实际 1
+    expect(bad).toEqual({ kind: "invalidated", stage: "first-byte" });
+    expect(h.host.proc(h.host.procs[0]!.handle).writes).toEqual([]); // 零写入
+    expect(h.audits.some((l) => l.includes("submit-turn-generation-mismatch expected=2 actual=1"))).toBe(true);
+    const ok = await h.sup.submitTurn(intent("i-b2"), 202, "fresh\n", 1); // 期望 1 匹配活代
+    expect(ok).toEqual({ kind: "launched", key: { intentId: "i-b2", commandId: 202, generation: 1 } });
+    expect(h.host.proc(h.host.procs[0]!.handle).writes).toEqual(["fresh\n"]);
+    await h.coord.onRpcResponse(202, 1, true);
+    await h.coord.onSettledEvent({ generation: 1, commandId: 202 }); // 收口后才能下轮
+    const v1 = await h.sup.submitTurn(intent("i-b3"), 203, "legacy\n"); // v1 兼容：不携代次=无断言
+    expect(v1.kind).toBe("launched");
+    await h.coord.onRpcResponse(203, 1, true);
+    await h.coord.onSettledEvent({ generation: 1, commandId: 203 });
+  });
+
   it("首字节窗口失效（受控替身）：协调器返 launched 但进程已退役→不写 stdin+审计（防御深度）", async () => {
     const dur = new FakeDurability();
     const audits: string[] = [];

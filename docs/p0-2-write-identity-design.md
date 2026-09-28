@@ -91,7 +91,18 @@ writer-authority WS 层接线（双 tab 单写者）：与 Kimi 前端面联动�
 
 **composition 接线**：makeResumeAuthority 加 executeFor=同 readOnce 归一链→recoverFromSnapshot→intents 查 payload.rawText（授权在则 intents 必含该 id；缺=防御 null）。
 
-**资源面（K3 审 P2-3 定案）**：per-file in-flight 合并（并发读共享同次 provider 调用；完成即删）——**不缓存**：无失效钩子下缓存 resume #1 快照跨 send 不失效→同 matchKey 双发面，正确性否决；断连取消=r3a 同口径不提供（帧应答前断连=send 已提交不可撤）；预算闸=evidence-source 合计 8MiB 入口门（同源）。
+**资源面（K3 审 P2-3 定案）**：per-file in-flight 合并（并发读共享同次 provider 调用；完成即删）——**不缓存**：无失效钩子下缓存 resume #1 快照跨 send 不失效→同 matchKey 双发面，正确性否决；预算闸=evidence-source 合计 8MiB 入口门（同源）。
+
+**资源面四件成表（r3c 收官，K3 审 r3b 建议④）**：
+
+| 面 | 机制 | 测试杀点 |
+|---|---|---|
+| 读预算 | evidence-source 合计 8MiB 入口门（同源 get-recovery） | 既有 R 面 |
+| 跨文件并发 | ComputeSemaphore 单槽串行（与 get-recovery 同一实例，composition 注入） | W-ra-10 |
+| 同 file 并发 | per-file in-flight 合并（完成即删不缓存；后来者携 aborted 信号不取消先到者读——合并优先于信号隔离） | W-ra-8/W-ra-12 |
+| 排队超时/断连取消 | 排队超时=ComputeGateQueueTimeout→4409 retryable；断连=st.abortCtl.signal 透传 readOnce（排队中 abort→acq.cancel；读段=provider 步骤间观察，不中断挂起 I/O） | W-res-18/W-ra-11/W-res-20 |
+
+**断连取消口径（r3c）**：信号覆盖面=读链（reportFor/executeFor 排队+读）；**不覆盖 send 执行本身**（发送后归 TurnGate 语义——断连撤 send=已 enqueue 的意图凭空消失，反不可审计；帧应答丢失由客户端重连后重查恢复）。
 
 **E2E（A-3）**：真 composition 接线实证（K3 附条件后半）——手造 journal（writer+enqueue）→resume 帧→identity-rejected{resume-not-authorized}：收到 not-authorized（非 no-recovery-data）即证归一键链通+真 provider 读到真盘+恢复算法真跑；零新行断言=零副作用。首捕信任=测试仓显式 trustFirstRecoveryCapture:true（生产=宿主声明，不传则新文件恒 no-evidence-snapshot——B12-1 冷启动权威门）。
 
@@ -100,6 +111,18 @@ writer-authority WS 层接线（双 tab 单写者）：与 Kimi 前端面联动�
 - **FF-P02-3 关停有序**：dispose 后无新 append 被受理；锁释放前写面已静止（证据层级=单元受控交错（R1-交错1/2+GPT r2 审探针 P4：guard-check 挂起时 dispose→在途先完成再释放，late 行拒）——组合根 E2E 无 dispose 期并发写注入，不冒称）。
 - **FF-P02-4 重启身份**：同 bootId 不重复宣誓同文件；重启（新 bootId）→新 epoch 严格递增；旧进程存活→新进程锁拒。
 - **FF-P02-5（r3a）帧身份拒旧**：旧 generation/intentId 冒充→identity-rejected（prompt 面=write-ack 枝；resume 面=write-resume-ack），零会话创建零盘面写入（r2 预告时写作 4409，实装后勘正——身份拒非传输层错误）。
+
+## §2c r3c 收窗收官（已实现；审读点=期望代次断言点+取消信号接线面）
+
+**send 期望代次（K3 审 r3b 建议①）**：两层把关——①rpc-session.send(message, expectedGeneration?) 入口早拒（快路径省协调器记账）②supervisor.submitTurn(..., expectedGeneration?) 同步读 entry 即比对=零窗口权威点（JS 单线程同步序不可分割）。不匹配→invalidated{first-byte}（与首字节复核同枝同语义，客户端刷新代次重试）。
+
+**语义关键（防回归）**：resume/prompt 传给 send 的期望代次=**门验过的活代**（live/live2）非帧代次——live=null（无活进程冷启动拉起）→传 undefined（无断言放行）：帧代次是客户端旧观察，冷启动新代必≠帧代次，若传帧代次则所有冷启动 resume 全拒（r3b 语义回归）。
+
+**断连取消分层（K3 建议③）**：st.abortCtl.signal（3b-4 连接级信号，与 get-recovery provider 同源）透传 writeHost.resume→authority.reportFor/executeFor→readOnce（排队中 abort→acq.cancel；读段=provider 步骤间观察）。见 §2b 资源面四件表。
+
+**E2E（A-4 正路径）**：手造四行（writer+enqueue+repair{torn-tail}+adjudicate{fragment,resend}，探针验证形）→真恢复算法授 i-a1→prompt 先拉真 pi→resume(generation=1)→launched（新 intentId≠i-a1）→journal 新 enqueue.rawText=「重发正文」（payload 读回真值）→settled。
+
+**测试清单**：supervisor r3c 例（不匹配零写入/匹配 launched/v1 无断言兼容）/W-res-19（sendCalls 断言+冷启动 undefined）/W-res-20（signal 透传）/W-ra-11（排队取消）/W-ra-12（合并不继承信号）/A-4。变异四杀：Mu-r3c-1..4。
 
 ## §4 ADR
 

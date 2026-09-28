@@ -160,6 +160,35 @@ const d = describe.skipIf(!RUN)("P0-2 r1 W-asm-6 装配面 E2E（真服务重启
     } finally { await shutdown(l); }
   });
 
+  it("A-4 r3c composition 正路径：授权 resume→真重发（payload 读回+send 接线+journal 新 enqueue）", { timeout: 240_000 }, async () => {
+    // 授权链闭环：手造撕裂修复+fragment resend 裁决（探针验证形）→真恢复算法授 i-a1→
+    // resume 帧→executeFor payload 读回「重发正文」→真 pi 真发→新 enqueue（新 intentId）→settled。
+    const f = "r3c-s1.jsonl";
+    const sha = "a".repeat(64);
+    const lines = [
+      JSON.stringify({ t: "writer", epoch: 1, bootId: "b-e2e-r3c", at: "2026-01-01T00:00:00Z" }),
+      JSON.stringify({ t: "enqueue", intentId: "i-a1", sessionId: "r3c-s1", generation: 1, leafId: "l-a1", matchKey: { textHash: "a1", attachmentIdentity: "", ordinal: 0 }, payload: { kind: "prompt", rawText: "重发正文", attachments: [], sentAt: "2026-01-01T00:00:00Z" } }),
+      JSON.stringify({ t: "repair", reason: "torn-tail", removedSha256: sha, byteStart: 10, byteEnd: 20, buildId: "bld-r3c", contractVersion: 2, at: "2026-01-01T00:00:01Z" }),
+      JSON.stringify({ t: "adjudicate", subject: { kind: "fragment", intentId: "i-a1", removedSha256: sha, byteStart: 10, byteEnd: 20, at: "2026-01-01T00:00:01Z" }, verdict: "resend", operator: "e2e", buildId: "bld-r3c", contractVersion: 2, at: "2026-01-01T00:00:01Z" }),
+    ];
+    await writeFile(join(dir, f), lines.join("\n") + "\n");
+    const l = await boot();
+    try {
+      await promptRound(l, f, "a4-r0", "只回复两个字：收到"); // 拉起真 pi（gen=1；写者接管 journal）
+      await send(l.ws, { t: "resume", requestId: "a4-r1", file: f, intentId: "i-a1", generation: 1 });
+      await until(() => l.frames.some((x) => x.t === "write-resume-ack" && x.requestId === "a4-r1"), "write-resume-ack a4-r1");
+      const ack = l.frames.find((x) => x.t === "write-resume-ack" && x.requestId === "a4-r1")!;
+      expect(ack.outcome?.kind).toBe("launched"); // 正路径：真重发成功
+      const newId = ack.outcome.intentId!;
+      expect(newId).not.toBe("i-a1"); // 新意图（无辜新身份）
+      await until(async () => (await readJournal(f)).some((x) => x.t === "settled" && x.intentId === newId), `settled ${newId}`, 120_000);
+      const j = await readJournal(f);
+      const enq = j.find((x) => x.t === "enqueue" && x.intentId === newId);
+      expect(enq?.payload?.rawText).toBe("重发正文"); // payload 读回真值（executeFor→send 接线实证）
+      expect(audits.some((x) => x.includes("write-resume") && x.includes("outcome=launched") && x.includes(`newIntentId=${newId}`))).toBe(true);
+    } finally { await shutdown(l); }
+  });
+
   it("A-2 双实例活锁拒：他实例持锁→写 gate-failed(enqueue)+零新业务行", { timeout: 300_000 }, async () => {
     const f2 = "s2.jsonl";
     const l3 = await boot();

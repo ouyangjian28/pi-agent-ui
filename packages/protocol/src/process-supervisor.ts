@@ -291,9 +291,17 @@ export class ProcessSupervisor {
     intent: Omit<TurnIntentInput, "generation">,
     commandId: number,
     stdinText: string,
+    expectedGeneration?: number,
   ): Promise<SupervisorSubmitOutcome> {
     if (this.phase !== "running" || this.current === null) return { kind: "no-process" };
     const entry = this.current;
+    // P0-2 r3c（K3 审 r3b 建议①）：期望代次零窗口权威点——同步读 entry 即比对（JS 单线程同步序不可
+    // 分割），拦「调用方身份门验代→submitTurn 提交」微任务窗口内换代（resume/prompt 携代次断言面；
+    // 不匹配→invalidated 未写 stdin，与首字节复核同枝同语义，客户端刷新代次重试）。
+    if (expectedGeneration !== undefined && entry.generation !== expectedGeneration) {
+      this.audit(`submit-turn-generation-mismatch expected=${expectedGeneration} actual=${entry.generation}`);
+      return { kind: "invalidated", stage: "first-byte" };
+    }
     const launched = await this.opts.coordinator.submitTurn(
       { ...intent, generation: entry.generation },
       commandId,

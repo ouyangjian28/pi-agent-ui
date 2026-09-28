@@ -17,12 +17,11 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WsGateway, type ConnMeta, type GatewayConnHooks, type WsGatewayOpts } from "../../../apps/server/src/ws/ws-gateway.ts";
+import { WsGateway, type ConnMeta, type GatewayConnHooks } from "../../../apps/server/src/ws/ws-gateway.ts";
 import { createRpcWriteHost, type ResumeAuthority } from "../../../apps/server/src/ws/rpc-write-host.ts";
 import { ComputeGateQueueTimeout } from "../../../apps/server/src/ws/compute-semaphore.ts";
 import { TokenAuthority } from "../../../apps/server/src/ws/token-auth.ts";
 import type { SessionSendResult } from "../../../apps/server/src/runtime/rpc-session.ts";
-import type { WriteSendOutcomeDTO } from "@pi-agent-ui/protocol";
 
 const tick = (): Promise<void> => new Promise((res) => setImmediate(() => res()));
 
@@ -46,7 +45,11 @@ class FakeConn {
 /** 会话替身：记录 send 调用（零副作用断言=从不触发）。 */
 class RecordingSession {
   sends: string[] = [];
-  async send(message: string): Promise<SessionSendResult> { this.sends.push(message); return { kind: "launched", key: { intentId: "i-x", commandId: 1, generation: 1 } }; }
+  sendCalls: { message: string; expectedGeneration?: number }[] = []; // r3c：期望代次断言面
+  async send(message: string, expectedGeneration?: number): Promise<SessionSendResult> {
+    this.sends.push(message); this.sendCalls.push({ message, expectedGeneration });
+    return { kind: "launched", key: { intentId: "i-x", commandId: 1, generation: 1 } };
+  }
   async stop(): Promise<{ kind: "confirmed"; exit: { code: number | null; signal: string | null } }> { return { kind: "confirmed", exit: { code: 0, signal: null } }; }
 }
 
@@ -58,6 +61,7 @@ interface Rig {
   dir: string;
   inFile: string;
   created: { n: number }; // sessionFor 调用计数（零副作用杀点：身份拒必须不触会话创建）
+  reportSignals: Array<AbortSignal | undefined>; // r3c：signal 透传断言面（W-res-20）
   authority: {
     report: { resendAuthorized: readonly string[]; resumeBlocked: boolean } | null;
     liveGen: number | null;
@@ -86,8 +90,10 @@ async function makeRig(): Promise<Rig> {
     payload: { rawText: "re-hi" } as { rawText: string } | null,
   };
   const created = { n: 0 };
+  const reportSignals: Array<AbortSignal | undefined> = []; // r3c：signal 透传断言（W-res-20）
   const resumeAuthority: ResumeAuthority = {
-    reportFor: async () => {
+    reportFor: async (_f: string, signal?: AbortSignal) => {
+      reportSignals.push(signal);
       if (authority.throwGateTimeout) throw new ComputeGateQueueTimeout();
       if (authority.throwReport) throw new Error("boom-report");
       return authority.report;
@@ -118,7 +124,7 @@ async function makeRig(): Promise<Rig> {
     gw.attach(c, c.hooks(), { origin: "http://localhost:5173", loopback: true, tls: false } satisfies ConnMeta);
     return c;
   };
-  return { gw, conn, session, audits, dir: d, inFile: "s1.jsonl", created, authority, dispose: async () => { gw.dispose(); await rm(d, { recursive: true, force: true }); } };
+  return { gw, conn, session, audits, dir: d, inFile: "s1.jsonl", created, authority, reportSignals, dispose: async () => { gw.dispose(); await rm(d, { recursive: true, force: true }); } };
 }
 
 async function authed(r: Rig): Promise<FakeConn> {
@@ -436,6 +442,37 @@ describe("P0-2 r3b 执行面：执行点读+复核+send 接线", () => {
       expect(f[0]!.retryable).toBe(true);
       expect(r.created.n).toBe(0); // 零副作用
       expect(r.audits.some((l) => l.includes("outcome=gate-queue-timeout"))).toBe(true);
+    } finally { await r.dispose(); }
+  });
+
+  it("W-res-19 send 期望代次断言（r3c）：live=帧代→send 携 expectedGeneration；live=null 冷启动→undefined（放行拉起）", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      await c.say({ t: "resume", requestId: "rq1", file: r.inFile, intentId: "i-auth", generation: 3 }); // Rig 默认 liveGen=3
+      const ack = resumeAck(c);
+      expect(ack?.outcome.kind).toBe("launched");
+      expect(r.session.sendCalls[0]?.expectedGeneration).toBe(3); // 执行点活代断言参到位
+    } finally { await r.dispose(); }
+    const r2 = await makeRig();
+    try {
+      r2.authority.liveGen = null; // 无活进程：门序⑥放行→执行面拉起（冷启动）→无断言
+      const c = await authed(r2);
+      await c.say({ t: "resume", requestId: "rq2", file: r2.inFile, intentId: "i-auth", generation: 7 }); // 帧代次任意（无活代可比）
+      const ack = resumeAck(c);
+      expect(ack?.outcome.kind).toBe("launched");
+      expect(r2.session.sendCalls[0]?.expectedGeneration).toBeUndefined();
+    } finally { await r2.dispose(); }
+  });
+
+  it("W-res-20 连接级取消信号透传（r3c）：reportFor 收 signal（非 undefined）——断连→读链停的接线面", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      await c.say({ t: "resume", requestId: "rq1", file: r.inFile, intentId: "i-auth", generation: 3 });
+      expect(resumeAck(c)?.outcome.kind).toBe("launched");
+      expect(r.reportSignals.length).toBeGreaterThanOrEqual(1);
+      expect(r.reportSignals[0]).toBeInstanceOf(AbortSignal); // 网关 st.abortCtl.signal 已透传到权威源
     } finally { await r.dispose(); }
   });
 });

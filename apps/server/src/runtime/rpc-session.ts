@@ -432,8 +432,10 @@ export class RpcSession {
     return { kind: "ready", generation: r.generation };
   }
 
-  /** 发一轮用户消息（三写硬序在纯逻辑层；本层只渲染帧+对账 id）。 */
-  async send(message: string): Promise<SessionSendResult> {
+  /** 发一轮用户消息（三写硬序在纯逻辑层；本层只渲染帧+对账 id）。expectedGeneration=v1.1
+   * 可选期望代次（早拒：入口快照活代≠期望→invalidated；零窗口权威点在 supervisor.submitTurn
+   * 同步比对层——两层把关，早拒层为省协调器记账的快路径）。 */
+  async send(message: string, expectedGeneration?: number): Promise<SessionSendResult> {
     let st = this.supervisor.getState();
     // 切片5①：闲置回收后无进程——send=明确申请执行，冷启动拉起（查看不拉起；原会话文件+readiness）
     if (st.phase === "idle") {
@@ -446,6 +448,7 @@ export class RpcSession {
     const gen = st.generation;
     // B2 面：ready 标志之外还须现态 running（stopping/已退出不开真实派发）
     if (gen === null || st.phase !== "running" || this.readyGeneration !== gen) return { kind: "not-ready", cause: "not-running" };
+    if (expectedGeneration !== undefined && gen !== expectedGeneration) return { kind: "invalidated", stage: "first-byte" }; // r3c 早拒
     const commandId = (this.cmdSeq += 1);
     const intentId = `i-${(this.intentSeq += 1)}`;
     const mk = matchKeyOf(message, [], this.takeOrdinal(message));
@@ -455,6 +458,7 @@ export class RpcSession {
       { intentId, sessionId: this.opts.sessionId, leafId: `leaf-${commandId}`, matchKey: mk, payload },
       commandId,
       stdinText,
+      expectedGeneration, // r3c：零窗口权威点透传
     );
   }
 
