@@ -54,13 +54,20 @@ ReadIndex.append 已持有全部 ScanRow（ws-gateway.ts:802/843/911）——但
 - 净化：回传 blocks 全走 sanitizeText（同族限长）；argsPreview 限长；不回 raw 原文（避免把 pi 会话文件任意字段外泄——只回投影白名单块）。
 - 审计：entry-get 不写 journal、不触 writerEpoch（纯读面，同 ui-answer 声明口径）。
 
-## 5. 测试计划（草案）
+## 5. 测试计划（草案；ts 升级后补：session 事件 ts 透传断言）
 - W-d4-s*（单测·服务端）：定位/读取/解析复用/超限/游标失效→entry-stale/跨文件门/净化/幂等（同 entryId 重复取）。
 - W-d4-g*（网关）：帧形状/权限/4409 resync 联动。
 - E2E（E-d4-1）：FakeRpcHost 落一条长文+thinking+toolCall 条目 → 订阅 → entry.get 展开 → 断言 blocks 全量。
 - 变异面（先记档后实现）：定位索引登记死→红；readBounded 硬限死→oversized 不出；解析器分叉（宽松版）→形状门红。
 
-## 6. 开放问题（评审拍板）
+## 6. 事实核验附录（2026-10-10，真实 pi 会话文件抽样）
+- message 行=`{id, message:{content, role, sections, timestamp, toolsAdded}, parentId, timestamp, type:"message"}`——**行级 timestamp 存在**（ISO 串，如 2026-09-27T17:20:07.937Z；message.timestamp 另有毫秒 epoch）→ 历史面 session 事件的 ts=null 可升级为真时间戳（journal 面仍无，保持 null）——列入 D4 契约增量。
+- toolCall 块=`{type, id, name, arguments:dict}`——name+全量参数可用 → argsPreview=sanitizeText(JSON.stringify(arguments), 200) 可行。
+- thinking 块=`{type, thinking:string, thinkingSignature}`——正文可用（signature 不外投）。
+- 行型全集：message/custom/custom_message/model_change/session/thinking_level_change（与 session-projection.ts unknown-line 口径一致）。
+
+## 7. 开放问题（评审拍板）
 1. entry-get 并发/频率限流要不要（纯读+有界，倾向 v1 不做，观察）。
 2. toolResult 条目（role:"toolResult"）要不要同路展开（倾向：v1 一起做——同一 parseMessageLine 已覆盖）。
 3. digest 语义：对行原文还是对投影 blocks（倾向：行原文——与 scanDigest 同坐标系）。
+4. session 面 ts 升级（真时间戳）随本批还是单开小批（倾向随本批——同文件同解析器，增量为 evBase 传参）。
