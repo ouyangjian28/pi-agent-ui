@@ -1154,3 +1154,23 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 **口径差异注记**：generation 客户端要求正整数≥1（UI 默认 1），服务端 schema ≥0——0=代次无真实场景（从 1 起），收紧认可（GLM 审注意点③裁决）。
 
 **测试**：tests/unit/web 273→290（+17：write-client 10 例+use-write 7 例含 composer 真实链两例）；合后全仓 1490 预期。tsc web 面零命中；eslint 净。
+
+## D1 直播面（pi 回复增量广播；设计稿=docs/d1-live-stream-design.md；2026-10-09，GLM 写·待 GPT 审）
+
+**范围**：自举 D1 批——pi 事件流（rpc-session onPiEvent 钩子）→节流聚合→gateway.broadcastLive→订阅引擎 events 帧（origin=live）。契约=LiveEvent v1.1 扩三形（message-delta/message-part-end/message-final）。
+
+**架构**：
+- `apps/server/src/runtime/live-aggregator.ts`：LiveAggregator（80ms 节流窗同 (part,contentIndex) 合并+8KiB maxChunkBytes 切分+2MiB turnBudgetBytes 软上限超限停 delta final 仍发+thinkingVisible 缺省 false+assistantFinalText() content 数组取 text 段拼接）+shouldBroadcastLive 纯函数（disposition 门）。语义：窗到 flush 只发 delta；text_end/thinking_end=flush+part-end；message_end=dropPending（终局全文权威）；agent_settled=flush all 补 part-end 异常收尾；预算入窗即计。
+- 接线：session-registry opts.onPiEvent 透传→composition per-file 聚合器（liveAggregators Map）→liveSink 晚绑定槽（gateway 创建后回填 broadcastLive）→ws-gateway.forEachEngine 反查 watchers+engine.onLiveEvent+schedulePump；背压=pushBacklog 超限 4431 既有语义。
+- 键归一（r3a 修复批同款教训）：onPiEvent 的 file=journal 绝对路径，watchers 键=roots 相对逻辑名→logicalNameWithinRoots 归一（E2E 探针实证不归一则 broadcastLive 全早退零帧）。
+- disposition 门（E2E 实证修正）：buffered/delivered 均广播（buffered=response 未回绑的正常回复期，记账行已在 enqueue 时落）；dropped-stale-generation/overflow-closed 拒。旧「只 delivered」设计把回复期事件全滤掉（dispatch-coordinator awaiting-response 相）。
+
+**测试**：
+- tests/unit/server/live-aggregator.test.ts 10 例（W-d1-2/3/3b/3d/4/5/6+边界+assistantFinalText+W-d1-8b 门）。
+- tests/unit/server/ws-gateway.test.ts D1 describe 两例（W-d1-7 只投活跃订阅/W-d1-8 无订阅零开销）。
+- tests/integration/d1-live-e2e.test.ts（PI_E2E=1，13.5s：真 pi 一轮→delta 流+final+拼接前缀校验）。
+- 变异四杀全验真：Mu-d1-1（缺省窗 80→0→W-d1-3d schedule 延时断言红）/Mu-d1-2（thinking 缺省透→W-d1-2）/Mu-d1-3（final role 滤去→W-d1-6）/Mu-d1-4（disposition 门去→W-d1-8b）。教训：Mu-d1-4 首轮杀点缺失（门内联在 composition 闭包）→提成纯函数；checkout 误伤未提交杀点改动→**杀点补强必须先提交再注杀**（M-245 家族新变体）。
+
+**E2E 杂项教训**：tokens.json 须 {version:1,tokens:[...]}；订阅文件须预存（4402 fail-closed）手造 writer 行；短回复整体在窗内被 final 权威吸收→prompt 要长回复（~120 字）断言 delta 流非空。
+
+**提交**：e5ee54d（基线）+9c670a9（杀点补强）。
