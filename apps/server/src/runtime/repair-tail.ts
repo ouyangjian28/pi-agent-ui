@@ -143,7 +143,7 @@ async function loadMarker(evidenceDir: string, file: string): Promise<RepairMark
         typeof p.byteEnd === "number" && Number.isSafeInteger(p.byteEnd) && p.byteEnd > p.byteStart &&
         typeof p.removedSha256 === "string" && /^[0-9a-f]{64}$/.test(p.removedSha256) &&
         typeof p.startedAt === "string" && p.startedAt.length > 0 &&
-        (p.fragIntentId === undefined || p.fragIntentId === null || typeof p.fragIntentId === "string")) {
+        (p.fragIntentId === undefined || p.fragIntentId === null || (typeof p.fragIntentId === "string" && p.fragIntentId.length > 0))) { // r9（GPT r8 P3-r8-1）：非空约束与行 schema 对齐——空串补完会写出 schema 非法行
       return { version: 1, file, byteStart: p.byteStart, byteEnd: p.byteEnd, removedSha256: p.removedSha256, startedAt: p.startedAt,
         ...(p.fragIntentId === undefined ? {} : { fragIntentId: p.fragIntentId }) }; // 三态：缺省=旧版/null=扫描即不可归因/string=结构归因留痕
     }
@@ -153,9 +153,11 @@ async function loadMarker(evidenceDir: string, file: string): Promise<RepairMark
   }
 }
 
-/** 构造 repair 行（含换行；字段序固定=身份可复算；fragIntentId 放最尾——旧形态=新形态严格前缀，
- *  崩溃部分行残局的前缀判定跨版本兼容）。fragIntentId=对移除尾段做受限结构扫描的归因留痕
- *  （r7 GPT r6 P1-r6-1：顶层唯一身份可证记 id；none/conflict 显式 null；缺省=仅测试夹具/存量）。 */
+/** 构造 repair 行（含换行；字段序固定=身份可复算；fragIntentId 放最尾）。r9 勘误（GPT r8
+ *  P2）：旧**完整**行以 `}` 闭合并非新行前缀（同 bounds 仅旧部分行=新行前缀）；部分行判定自
+ *  r9 起恢复逐字节前缀比对+旧行形枚举（legacyMrow），不再依赖跨版本前缀说法。fragIntentId=
+ *  对移除尾段做受限结构扫描的归因留痕（r7：顶层唯一身份可证记 id；none/conflict 显式 null；
+ *  缺省=仅测试夹具/存量=legacy 构造形）。 */
 function buildRepairRow(opts: { byteStart: number; byteEnd: number; removedSha256: string; buildId: string; at: string; fragIntentId?: string | null }): Buffer {
   const line: RepairLine = {
     t: "repair",
@@ -360,15 +362,20 @@ export async function repairJournalTail(opts: RepairTailOptions): Promise<Repair
       const tailHashMatch = boundsEqual && marker.removedSha256 === removedSha256;
       if (!tailHashMatch && marker.fragIntentId === undefined) {
         audit(`repair-tail-aborted file=${opts.file} reason=repair-marker-conflict detail=legacy-marker-no-structural-evidence`);
-        return { kind: "aborted", file: opts.file, reason: "repair-marker-conflict", detail: "旧版 marker 无结构身份且尾段不可复扫（非吻合形）：宿主清 marker 后 fresh 重做取证（marker 保留）" };
+        return { kind: "aborted", file: opts.file, reason: "repair-marker-conflict", detail: "旧版 marker 无结构身份且尾段不可复扫（非吻合形）：留置调查——禁止仅删除 marker（尾已消失，marker 是唯一修复事实；删除后冷捕获将以无裁决恢复全部意图重启）；需以原始证据独立处置（marker 保留）" };
       }
       if (!tailHashMatch) {
         const mrow = buildRepairRow({ byteStart: marker.byteStart, byteEnd: marker.byteEnd, removedSha256: marker.removedSha256, buildId: opts.buildId, at: marker.startedAt, fragIntentId: marker.fragIntentId ?? null });
-        // r8：部分行判据放宽为「起点吻合+长度界」——r7 留痕 fragIntentId 后，写入中途崩溃的
-        // 「值写入中」形（尾≠行前缀：行尾字段值写一半）与旧行 `}` 无换形均合法收敛；信任域=
-        // marker 信封（evidenceDir 越权等同可改锚，非新增面）+pendingRepair 挡 journal 写者在
-        // 事务期 append；上界=构造行全长（尾无换行⇒严格短于行；行含 \n 全落即非撕裂尾走他分支）。
-        const isPartialRow = marker.byteStart === byteStart && tail.byteLength < mrow.byteLength;
+        // r9（GPT r8 P2-r8-1）：内容证据恢复——部分行判定回到逐字节前缀比对（mrow 用 marker 身份
+        // 重建，同 build/序列化下的真实短写（含身份值写一半）必是新行严格前缀）+旧行形枚举兼容
+        // （r7 前旧行以 `}` 闭合无换形=legacy 行的严格前缀，非新行前缀，单独判定）；长度界保留
+        // （尾无换行⇒严格短于行；行含 \n 全落即非撕裂尾走他分支）。
+        // 信任前提（r9 勘误）：修复期外部停写是必要部署条件（RT:28 既有前提）——pendingRepair
+        // 只是恢复阻断状态非文件锁，通用 FileDurability.append 不检查 marker，evidenceDir 隔离
+        // 不保护 journal 尾；前缀比对=内容证据，非凭 marker 域自证。
+        const legacyMrow = buildRepairRow({ byteStart: marker.byteStart, byteEnd: marker.byteEnd, removedSha256: marker.removedSha256, buildId: opts.buildId, at: marker.startedAt }); // 无 fragIntentId 字段=旧形态构造行（枚举兼容形）
+        const prefixOf = (b: Buffer) => tail.byteLength < b.byteLength && b.subarray(0, tail.byteLength).equals(tail);
+        const isPartialRow = marker.byteStart === byteStart && (prefixOf(mrow) || prefixOf(legacyMrow));
         if (isPartialRow) {
           // r3-B3b：锚可转移性检查必须先于任何盘面改动——锚已写穿事务原始锚界（anchor.len >
           // marker.byteStart，旧版 pending 捕获造成的脏态）时拒绝且盘面一字不动（aborted 契约）。
@@ -382,7 +389,7 @@ export async function repairJournalTail(opts: RepairTailOptions): Promise<Repair
         }
         if (boundsEqual) {
           audit(`repair-tail-aborted file=${opts.file} reason=file-changed detail=marker-tail-hash`);
-          return { kind: "aborted", file: opts.file, reason: "file-changed", detail: "尾段哈希与在场 marker 不符且非部分行前缀（并发改写）" };
+          return { kind: "aborted", file: opts.file, reason: "file-changed", detail: "尾段哈希与在场 marker 不符且非部分行前缀（并发改写/停写前提被违反）" };
         }
         audit(`repair-tail-aborted file=${opts.file} reason=repair-marker-conflict size=${byteEnd} marker=[${marker.byteStart},${marker.byteEnd}]`);
         return { kind: "aborted", file: opts.file, reason: "repair-marker-conflict", detail: "有撕裂尾且与在场 marker 事实不吻合（非部分补行形）——留宿主调查（marker 保留）" };
@@ -460,22 +467,24 @@ async function completeMarkerResidue(
   audit: (line: string) => void,
 ): Promise<RepairTailResult> {
   const byteEnd = raw.byteLength;
-  // r8 防御深度：旧版 marker（无结构身份）不走补完（主函数入口已拦，此处零改盘再拦一道）——
-  // 无条件 null 补完即 P1-r7-1 越权窗；开发期无存量，宿主清 marker 后 fresh 重做取证。
-  if (marker.fragIntentId === undefined) {
-    audit(`repair-tail-aborted file=${opts.file} reason=repair-marker-conflict detail=legacy-marker-no-structural-evidence`);
-    return { kind: "aborted", file: opts.file, reason: "repair-marker-conflict", detail: "旧版 marker 无结构身份（补完面拒绝）：宿主清 marker 后 fresh 重做取证（marker 保留）" };
-  }
   const last = lastRepairRowFact(raw);
   const rowAtBounds = last !== null && last.offset === marker.byteStart && last.offset + last.rowLen === byteEnd &&
     last.row.byteStart === marker.byteStart && last.row.byteEnd === marker.byteEnd && last.row.removedSha256 === marker.removedSha256;
   const truncatedShape = byteEnd === marker.byteStart; // 截断已做、行未补（长度即证据：前缀段以 \n 结尾）
-  // B4/r2 P6：锚已转移+行已落盘=物理修复全部完成、只欠 marker 清理（clearMarker 崩溃窗）——
-  // 幂等补完：盘面新后像与锚全等即清 marker 返回（不重写锚、不经前缀门——新锚本身就是完成证据）。
+  // r9（GPT r8 P1-r8-1）：cleanup-only 分级前置（旧 marker 门之前）——行已落盘+事务事实匹配+
+  // 全文件锚匹配均成立时，修复事实完整存活于行与锚，marker 仅是冗余屏障：允许幂等清（含旧版
+  // marker 形）。「物理健康」不等于「已授权重发」——未裁决事务仍由读面 repairShadow 阻断。
   if (rowAtBounds && anchor !== null && anchor.len === byteEnd && sha256Hex(raw) === anchor.sha) {
     await clearMarker(opts, markerPath(opts.evidenceDir, opts.file));
     audit(`repair-tail-marker-cleanup file=${opts.file} len=${byteEnd}`);
     return { kind: "reconciled", file: opts.file, anchor: { len: anchor.len, sha: anchor.sha }, via: "marker-cleanup" };
+  }
+  // r8 防御深度：旧版 marker（无结构身份）不走补完（主函数入口已拦，此处零改盘再拦一道）——
+  // 无条件 null 补完即 P1-r7-1 越权窗；缺证据残局一律留置（r9：禁止指引仅删 marker——尾已
+  // 消失时 marker 是唯一修复事实，删除后冷捕获将以无裁决恢复全部意图重启；需以原始证据独立处置）。
+  if (marker.fragIntentId === undefined) {
+    audit(`repair-tail-aborted file=${opts.file} reason=repair-marker-conflict detail=legacy-marker-no-structural-evidence`);
+    return { kind: "aborted", file: opts.file, reason: "repair-marker-conflict", detail: "旧版 marker 无结构身份（补完面拒绝）：留置调查——禁止仅删除 marker（尾已消失，marker 是唯一修复事实；删除后冷捕获将以无裁决恢复全部意图重启）；需以原始证据独立处置（marker 保留）" };
   }
   if (truncatedShape || rowAtBounds) {
     // 锚可转移性：无锚直接跳过；有锚仍要求旧锚前缀可复验（journal 写者可改盘面——marker

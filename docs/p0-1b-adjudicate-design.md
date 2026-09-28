@@ -139,4 +139,6 @@ P1-r7-1：r7 的 marker 不含结构身份——「截断后写行前崩溃」�
 3. **旧版 marker 保守拒（防御面）**：无 `fragIntentId` 的 marker 残局（尾缺失形）一律 `repair-marker-conflict` 拒（detail=legacy-marker-no-structural-evidence，主函数入口门+补全面顶部门双层，盘面零动）。开发期无存量；宿主清 marker 后 fresh 重做即重新取证（尾在=证据在）。
 4. **部分行判据放宽（收敛面）**：`isPartialRow` 从逐字节前缀比对放宽为「起点吻合+尾长<构造行全长」——r7 留痕 fragIntentId 后「值写入中」形（行尾字段值写一半，非行前缀）与旧行 `}` 无换形均合法收敛；信任域=marker 信封（evidenceDir 越权等同可改锚）+pendingRepair 挡 journal 写者在事务期 append。
 
-不变式：无裁决时意图默认可重启（未决状态，合法）；裁决落盘须与结构留痕强一致（不一致→`inconsistent-attribution` 拒，不挑 verdict——R31 abandon 负例）。测试：RT-r8-1（marker 携身份）/RT-r8-2（resend 真窗全链：行带 id→不一致门拦 i2 归因零落盘→一致归因 i1 授权）/RT-r8-3（abandon 真窗）/RT-r8-4（旧 marker 双形保守拒）；变异 Mu-r8-1/1b/2/3/4 五点全真杀。
+不变式（r9 勘误，GPT r8 P2-r8-2）：「无裁决时意图默认可重启」仅适用于**无修复阴影的普通 enqueue**；本节修复事务未裁决/未归因时构成 repairShadow——冷捕获阻断（resumeBlocked，resumable 全排除），不得写成默认可重启。裁决落盘须与结构留痕强一致（不一致→`inconsistent-attribution` 拒，不挑 verdict——R31 abandon 负例）。
+
+r9 修订（GPT r8 审 84 NO-GO 修复批）：①部分行判据恢复内容证据=逐字节前缀比对（mrow 用 marker 身份重建，同 build 真实短写含身份值写一半必为新行严格前缀）+旧行形枚举兼容（`}` 无换形=legacy 行前缀）；信任前提勘误=修复期外部停写是必要部署条件（pendingRepair 只是恢复阻断状态非文件锁，FileDurability.append 不检查 marker，evidenceDir 隔离不保护 journal 尾）。②旧 marker 缺证据残局指引撤「清 marker 后 fresh 重做」——改留置+禁删（尾已消失时 marker 是唯一修复事实；违规清后冷捕获以无裁决恢复全部意图重启，N2 红线演示）；cleanup-only 分级前置：行已落盘+事务事实匹配+全文件锚匹配→幂等清冗余 marker（含旧版形，物理健康≠已授权重发——repairShadow 仍阻断）。③loadMarker fragIntentId 非空校验（对齐行 schema，防空串补完写 schema 非法行）。测试 RT-r9-1/2/3+RT37 三形重写。测试：RT-r8-1（marker 携身份）/RT-r8-2（resend 真窗全链：行带 id→不一致门拦 i2 归因零落盘→一致归因 i1 授权）/RT-r8-3（abandon 真窗）/RT-r8-4（旧 marker 双形保守拒）；变异 Mu-r8-1/1b/2/3/4 五点全真杀。
