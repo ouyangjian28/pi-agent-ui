@@ -1486,7 +1486,13 @@ describe("D3 ui-request/ui-closed/ui-answer（瞬态问答面）", () => {
     );
     const reqs = client.getSnapshot().uiRequests;
     expect(reqs).toHaveLength(1);
-    expect(reqs[0]).toEqual({ requestId: "ui-1", method: "select", title: "选哪个？", options: ["甲", "乙"], timeoutMs: 30_000 });
+    expect(reqs[0]).toEqual({
+      requestId: "ui-1",
+      method: "select",
+      title: "选哪个？",
+      options: ["甲", "乙"],
+      timeoutMs: 30_000,
+    });
     expect(reqs[0]).not.toHaveProperty("file"); // file 只用于过滤，不入快照
   });
 
@@ -1499,7 +1505,14 @@ describe("D3 ui-request/ui-closed/ui-answer（瞬态问答面）", () => {
     expect(client.getSnapshot().uiRequests.map((r) => r.requestId)).toEqual(["ui-a"]);
     // paging（首页 hasMore，续页在途）
     const initRequestId = (ws.sentFrames()[1] as { requestId: string }).requestId;
-    ws.receive(pageFrame({ requestId: initRequestId, barrier: 3, page: [msg(1)], historyNext: { streamId: "stream-1", seq: 2 } }));
+    ws.receive(
+      pageFrame({
+        requestId: initRequestId,
+        barrier: 3,
+        page: [msg(1)],
+        historyNext: { streamId: "stream-1", seq: 2 },
+      }),
+    );
     expect(client.getSnapshot().phase).toBe("paging");
     ws.receive(uiRequest({ requestId: "ui-b" }));
     expect(client.getSnapshot().uiRequests.map((r) => r.requestId)).toEqual(["ui-a", "ui-b"]);
@@ -1556,6 +1569,16 @@ describe("D3 ui-request/ui-closed/ui-answer（瞬态问答面）", () => {
     expect(client.getSnapshot()).toBe(before);
     ws.receive({ t: "ui-closed", requestId: "ui-1", reason: "process-retired" });
     expect(client.getSnapshot().uiRequests.map((r) => r.requestId)).toEqual(["ui-2"]);
+  });
+
+  it("ui-closed(answered) 也撤框（他端已答场景；后端批 1b3bcd5 第 4 因，跨批时序补齐）", () => {
+    const { client, ws } = livePhase();
+    ws.receive(uiRequest({ requestId: "ui-1" }));
+    ws.receive(uiRequest({ requestId: "ui-2", method: "input" }));
+    const before = client.getSnapshot();
+    ws.receive({ t: "ui-closed", requestId: "ui-1", reason: "answered" });
+    expect(client.getSnapshot().uiRequests.map((r) => r.requestId)).toEqual(["ui-2"]);
+    expect(client.getSnapshot()).not.toBe(before); // 真撤框非零副作用
   });
 
   it("answerUi：三形态发帧（字段恰其一）并本地移除（不等 ack）", () => {

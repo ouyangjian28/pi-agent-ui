@@ -493,7 +493,7 @@ function parseUiRequest(v: Record<string, unknown>): UiRequestFrame | null {
 /** ui-closed（契约 v1.2 §3.1）：requestId 必备，reason 枚举闭合。 */
 function parseUiClosed(v: Record<string, unknown>): UiClosedFrame | null {
   if (!transportId(v.requestId)) return null;
-  if (v.reason !== "process-retired" && v.reason !== "no-subscriber" && v.reason !== "overflow") return null;
+  if (v.reason !== "process-retired" && v.reason !== "no-subscriber" && v.reason !== "overflow" && v.reason !== "answered") return null;
   return { t: "ui-closed", requestId: v.requestId, reason: v.reason };
 }
 

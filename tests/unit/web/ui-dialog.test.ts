@@ -28,7 +28,9 @@ describe("UiDialog 四方法渲染与答案构造", () => {
   });
 
   it("select：选项逐个渲染为按钮，点击答案 value 必为 options 其一", () => {
-    const { answers } = mount([{ requestId: "ui-1", method: "select", title: "选哪个？", options: ["甲", "乙", "丙"] }]);
+    const { answers } = mount([
+      { requestId: "ui-1", method: "select", title: "选哪个？", options: ["甲", "乙", "丙"] },
+    ]);
     expect(screen.getByRole("dialog", { name: "选哪个？" })).toBeTruthy();
     for (const option of ["甲", "乙", "丙"]) expect(screen.getByRole("button", { name: option })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "乙" }));
