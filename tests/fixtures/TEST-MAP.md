@@ -1195,3 +1195,9 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - **错题复发+新训**：①「4404 累计 3→close 1002 门」再犯（W-ui-g5 三案同连接→关闭→releaseWatcher→pending 全 cancelled→host 收 3 cancelled 假阳性）——多案形校验必拆连接（本仓第三犯，写进错题家族）；②泵=setTimeout(0) 与 setImmediate 序在负载下不保证先行——帧断言一律 until 轮询不数 tick（g9 闪断教训）；③vitest 吞 console.log——探针用 appendFileSync 落 /tmp 日志。
 
 **D3 变异档（8/8 全杀，2026-10-09）**：基线 1b3bcd5；Mu-d3-1 网关同步删点（首答胜出原子性）→杀点=W-ui-g4b（同 tick 双答，host 延迟闸挂起时次答即 4404+不二次回写；补强前存活——broadcastUiClosed(answered) 异步删点遮蔽，教训：异步链被 await 刷掉会掩盖原子性属性，杀点须停在未决窗口内）/Mu-d3-2 跨文件订阅者门→g4/Mu-d3-3 releaseWatcher 挂 cancelPendingUiForFile→g7/Mu-d3-4 notifyType 归一→s2/Mu-d3-5 会话 pendingUi 首答删点→s5（注意 stale 分支删点是另一处，别删错）/Mu-d3-6 closeUiForGeneration 空转→s6/Mu-d3-7 cap8→999→s7/Mu-d3-8 writeUiResponse 活界校验死→4 例红。全杀后全仓复绿+双跑。
+
+## D3-F 前端批（Kimi wt/kimi-web-1 df32f51→c714bc6；GLM 审 88 GO 附条件→P1 修复→合 621278b）
+
+- **面**：apps/web 消费端——订阅面（parseUiRequest/parseUiClosed 形状门+uiRequests 快照+answerUi+六处终局清空）+ui-dialog.tsx 四法渲染（timeoutMs 仅提示不自动作答）+session-detail 接线（UiDialog 槽+ui-note 三级旁路）。26+1 例；全仓 1585 绿。
+- **GLM 审 P1-1（跨批时序缺口）**：parseUiClosed 缺第 4 因 answered（后端批 1b3bcd5 增；Kimi 基线 df32f51 无从知）→他端已答本端框悬挂。修复=c714bc6 一行+answered 撤框测试。P3 三项（timeoutMs=0 口径/pi 自答无感知自愈/options 无项长上限）留观。
+- **教训**：并行分工下「协议先行批」之后新增的枚举值必须双向同步——审者要专门核对「枚举闭合面跨批是否一致」（本批审出点）。
