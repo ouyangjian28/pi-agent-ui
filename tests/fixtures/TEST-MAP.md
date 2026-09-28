@@ -1064,3 +1064,14 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 **发现真缺陷**：W-asm-5 首跑抓「dispose 后 writer 仍可写」（FF-P02-3 违反）→修 disposed 标志（同步置位+await 窗口竞态双判+工厂 dispose 全置位现存写者）。
 
 **变异五连全杀**（基线 7d48f09；五步单链，注入后 git diff 验非空）：Mu-a1 dispose 不置位现存写者→W-asm-5 杀；Mu-a2 noteAppended 每行 +1 字节→W-asm-4/W-asm-7 杀（记账漂移经连写后 check 暴露）；Mu-a3 checkBeforeAppend 跳过（if false&&）→W-asm-3 两例杀（superseded+foreign）；Mu-a4 epoch 用 maxEpoch 不 +1→9 例杀（W-asm-1 例2 递增断言主杀）；Mu-a5 锁拒不 fail-closed（继续装配）→W-asm-2 两例杀（活锁+stale 锁零写保证）。还原后 12 绿。
+
+### P0-2 r2 根修批（GPT r1 审 58 NO-GO 后；基线 52bba50+bb29eca）
+
+**三 P1 修复**（报告 worktrees/gpt-p02-r1-review/p02-r1-review.md；探针 /tmp/gpt-p02-r1-probe/）：
+- R1 dispose 汇合在途 boot：每 writer 生命周期队列（boot/append/close 全串行临界区）；dispose=同步置位→drainAndClose 汇合全部队列→释放锁；boot 检查点①(after-lock 当场 release 零泄漏)/②(pre-oath 归口 dispose 释放零宣誓)。交错杀点=交错1（走①：零宣誓+锁清+后继可写）/交错2（走②：旧 boot 不污染新持有者 B——恰一代 writer+B 续写不冻结）。
+- R2 check→append→note 整体临界区：同写者并发 append 不自冻（datasync 窗口无第二个 check 在飞；杀点=真 FileDurability 包延迟层首行慢返，B 紧随两行都成+第三行仍可写——替身不写盘会致记账/盘面脱节，接缝须真底座语义）。
+- R3 bootP 构造即归一化（异常→failed 恒拒，永不成 unhandled rejection）+取锁 I/O 归一 lock-io-failed+mkdir 父目录（对齐 FileDurability 递归建目录——锁先跑目录未建=ENOENT 杀装配）。杀点=子进程 EACCES 探针 exit=0 SURVIVED+append 恒拒（r1 版对照 exit=1 实锤）。
+- R4 测试/文档收窄：E2E epoch1 toBe(1)（includes 可被 epoch=10 误匹配）+A-1 勘称「实例重建非 OS 进程 SIGKILL」+try/finally 收尾；设计稿 §3「同步拒」过称改「await boot 结果 reject」/§5 释放序勘误（实际=registry→guardedWriters→tokens）/§6 崩溃链边界收窄（stale 锁/清锁链=E2E 未验证，单元 W-asm-2 覆盖）。
+- r2 面诚实标注：4402/not-ready.cause/writerState 呈现=r2 帧身份批交付，r1 gate-failed 不冒称 4409。
+
+**变异四点全杀**（基线 52bba50；五步单链）：Mu-b1 dispose 不汇合队列（直接释放）→交错1+2 红；Mu-b2 append 不进队列→R2 自冻红；Mu-b3 bootP 无归一化→vitest 进程崩溃 no tests（进程级证据：rejection 逃逸杀进程=r1 R3 缺陷复活）；Mu-b4 检查点② if(false&&)→交错2 红（**首跑未杀**——测试时序不可达检查点②，修=enteredRead Promise 信号锚定 readJournal 已进；教训：变异杀点必须点验路径真经过被改行，测试接缝的 gate 放行不得依赖 dispose 完成（dispose 汇合队列等 boot=互等死锁反模式））。全部还原复绿。
