@@ -12,7 +12,7 @@
 //       界限（r2/GPT r1 F2）：L2 是事后检测非预防（check→append 窗口存在）；无存储端原子拒旧写，
 //       多机共享存储不属支持形态（ADR-P03-D2 r2 修订）。
 //
-// 启动恢复硬序（宣誓前不开写面）：flock(L1) → 既有恢复链（repair/adjudicate/对账，不改）→
+// 启动恢复硬序（宣誓前不开写面）：O_EXCL 锁文件 acquire(L1) → 既有恢复链（repair/adjudicate/对账，不改）→
 //   扫描最高 writer epoch=N → 自 epoch=N+1 → append 宣誓行+fsync → 开放写面。
 //
 // 信任域：锁文件与 journal 同目录（写者域）；探活方向保守（判活=拒起/抢占失败，误判死=人工清锁）。
@@ -173,8 +173,9 @@ export async function appendWriterOath(opts: OathOptions): Promise<OathAppendRes
     return { ok: false, reason: "invalid-oath", detail: `epoch 非正安全整数：${String(opts.epoch)}` };
   if (typeof opts.bootId !== "string" || opts.bootId.length === 0)
     return { ok: false, reason: "invalid-oath", detail: "bootId 空" };
-  // r3/GPT r2 R2-F3：at 显式提供时空串拒（写出 schema 不接受的行=写读不一致）；
-  // 组装行另做 parseJournalText 自证（成功返回不得掩盖自造 schema 非法行）——均在任何 I/O 前。
+  // r3/GPT r2 R2-F3：at 显式提供时空串拒（写出 schema 不接受的行=写读不一致）——在任何 I/O 前；
+  // 组装行另做 parseJournalText 自证（读盘后、开句柄前，非零 I/O——GPT r3 R3-F4 勘误：成功返回
+  // 不得掩盖自造 schema 非法行，两层分层勿混称）。
   if (opts.at !== undefined && (typeof opts.at !== "string" || opts.at.length === 0))
     return { ok: false, reason: "invalid-oath", detail: "at 空串" };
   let raw: string;
@@ -223,9 +224,11 @@ export type GuardVerdict =
 
 /**
  * 写前检查器（旧写者冻结面；冻结粘性——一旦冻结后续 append 一律拒，noteAppended 不解冻）。
- * 基线契约（r2/GPT r1 F2）：增量记账，禁全盘 stat 回写——写后用盘面 stat 值重建基线会把并发
- * 他者宣誓字节吞进自身基线，守卫永续放行。正确序：initialize(宣誓后 stat) → [check → append →
- * fsync → noteAppended(自写字节数)]循环。check→append 窗口=检测非预防（L2 界限，见文件头）。
+ * 基线契约（r2/GPT r1 F2；r3/GPT r3 R3-F1 勘误）：增量记账，禁全盘 stat 回写——写后用盘面 stat
+ * 值重建基线会把并发他者宣誓字节吞进自身基线，守卫永续放行。正确序：initialize(自身 oath 成功
+ * 结果对象，其 byteEnd=自身宣誓字节终点；调用约定非类型强制——结构类型 {byteEnd} 不证明来源，
+ * 只信装配层保证唯一流入自身成功 oath，见设计稿 §3 r3) → [check → append → fsync →
+ * noteAppended(自写字节数)]循环。check→append 窗口=检测非预防（L2 界限，见文件头）。
  * 判据：stat size ≠ 基线 → 他者写过 → 重扫 writer 行：异已宣誓（epoch≥自身且 bootId≠自身）
  * → writer-superseded；无异已宣誓的变化 → foreign-write-detected（合法写者必先宣誓）。
  */

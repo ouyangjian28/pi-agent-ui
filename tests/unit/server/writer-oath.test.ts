@@ -204,6 +204,12 @@ describe("W-oath-4 重放兼容+schema+读面呈现（FF-4）", () => {
     expect(journalLineSchemaError({ t: "writer", epoch: 1.5, bootId: "b", at: "T" })).toContain("epoch");
     expect(journalLineSchemaError({ t: "writer", epoch: 1, bootId: "", at: "T" })).toContain("bootId");
     expect(journalLineSchemaError({ t: "writer", epoch: 1, bootId: "b" })).toContain("at");
+    // r3 尾债（GPT r3 R3-F2）：at 空串直接 schema 负例——Mu-extra-F7（放宽 schema 的 length 检查）
+    // 靠写门 io 断言锁不住（空 at 根本到不了 schema），本例锁读面本身
+    expect(journalLineSchemaError({ t: "writer", epoch: 1, bootId: "b", at: "" })).toContain("at");
+    // 同面：空 at 行进 parseJournalText 判 bad（读面与写面同源拒）
+    const badTail = parseJournalText(`${JSON.stringify({ t: "writer", epoch: 1, bootId: "b", at: "" })}\n`);
+    expect(badTail.bad.length).toBe(1);
   });
 
   it("INV-2/INV-3 违反盘面：报告呈现不崩溃", () => {
