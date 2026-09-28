@@ -14,7 +14,7 @@ import {
 } from "../../../apps/server/src/runtime/repair-tail.ts";
 import { createRecoveryEvidenceProvider, isRecoverySnapshot, type FsLike } from "../../../apps/server/src/runtime/recovery-evidence-source.ts";
 import { parseJournalText, buildRecoverReport, recoverFromJournal, recoverFromSnapshot } from "../../../apps/server/src/runtime/recover.ts";
-import { journalLineSchemaError, replayIntents, journalToScanRows, type JournalLine, type RepairLine } from "@pi-agent-ui/protocol";
+import { JOURNAL_CONTRACT_VERSION, journalLineSchemaError, replayIntents, journalToScanRows, type JournalLine, type RepairLine } from "@pi-agent-ui/protocol";
 
 const sha = (b: Buffer | string): string => createHash("sha256").update(b).digest("hex");
 const jl = (i: string) => JSON.stringify({ t: "enqueue", intentId: i, sessionId: "q", generation: 1, leafId: "L", matchKey: { textHash: "h", attachmentIdentity: "a", ordinal: 1 }, payload: { kind: "prompt", rawText: "t", attachments: [], sentAt: "1" } });
@@ -108,7 +108,7 @@ describe("P0-1a repairJournalTail 工具事务", () => {
     expect(row.t).toBe("repair");
     expect(row.removedSha256).toBe(sha(TORN));
     expect(row.buildId).toBe("build-rt");
-    expect(row.contractVersion).toBe(2);
+    expect(row.contractVersion).toBe(JOURNAL_CONTRACT_VERSION);
     // 锚点转移=新盘面哈希（与返回 anchor 一致）
     const anchor = JSON.parse(await readFile(join(e.evidenceDir, `${encodeURIComponent(e.file)}.evidence.json`), "utf8")) as { len: number; sha: string };
     expect(anchor.len).toBe(Buffer.byteLength(after, "utf8"));
@@ -690,7 +690,9 @@ describe("P0-1a GPT r3 阻断修复批（B3a/B3b/B6）", () => {
   };
   const markerOf = async (e: Env) => JSON.parse(await readFile(join(e.evidenceDir, `${encodeURIComponent(e.file)}.repair-pending.json`), "utf8")) as { byteStart: number; byteEnd: number; removedSha256: string; startedAt: string };
   const mrowOf = (m: { byteStart: number; byteEnd: number; removedSha256: string; startedAt: string }) =>
-    Buffer.from(JSON.stringify({ t: "repair", reason: "torn-tail", byteStart: m.byteStart, byteEnd: m.byteEnd, removedSha256: m.removedSha256, buildId: "build-rt", contractVersion: 2, at: m.startedAt }) + "\n", "utf8");
+    Buffer.from(JSON.stringify({ t: "repair", reason: "torn-tail", byteStart: m.byteStart, byteEnd: m.byteEnd, removedSha256: m.removedSha256, buildId: "build-rt", contractVersion: JOURNAL_CONTRACT_VERSION, at: m.startedAt }) + "\n", "utf8"); // 当前契约形态（跟版本常量）
+  const mrowLegacyOf = (m: { byteStart: number; byteEnd: number; removedSha256: string; startedAt: string }) =>
+    Buffer.from(JSON.stringify({ t: "repair", reason: "torn-tail", byteStart: m.byteStart, byteEnd: m.byteEnd, removedSha256: m.removedSha256, buildId: "build-rt", contractVersion: 2, at: m.startedAt }) + "\n", "utf8"); // 历史旧行形（固定 v2=r7 前最后一版）
 
   it("RT42-B6/r4 交叉起点：marker 起点后多一条完整合法行+尾恰为 repair 严格前缀→conflict+盘面逐字节不变（起点对齐杀手）", async () => {
     const e = await env([jl("i1")]);
@@ -787,7 +789,7 @@ describe("P0-1a GPT r3 阻断修复批（B3a/B3b/B6）", () => {
     await appendFile(e2.abs, `{"t":"sending","intentId":"i1","x":"y"`, "utf8");
     await expect(repairJournalTail(OPT(e2, { openHandle: crashAfterTruncate }))).rejects.toThrow("crash after truncate");
     const m2 = await markerOf(e2);
-    await appendFile(e2.abs, mrowOf(m2).subarray(0, mrowOf(m2).byteLength - 1), "utf8"); // 旧行全内容缺末换行
+    await appendFile(e2.abs, mrowLegacyOf(m2).subarray(0, mrowLegacyOf(m2).byteLength - 1), "utf8"); // 旧行全内容缺末换行（固定 v2 历史形）
     const r2 = await repairJournalTail(OPT(e2));
     expect(r2.kind).toBe("repaired"); // legacy 枚举形收敛（旧行前缀）
     if (r2.kind === "repaired") expect(r2.via).toBe("marker-complete");

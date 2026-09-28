@@ -158,7 +158,7 @@ async function loadMarker(evidenceDir: string, file: string): Promise<RepairMark
  *  r9 起恢复逐字节前缀比对+旧行形枚举（legacyMrow），不再依赖跨版本前缀说法。fragIntentId=
  *  对移除尾段做受限结构扫描的归因留痕（r7：顶层唯一身份可证记 id；none/conflict 显式 null；
  *  缺省=仅测试夹具/存量=legacy 构造形）。 */
-function buildRepairRow(opts: { byteStart: number; byteEnd: number; removedSha256: string; buildId: string; at: string; fragIntentId?: string | null }): Buffer {
+function buildRepairRow(opts: { byteStart: number; byteEnd: number; removedSha256: string; buildId: string; at: string; fragIntentId?: string | null; contractVersion?: number }): Buffer {
   const line: RepairLine = {
     t: "repair",
     reason: "torn-tail",
@@ -166,7 +166,7 @@ function buildRepairRow(opts: { byteStart: number; byteEnd: number; removedSha25
     byteEnd: opts.byteEnd,
     removedSha256: opts.removedSha256,
     buildId: opts.buildId,
-    contractVersion: JOURNAL_CONTRACT_VERSION,
+    contractVersion: opts.contractVersion ?? JOURNAL_CONTRACT_VERSION,
     at: opts.at,
     ...(opts.fragIntentId !== undefined ? { fragIntentId: opts.fragIntentId } : {}),
   };
@@ -373,7 +373,9 @@ export async function repairJournalTail(opts: RepairTailOptions): Promise<Repair
         // 信任前提（r9 勘误）：修复期外部停写是必要部署条件（RT:28 既有前提）——pendingRepair
         // 只是恢复阻断状态非文件锁，通用 FileDurability.append 不检查 marker，evidenceDir 隔离
         // 不保护 journal 尾；前缀比对=内容证据，非凭 marker 域自证。
-        const legacyMrow = buildRepairRow({ byteStart: marker.byteStart, byteEnd: marker.byteEnd, removedSha256: marker.removedSha256, buildId: opts.buildId, at: marker.startedAt }); // 无 fragIntentId 字段=旧形态构造行（枚举兼容形）
+        // 旧形态枚举形固定 v2（v2=历史最后一版，r7 前旧行以 `}` 闭合无换形）——枚举是历史形兼容面，
+        // 不随 JOURNAL_CONTRACT_VERSION 漂移；未来版本升级只需追加新枚举，不改旧形。
+        const legacyMrow = buildRepairRow({ byteStart: marker.byteStart, byteEnd: marker.byteEnd, removedSha256: marker.removedSha256, buildId: opts.buildId, at: marker.startedAt, contractVersion: 2 }); // 无 fragIntentId 字段=旧形态构造行（枚举兼容形）
         const prefixOf = (b: Buffer) => tail.byteLength < b.byteLength && b.subarray(0, tail.byteLength).equals(tail);
         const isPartialRow = marker.byteStart === byteStart && (prefixOf(mrow) || prefixOf(legacyMrow));
         if (isPartialRow) {
