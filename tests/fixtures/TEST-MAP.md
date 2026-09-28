@@ -1201,3 +1201,5 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - **面**：apps/web 消费端——订阅面（parseUiRequest/parseUiClosed 形状门+uiRequests 快照+answerUi+六处终局清空）+ui-dialog.tsx 四法渲染（timeoutMs 仅提示不自动作答）+session-detail 接线（UiDialog 槽+ui-note 三级旁路）。26+1 例；全仓 1585 绿。
 - **GLM 审 P1-1（跨批时序缺口）**：parseUiClosed 缺第 4 因 answered（后端批 1b3bcd5 增；Kimi 基线 df32f51 无从知）→他端已答本端框悬挂。修复=c714bc6 一行+answered 撤框测试。P3 三项（timeoutMs=0 口径/pi 自答无感知自愈/options 无项长上限）留观。
 - **教训**：并行分工下「协议先行批」之后新增的枚举值必须双向同步——审者要专门核对「枚举闭合面跨批是否一致」（本批审出点）。
+
+**D3 r1 K3 审（转录整理版，2026-10-09）+修复批**：审报=projects/pi-agent-ui/audits/k3-d3-r1-review-2026-10-09.md（原报未落盘事故=M-253 披露；审读 worktree 被误删后 K3 靠只读工具完成 95%）。无 P1；P2-1=validateClientFrame ui-answer 形状门分支零测试→已补 4 例（并存歧义/类型错/零枝/requestId+多余键，contracts-validate 24 绿）；P2-2=设计稿 §7 E2E 腿未交付→登记尾债 D3-T1（D3-E2E 批补）；P3-1=§7「畸形 4403」勘误为 4404。K3 验证面（首答胜出双删点互补/生命周期闭合/cap8/审计无敏感内容/非写帧声明/协议字段一致）全过。前端风险提示=4404×3→close 1002（晚答三连关连接；前端 ui-closed 及时撤框+4404 静默已缓解，禁做重试答）。

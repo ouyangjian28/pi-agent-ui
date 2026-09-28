@@ -97,6 +97,6 @@ pi 进程内扩展（安全三层防线：permission-gate / pi-verdict / filter-
 
 - rpc-session 单元 W-ui-s*：对话族 demux→onUiRequest；即显 notify→onUiNote；其余即显→审计；
   answerUi 三方法回写形+cancelled；retire 清 pending+onUiClosed 逐个；cap 8 溢出；晚答照转。
-- 网关单元 W-ui-g*：合法答案回写+首答胜出+次答 4404；跨文件 4404；畸形 4403；零订阅派发→立即
+- 网关单元 W-ui-g*：合法答案回写+首答胜出+次答 4404；跨文件 4404；畸形 4404（勘误 r1：原稿误写 4403；4403=协议版本不匹配专用，见 §5.3）；零订阅派发→立即
   cancelled；末订阅者断开→pending 全 cancelled；进程 retired→ui-closed 广播；ui-note 进 live 流。
-- E2E（受控 FakeRpcHost）：emit extension_ui_request → 帧→answer→stdin 断言；断开/退役两路。
+- E2E（受控 FakeRpcHost）：emit extension_ui_request → 帧→answer→stdin 断言；断开/退役两路。（r1 勘误：本腿未随 r1 交付，登记为 D3 尾债 D3-T1，随 D3-E2E 批补齐；当前覆盖=两份单测+变异档）
