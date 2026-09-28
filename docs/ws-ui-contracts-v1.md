@@ -159,7 +159,7 @@ type ProgressNote = "thinking" | "tool-start" | "tool-end" | "compacting" | "mes
 - **只透 assistant 正文**：user 已知无价值；system 事件含全系统提示/工具清单不外泄（探针实证）。
 - **thinking 缺省不透**（服务端聚合器过滤；开关 server 侧配置，非协议面）。
 - **节流**：同 (part, contentIndex) 增量 80ms 窗合并；单帧 ≤8KiB 超长切分；单 turn 广播总量 2MiB 软上限（超限停 delta，final 仍发）。
-- **delivered 门**：未记账轮次（buffered/overflow）不广播。
+- **disposition 门（白名单）**：只放行 delivered/buffered 两已知记账态（buffered=回复期缓冲，记账行已先落）；其余（旧代/溢出/未知态）不广播。
 - **背压**：慢订阅=引擎积压门 4431（既有语义，不杀进程不断其他订阅）。
 - message-final 到达=窗内残留丢弃（终局全文权威）；前端拼接以 final 为准（增量流可能缺尾，重同步不承诺恢复 delta）。
 

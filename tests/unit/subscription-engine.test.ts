@@ -752,3 +752,30 @@ describe("3b3-fix8 F8-1：页提交资格统一终检（GPT fix7 P8/P9/P10/P11�
     expect(eng.state.phase).toBe("closed");
   });
 });
+
+describe("D1 live 相位门（K3 审 P2-6②：onLiveEvent 仅 live 相收——paging 期静默丢）", () => {
+  it("W-d1-8c paging 期 live 帧丢弃；追平进 live 后恢复投递", () => {
+    const idx = new ReadIndex("s.jsonl", "s-1");
+    for (let i = 1; i <= 450; i++) idx.append("journal", `L${i}`, `L${i}`, hEv(i)); // >200 条→必分页
+    let idSeq = 0;
+    const eng = new SubscriptionEngine({ index: idx, status: () => fakeStatus(1), now: () => 0, newId: () => `id-${++idSeq}` });
+    const first = eng.startSnapshot("r1");
+    const snap = first.find((f) => f.t === "snapshot") as { snapshotId: string; historyNext: { seq: number } | null; hasMore: boolean };
+    expect(snap.hasMore).toBe(true); // paging 期确立
+    eng.onLiveEvent({ kind: "message-delta", part: "text", contentIndex: 1, delta: "分页期不该投" });
+    expect(eng.drain().some((f) => f.t === "events" && (f as { events?: unknown[] }).events?.some(() => true))).toBe(false); // 无 live 帧
+    // 续页至 done → enterLive
+    let cursor = snap.historyNext!;
+    for (;;) {
+      const fs = eng.handle({ kind: "page", requestId: "rp", snapshotId: snap.snapshotId, historyNext: cursor });
+      const page = fs.find((f) => f.t === "snapshot") as { historyNext: { seq: number } | null };
+      if (page.historyNext === null) break;
+      cursor = page.historyNext;
+    }
+    eng.onLiveEvent({ kind: "message-delta", part: "text", contentIndex: 1, delta: "追平后该投" });
+    const out = eng.drain();
+    const liveFrame = out.find((f) => f.t === "events") as { events: Array<{ kind: string; delta?: string }> };
+    expect(liveFrame).toBeDefined();
+    expect(liveFrame.events.some((e) => e.kind === "message-delta" && e.delta === "追平后该投")).toBe(true);
+  });
+});

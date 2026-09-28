@@ -3438,13 +3438,25 @@ describe("ws-gateway D1：broadcastLive 直播广播", () => {
     }
   });
 
-  it("W-d1-8 无订阅文件=零开销早退（无 watcher/无帧/不抛错）", async () => {
+  it("W-d1-8 无订阅文件=零开销早退；退订后订阅不再投（K3 审 P2-6②：原恒真断言废）", async () => {
     const r = await makeRig();
     try {
+      // 无订阅文件：零帧不抛错
       r.gw.broadcastLive("nope.jsonl", { kind: "message-delta", part: "text", contentIndex: 1, delta: "x" });
       r.gw.broadcastLive("nope.jsonl", { kind: "message-final", role: "assistant", text: "全文" });
-      // 帧零产出（无连接）——不抛错即过；静态断言补一例真实订阅停止面
-      expect(r.audits.length).toBeGreaterThanOrEqual(0);
+      // 真实订阅停止面：订阅→收帧→退订→再投=零帧
+      r.history.put("d1s.jsonl", makeRows(1));
+      const c1 = await authed(r);
+      await c1.say({ t: "subscribe", requestId: "s1", file: "d1s.jsonl" });
+      r.gw.broadcastLive("d1s.jsonl", { kind: "message-delta", part: "text", contentIndex: 1, delta: "退订前" });
+      await until(() => c1.frames().some((f) => f.t === "events" && f.origin === "live"), 1000);
+      const liveBefore = c1.frames().find((f) => f.t === "events" && f.origin === "live") as { events: Array<{ delta?: string }> };
+      expect(liveBefore.events.some((e) => e.delta === "退订前")).toBe(true);
+      const subId = (c1.frames().find((f) => f.t === "snapshot") as { subscriptionId?: string }).subscriptionId ?? ""; // 订阅身份=snapshot 帧 subscriptionId
+      await c1.say({ t: "unsubscribe", requestId: "u1", subscriptionId: subId });
+      r.gw.broadcastLive("d1s.jsonl", { kind: "message-delta", part: "text", contentIndex: 1, delta: "退订后" });
+      await new Promise((res) => setTimeout(res, 80));
+      expect(c1.frames().some((f) => f.t === "events" && f.origin === "live" && (f as { events?: Array<{ delta?: string }> }).events?.some((e) => e.delta === "退订后"))).toBe(false); // 退订后零投
     } finally {
       await r.dispose();
     }

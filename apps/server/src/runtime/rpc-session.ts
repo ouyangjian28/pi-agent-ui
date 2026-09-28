@@ -298,12 +298,20 @@ export class RpcSession {
       return; // 未知 id 的 response：丢弃（不进事件流）
     }
     if (o !== null && typeof o === "object" && o.type === "agent_settled") {
+      // P2-2（K3 审）：agent_settled 也透传 onPiEvent（D1 聚合器清窗兑底依赖它；coordinator 结算逻辑不变）
+      const r = this.coordinator.onPiEvent(ev, generation);
+      try {
+        const ret = this.opts.onPiEvent?.(ev, generation, r.kind) as unknown;
+        if (ret instanceof Promise) void ret.catch((e: unknown) => this.safeAudit(`rpc-session pi-event-async-error ${String(e instanceof Error ? e.message : e)}`));
+      } catch (e: unknown) {
+        this.safeAudit(`rpc-session pi-event-error ${String(e instanceof Error ? e.message : e)}`);
+      }
       void this.coordinator
         .onSettledEvent({ generation })
-        .then((r) => {
-          if (r.kind === "settled") this.notifySettled(r.key); // S4-05：直接结算路径（buffered/discard/耐久失败不通知）
-          else if (r.kind === "settle-durability-failed") this.safeAudit(`rpc-session settle-held generation=${generation}（完成通知延后）`);
-          else if (r.kind === "buffered") this.safeAudit(`rpc-session settle-buffered generation=${generation}（等待 response 回绑）`);
+        .then((r2) => {
+          if (r2.kind === "settled") this.notifySettled(r2.key); // S4-05：直接结算路径（buffered/discard/耐久失败不通知）
+          else if (r2.kind === "settle-durability-failed") this.safeAudit(`rpc-session settle-held generation=${generation}（完成通知延后）`);
+          else if (r2.kind === "buffered") this.safeAudit(`rpc-session settle-buffered generation=${generation}（等待 response 回绑）`);
         })
         .catch((e) => {
           this.safeAudit(`rpc-session settled-error generation=${generation} ${String(e instanceof Error ? e.message : e)}`);

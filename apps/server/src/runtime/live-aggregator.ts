@@ -7,6 +7,7 @@
 // 背压不在本层：出口=engine.onLiveEvent（pushBacklog 超限→4431 关订阅，既有语义）。
 
 import type { LiveEvent } from "@pi-agent-ui/protocol";
+import { logicalNameWithinRoots } from "../ws/safe-open.ts";
 
 /** 本层产出的三形（LiveEvent 子集；类型直取 protocol 契约，不自造同构形）。 */
 export type LiveContentEvent = Extract<LiveEvent, { kind: "message-delta" | "message-part-end" | "message-final" }>;
@@ -57,11 +58,55 @@ export function assistantFinalText(content: unknown): string | null {
   return out;
 }
 
-/** D1 disposition 门（docs/d1-live-stream-design.md §5）：buffered/delivered 均广播
- *（buffered=response 未回绑的正常回复期，记账行已在 enqueue 时落）；dropped-stale-generation
- *（旧代事件——新写者已接管）/overflow-closed（gate 溢出已弃）不广播。 */
+/** D1 disposition 门（docs/d1-live-stream-design.md §5；P2-1 白名单制）：只放行
+ * delivered（run-open 期）与 buffered（response 未回绑的回复期——记账行已在 enqueue 时落，
+ * turn-gate 硬序①意图行 fsync 先于 send 许可）；其余（dropped-stale-generation 旧代/
+ * overflow-closed 溢出/未来新增态）一律拒。 */
 export function shouldBroadcastLive(disposition: string): boolean {
-  return disposition !== "dropped-stale-generation" && disposition !== "overflow-closed";
+  // P2-1（K3 审）：白名单制（fail-closed）——只放行两已知记账态；协调器新增任何 disposition 默认拒
+  return disposition === "delivered" || disposition === "buffered";
+}
+
+/** UTF-8 字节长度（P2-3：预算/切分口径=字节非 UTF-16 码元——中文实差至 3×）。 */
+function byteLen(s: string): number {
+  return Buffer.byteLength(s, "utf8");
+}
+
+/** 按 UTF-8 字节预算安全切片（不劈多字节字符；最多取 ≤budget 字节的最长前缀）。 */
+function sliceByBytes(s: string, budget: number): string {
+  if (byteLen(s) <= budget) return s;
+  // 二分找最长前缀（字节 ≤budget 且不劈字符）
+  let lo = 0, hi = s.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (byteLen(s.slice(0, mid)) <= budget) lo = mid; else hi = mid - 1;
+  }
+  return s.slice(0, lo);
+}
+
+/**
+ * D1 接线路由工厂（W-d1-1：composition 的 onPiEvent 闭包提取为可测单元）。
+ * 生产接线=composition.ts（makeLiveOnPiEvent + late-bound sink）；单测直接驱动本工厂覆盖：
+ * disposition 白名单门（Mu-d1-4 接线级杀点）/键归一（journal 绝对路径→roots 相对逻辑名）/
+ * per-file 聚合器复用/sink 晚绑定（null=零订阅期丢弃）。
+ */
+export function makeLiveOnPiEvent(deps: {
+  roots: readonly string[];
+  /** sink 取值器（每事件重取——late-bound：composition dispose 后恒 null） */
+  sink: () => ((file: string, ev: LiveContentEvent) => void) | null;
+  aggregators: Map<string, LiveAggregator>;
+}): (file: string, ev: unknown, generation: number, disposition: string) => void {
+  return (file, ev, _generation, disposition) => {
+    if (!shouldBroadcastLive(disposition)) return; // 白名单门（P2-1 fail-closed）
+    if (deps.sink() === null) return; // 零订阅期/dispose 后丢弃
+    const logical = logicalNameWithinRoots(file, deps.roots) ?? file; // 键归一（r3a 同款）
+    let agg = deps.aggregators.get(logical);
+    if (agg === undefined) {
+      agg = new LiveAggregator();
+      deps.aggregators.set(logical, agg);
+    }
+    agg.onPiEvent(ev, (le) => deps.sink()!(logical, le));
+  };
 }
 
 export class LiveAggregator {
@@ -85,12 +130,26 @@ export class LiveAggregator {
     this.schedule = opts.schedule ?? ((fn, ms) => { const t = setTimeout(fn, ms); return () => clearTimeout(t); });
   }
 
-  /** pi 事件入口（调用方已保证 disposition==="delivered"）。返回=false 表事件面不可识别（忽略）。 */
+  /** P2-4（K3 审）：dispose——撤 pending 定时器（晚到 flush 不再触发）。幂等。 */
+  dispose(): void {
+    if (this.timer !== null) {
+      this.timer();
+      this.timer = null;
+    }
+    this.pending.clear();
+  }
+
+  /** pi 事件入口（disposition 门由调用方 composition 按 shouldBroadcastLive 把关）。返回=false 表事件面不可识别（忽略）。 */
   onPiEvent(ev: unknown, sink: LiveSink): boolean {
     const e = ev as PiEvent;
     switch (e.type) {
-      case "agent_start": case "turn_start": case "agent_end": case "turn_end":
-        return true; // 边界观测：turn_end 后由调用方 flush（onTurnEnd）
+      case "agent_start": case "turn_start":
+        // P1-1（K3 审）：单 turn 预算跨 turn 复位——不重置则超限永久生效，直播面静默退化为只发 final
+        this.turnBytes = 0;
+        this.overBudget = false;
+        return true;
+      case "agent_end": case "turn_end":
+        return true; // 边界观测：turn 收尾由 agent_settled 分支清窗（P2-2 已可达）
       case "agent_settled":
         this.flush(sink, "all"); // turn 收尾：已收增量不丢+每段补 part-end（异常流无 message_end）
         return true;
@@ -141,9 +200,6 @@ export class LiveAggregator {
   }
 
   /** turn 收口（turn_end/agent_settled 后调用）：清窗。 */
-  onTurnEnd(sink: LiveSink): void {
-    this.flush(sink, "all");
-  }
 
   private pushDelta(part: "text" | "thinking", contentIndex: unknown, delta: string, sink: LiveSink): void {
     if (this.overBudget) return; // 超限停 delta（final 仍发）
@@ -152,11 +208,12 @@ export class LiveAggregator {
     const cur = this.pending.get(key);
     if (cur !== undefined) cur.text += delta;
     else this.pending.set(key, { part, contentIndex: idx, text: delta });
-    // 预算=入窗即计（不等 flush）：超限→窗内已收（含触发条）全发后停后续（final 仍发）
-    this.turnBytes += delta.length;
+    // 预算=入窗即计（不等 flush；P2-3：UTF-8 字节口径非码元）：超限→窗内已收（含触发条）全发后停后续（final 仍发）
+    this.turnBytes += byteLen(delta);
     if (this.turnBytes > this.turnBudget) {
       this.overBudget = true;
-      this.flush(sink, "all");
+      // P2-5（K3 审）：超限只发 delta 不补提前 part-end（段未真闭合；真闭时 text_end 路径自然补锚）
+      this.flush(sink, null);
       return;
     }
     if (cur === undefined) this.armWindow(sink); // 首段增量开窗
@@ -190,8 +247,9 @@ export class LiveAggregator {
     for (const [, it] of items) {
       let rest = it.text;
       while (rest.length > 0) {
-        const take = rest.length <= this.maxChunk ? rest : rest.slice(0, this.maxChunk);
-        rest = rest.length <= this.maxChunk ? "" : rest.slice(this.maxChunk);
+        // P2-3（K3 审）：切分按 UTF-8 字节口径（码元切分对中文实达 ~3× 名义值）
+        const take = sliceByBytes(rest, this.maxChunk);
+        rest = rest.slice(take.length);
         this.emit(sink, { kind: "message-delta", part: it.part, contentIndex: it.contentIndex, delta: take });
         // overBudget 不中断本次 flush（语义=停后续入窗；已触发发射完整送出）
       }

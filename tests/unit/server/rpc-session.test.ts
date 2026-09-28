@@ -225,6 +225,24 @@ describe("RpcSession（受控替身）", () => {
     expect((await stopP).kind).toBe("confirmed");
   });
 
+  it("D1 P2-2：agent_settled 也透传 onPiEvent（清窗兜底可达）且不影响 onSettledEvent 结算", async () => {
+    const routed: Array<{ ev: unknown; disp: string }> = [];
+    const { session, host } = await makeSession({ onPiEvent: (ev, _gen, disp) => routed.push({ ev, disp }) });
+    const p = session.start();
+    await until(() => host.frames.length === 1, "探针");
+    host.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true });
+    await p;
+    const cmd = session.send("hi");
+    await until(() => host.frames.some((f) => f.includes('"prompt"')), "prompt 写出");
+    host.emitEvent({ id: "c1", type: "response", command: "prompt", success: true });
+    host.emitEvent({ type: "agent_settled" }); // ← 本行主角：应进 routed（P2-2 修复前不进）
+    await cmd;
+    await until(() => (session.getState().gate as { kind: string }).kind !== "in-flight", "轮次收口");
+    const settledEvents = routed.filter((r) => (r.ev as { type?: string }).type === "agent_settled");
+    expect(settledEvents.length).toBe(1); // 透传恰一次
+    expect((session.getState().gate as { kind: string }).kind).not.toBe("in-flight"); // 结算不受影响
+  });
+
   it("响应超时不阻断轮次收口：response 迟到被 ignored，settled 正常结算（协调器语义透传）", async () => {
     const { session, host } = await makeSession({ responseTimeoutMs: 60 });
     const p = session.start();

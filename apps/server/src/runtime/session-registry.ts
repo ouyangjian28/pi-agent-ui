@@ -31,8 +31,9 @@ export interface SessionRegistryOpts {
   /** 观测面（20b B2）：pi 进程 spawn 时回调（file+handle+generation）——E2E/宿主在 spawn 时即记录
    * 句柄身份，不靠事后审计反推；纯观测不参与生命周期（RpcSessionOpts.onSpawned 同源）。 */
   readonly onSpawned?: (file: string, handle: ProcessHandle, generation: number) => void;
-  /** D1 直播面：pi 进程事件回调（file+事件+代次+分派结果）。只透 delivered（journal 未记账轮次
-   *  不外泄）由调用方（composition 聚合器前）门控；纯观测不参与生命周期。 */
+  /** D1 直播面：pi 进程事件回调（file+事件+代次+分派结果）。disposition 门=白名单制
+   *  shouldBroadcastLive（delivered/buffered 放行——buffered 的记账行已在 enqueue 硬序①落；
+   *  其余拒）由调用方（composition 聚合器前）把关；纯观测不参与生命周期。 */
   readonly onPiEvent?: (file: string, ev: unknown, generation: number, disposition: string) => void;
   readonly audit?: (line: string) => void;
   readonly now?: () => string;

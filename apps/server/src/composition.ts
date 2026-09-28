@@ -20,7 +20,7 @@ import { DualHistorySource } from "./runtime/dual-history-source.ts";
 import { createRecoveryEvidenceProvider, isRecoverySnapshot, type RecoveryEvidenceResult } from "./runtime/recovery-evidence-source.ts";
 import { recoverFromSnapshot } from "./runtime/recover.ts";
 import { createSessionRegistry, type SessionRegistry } from "./runtime/session-registry.ts";
-import { LiveAggregator, type LiveContentEvent, shouldBroadcastLive } from "./runtime/live-aggregator.ts";
+import { LiveAggregator, type LiveContentEvent, makeLiveOnPiEvent } from "./runtime/live-aggregator.ts";
 import { createGuardedJournalWriterFactory } from "./runtime/guarded-journal-writer.ts";
 import { randomUUID } from "node:crypto";
 import { PiProcessHost } from "./host/process-host.ts";
@@ -257,18 +257,9 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
       // disposition 门（E2E 修正）：buffered/delivered 均广播（buffered=response 未回绑的正常回复期，
       // 记账行已在 enqueue 时落——非未记账）；dropped-stale-generation（旧代事件）/overflow-closed
       // （gate 溢出已弃）不广播。旧「只 delivered」门把回复期事件全滤掉了（D1-E2E 探针实证）。
-      onPiEvent: (file: string, ev: unknown, _generation: number, disposition: string) => {
-        if (!shouldBroadcastLive(disposition)) return;
-        if (liveSink === null) return;
-        // 键归一（r3a 修复批同款）：registry 面=journal 绝对路径；watchers 面=roots 相对逻辑名。
-        const logical = logicalNameWithinRoots(file, config.roots) ?? file;
-        let agg = liveAggregators.get(logical);
-        if (agg === undefined) {
-          agg = new LiveAggregator();
-          liveAggregators.set(logical, agg);
-        }
-        agg.onPiEvent(ev, (le) => liveSink!(logical, le));
-      },
+      // W-d1-1（K3 审 P2-6①）：接线闭包提取为 makeLiveOnPiEvent 工厂（键归一+白名单门+晚绑定 sink），
+      // 生产行为不变；接线级单测/变异杀点（Mu-d1-4）由此可达。
+      onPiEvent: makeLiveOnPiEvent({ roots: config.roots, sink: () => liveSink, aggregators: liveAggregators }),
       ...(config.write.responseTimeoutMs !== undefined ? { responseTimeoutMs: config.write.responseTimeoutMs } : {}),
       ...(config.write.turnTimeoutMs !== undefined ? { turnTimeoutMs: config.write.turnTimeoutMs } : {}),
       ...(config.write.readinessTimeoutMs !== undefined ? { readinessTimeoutMs: config.write.readinessTimeoutMs } : {}),
@@ -415,6 +406,10 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
         if (pollTimer !== null) { clearInterval(pollTimer); pollTimer = null; }
         if (config.registerSighup === true) process.off("SIGHUP", onSighup);
         gateway.dispose(); // 应用层告别（1000 server-shutdown）+观察器全解绑（DH 句柄归零）
+        // P2-4（K3 审）：D1 聚合器收口——撤 pending 定时器+清 Map+断 liveSink（≤80ms 晚到 flush 不再广播）
+        liveSink = null;
+        for (const agg of liveAggregators.values()) agg.dispose();
+        liveAggregators.clear();
         await adapter.dispose(); // 传输层兜底（1001+关自建 server；外部模式=只摘 upgrade 钩子）
         if (httpServer !== null) {
           // ⑤B：外部 server 归 composition 所有权——有界关闭（closeAllConnections 截 keep-alive 残留）

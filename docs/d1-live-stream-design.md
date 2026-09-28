@@ -54,7 +54,7 @@
 
 ## 5. 归属与门
 
-- onPiEvent 带 generation：disp!=="delivered"（buffered/overflow）**不广播**（journal 未记账的轮次不外泄）。
+- onPiEvent 带 generation：disposition 白名单门 shouldBroadcastLive——只放行 delivered/buffered（buffered 的记账行已在 enqueue 硬序①先落；E2E 实证回复期=buffered，旧「只 delivered」门把回复期全滤掉）；其余（旧代/溢出/未知态）拒。
 - file 无活跃订阅→零开销（broadcastLive 早退）。
 - 扩展面 `extension_ui_request`/`response` 不进广播（§1）。
 
