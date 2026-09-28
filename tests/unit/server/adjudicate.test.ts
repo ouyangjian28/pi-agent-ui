@@ -1,4 +1,4 @@
-// P0-1b 裁决持久化 v2（GPT r1 B1-B5 修复批）测试矩阵 R1-R10。
+// P0-1b 裁决持久化 v2 测试矩阵 R1-R28（r1 B1-B5 修复批起步，历轮扩谱；权威谱系=tests/fixtures/TEST-MAP.md）。
 // v2 身份模型：subject（fragment/repair）=修复事务四元组（removedSha256/byteStart/byteEnd/at），
 // fragment 另携归因目标 intentId——同内容新事务（不同 at）不被旧裁决解锁（B1/P3）；同事务换
 // 目标=conflicting-verdict（B3/P2）；raw 全文不入裁决行（B5/P7 撕裂字节+L2 膨胀）。
@@ -81,7 +81,7 @@ async function crashSync(abs: string): Promise<{ fh: FileHandle; size: number }>
   return { fh, size: real.size };
 }
 
-describe("P0-1b 裁决持久化 v2（崩溃/重启矩阵 R1-R10）", () => {
+describe("P0-1b 裁决持久化 v2（崩溃/重启矩阵 R1-R24+双证/覆盖 R25-R28）", () => {
   it("R1a 写前失败：appendFile 抛=write-failed 零裁决+盘面逐字节不变；重试收敛", async () => {
     const torn = `{"t":"sending","intentId":"i1","pay`;
     const e = await env([jl("i1"), send("i1"), repairRow(30, 66, sha(torn))]);

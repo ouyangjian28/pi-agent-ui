@@ -996,3 +996,16 @@
 - **P2-r5-2 注释债**：adjudicate-journal.ts 头注④改「候选加入后统一二维判定+kind 混合=双证合法共存」（原 kind 混合=冲突与 r4/r5 语义矛盾）；R20 注释「解锁+可重发」改「授权/执行分层」表述。文档计数勘误：isSafeInteger 实为七落点（repair-tail 117/138/139+adjudicate-journal 95+evidence-migration 112+recovery-evidence-source 209/342）。
 - 测试 v6=27 例（+R25/R26；R21 两断言改）。变异四连全杀（基线 3b682f0；五步单链）：Mu-r6-1 撤 txImpacted 门→**R25 杀**；Mu-r6-2 abandon 删 have 即排除→**R26 杀**；Mu-r6-3 G2 raw 全等过滤删→**R12 杀**（g2wrong）；Mu-r6-4 无映射 false→continue→**R17 杀**（resendAuthorized 面）。
 - 悬置（非本批）：L-r5-1 resendAuthorized 孤儿 ID 限定+投影消费契约=P0-3 接线面；S-r3-1 漂移锚人工解困流程仍 open。
+
+## P0-1b r7 结构归因留痕批（GPT r6 审 83 NO-GO 修复；报告=audits/gpt-p01b-r6-review-2026-10-08.md；2026-10-08）
+
+**范围**：P1-r6-1（热态结构归因到持久裁决目标集外，冷捕获绕覆盖判定）+P2-r6-1（注释债/§11 边界勘误）。权威语义=设计稿 §12。
+
+- **schema**（packages/protocol/src/journal.ts+journal-schema.ts）：repair 行可选字段 `fragIntentId?: IntentId | null`（字段序最尾=旧行为新行前缀，崩溃部分行残局前缀判定跨版本兼容）；缺省（存量）/null（不可归因/补完）/非空 string 合法，其余拒。
+- **生成面**（repair-tail.ts）：`structuralIntentId(tail)`=scanTopLevelIntentId（从 recover.ts 导出）——顶层唯一身份可证记 id，none/conflict 显式 null；fresh 修复+marker 吻合形+345 比对行（与将来落盘行同形态）均算；marker 补完路径（尾段物理消失）诚实 null。
+- **写面一致门**（adjudicate-journal.ts 身份门后）：fragment 裁决归因 vs matches[0].fragIntentId 不一致→`inconsistent-attribution` 拒零追加（S5 矛盾裁决自此不可持久化）；缺省/null 无结构证据不强一致（人工归因自由，未归因事务阻断门兜底）。
+- **读面影响域并入**（recover.ts）：txImpacted 并入 repair 行 fragIntentId 有效值——存量 S5 形冷态不再失忆（i1 并入影响域→须覆盖→排除）；存量行缺省不并入（归因缺失=未归因事务阻断兜底；归因在场=行为不变）。
+- **RepairFact**：读面呈现加 fragIntentId（exactOptionalPropertyTypes 条件展开拷贝）。
+- **测试**（adjudicate.test.ts 29 例+repair-tail.test.ts 38 例；全仓 1402 绿）：**R27** 写面一致门四形（不一致拒+盘面逐字节不变/一致落行/null 放行/存量放行）；**R28** 读面并入三态（S5 冷态 i1 排除+i2 授权重发合法+i3 无关正对照/热态对照/一致归因补正=resendAuthorized+resumable 双含 i1——缝的修复=证据完备而非阻断重发）；**RT-r7-1/2/3** 生成面（可归因=i1/不可归因=conflict 显式 null/存量无字段 schema 照认+类型 42 拒）。教训：可归因撕裂尾须完整闭合值（`"x":"y"` 形）——未闭合键被判 conflict（RT-r7-1 首版串 `"x"` 未闭合红）。
+- **变异三连全杀**（基线 7f39170 附近提交后注入；五步单链）：Mu-r7-1 一致门 `if (false)`→R27 杀；Mu-r7-2 txImpacted 并入项删→R28 杀（冷态 i1 失忆复活=S5 缺陷形）；Mu-r7-3 structuralIntentId 恒 null→RT-r7-1 杀（unique 面；RT-r7-2 本断 null 故不杀，杀点单一预期）。三连 checkout 还原后定向复绿+全仓复绿。
+- **注释债**（P2-r6-1）：测试头注 R1-R10→R1-R28 全谱、describe 标题对齐、设计稿 §11 第 1 条边界勘误+§12 新节。
