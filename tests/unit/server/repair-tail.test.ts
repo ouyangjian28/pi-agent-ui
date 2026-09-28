@@ -693,6 +693,8 @@ describe("P0-1a GPT r3 阻断修复批（B3a/B3b/B6）", () => {
     Buffer.from(JSON.stringify({ t: "repair", reason: "torn-tail", byteStart: m.byteStart, byteEnd: m.byteEnd, removedSha256: m.removedSha256, buildId: "build-rt", contractVersion: JOURNAL_CONTRACT_VERSION, at: m.startedAt }) + "\n", "utf8"); // 当前契约形态（跟版本常量）
   const mrowLegacyOf = (m: { byteStart: number; byteEnd: number; removedSha256: string; startedAt: string }) =>
     Buffer.from(JSON.stringify({ t: "repair", reason: "torn-tail", byteStart: m.byteStart, byteEnd: m.byteEnd, removedSha256: m.removedSha256, buildId: "build-rt", contractVersion: 2, at: m.startedAt }) + "\n", "utf8"); // 历史旧行形（固定 v2=r7 前最后一版）
+  const mrowV2FragOf = (m: { byteStart: number; byteEnd: number; removedSha256: string; startedAt: string; fragIntentId?: string | null }) =>
+    Buffer.from(JSON.stringify({ t: "repair", reason: "torn-tail", byteStart: m.byteStart, byteEnd: m.byteEnd, removedSha256: m.removedSha256, buildId: "build-rt", contractVersion: 2, at: m.startedAt, ...(m.fragIntentId === undefined ? {} : { fragIntentId: m.fragIntentId }) }) + "\n", "utf8"); // v2+身份过渡形（P0-1b r8..r10 窗口实际形态；r2/F3）
 
   it("RT42-B6/r4 交叉起点：marker 起点后多一条完整合法行+尾恰为 repair 严格前缀→conflict+盘面逐字节不变（起点对齐杀手）", async () => {
     const e = await env([jl("i1")]);
@@ -795,6 +797,19 @@ describe("P0-1a GPT r3 阻断修复批（B3a/B3b/B6）", () => {
     if (r2.kind === "repaired") expect(r2.via).toBe("marker-complete");
     await rm(e2.roots, { recursive: true, force: true });
     await rm(e2.evidenceDir, { recursive: true, force: true });
+    // 形二a（v2+身份过渡形；r2/F3）：P0-1b r8..r10 窗口行=contractVersion 2+fragIntentId——半写残局枚举遗漏会被误判 conflict
+    const e2b = await env([jl("i1")]);
+    await seedAnchor(e2b);
+    await appendFile(e2b.abs, `{"t":"sending","intentId":"i1","x":"y"`, "utf8");
+    await expect(repairJournalTail(OPT(e2b, { openHandle: crashAfterTruncate }))).rejects.toThrow("crash after truncate");
+    const m2b = await markerOf(e2b);
+    const v2frag = mrowV2FragOf({ ...m2b, fragIntentId: "i1" });
+    await appendFile(e2b.abs, v2frag.subarray(0, v2frag.byteLength - 3), "utf8"); // 过渡形全内容缺末尾（值后段+闭括+换行）
+    const r2b = await repairJournalTail(OPT(e2b));
+    expect(r2b.kind).toBe("repaired"); // v2+身份过渡形枚举收敛（r1 探针：缺此枚举→aborted）
+    if (r2b.kind === "repaired") expect(r2b.via).toBe("marker-complete");
+    await rm(e2b.roots, { recursive: true, force: true });
+    await rm(e2b.evidenceDir, { recursive: true, force: true });
     // 形三（非前缀垃圾短尾+超界长尾）：内容证据不成立——拒（Mu-r8-4 上界杀点+前缀杀点）
     for (const [torn2] of [[`{"t":"send`]] as const) {
       const e3 = await env([jl("i1")]);

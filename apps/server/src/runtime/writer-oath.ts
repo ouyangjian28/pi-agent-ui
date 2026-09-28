@@ -2,11 +2,15 @@
 // 设计稿=docs/p0-3-writer-epoch-design.md；ADR=projects/pi-agent-ui/decisions-2026-09-23.md（P03-D1..D4）。
 //
 // 两道防线：
-//   L1 排他锁文件（O_EXCL 原子创建+pid 探活）——同机双实例硬门：拿不到锁=存在活实例，拒起零字节写入。
-//       （Node 无 flock 绑定；O_EXCL 原子性与 ADR-P03-D2「OS/FS 级原子互斥为主门」语义等价，
-//        崩溃残留=锁文件+死 pid，探活后可安全抢占。）
-//   L2 持久代次宣誓（writer 行 append 入 journal）——跨锁防线：锁失效（NFS 弱语义/绕锁路径写/锁文件被误删）
+//   L1 排他锁文件（O_EXCL 原子创建+pid 探活诊断）——同机双实例硬门：拿不到锁=存在实例或证据不足，
+//       拒起零字节写入。**fail-closed：不自动抢占 stale 锁**（r2/GPT r1 F1：探活→unlink→重建
+//       的 TOCTOU 窗可产生双持有者；删窗内后来者新建的锁被抢先者 unlink 删除→双写）。
+//       stale（探活确认死）同样 held 拒+stale:true 诊断——恢复=宿主/运维显式清锁（pid+bootId
+//       证据在场可判），宁拒起不可双写。锁文件持有期内唯一删除者=持有者自身（release 归属校验）。
+//   L2 持久代次宣誓（writer 行 append 入 journal）——跨锁防线：锁失效（绕锁路径写/锁文件被误删）
 //       场景下，新写者宣誓更高 epoch，旧写者写前检查发现异已宣誓即冻结写面（writer-superseded）。
+//       界限（r2/GPT r1 F2）：L2 是事后检测非预防（check→append 窗口存在）；无存储端原子拒旧写，
+//       多机共享存储不属支持形态（ADR-P03-D2 r2 修订）。
 //
 // 启动恢复硬序（宣誓前不开写面）：flock(L1) → 既有恢复链（repair/adjudicate/对账，不改）→
 //   扫描最高 writer epoch=N → 自 epoch=N+1 → append 宣誓行+fsync → 开放写面。
@@ -33,8 +37,9 @@ export interface LockHolderInfo {
 
 export type LockAcquireResult =
   | { readonly ok: true; readonly release: () => Promise<void> }
-  /** 锁被持有（活 pid 或探活不可判）——拒起，零字节写入 journal。holder=null=锁文件读/解析失败（保守按活处理）。 */
-  | { readonly ok: false; readonly reason: "held"; readonly holder: LockHolderInfo | null };
+  /** 锁被持有——拒起，零字节写入 journal。holder=null=锁文件读/解析失败（保守按活处理）。
+   *  stale=true=探活确认死（崩溃残留）——仍拒起；恢复=显式清锁（本函数不清：自动抢占 TOCTOU=双持有者风险）。 */
+  | { readonly ok: false; readonly reason: "held"; readonly holder: LockHolderInfo | null; readonly stale: boolean };
 
 export interface LockOptions {
   /** journal 绝对路径（锁文件=同目录 `${journalPath}.writer.lock`）。 */
@@ -83,40 +88,38 @@ async function readLockHolder(path: string): Promise<LockHolderInfo | null> {
 }
 
 /**
- * 获取 journal 写权排他锁（L1）。拿不到=存在活实例或证据不足，调用方必须拒起。
- * 死实例残留锁（stale）：探活确认死后 unlink+重试一次（抢占失败=竞争者先得，如实 held）。
+ * 获取 journal 写权排他锁（L1）。拿不到=存在实例或证据不足，调用方必须拒起。
+ * fail-closed（r2/GPT r1 F1）：stale 锁（探活确认死）同样拒起+stale 诊断——不 unlink 不重试
+ * （r1 实现的探活→unlink→重建抢占有 TOCTOU 窗：两竞争者交错 unlink 可互删对方新锁→双持有者）。
+ * 崩溃残留恢复=显式动作（宿主/运维按 pid+bootId 证据清锁后重启）；宁拒起不可双写。
  */
 export async function acquireJournalLock(opts: LockOptions): Promise<LockAcquireResult> {
   const path = lockPathOf(opts.journalPath);
   const alive = opts.alive ?? defaultAlive;
   const body: LockFileBody = { pid: process.pid, bootId: opts.bootId, at: opts.now?.() ?? new Date().toISOString() };
-  for (let attempt = 0; attempt < 2; attempt++) {
+  try {
+    const fh = await open(path, "wx");
     try {
-      const fh = await open(path, "wx");
-      try {
-        await writeFile(fh, `${JSON.stringify(body)}\n`, "utf8");
-        await fh.sync();
-      } finally {
-        await fh.close();
-      }
-      return {
-        ok: true,
-        release: async () => {
-          // 归属校验后删（被抢占的锁不删——只清自己的）
-          const h = await readLockHolder(path);
-          if (h && h.bootId === opts.bootId) await unlink(path).catch(() => undefined);
-        },
-      };
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-      const holder = await readLockHolder(path);
-      if (holder === null) return { ok: false, reason: "held", holder: null }; // 锁文件不可读=无证据判死，保守拒起（人工清）
-      if (alive(holder.pid)) return { ok: false, reason: "held", holder };
-      // stale（探活确认死）：抢占——unlink 后重试一次
-      await unlink(path).catch(() => undefined);
+      await writeFile(fh, `${JSON.stringify(body)}\n`, "utf8");
+      await fh.sync();
+    } finally {
+      await fh.close();
     }
+    return {
+      ok: true,
+      release: async () => {
+        // 归属校验后删（只删自己的锁；fail-closed 下持有期内无人可换锁——他者 EEXIST 即拒不删）
+        const h = await readLockHolder(path);
+        if (h && h.bootId === opts.bootId) await unlink(path).catch(() => undefined);
+      },
+    };
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    const holder = await readLockHolder(path);
+    if (holder === null) return { ok: false, reason: "held", holder: null, stale: false }; // 锁文件不可读=无证据，保守拒起（人工处置）
+    const holderAlive = alive(holder.pid);
+    return { ok: false, reason: "held", holder, stale: !holderAlive }; // 死=stale 诊断仍拒（显式恢复面）
   }
-  return { ok: false, reason: "held", holder: await readLockHolder(path) };
 }
 
 // ---------------------------------------------------------------------------
@@ -133,6 +136,8 @@ export type OathAppendResult =
   | { readonly ok: true; readonly epoch: number; readonly byteStart: number; readonly byteEnd: number }
   /** 撕裂尾/schema 坏行在场=拒（追加补换行会把撕裂尾变永久中间断行；先走 repair-tail 修复）。 */
   | { readonly ok: false; readonly reason: "bad-tail" }
+  /** 参数非法（r2/F5：epoch 非正安全整数含代次耗尽/bootId 空）——写前拒，零改盘。 */
+  | { readonly ok: false; readonly reason: "invalid-oath"; readonly detail: string }
   /** 追加+fsync 失败（结果未确认：行可能已全/半落盘——幂等重收敛归上层恢复流程）。 */
   | { readonly ok: false; readonly reason: "write-failed"; readonly detail: string };
 
@@ -149,8 +154,13 @@ export interface OathOptions {
   readonly stat?: (path: string) => Promise<{ size: number }>;
 }
 
-/** 追加 writer 宣誓行（盘面门→append→fsync）。 */
+/** 追加 writer 宣誓行（参数校验→盘面门→append→fsync）。 */
 export async function appendWriterOath(opts: OathOptions): Promise<OathAppendResult> {
+  // r2/F5：写前校验将写行——成功返回不得掩盖自造 schema 非法行（epoch 耗尽/越界同样拒；零改盘）
+  if (!Number.isSafeInteger(opts.epoch) || opts.epoch < 1)
+    return { ok: false, reason: "invalid-oath", detail: `epoch 非正安全整数：${String(opts.epoch)}` };
+  if (typeof opts.bootId !== "string" || opts.bootId.length === 0)
+    return { ok: false, reason: "invalid-oath", detail: "bootId 空" };
   let raw: string;
   const readRaw = opts.readFile ?? ((p: string) => readFile(p, "utf8"));
   try {
@@ -190,13 +200,15 @@ export async function appendWriterOath(opts: OathOptions): Promise<OathAppendRes
 
 export type GuardVerdict =
   | { readonly ok: true }
-  | { readonly ok: false; readonly reason: "writer-superseded" | "foreign-write-detected" | "journal-unreadable"; readonly detail?: string };
+  | { readonly ok: false; readonly reason: "writer-superseded" | "foreign-write-detected" | "journal-unreadable" | "uninitialized"; readonly detail?: string };
 
 /**
- * 写前检查器（旧写者冻结面；冻结粘性——一旦冻结后续 append 一律拒）。
- * 判据：stat size ≠ 记忆值 → 他者写过 → 重扫 writer 行：
- *   异已宣誓（epoch≥自身且 bootId≠自身）→ writer-superseded（让位证据明确）；
- *   无异已宣誓的变化 → foreign-write-detected（保守冻结：合法写者必先宣誓，无宣誓他写=异常盘面）。
+ * 写前检查器（旧写者冻结面；冻结粘性——一旦冻结后续 append 一律拒，noteAppended 不解冻）。
+ * 基线契约（r2/GPT r1 F2）：增量记账，禁全盘 stat 回写——写后用盘面 stat 值重建基线会把并发
+ * 他者宣誓字节吞进自身基线，守卫永续放行。正确序：initialize(宣誓后 stat) → [check → append →
+ * fsync → noteAppended(自写字节数)]循环。check→append 窗口=检测非预防（L2 界限，见文件头）。
+ * 判据：stat size ≠ 基线 → 他者写过 → 重扫 writer 行：异已宣誓（epoch≥自身且 bootId≠自身）
+ * → writer-superseded；无异已宣誓的变化 → foreign-write-detected（合法写者必先宣誓）。
  */
 export class WriterGuard {
   private lastKnownSize: number | null = null;
@@ -209,21 +221,29 @@ export class WriterGuard {
     private readonly deps: { stat?: (p: string) => Promise<{ size: number }>; readFile?: (p: string) => Promise<string> } = {},
   ) {}
 
-  /** 宣誓/每次 append 成功后记录盘面 size（守卫基线）。 */
-  noteSize(size: number): void {
+  /** 宣誓 fsync 成功后显式建基线（此 stat 值可信：自己刚写完，进程内串行前提下无人插写）。 */
+  initialize(size: number): void {
+    if (this.frozen) return; // 冻结后拒绝基线重置（不解冻）
     this.lastKnownSize = size;
   }
 
-  /** append 前调用：ok 才许写。 */
+  /** 每次 append+fsync 成功后记账（增量：基线+自写字节数；勿用全盘 stat——会吞并发他者写）。 */
+  noteAppended(bytes: number): void {
+    if (this.frozen) return;
+    if (this.lastKnownSize !== null) this.lastKnownSize += bytes;
+  }
+
+  /** append 前调用：ok 才许写；未 initialize=拒（接线面必须先宣誓建基线）。 */
   async checkBeforeAppend(): Promise<GuardVerdict> {
     if (this.frozen) return this.frozen;
+    if (this.lastKnownSize === null) return this.freeze({ ok: false, reason: "uninitialized", detail: "先 initialize（宣誓 fsync 后）再开写面" });
     let sizeNow: number;
     try {
       sizeNow = (await (this.deps.stat ?? stat)(this.journalPath)).size;
     } catch (e) {
       return this.freeze({ ok: false, reason: "journal-unreadable", detail: String(e) });
     }
-    if (this.lastKnownSize === null || sizeNow === this.lastKnownSize) return { ok: true };
+    if (sizeNow === this.lastKnownSize) return { ok: true };
     // 盘面被他人动过：重扫 writer 行判让位
     let raw: string;
     const readRaw = this.deps.readFile ?? ((p: string) => readFile(p, "utf8"));

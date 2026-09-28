@@ -365,7 +365,6 @@ export async function repairJournalTail(opts: RepairTailOptions): Promise<Repair
         return { kind: "aborted", file: opts.file, reason: "repair-marker-conflict", detail: "旧版 marker 无结构身份且尾段不可复扫（非吻合形）：留置调查——禁止仅删除 marker（尾已消失，marker 是唯一修复事实；删除后冷捕获将以无裁决恢复全部意图重启）；需以原始证据独立处置（marker 保留）" };
       }
       if (!tailHashMatch) {
-        const mrow = buildRepairRow({ byteStart: marker.byteStart, byteEnd: marker.byteEnd, removedSha256: marker.removedSha256, buildId: opts.buildId, at: marker.startedAt, fragIntentId: marker.fragIntentId ?? null });
         // r9（GPT r8 P2-r8-1）：内容证据恢复——部分行判定回到逐字节前缀比对（mrow 用 marker 身份
         // 重建，同 build/序列化下的真实短写（含身份值写一半）必是新行严格前缀）+旧行形枚举兼容
         // （r7 前旧行以 `}` 闭合无换形=legacy 行的严格前缀，非新行前缀，单独判定）；长度界保留
@@ -375,9 +374,15 @@ export async function repairJournalTail(opts: RepairTailOptions): Promise<Repair
         // 不保护 journal 尾；前缀比对=内容证据，非凭 marker 域自证。
         // 旧形态枚举形固定 v2（v2=历史最后一版，r7 前旧行以 `}` 闭合无换形）——枚举是历史形兼容面，
         // 不随 JOURNAL_CONTRACT_VERSION 漂移；未来版本升级只需追加新枚举，不改旧形。
-        const legacyMrow = buildRepairRow({ byteStart: marker.byteStart, byteEnd: marker.byteEnd, removedSha256: marker.removedSha256, buildId: opts.buildId, at: marker.startedAt, contractVersion: 2 }); // 无 fragIntentId 字段=旧形态构造行（枚举兼容形）
+        // 枚举三形（r2/F3）：①新形 v3+身份②v2 无身份（fix11..P0-1b r7 窗口）③v2+身份
+        // （P0-1b r8..r10 窗口：fragIntentId 已落但契约仍 v2——11bc0df^ 历史实证）。缺③会让
+        // 过渡窗残局被误判 conflict 拒（GPT r1 探针：v2 半行 aborted/v3 同形 repaired）。
+        const mk = (frag: string | null | undefined, ver: number) => buildRepairRow({ byteStart: marker.byteStart, byteEnd: marker.byteEnd, removedSha256: marker.removedSha256, buildId: opts.buildId, at: marker.startedAt, ...(frag === undefined ? {} : { fragIntentId: frag }), contractVersion: ver });
+        const mrow = mk(marker.fragIntentId ?? null, JOURNAL_CONTRACT_VERSION);
+        const legacyMrow = mk(undefined, 2); // v2 无 fragIntentId 字段=旧形态构造行（枚举兼容形）
+        const v2FragMrow = mk(marker.fragIntentId ?? null, 2); // v2+身份过渡形（P0-1b r8..r10 窗口实际形态）
         const prefixOf = (b: Buffer) => tail.byteLength < b.byteLength && b.subarray(0, tail.byteLength).equals(tail);
-        const isPartialRow = marker.byteStart === byteStart && (prefixOf(mrow) || prefixOf(legacyMrow));
+        const isPartialRow = marker.byteStart === byteStart && (prefixOf(mrow) || prefixOf(legacyMrow) || prefixOf(v2FragMrow));
         if (isPartialRow) {
           // r3-B3b：锚可转移性检查必须先于任何盘面改动——锚已写穿事务原始锚界（anchor.len >
           // marker.byteStart，旧版 pending 捕获造成的脏态）时拒绝且盘面一字不动（aborted 契约）。

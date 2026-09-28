@@ -32,7 +32,7 @@ import { readFile, realpath, rename, writeFile } from "node:fs/promises";
 import { isAbsolute, sep } from "node:path";
 import type { FileHandle } from "node:fs/promises";
 import { parseJournalText } from "./recover.ts";
-import { journalLineSchemaError, type AdjudicateLine, type JournalLine, type IntentId } from "@pi-agent-ui/protocol";
+import { journalLineSchemaError, JOURNAL_CONTRACT_VERSION, type AdjudicateLine, type JournalLine, type IntentId } from "@pi-agent-ui/protocol";
 
 export type AdjudicateSubject =
   | { kind: "fragment"; removedSha256: string; byteStart: number; byteEnd: number; at: string; intentId: IntentId }
@@ -292,7 +292,7 @@ async function adjudicateWithHandle(
     verdict: opts.verdict,
     operator: opts.operator,
     buildId: opts.buildId,
-    contractVersion: opts.contractVersion ?? 2,
+    contractVersion: opts.contractVersion ?? JOURNAL_CONTRACT_VERSION,
     at: opts.at ?? new Date().toISOString(),
   };
   const schemaErr = journalLineSchemaError(line as unknown as Record<string, unknown>);

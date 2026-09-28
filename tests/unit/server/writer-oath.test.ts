@@ -34,26 +34,27 @@ describe("W-oath-1 排他锁（FF-1 单例互斥；O_EXCL+pid 探活）", () => 
     expect(b.ok).toBe(false);
     if (!b.ok) {
       expect(b.reason).toBe("held");
+      expect(b.stale).toBe(false); // 活持有者：非 stale 诊断（r2/F1 语义分面）
       expect(b.holder?.bootId).toBe("boot-a"); // holder 呈现（诊断面）
     }
     expect((await readFile(path, "utf8")).length).toBe(0); // 拒起方零字节写入
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("stale 锁（探活确认死）抢占成功；抢占后 release 归属校验只清自己的锁", async () => {
+  it("stale 锁（探活确认死）仍拒起+stale 诊断；锁文件原样保留（fail-closed 不抢占，恢复=显式清锁）", async () => {
     const { dir, path } = await tmpJournal("");
-    // 手造 stale 锁（模拟崩溃残留）
-    await writeFile(`${path}.writer.lock`, `${JSON.stringify({ pid: 999999, bootId: "boot-dead", at: "x" })}\n`, "utf8");
+    const staleBody = `${JSON.stringify({ pid: 999999, bootId: "boot-dead", at: "x" })}\n`;
+    await writeFile(`${path}.writer.lock`, staleBody, "utf8");
     const a = await acquireJournalLock({ journalPath: path, bootId: "boot-a", alive: () => false });
-    expect(a.ok).toBe(true);
-    // 锁文件已被 boot-a 重写
-    const lockBody = JSON.parse(await readFile(`${path}.writer.lock`, "utf8"));
-    expect(lockBody.bootId).toBe("boot-a");
-    if (a.ok) await a.release();
-    // 被抢后他者持锁时 release 不误删（归属校验）
-    await acquireJournalLock({ journalPath: path, bootId: "boot-b", alive: () => true });
-    const c = await acquireJournalLock({ journalPath: path, bootId: "boot-c", alive: () => true });
-    expect(c.ok).toBe(false);
+    expect(a.ok).toBe(false);
+    if (!a.ok) {
+      expect(a.reason).toBe("held");
+      expect(a.stale).toBe(true); // 诊断=可安全人工清理
+      expect(a.holder?.bootId).toBe("boot-dead");
+    }
+    // 锁文件一字未动（无人 unlink——r1 探活→unlink→重建的 TOCTOU 抢占窗已删）
+    expect(await readFile(`${path}.writer.lock`, "utf8")).toBe(staleBody);
+    expect((await readFile(path, "utf8")).length).toBe(0); // 拒起方零字节写入
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -102,12 +103,12 @@ describe("W-oath-2 宣誓 append 硬序（FF-2）", () => {
   });
 });
 
-describe("W-oath-3 写前守卫（FF-3 旧写者停写；冻结粘性）", () => {
-  it("异已更高 epoch 宣誓→writer-superseded；粘性（后续 check 全拒）", async () => {
+describe("W-oath-3 写前守卫（FF-3 旧写者停写；冻结粘性；增量基线）", () => {
+  it("异已更高 epoch 宣誓→writer-superseded；粘性（后续 check 全拒，initialize 不解冻）", async () => {
     const { dir, path } = await tmpJournal(`${writerRow(1, "boot-a")}\n`);
     const raw1 = await readFile(path, "utf8");
     const g = new WriterGuard(path, 1, "boot-a");
-    g.noteSize(Buffer.byteLength(raw1, "utf8"));
+    g.initialize(Buffer.byteLength(raw1, "utf8"));
     expect((await g.checkBeforeAppend()).ok).toBe(true); // 无变化=放行
     // 外部：新写者宣誓 epoch=2
     const fh = await import("node:fs/promises").then((m) => m.open(path, "a"));
@@ -116,33 +117,64 @@ describe("W-oath-3 写前守卫（FF-3 旧写者停写；冻结粘性）", () =>
     const v = await g.checkBeforeAppend();
     expect(v.ok).toBe(false);
     if (!v.ok) expect(v.reason).toBe("writer-superseded");
-    // 粘性：即使盘面不再变化，后续 append 前检查仍拒
+    // 粘性：盘面不再变化后续 check 仍拒；initialize/noteAppended 不解冻
+    g.initialize(99999);
+    g.noteAppended(5);
     const v2 = await g.checkBeforeAppend();
     expect(v2.ok).toBe(false);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("F2 回归：写后全盘 stat 重建基线不再可能——noteAppended 增量记账不吞他者宣誓字节", async () => {
+    const { dir, path } = await tmpJournal(`${writerRow(1, "boot-a")}\n`);
+    const g = new WriterGuard(path, 1, "boot-a");
+    const raw0 = await readFile(path, "utf8");
+    g.initialize(Buffer.byteLength(raw0, "utf8"));
+    expect((await g.checkBeforeAppend()).ok).toBe(true);
+    // B 宣誓 epoch=2（并发他写）
+    const fh = await import("node:fs/promises").then((m) => m.open(path, "a"));
+    await fh.appendFile(`${writerRow(2, "boot-b")}\n`);
+    await fh.close();
+    // A 自己 append 业务行+fsync 后按增量记账（r1 缺陷形：按全盘 stat 回写会把 B 的宣誓吞进基线）
+    const myRow = `${settledRow("i1")}\n`;
+    const fh2 = await import("node:fs/promises").then((m) => m.open(path, "a"));
+    await fh2.appendFile(myRow);
+    await fh2.close();
+    g.noteAppended(Buffer.byteLength(myRow, "utf8"));
+    const v = await g.checkBeforeAppend();
+    expect(v.ok).toBe(false); // 基线不含 B 字节→sizeNow≠基线→重扫→superseded
+    if (!v.ok) expect(v.reason).toBe("writer-superseded");
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("未 initialize=拒（uninitialized 粘性）；journal 消失→journal-unreadable", async () => {
+    const { dir, path } = await tmpJournal(`${writerRow(1, "boot-a")}\n`);
+    const g = new WriterGuard(path, 1, "boot-a");
+    const v0 = await g.checkBeforeAppend();
+    expect(v0.ok).toBe(false);
+    if (!v0.ok) expect(v0.reason).toBe("uninitialized"); // r1 缺陷形：未初始化默认放行
+    const v0b = await g.checkBeforeAppend();
+    expect(v0b.reason).toBe("uninitialized"); // 粘性（与吞字节同界：冻结后不再演化）
+    // 独立实例：正常建基线后 journal 消失
+    const g2 = new WriterGuard(path, 1, "boot-a");
+    g2.initialize(10);
+    await rm(path, { force: true });
+    const v = await g2.checkBeforeAppend();
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.reason).toBe("journal-unreadable");
     await rm(dir, { recursive: true, force: true });
   });
 
   it("无宣誓他写（异常盘面）→foreign-write-detected 保守冻结", async () => {
     const { dir, path } = await tmpJournal(`${writerRow(1, "boot-a")}\n`);
     const g = new WriterGuard(path, 1, "boot-a");
-    g.noteSize(Buffer.byteLength(await readFile(path, "utf8"), "utf8"));
+    g.initialize(Buffer.byteLength(await readFile(path, "utf8"), "utf8"));
     const fh = await import("node:fs/promises").then((m) => m.open(path, "a"));
     await fh.appendFile(`${settledRow("iX")}\n`); // 他写业务行无宣誓（违反 INV-1 的异常面）
     await fh.close();
     const v = await g.checkBeforeAppend();
     expect(v.ok).toBe(false);
     if (!v.ok) expect(v.reason).toBe("foreign-write-detected");
-    await rm(dir, { recursive: true, force: true });
-  });
-
-  it("journal 消失→journal-unreadable 冻结", async () => {
-    const { dir, path } = await tmpJournal(`${writerRow(1, "boot-a")}\n`);
-    const g = new WriterGuard(path, 1, "boot-a");
-    g.noteSize(10);
-    await rm(path, { force: true });
-    const v = await g.checkBeforeAppend();
-    expect(v.ok).toBe(false);
-    if (!v.ok) expect(v.reason).toBe("journal-unreadable");
     await rm(dir, { recursive: true, force: true });
   });
 });
@@ -182,6 +214,26 @@ describe("W-oath-4 重放兼容+schema+读面呈现（FF-4）", () => {
     const report = buildRecoverReport(parsed.lines, "q", { fragments: [], blocked: false });
     expect(report.writerState.legacyHead).toBe(false);
     expect(report.writerState.maxEpoch).toBe(2);
+  });
+});
+
+describe("W-oath-6 宣誓参数校验（F5：写前拒零改盘）", () => {
+  it("epoch 耗尽/0/非整数/bootId 空→invalid-oath+盘面零变", async () => {
+    const { dir, path } = await tmpJournal(`${writerRow(1, "boot-a")}\n`);
+    const before = await readFile(path, "utf8");
+    const bad: Array<{ epoch: number; bootId: string }> = [
+      { epoch: Number.MAX_SAFE_INTEGER + 1, bootId: "boot-b" }, // 代次耗尽（合法 max 的 N+1）
+      { epoch: 0, bootId: "boot-b" },
+      { epoch: 1.5, bootId: "boot-b" },
+      { epoch: 2, bootId: "" },
+    ];
+    for (const args of bad) {
+      const r = await appendWriterOath({ journalPath: path, ...args });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.reason).toBe("invalid-oath");
+    }
+    expect(await readFile(path, "utf8")).toBe(before); // 全部写前拒零改盘
+    await rm(dir, { recursive: true, force: true });
   });
 });
 

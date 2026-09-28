@@ -148,7 +148,8 @@ export function journalLineSchemaError(obj: UnknownRecord): string | null {
       if (typeof obj["epoch"] !== "number" || !Number.isSafeInteger(obj["epoch"] as number) || (obj["epoch"] as number) < 1)
         return "缺字段/错类型 epoch";
       if (typeof obj["bootId"] !== "string" || (obj["bootId"] as string).length === 0) return "缺字段/错类型 bootId";
-      return str("at");
+      if (typeof obj["at"] !== "string" || (obj["at"] as string).length === 0) return "缺字段/错类型 at"; // r2/F7：at 空串同拒（ISO8601 格式不深验，同其余行型粗验口径）
+      return null;
     }
     default:
       return `未知行型 ${String(t)}`;
