@@ -769,7 +769,11 @@ describe("P0-1a GPT r3 阻断修复批（B3a/B3b/B6）", () => {
     const m = await markerOf(e);
     const mrow = mrowOf(m); // 旧形态构造（无 fragIntentId 字段）——fragIntentId 在最尾，新行=旧行+字段段
     const mrowF = Buffer.concat([mrow.subarray(0, mrow.byteLength - 2), Buffer.from(`,"fragIntentId":"${String(m.fragIntentId)}"}`), Buffer.from("\n")]); // 新形态行（含身份字段）
-    await appendFile(e.abs, mrowF.subarray(0, mrowF.byteLength - 6), "utf8"); // 身份值写一半=新行严格前缀（缺尾部字节）
+    const keyIdx = mrowF.indexOf(Buffer.from(',"fragIntentId":"')); // r10 P2-r10-1：切点=值内
+    const cut = keyIdx + ',"fragIntentId":"'.length + 1; // 值首字节后（"i 已落、1 未落=真值中途短写）
+    await appendFile(e.abs, mrowF.subarray(0, cut), "utf8");
+    const tornNow = await readFile(e.abs, "utf8");
+    expect(tornNow.endsWith(',"fragIntentId":"i')).toBe(true); // 定位断言：残片以 "i 结尾（值中途）
     const r1 = await repairJournalTail(OPT(e));
     expect(r1.kind).toBe("repaired"); // 真短写收敛（内容证据=新行前缀）
     if (r1.kind === "repaired") expect(r1.via).toBe("marker-complete");
@@ -954,7 +958,7 @@ describe("r8 崩溃窗结构身份持久化（GPT r7 P1-r7-1）", () => {
     await rm(e.roots, { recursive: true, force: true });
     await rm(e.evidenceDir, { recursive: true, force: true });
   });
-  it("RT-r8-4 旧版 marker（无 fragIntentId）残局：保守拒+盘面零动+marker 保留（宿主清 marker 后 fresh 重做取证）", async () => {
+  it("RT-r8-4 旧版 marker（无 fragIntentId）残局：保守拒+盘面零动+marker 保留（detail=留置禁删指引，r9 更新）", async () => {
     const e = await env([jl("i1")]);
     await seedAnchor(e);
     await appendFile(e.abs, `{"t":"sending","intentId":"i1","x":"y"`, "utf8");
@@ -967,7 +971,7 @@ describe("r8 崩溃窗结构身份持久化（GPT r7 P1-r7-1）", () => {
     const before = await readFile(e.abs);
     const r2 = await repairJournalTail(OPT(e));
     expect(r2).toMatchObject({ kind: "aborted", reason: "repair-marker-conflict" });
-    if (r2.kind === "aborted") expect(r2.detail).toContain("旧版 marker");
+    if (r2.kind === "aborted") { expect(r2.detail).toContain("旧版 marker"); expect(r2.detail).toContain("禁止仅删除 marker"); } // r10：补全面指引断言
     expect((await readFile(e.abs)).equals(before)).toBe(true); // 盘面零动
     expect((await readdir(e.evidenceDir)).some((f) => f.includes("repair-pending"))).toBe(true); // marker 保留
     await rm(e.roots, { recursive: true, force: true });
@@ -985,7 +989,7 @@ describe("r8 崩溃窗结构身份持久化（GPT r7 P1-r7-1）", () => {
     const before2 = await readFile(e2.abs);
     const r3 = await repairJournalTail(OPT(e2));
     expect(r3).toMatchObject({ kind: "aborted", reason: "repair-marker-conflict" });
-    if (r3.kind === "aborted") expect(r3.detail).toContain("旧版 marker");
+    if (r3.kind === "aborted") { expect(r3.detail).toContain("旧版 marker"); expect(r3.detail).toContain("禁止仅删除 marker"); } // r10：有尾入口指引断言补强
     expect((await readFile(e2.abs)).equals(before2)).toBe(true);
     expect((await readdir(e2.evidenceDir)).some((f) => f.includes("repair-pending"))).toBe(true);
     await rm(e2.roots, { recursive: true, force: true });

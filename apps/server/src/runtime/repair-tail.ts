@@ -353,7 +353,7 @@ export async function repairJournalTail(opts: RepairTailOptions): Promise<Repair
     // truncate 前崩溃」残局，复用原 marker 事实继续 fresh 修复（startedAt 保留原始时间戳；
     // 结构身份不取 marker 而重新扫描在场尾段——同尾同源，旧版 marker 亦安全继续）；
     // r8：旧版 marker（无 fragIntentId）的尾缺失形（部分补行/冲突）一律保守拒——补完无结构身份
-    // 可用，无条件 null 即 P1-r7-1 越权窗（开发期无存量，宿主清 marker 后 fresh 重做取证）；
+    // 可用，无条件 null 即 P1-r7-1 越权窗（开发期无存量；缺证据残局一律留置——禁止仅删 marker，r9 起 detail 已带指引）；
     // 部分补行形=truncate 已做+行写一半崩溃→截回截断形走 marker 补完（原始删除事实不被
     // 二次修复覆盖）；bounds 全等但尾哈希不符且非部分形=并发改写；其余=冲突拒绝（marker 保留）。
     if (marker !== null) {

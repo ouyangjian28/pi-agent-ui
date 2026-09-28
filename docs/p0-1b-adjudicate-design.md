@@ -136,8 +136,8 @@ P1-r7-1：r7 的 marker 不含结构身份——「截断后写行前崩溃」�
 
 1. **marker 携带身份（生成面）**：fresh 写 marker 时 `fragIntentId` 与 bounds/哈希同批持久化（破坏前取证，与 fresh 行同源扫描值）；三态=string（可归因）/null（扫描即不可归因，真实无身份）/缺省（旧版）。
 2. **补完行恢复身份（补全面）**：`buildRepairRow(… fragIntentId: marker.fragIntentId ?? null)`——尾段已物理消失但身份随 marker 存活；null 仅当截断前扫描即不可归因。
-3. **旧版 marker 保守拒（防御面）**：无 `fragIntentId` 的 marker 残局（尾缺失形）一律 `repair-marker-conflict` 拒（detail=legacy-marker-no-structural-evidence，主函数入口门+补全面顶部门双层，盘面零动）。开发期无存量；宿主清 marker 后 fresh 重做即重新取证（尾在=证据在）。
-4. **部分行判据放宽（收敛面）**：`isPartialRow` 从逐字节前缀比对放宽为「起点吻合+尾长<构造行全长」——r7 留痕 fragIntentId 后「值写入中」形（行尾字段值写一半，非行前缀）与旧行 `}` 无换形均合法收敛；信任域=marker 信封（evidenceDir 越权等同可改锚）+pendingRepair 挡 journal 写者在事务期 append。
+3. **旧版 marker 保守拒（防御面）**〔r8 原文，**尾句解困指引已被 r9 修订段②替代**——r9 起一律留置+禁删（cleanup-only 分级除外），勿按本条删 marker〕：无 `fragIntentId` 的 marker 残局（尾缺失形）一律 `repair-marker-conflict` 拒（detail=legacy-marker-no-structural-evidence，主函数入口门+补全面顶部门双层，盘面零动）。开发期无存量。
+4. **部分行判据放宽（收敛面）**〔r8 原文，**已被 r9 修订替代**（见上方 r9 修订段①②）——信任论证有误（pendingRepair 非文件锁）且判据缺内容证据，仅存档〕：`isPartialRow` 从逐字节前缀比对放宽为「起点吻合+尾长<构造行全长」——r7 留痕 fragIntentId 后「值写入中」形（行尾字段值写一半，非行前缀）与旧行 `}` 无换形均合法收敛；信任域=marker 信封（evidenceDir 越权等同可改锚）+pendingRepair 挡 journal 写者在事务期 append。
 
 不变式（r9 勘误，GPT r8 P2-r8-2）：「无裁决时意图默认可重启」仅适用于**无修复阴影的普通 enqueue**；本节修复事务未裁决/未归因时构成 repairShadow——冷捕获阻断（resumeBlocked，resumable 全排除），不得写成默认可重启。裁决落盘须与结构留痕强一致（不一致→`inconsistent-attribution` 拒，不挑 verdict——R31 abandon 负例）。
 

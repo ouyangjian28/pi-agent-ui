@@ -1016,7 +1016,7 @@
 
 - **marker 携带身份**（repair-tail.ts）：RepairMarker 加 `fragIntentId?: string | null` 三态（缺省=旧版/null=扫描即不可归因/string=留痕）；fresh 写 marker 与 bounds/哈希同批持久化（破坏前取证，与 fresh 行同源扫描值 sid）。
 - **补完行恢复身份**：completeMarkerResidue builtRow `fragIntentId: marker.fragIntentId ?? null`——尾段物理消失但身份随 marker 存活。
-- **旧版 marker 保守拒（双层门）**：主函数入口门（有尾+旧 marker+非吻合形）+补全面顶部门（防御深度）——一律 repair-marker-conflict/detail=legacy-marker-no-structural-evidence，盘面零动零截回；开发期无存量，宿主清 marker 后 fresh 重做取证。
+- **旧版 marker 保守拒（双层门）**：主函数入口门（有尾+旧 marker+非吻合形）+补全面顶部门（防御深度）——一律 repair-marker-conflict/detail=legacy-marker-no-structural-evidence，盘面零动零截回；开发期无存量。〔r8 原指引「宿主清 marker 后 fresh 重做取证」已被 r9 节留置+禁删替代——勿按本条删 marker〕
 - **部分行判据放宽**：isPartialRow 从逐字节前缀比对改为「起点吻合+尾长<构造行全长」——值写入中形（行尾字段值写一半，非行前缀）与旧行 `}` 无换形合法收敛；信任域=marker 信封+pendingRepair 挡 journal 写者。
 - **测试**（adjudicate 30+repair-tail 42；全仓 1407 绿）：**RT-r8-1** marker 携身份两形（可归因 i1/不可归因 null）；**RT-r8-2** resend 真窗全链（崩溃→重试行带 id→i2 归因被一致门零落盘拦→一致归因 i1 授权=resendAuthorized+resumable 双含）；**RT-r8-3** abandon 真窗（i1 永不可重发）；**RT-r8-4** 旧 marker 双形保守拒（无尾走顶部门/有尾走入口门）；**R31** abandon verdict 一致门负例（N-abandon-official 转正：不一致 abandon 同拒+一致放行）；**RT37** 更新双形（界内任意尾收敛重写+超界长尾仍拒）。
 - **变异五点全杀**（基线 6eb761f/后补杀点提交后注入；五步单链）：Mu-r8-1 顶部门删→RT-r8-4 无尾形杀；Mu-r8-1b 入口门删→RT-r8-4 有尾形杀；Mu-r8-2 fresh marker 去字段→RT-r8-1/2/3 杀；Mu-r8-3 补完恒 null→RT-r8-2 杀；Mu-r8-4 上界删→RT37 超界形杀。全部 checkout 还原复绿。
@@ -1032,4 +1032,5 @@
 - **加载器**：fragIntentId 非空校验（对齐行 schema）——空串 corrupt 拒（防空串补完写 schema 非法行）。
 - **测试**（repair-tail 45+adjudicate 30；全仓 1410 绿）：**RT37 三形重写**（真短写=新行前缀收敛/旧行 `}` 无换形=legacy 前缀收敛/非前缀垃圾短尾+超界长尾拒——N1 转正）；**RT-r9-1** cleanup 分级（N5 转正：旧版 marker 幂等清+盘面零动+resumable=[]）；**RT-r9-2** 缺证据留置（N2 转正：幂等拒+detail 禁删+违规清 marker 洗白后果红线演示）；**RT-r9-3** 空串 marker corrupt 拒零改盘。
 - **变异四连全杀**（基线 01ab0ec 后注入；五步单链）：Mu-r9-1 cleanup 前置块删→RT-r9-1 杀；Mu-r9-2 detail 回退→RT-r9-2 杀；Mu-r9-3 legacy 枚举删→RT37 形二杀；Mu-r9-4 非空校验删→RT-r9-3 杀。全部 checkout 还原复绿。
+- **r10 尾债小修（88 GO 后落，audit=gpt-p01b-r10-review）**：①RT37 形一切点改值内（keyIdx 定位+残片以 `,"fragIntentId":"i` 结尾的定位断言——P2-r10-1）；②活动注释/标题旧指引清理+两处 detail 补「禁止仅删除 marker」双防守断言（Mu-r8-1b 从文案杀升级为指引杀，RT-r8-4 双形）——P2-r10-2；③r8 历史变异映射按现行谓词重记账：Mu-r8-1b 在 r9 后为 detail 文案/指引杀（现行前缀门先拒非吻合尾，零截回顺序由合法前缀形的指引断言防守）；Mu-r8-4「单删长度比较」=有尾分支等价变异（Buffer.equals 隐含长度），超长尾不可达该分支路径，不再计独立杀点——P3-r10-1。
 - **文档**（P2-r8-2）：§13 不变式限定（「默认可重启」仅限无修复阴影的普通 enqueue；repairShadow 形=阻断）+r9 修订段；buildRepairRow 头注（旧完整行非新行前缀，部分行判定=前缀+枚举）；RT-r8-2 标题+注释改实际执行路径（错误归因被拦→一致归因授权）；RT-r8-3/R31 分工表述（组合覆盖两 verdict，非各自双形）。
