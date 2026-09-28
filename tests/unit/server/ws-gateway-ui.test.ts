@@ -214,6 +214,32 @@ describe("D3 扩展问答：网关面", () => {
     } finally { await r.dispose(); }
   });
 
+  it("W-ui-g10 answer 端口同步抛：不穿透消息回调+还槽+保守撤框（r2 P2-A）", async () => {
+    // 同步抛 host：非 async 实现，answer() 在调用点直接 throw（区别于 async 函数返回 rejected
+    // promise）——模拟关停窗 registry 已 dispose→sessionFor 同步拒绝。
+    const boom: UiHostPort = {
+      answer(): Promise<UiAnswerOutcomeGateway> { throw new Error("disposed"); },
+    };
+    const r = await makeRig(true, { uiHost: boom });
+    try {
+      const c = await authedSub(r);
+      r.gw.broadcastUiRequest(r.file, { requestId: "q-1", method: "select", options: ["a"] });
+      await tick(); await tick();
+      // 同步抛被接待：连接不崩（FakeConn.say 直接驱动回调，穿透即到测试面）、不悬挂 UI
+      await c.say({ t: "ui-answer", requestId: "q-1", value: "a" });
+      expect(c.closes.length).toBe(0); // 未崩未关
+      await until(() => c.frames().some((f) => f.t === "ui-closed"), "同步抛→保守撤框");
+      const closed = c.frames().find((f) => f.t === "ui-closed");
+      expect(closed).toMatchObject({ t: "ui-closed", requestId: "q-1", reason: "process-retired" });
+      expect(r.audits.some((l) => l.includes("ui-answer-sync-error"))).toBe(true);
+      // inflight 槽已归还：同 id 再答不得报「在途重复」（应走正常拒答面：未知或已答）
+      await c.say({ t: "ui-answer", requestId: "q-1", value: "a" });
+      const e = errs(c).find((f) => f.requestId === "q-1");
+      expect(e?.code).toBe(4404);
+      expect(JSON.stringify(c.sent)).not.toContain("在途重复");
+    } finally { await r.dispose(); }
+  });
+
   it("W-ui-g6 零订阅派发：返回 0+不登记+host 未被调（组装层回 cancelled）", async () => {
     const r = await makeRig();
     try {

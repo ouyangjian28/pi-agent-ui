@@ -24,7 +24,7 @@ import type {
 import { LIMITS, SubscriptionEngine, validateClientFrame, validateWriteFrame, WRITE_FRAME_TYPES, defaultStreamId } from "@pi-agent-ui/protocol";
 import type { WriteClientFrame } from "@pi-agent-ui/protocol";
 import type { WriteHostPort } from "./write-host.ts";
-import type { UiHostPort, UiAskGateway } from "./ui-host.ts";
+import type { UiHostPort, UiAskGateway, UiAnswerOutcomeGateway } from "./ui-host.ts";
 import type { ScanRow } from "@pi-agent-ui/protocol";
 import { ReadIndexRegistry, FileOverBudgetError } from "@pi-agent-ui/protocol";
 import type { ReadIndex } from "@pi-agent-ui/protocol";
@@ -400,7 +400,17 @@ export class WsGateway {
       case "unsubscribe": this.handleUnsubscribe(st, frame); return;
       case "list-sessions": void this.handleList(st, frame); return;
       case "get-recovery": void this.handleRecovery(st, frame); return;
-      case "ui-answer": this.handleUiAnswer(st, frame); st.inflight.delete(frame.requestId); return; // D3：同步路由+即时还槽（首答胜出由 uiPending 删点保证；同 id 次答→4404 未知或已答）
+      case "ui-answer": {
+        // r2 P2-A（DS 判分 2026-10-10）：handleUiAnswer 同步路由内 answer() 端口同步抛
+        // （如关停窗 registry 已 dispose→sessionFor 拒绝）会跳过还槽→inflight 永久泄漏，
+        // 4 次即「在途请求超限」4404 锁死连接。finally 归还与其余 handler 同纪律。
+        try {
+          this.handleUiAnswer(st, frame);
+        } finally {
+          st.inflight.delete(frame.requestId);
+        }
+        return; // D3：同步路由+即时还槽（首答胜出由 uiPending 删点保证；同 id 次答→4404 未知或已答）
+      }
     }
   }
 
@@ -1077,18 +1087,26 @@ export class WsGateway {
     this.uiPending.delete(frame.requestId); // 首答胜出原子点（同步删；后续同 id 答案入口即拒）
     const payload = "value" in frame ? { value: frame.value } : "confirmed" in frame ? { confirmed: frame.confirmed } : { cancelled: true as const };
     const f = entry.file;
-    void this.opts.uiHost
-      .answer(f, frame.requestId, payload)
-      .then((outcome) => {
-        // delivered→广播 answered（全订阅者撤框）；stale/write-failed→会话层已 emitUiClosed→组装层广播
-        // process-retired，网关不重复；unknown=会话层已答（竞态双删安全）。
-        if (outcome.kind === "delivered") this.broadcastUiClosed(f, frame.requestId, "answered");
-        else this.audit?.(`ws-gateway ui-answer id=${frame.requestId} outcome=${outcome.kind}`);
-      })
-      .catch((e: unknown) => {
-        this.audit?.(`ws-gateway ui-answer-error id=${frame.requestId} ${String(e instanceof Error ? e.message : e)}`);
-        this.broadcastUiClosed(f, frame.requestId, "process-retired"); // 端口异常→保守撤框（不悬挂 UI）
-      });
+    // r2 P2-A（DS 判分 2026-10-10）：answer() 端口同步抛（关停窗 registry 已 dispose→
+    // sessionFor 拒绝等）会穿透本方法→消息回调未捕获→进程级未捕获异常；且跳过还槽→
+    // inflight 泄漏 4 次即锁死连接。同步抛与异步拒绝同待遇：审计+保守撤框。
+    try {
+      const p = this.opts.uiHost.answer(f, frame.requestId, payload);
+      void p
+        .then((outcome: UiAnswerOutcomeGateway) => {
+          // delivered→广播 answered（全订阅者撤框）；stale/write-failed→会话层已 emitUiClosed→组装层广播
+          // process-retired，网关不重复；unknown=会话层已答（竞态双删安全）。
+          if (outcome.kind === "delivered") this.broadcastUiClosed(f, frame.requestId, "answered");
+          else this.audit?.(`ws-gateway ui-answer id=${frame.requestId} outcome=${outcome.kind}`);
+        })
+        .catch((e: unknown) => {
+          this.audit?.(`ws-gateway ui-answer-error id=${frame.requestId} ${String(e instanceof Error ? e.message : e)}`);
+          this.broadcastUiClosed(f, frame.requestId, "process-retired"); // 端口异常→保守撤框（不悬挂 UI）
+        });
+    } catch (e: unknown) {
+      this.audit?.(`ws-gateway ui-answer-sync-error id=${frame.requestId} ${String(e instanceof Error ? e.message : e)}`);
+      this.broadcastUiClosed(f, frame.requestId, "process-retired"); // 同步抛同待遇：审计+保守撤框
+    }
   }
 
   /** 末订阅者离场：file 全部待答提问回 pi cancelled（无人可答规则 docs §4）。在
