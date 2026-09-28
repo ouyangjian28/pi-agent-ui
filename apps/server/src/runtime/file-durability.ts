@@ -11,7 +11,7 @@
 // 目录同步失败=本次追加结果未确认：fail-closed 同其他写失败。
 import { open, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { DurabilityPort, JournalLine } from "@pi-agent-ui/protocol";
+import { serializeJournalLine, type DurabilityPort, type JournalLine } from "@pi-agent-ui/protocol";
 
 /** fs 端口（测试注入用；生产=node:fs/promises 同构子集）。 */
 export interface DurabilityFsPort {
@@ -83,7 +83,7 @@ export class FileDurability implements DurabilityPort {
       }
       try {
         const fh = await this.handle();
-        const buf = Buffer.from(`${JSON.stringify(line)}\n`, "utf8");
+        const buf = serializeJournalLine(line); // P02-D1：序列化单一来源（与守卫壳字节记账同源）
         let offset = 0;
         while (offset < buf.length) {
           // 部分写返回 < length（磁盘满/EINTR 后重试同一 offset）

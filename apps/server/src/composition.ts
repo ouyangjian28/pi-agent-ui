@@ -19,6 +19,8 @@ import { ComputeSemaphore } from "./ws/compute-semaphore.ts";
 import { DualHistorySource } from "./runtime/dual-history-source.ts";
 import { createRecoveryEvidenceProvider } from "./runtime/recovery-evidence-source.ts";
 import { createSessionRegistry, type SessionRegistry } from "./runtime/session-registry.ts";
+import { createGuardedJournalWriterFactory } from "./runtime/guarded-journal-writer.ts";
+import { randomUUID } from "node:crypto";
 import { PiProcessHost } from "./host/process-host.ts";
 import { createRpcWriteHost } from "./ws/rpc-write-host.ts";
 import { resolveWithinRoots } from "./ws/safe-open.ts";
@@ -154,6 +156,9 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     throw new Error("writeHost 与 write 同供：写侧接线歧义，拒绝启动（二选一）");
   }
   // 3c-3 写侧自建链：PiProcessHost+会话注册表（真实 RpcSession 工厂+statusFor 真源+统一销毁面）。
+  // P0-2 r1：守卫写者工厂（每 journal 懒装配锁→宣誓→守卫；bootId=本进程启动身份 P02-D2）。
+  const writerBootId = randomUUID();
+  const guardedWriters = createGuardedJournalWriterFactory({ bootId: writerBootId, audit: (l) => audit(l) });
   let registry: SessionRegistry | null = null;
   if (config.write !== undefined) {
     if (typeof config.write.sessionFor !== "function") {
@@ -166,6 +171,7 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     registry = createSessionRegistry({
       host,
       sessionFor: config.write.sessionFor,
+      durabilityFor: (file: string) => guardedWriters.writerFor(file), // P0-2 r1：守卫壳统一接管两写入口（FF-P02-2）
       ...(config.write.responseTimeoutMs !== undefined ? { responseTimeoutMs: config.write.responseTimeoutMs } : {}),
       ...(config.write.turnTimeoutMs !== undefined ? { turnTimeoutMs: config.write.turnTimeoutMs } : {}),
       ...(config.write.readinessTimeoutMs !== undefined ? { readinessTimeoutMs: config.write.readinessTimeoutMs } : {}),
@@ -313,6 +319,7 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
           });
         }
         if (registry !== null) await registry.dispose(); // 3c-3：写侧统一销毁（全量 stop+dispose；网关先告别再杀进程）
+        await guardedWriters.dispose(); // P0-2 r1：写面已静止后释放全部 writer 锁（FF-P02-3；释放失败=audit 残锁可接受）
         tokens.dispose();
         audit("composition disposed");
       })();

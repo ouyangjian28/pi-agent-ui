@@ -62,6 +62,13 @@ export interface WriterOathLine {
 
 export const JOURNAL_CONTRACT_VERSION = 3; // v3=P0-3 加 writer 行（先例：v2=P0-1a RepairLine）；legacy v2 盘面兼容读，恢复时补宣誓转 v3 域
 
+/** journal 行序列化单一来源（P0-2/P02-D1）：实写格式与字节记账（守卫 noteAppended）必须同源，
+ *  各自实现会漂移（记账错=守卫假阳性冻结/假阴性放行）。FileDurability 实写与 GuardedJournalWriter
+ *  记账同用本函数。 */
+export function serializeJournalLine(line: JournalLine): Buffer {
+  return Buffer.from(`${JSON.stringify(line)}\n`, "utf8");
+}
+
 // ---------------------------------------------------------------------------
 // P0-3 写权代次扫描（纯逻辑；读面呈现/恢复/写前守卫共用）
 // ---------------------------------------------------------------------------
