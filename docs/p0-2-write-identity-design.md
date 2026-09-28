@@ -71,9 +71,11 @@ ws-gateway 写分支 → rpc-write-host → session-registry.sessionFor(file) �
 6. live generation ≠ frame.generation→generation-mismatch（无活进程 live=null→放行至执行面，无冒充对象）
 7. 全过→execution-pending（r3b 真重发）
 
-prompt.generation（同门序第 6 步）：携带代次≠活代→identity-rejected；缺省=v1 兼容跳过；无活进程→放行。
+prompt.generation（同门序第六步；**K3 审 P2-1 拍板 fail-closed**）：携带代次+无权威源→identity-rejected{no-recovery-data}（身份断言不可验证→拒；v1 缺省不受影响）；有权威源旧代→generation-mismatch；无活进程→放行。
 
-**真源装配**（composition）：reportFor=recoveryEvidence provider→isRecoverySnapshot→recoverFromSnapshot→{resendAuthorized,resumeBlocked}；generationFor=registry.statusFor(file).process.generation（file 未构造/无 registry→null 放行）。**接线运行时验证入 r3b E2E**（execution-pending 真重发链一起测；本批证据=tsc 类型链+W-res 替身面+互审点验）。
+**真源装配**（composition）：makeResumeAuthority 工厂（导出供装配层测试）——reportFor=journal 绝对路径→logicalNameWithinRoots 归一逻辑名→recoveryEvidence→isRecoverySnapshot→recoverFromSnapshot→{resendAuthorized,resumeBlocked}（**键与 get-recovery 同面：seen-store/锚点持久键单一宇宙，K3 审 P1 修复**）；generationFor=绝对路径直查 registry.statusFor(file).process.generation（write 面口径——sendPrompt/stop/sessionFor 链皆绝对路径键；file 未构造/无 registry→null 放行）。**接线运行时验证入 r3b E2E**（execution-pending 真重发链一起测；本批证据=tsc 类型链+W-res/W-ra 替身面+互审点验）。
+
+**资源面（K3 审 P2-3，r3b 设计条目）**：resume reportFor 直调 provider（全量 journal 读+解析），绕开 get-recovery 的计算闸（registerTask+semaphore+连接 abort）；r3b 须定 semaphore/按 evidenceHash 缓存/断连取消口径。
 
 writer-authority WS 层接线（双 tab 单写者）：与 Kimi 前端面联动评估，不在 r3a 范围。
 
@@ -119,6 +121,17 @@ W-res 系（r3a，tests/unit/server/ws-gateway-write-resume.test.ts，11 例）�
 | W-res-9 | 无活进程（generationFor→null）→放行（无冒充对象） | — |
 | W-res-10 | prompt.generation 四态：旧代拒+零副作用（created.n===0）；匹配放行；缺省 v1 兼容；无活进程放行 | 校验跳过→挂（Mu-r3a-4）；零副作用破坏→挂（Mu-r3a-2：sessionOf 前置→created.n=1） |
 | W-res-11 | reportFor 抛错→stripped（write-host-internal: resume）→4402+审计 op=resume | — |
+| W-res-12 | prompt.generation+无权威源→no-recovery-data（fail-closed；零副作用；v1 缺省照写） | fail-open 复活→挂（Mu-fix-1） |
+
+W-ra 系（r3a 修复批，tests/unit/server/resume-authority.test.ts，5 例）：
+
+| # | 断言 | 杀点 |
+|---|---|---|
+| W-ra-1 | abs→provider 收逻辑名（单根/子目录形；get-recovery 同键） | 归一破坏→挂（Mu-fix-2） |
+| W-ra-2 | 无匹配根→原样透传（fail-open 归一不制造拒因） | — |
+| W-ra-3 | provider null/非 snapshot→report null | — |
+| W-ra-4 | snapshot→recoverFromSnapshot 真映射 | — |
+| W-ra-5 | generationFor=registry 直查（键=原样绝对路径，write 面口径） | — |
 
 变异四杀全过（基线 8d8e255；每条=注入→git diff 非空→定向红点名→checkout 还原→复绿）：Mu-r3a-1 blocked 优先 if(false&&)→W-res-5；Mu-r3a-2 prompt 校验前 await sessionOf→W-res-10；Mu-r3a-3 authority 缺省 if(false)→W-res-3；Mu-r3a-4 generation 校验 if(false&&)→W-res-10。
 
@@ -128,3 +141,4 @@ W-res 系（r3a，tests/unit/server/ws-gateway-write-resume.test.ts，11 例）�
 - r2（本批）：根修=每 writer 生命周期队列（boot/append/close 全串行临界区）+dispose 汇合队列（含在途 boot）+boot 检查点①②（装配中 dispose→零宣誓零泄漏中止）+bootP 构造即归一化（异常→failed 恒拒，永不成 unhandled）+mkdir 父目录（对齐 FileDurability）。杀点：R1-交错1/交错2、R2 并发自写、R3 子进程 EACCES exit=0。文档同步收窄（§1.4 释放序/§4 P02-D3 同步拒称/§5 W-asm-6 崩溃链边界；r2 审 L3 勘正原引用漂移）。
 - r2 尾债（98c8f11 并入 r3a 送审）：L1 E2E A-2 finally 遮蔽；L2 R2b 落盘后未记账窗口入仓；L3 设计稿五处；L4 交错1 注释勘正。
 - r3a（本批）：帧身份门（resume 帧+prompt.generation；§2 展开）。审读=Kimi K3（互审制首单，GPT 额度尽后 GLM 写→K3 审）。r3b（下批）：执行面（真重发 payload 读回+TurnGate 交涉）+composition 真源接线 E2E。
+- r3a 修复批（K3 审 86 GO 附条件，8eec8a4）：P1 makeResumeAuthority 键归一（abs→逻辑名/provider 单一宇宙；generationFor 保持 write 面 abs 口径）+P2-1 prompt 无权威源 fail-closed（no-recovery-data）+P2-2 intentIdPattern+P2-3 资源面记 r3b+P3 四小项。W-ra 五例+W-res-12；变异三杀。

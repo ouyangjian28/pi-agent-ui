@@ -1083,7 +1083,7 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - **L3（P3）**：设计稿五处——服务表改「当前表现/r3 预留」两栏制（4402/not-ready.cause/writerState 不再冒称已交付）/FF-P02-3 证据层级勘正（受控交错=单元+审读探针，E2E 无 dispose 期并发注入）/W-asm-2 去「sessionFor 抛」矛盾句/§6 迭代史章节引用漂移勘正（§1.4/§4/§5）。
 - **L4（P3）**：交错1 注释「检查点②」→①（after-lock——立即 dispose 置位早于 acquire 完成）；§1.4 与守卫壳源码注释统一「可观察 release rejection 记 audit；底层吞掉的 unlink 错误可能仅留残锁」。
 
-### P0-2 r3a 帧身份批（journal 写面身份校验·帧面；基线 e73090a+8d8e255；2026-10-09）
+### P0-2 r3a 帧身份批（journal 写面身份校验·帧面；基线 e73090a+8d8e255；2026-09-28）
 
 **范围**：resume 帧+prompt.generation——写帧入口身份门（恢复授权/阻断/代次）。执行面（真重发 payload+TurnGate）=r3b。审读=Kimi K3（互审制首单）。
 
@@ -1095,4 +1095,14 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 
 **变异四杀**（基线 8d8e255；五步单链，注入后 git diff 验非空+定向红点名）：Mu-r3a-1 blocked 优先 if(false&&)→W-res-5；Mu-r3a-2 prompt 校验前 await sessionOf→W-res-10（created.n=1）；Mu-r3a-3 authority 缺省 if(false)→W-res-3；Mu-r3a-4 generation 校验 if(false&&)→W-res-10。全部还原复绿。
 
-**r3b 待办**：执行面（真重发 payload 读回+TurnGate 交涉→write-resume-ack 结果升格）+composition 真源接线 E2E（本批证据=tsc 类型链+W-res 替身面）。
+**r3b 待办**：执行面（真重发 payload 读回+TurnGate 交涉→write-resume-ack 结果升格）+composition 真源接线 E2E（r3a 证据=tsc+W-res/W-ra 替身面）+resume 报告读取资源面（K3 审 P2-3：semaphore/缓存/断连取消口径）。
+
+### P0-2 r3a 修复批（K3 审 86/100 GO 附条件；2026-09-28，基线 8eec8a4）
+
+**K3 审报**（互审制首单，worktree /home/yyj/ai/repos/k3-p02-r3a-review）：四维 93/80/86/90→86 GO；门序无绕过+定向 11/11 复绿。发现：**P1**=composition reportFor file 形态错配（网关传 journal 绝对路径，provider 契约=逻辑名→seen-store/锚点持久键两宇宙劈裂）；P2=prompt.generation 无权威源 fail-open（与注释承诺矛盾）/intentId 无字符集（审计行注入）/resume 报告读取绕开计算闸（资源面）；P3=generationFor 不走 stripped+头注/注释/日期四处。
+
+**修复**（8eec8a4）：①P1=makeResumeAuthority 工厂（composition 导出，测试缝）——reportFor 入口 logicalNameWithinRoots 归一（abs→逻辑名，与 get-recovery 同键；safe-open 加反函数，无匹配→原样透传 fail-open 归一不制造拒因）；generationFor 绝对路径直查 registry（write 面口径不变）。②P2-1 拍板 fail-closed：prompt.generation+无权威源→identity-rejected{no-recovery-data}（契约 prompt 面拒因扩枝；v1 缺省不受影响）。③P2-2 intentIdPattern=^[\w-]{1,64}$（真实形态 i-N；\w 集禁换行防审计注入）。④P2-3 资源面→r3b 设计条目。⑤P3 全修（generationFor 入 stripped/头注矩阵/contracts 注释层级/write-host 四校验计数/TEST-MAP 日期）。
+
+**测试**：W-ra-1..5（resume-authority.test.ts：键口径五案——abs→逻辑名/无匹配透传/null 短路/recoverFromSnapshot 真映射/generationFor 直查）+W-res-12（prompt 无权威源 fail-closed+零副作用+v1 兼容照写）+W-res-1 补两形案（换行注入/空串——**又踩 4404 累计 3→close：第三案须再拆连接 c3**）。全仓 1462 绿。
+
+**变异三杀**（基线 8eec8a4；五步单链）：Mu-fix-1 sendPrompt fail-closed 门 if(false&&)→W-res-12；Mu-fix-2 归一破坏（直透传）→W-ra-1；Mu-fix-3 intentIdPattern→/^.*/→W-res-1 注入形。全部还原复绿。
