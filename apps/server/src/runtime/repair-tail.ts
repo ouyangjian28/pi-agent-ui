@@ -84,9 +84,12 @@ export type RepairTailResult =
 /** 侧车锚点形状（与 recovery-evidence-source.ts EvidenceAnchor 同构；此处独立声明避免跨模块私有类型泄漏）。 */
 interface AnchorFile { readonly version: 1; readonly file: string; readonly len: number; readonly sha: string }
 
-/** 修复意图 marker（B5/P5：truncate 前持久化——崩溃后残局可识别可补完）。 */
+/** 修复意图 marker（B5/P5：truncate 前持久化——崩溃后残局可识别可补完）。
+ *  r8（GPT r7 P1-r7-1）：fragIntentId 随 bounds/哈希等原始事实一并持久化——截断后写行前崩溃
+ *  的补完路径不再无条件 null（旧版补完行丢结构身份→i2 归因落盘后 i1 越权重启资格）。
+ *  缺省=旧版 marker（r8 前写入）：无存量兼容义务（开发期），补完面一律保守拒（见下）。 */
 interface RepairMarker { readonly version: 1; readonly file: string; readonly byteStart: number; readonly byteEnd: number;
-  readonly removedSha256: string; readonly startedAt: string }
+  readonly removedSha256: string; readonly startedAt: string; readonly fragIntentId?: string | null }
 
 function sha256Hex(buf: Buffer): string {
   return createHash("sha256").update(buf).digest("hex");
@@ -139,8 +142,10 @@ async function loadMarker(evidenceDir: string, file: string): Promise<RepairMark
         typeof p.byteStart === "number" && Number.isSafeInteger(p.byteStart) && p.byteStart >= 0 &&
         typeof p.byteEnd === "number" && Number.isSafeInteger(p.byteEnd) && p.byteEnd > p.byteStart &&
         typeof p.removedSha256 === "string" && /^[0-9a-f]{64}$/.test(p.removedSha256) &&
-        typeof p.startedAt === "string" && p.startedAt.length > 0) {
-      return { version: 1, file, byteStart: p.byteStart, byteEnd: p.byteEnd, removedSha256: p.removedSha256, startedAt: p.startedAt };
+        typeof p.startedAt === "string" && p.startedAt.length > 0 &&
+        (p.fragIntentId === undefined || p.fragIntentId === null || typeof p.fragIntentId === "string")) {
+      return { version: 1, file, byteStart: p.byteStart, byteEnd: p.byteEnd, removedSha256: p.removedSha256, startedAt: p.startedAt,
+        ...(p.fragIntentId === undefined ? {} : { fragIntentId: p.fragIntentId }) }; // 三态：缺省=旧版/null=扫描即不可归因/string=结构归因留痕
     }
     return "corrupt";
   } catch {
@@ -343,22 +348,27 @@ export async function repairJournalTail(opts: RepairTailOptions): Promise<Repair
 
     const removedSha256 = sha256Hex(raw.subarray(byteStart, byteEnd));
     // B3/r2+r3-B3a：有撕裂尾时在场 marker 必须参与判定——吻合（bounds+尾哈希全等）=「marker 写后
-    // truncate 前崩溃」残局，复用原 marker 事实继续 fresh 修复（startedAt 保留原始时间戳）；
-    // 部分补行形=truncate 已做+行写一半崩溃（尾段恰为 marker 构造行的严格前缀——上界=完整修复行
-    // 长度，与被删尾长度无关：修复行可长于原尾）→截回截断形走 marker 补完（原始删除事实不被
-    // 二次修复覆盖）；bounds 全等但尾哈希不符且非部分行前缀=并发改写；其余=冲突拒绝（marker 保留）。
+    // truncate 前崩溃」残局，复用原 marker 事实继续 fresh 修复（startedAt 保留原始时间戳；
+    // 结构身份不取 marker 而重新扫描在场尾段——同尾同源，旧版 marker 亦安全继续）；
+    // r8：旧版 marker（无 fragIntentId）的尾缺失形（部分补行/冲突）一律保守拒——补完无结构身份
+    // 可用，无条件 null 即 P1-r7-1 越权窗（开发期无存量，宿主清 marker 后 fresh 重做取证）；
+    // 部分补行形=truncate 已做+行写一半崩溃→截回截断形走 marker 补完（原始删除事实不被
+    // 二次修复覆盖）；bounds 全等但尾哈希不符且非部分形=并发改写；其余=冲突拒绝（marker 保留）。
     if (marker !== null) {
       const tail = raw.subarray(byteStart, byteEnd);
       const boundsEqual = marker.byteStart === byteStart && marker.byteEnd === byteEnd;
       const tailHashMatch = boundsEqual && marker.removedSha256 === removedSha256;
+      if (!tailHashMatch && marker.fragIntentId === undefined) {
+        audit(`repair-tail-aborted file=${opts.file} reason=repair-marker-conflict detail=legacy-marker-no-structural-evidence`);
+        return { kind: "aborted", file: opts.file, reason: "repair-marker-conflict", detail: "旧版 marker 无结构身份且尾段不可复扫（非吻合形）：宿主清 marker 后 fresh 重做取证（marker 保留）" };
+      }
       if (!tailHashMatch) {
-        const mrow = buildRepairRow({ byteStart: marker.byteStart, byteEnd: marker.byteEnd, removedSha256: marker.removedSha256, buildId: opts.buildId, at: marker.startedAt, fragIntentId: structuralIntentId(raw.subarray(byteStart, byteEnd)) }); // r7：比对行与将来落盘行同形态（含 fragIntentId）——新工具崩溃部分行残局的前缀判定不误拒；旧版残局部分行=旧行形态=新形态前缀（fragIntentId 在最尾），同样兼容
-        // r3-B3a：严格前缀判据以修复行全长为界（tail.byteLength < mrow.byteLength）——不再用
-        // byteEnd < marker.byteEnd（被删尾长度）做上界；写入恰等于原尾长（bounds 全等）或超过
-        // 原尾长的合法崩溃前缀同样收敛。跨 build 部分行前缀不匹配（mrow 含本 buildId）→保守冲突拒。
-        const isPartialRow = marker.byteStart === byteStart
-          && tail.byteLength < mrow.byteLength
-          && mrow.subarray(0, tail.byteLength).equals(tail);
+        const mrow = buildRepairRow({ byteStart: marker.byteStart, byteEnd: marker.byteEnd, removedSha256: marker.removedSha256, buildId: opts.buildId, at: marker.startedAt, fragIntentId: marker.fragIntentId ?? null });
+        // r8：部分行判据放宽为「起点吻合+长度界」——r7 留痕 fragIntentId 后，写入中途崩溃的
+        // 「值写入中」形（尾≠行前缀：行尾字段值写一半）与旧行 `}` 无换形均合法收敛；信任域=
+        // marker 信封（evidenceDir 越权等同可改锚，非新增面）+pendingRepair 挡 journal 写者在
+        // 事务期 append；上界=构造行全长（尾无换行⇒严格短于行；行含 \n 全落即非撕裂尾走他分支）。
+        const isPartialRow = marker.byteStart === byteStart && tail.byteLength < mrow.byteLength;
         if (isPartialRow) {
           // r3-B3b：锚可转移性检查必须先于任何盘面改动——锚已写穿事务原始锚界（anchor.len >
           // marker.byteStart，旧版 pending 捕获造成的脏态）时拒绝且盘面一字不动（aborted 契约）。
@@ -379,7 +389,8 @@ export async function repairJournalTail(opts: RepairTailOptions): Promise<Repair
       }
     }
     const at = marker !== null ? marker.startedAt : new Date(now()).toISOString();
-    const row = buildRepairRow({ byteStart, byteEnd, removedSha256, buildId: opts.buildId, at, fragIntentId: structuralIntentId(raw.subarray(byteStart, byteEnd)) });
+    const sid = structuralIntentId(raw.subarray(byteStart, byteEnd));
+    const row = buildRepairRow({ byteStart, byteEnd, removedSha256, buildId: opts.buildId, at, fragIntentId: sid });
 
     // 测试接缝：读后竞态注入点（读窗完成→复核截断前）
     if (opts.afterRead !== undefined) await opts.afterRead({ byteStart, byteEnd });
@@ -398,9 +409,12 @@ export async function repairJournalTail(opts: RepairTailOptions): Promise<Repair
     }
 
     // 持久意图先于破坏（B5/P5）：marker 落 evidenceDir 后才截断——崩溃残局可识别可补完。
-    // 吻合形 marker 已在场（上文判定）——不重写，保留原始 startedAt/事实链。
+    // r8（P1-r7-1）：结构身份与 bounds/哈希同批持久化（破坏前取证）——截断后写行前崩溃的
+    // 补完路径事实完备。吻合形 marker 已在场（上文判定）——不重写，保留原始 startedAt/事实链；
+    // 旧版 marker+吻合尾可安全继续（尾在手=重新扫描即证据，行落盘即留痕）；行带 scan 值与
+    // 新版 marker 同尾同源（信任域=marker 信封，一致性不另验）。
     if (marker === null) {
-      await writeMarker(opts, markerPath(opts.evidenceDir, opts.file), { version: 1, file: opts.file, byteStart, byteEnd, removedSha256, startedAt: at });
+      await writeMarker(opts, markerPath(opts.evidenceDir, opts.file), { version: 1, file: opts.file, byteStart, byteEnd, removedSha256, startedAt: at, fragIntentId: sid });
     }
 
     // 物理修复：截断→行内 datasync→写循环补行→datasync→回读验证（硬序，与写面同纪律）
@@ -446,6 +460,12 @@ async function completeMarkerResidue(
   audit: (line: string) => void,
 ): Promise<RepairTailResult> {
   const byteEnd = raw.byteLength;
+  // r8 防御深度：旧版 marker（无结构身份）不走补完（主函数入口已拦，此处零改盘再拦一道）——
+  // 无条件 null 补完即 P1-r7-1 越权窗；开发期无存量，宿主清 marker 后 fresh 重做取证。
+  if (marker.fragIntentId === undefined) {
+    audit(`repair-tail-aborted file=${opts.file} reason=repair-marker-conflict detail=legacy-marker-no-structural-evidence`);
+    return { kind: "aborted", file: opts.file, reason: "repair-marker-conflict", detail: "旧版 marker 无结构身份（补完面拒绝）：宿主清 marker 后 fresh 重做取证（marker 保留）" };
+  }
   const last = lastRepairRowFact(raw);
   const rowAtBounds = last !== null && last.offset === marker.byteStart && last.offset + last.rowLen === byteEnd &&
     last.row.byteStart === marker.byteStart && last.row.byteEnd === marker.byteEnd && last.row.removedSha256 === marker.removedSha256;
@@ -466,7 +486,7 @@ async function completeMarkerResidue(
       audit(`repair-tail-aborted file=${opts.file} reason=anchor-stale detail=marker-prefix-irreproducible`);
       return { kind: "aborted", file: opts.file, reason: "anchor-stale", detail: "marker 残局但旧锚前缀不可复验（覆盖被移除字节/改写面）：需宿主重走迁移/调查" };
     }
-    const builtRow = buildRepairRow({ byteStart: marker.byteStart, byteEnd: marker.byteEnd, removedSha256: marker.removedSha256, buildId: opts.buildId, at: marker.startedAt, fragIntentId: null }); // 补完路径尾段已物理消失（事实全部来自 marker，无 raw 可扫描）→诚实 null（归因裁决缺失时读面未归因事务门兜底）
+    const builtRow = buildRepairRow({ byteStart: marker.byteStart, byteEnd: marker.byteEnd, removedSha256: marker.removedSha256, buildId: opts.buildId, at: marker.startedAt, fragIntentId: marker.fragIntentId ?? null }); // r8（P1-r7-1）：尾段已物理消失，但结构身份在破坏前已随 marker 持久化——补完行不再无条件 null；null 仅当截断前扫描即不可归因（真实无身份，非丢证据）
     if (!rowAtBounds) {
       // 截断形补行（removedSha256 等事实全部来自 marker——尾已物理消失）
       await writeFull(fh, builtRow, marker.byteStart, opts.file);

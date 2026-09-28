@@ -760,20 +760,35 @@ describe("P0-1a GPT r3 阻断修复批（B3a/B3b/B6）", () => {
     await rm(e.evidenceDir, { recursive: true, force: true });
   });
 
-  it("RT37-B6/M-P 非修复行前缀的短尾：冲突拒绝（判据必须含字节前缀匹配，非仅长度/对齐）", async () => {
+  it("RT37-B6/r8 部分行判据放宽：界内任意尾收敛重写（值写入中/垃圾短尾），超界长尾仍冲突拒", async () => {
     const e = await env([jl("i1")]);
     await seedAnchor(e);
     await appendFile(e.abs, `{"t":"sending"`, "utf8");
     await expect(repairJournalTail(OPT(e, { openHandle: crashAfterTruncate }))).rejects.toThrow("crash after truncate");
-    await appendFile(e.abs, "NOT the repair row prefix at all: attacker padding bytes...", "utf8"); // 40 字节非 mrow 前缀
-    const before = await readFile(e.abs);
+    // r8：起点吻合+尾长<行长即部分行残局（尾内容不再比对——值写入中形（行尾字段值写一半）
+    // 本就不是 mrow 前缀；信任域=marker 信封+pendingRepair 挡 journal 写者）→截回重写收敛
+    await appendFile(e.abs, "NOT the repair row prefix at all: attacker padding bytes...", "utf8");
     const r = await repairJournalTail(OPT(e));
-    expect(r.kind).toBe("aborted"); // 删 mrow.equals 判据（M-P 变异）→误判部分行→truncate+补行→repaired=本测试杀点
-    if (r.kind === "aborted") expect(r.reason).toBe("repair-marker-conflict");
-    expect((await readFile(e.abs)).equals(before)).toBe(true);
-    expect((await readdir(e.evidenceDir)).some((f) => f.includes("repair-pending"))).toBe(true);
+    expect(r.kind).toBe("repaired");
+    if (r.kind === "repaired") expect(r.via).toBe("marker-complete");
+    const rows = (await readFile(e.abs, "utf8")).trimEnd().split("\n");
+    expect(JSON.parse(rows[rows.length - 1] as string).t).toBe("repair"); // 行补齐（marker 事实）
     await rm(e.roots, { recursive: true, force: true });
     await rm(e.evidenceDir, { recursive: true, force: true });
+    // 超上界长尾（非行部分写形）：仍冲突拒绝（删上界判据的 Mu-r8-4 杀点）
+    const e2 = await env([jl("i1")]);
+    await seedAnchor(e2);
+    await appendFile(e2.abs, `{"t":"sending"`, "utf8");
+    await expect(repairJournalTail(OPT(e2, { openHandle: crashAfterTruncate }))).rejects.toThrow("crash after truncate");
+    await appendFile(e2.abs, "x".repeat(4096), "utf8"); // 超行长的无关长尾
+    const before = await readFile(e2.abs);
+    const r2 = await repairJournalTail(OPT(e2));
+    expect(r2.kind).toBe("aborted");
+    if (r2.kind === "aborted") expect(r2.reason).toBe("repair-marker-conflict");
+    expect((await readFile(e2.abs)).equals(before)).toBe(true);
+    expect((await readdir(e2.evidenceDir)).some((f) => f.includes("repair-pending"))).toBe(true);
+    await rm(e2.roots, { recursive: true, force: true });
+    await rm(e2.evidenceDir, { recursive: true, force: true });
   });
 
   it("RT38-B6/M-R 跨 build 已补行形：重试转锚不重写行——盘面原文逐字节保留", async () => {
@@ -838,5 +853,102 @@ describe("r7 repair 行 fragIntentId 结构归因留痕", () => {
     expect("fragIntentId" in legacy).toBe(false);
     expect(journalLineSchemaError(legacy)).toBeNull();
     expect(journalLineSchemaError({ ...legacy, fragIntentId: 42 })).toMatch(/fragIntentId/); // 非法类型拒
+  });
+});
+
+// r8（GPT r7 P1-r7-1）：崩溃窗结构身份持久化。marker 在破坏前与 bounds/哈希同批携带
+// fragIntentId——「截断后写行前崩溃」的补完行不再无条件 null（旧形：补完行丢结构身份→
+// i2 归因落盘后 i1 越权重启资格）。旧版 marker（无字段）尾缺失形一律保守拒。
+describe("r8 崩溃窗结构身份持久化（GPT r7 P1-r7-1）", () => {
+  const crashAfterTruncate2 = async (abs: string) => {
+    const real = await (await import("../../../apps/server/src/ws/safe-open.ts")).openSafeReadWrite(abs);
+    const fh = real.fh as unknown as import("node:fs/promises").FileHandle;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (fh as any).write = async () => { throw new Error("crash after truncate"); };
+    return { fh, size: real.size };
+  };
+  it("RT-r8-1 marker 携带结构身份：fresh 写 marker 时 fragIntentId=破坏前扫描值（可归因 i1/不可归因 null 两形）", async () => {
+    for (const [torn, want] of [[`{"t":"sending","intentId":"i1","x":"y"`, "i1"], [`{"t":"sending","pay`, null] as const]) {
+      const e = await env([jl("i1")]);
+      await seedAnchor(e);
+      await appendFile(e.abs, torn, "utf8");
+      await expect(repairJournalTail(OPT(e, { openHandle: crashAfterTruncate2 }))).rejects.toThrow("crash after truncate");
+      const m = JSON.parse(await readFile(join(e.evidenceDir, `${encodeURIComponent(e.file)}.repair-pending.json`), "utf8")) as { fragIntentId?: string | null };
+      expect(m.fragIntentId).toBe(want); // 破坏前取证——与 fresh 行同源（P1-r7-1 主杀点）
+      await rm(e.roots, { recursive: true, force: true });
+      await rm(e.evidenceDir, { recursive: true, force: true });
+    }
+  });
+  it("RT-r8-2 真窗 resend 全链：崩溃重试补完行带 id→fragment 归因 i2 落盘→冷捕获 i1 不越权（resumable 不含 i1）+i3 正对照", async () => {
+    const e = await env([jl("i1"), jl("i2"), jl("i3")]);
+    await seedAnchor(e);
+    const torn = `{"t":"sending","intentId":"i1","x":"y"`;
+    await appendFile(e.abs, torn, "utf8");
+    await expect(repairJournalTail(OPT(e, { openHandle: crashAfterTruncate2 }))).rejects.toThrow("crash after truncate");
+    // 重试：marker 补完——行带 fragIntentId="i1"（不再无条件 null=P1-r7-1 修复面）
+    const r = await repairJournalTail(OPT(e));
+    expect(r.kind).toBe("repaired");
+    if (r.kind === "repaired") expect(r.via).toBe("marker-complete");
+    const lines = (await readFile(e.abs, "utf8")).trimEnd().split("\n");
+    const repair = JSON.parse(lines[lines.length - 1] as string) as { t: string; fragIntentId?: string | null };
+    expect(repair.t).toBe("repair");
+    expect(repair.fragIntentId).toBe("i1"); // 崩溃窗结构身份恢复
+    // fragment 裁决归因 i2（一致门放行：行留痕 i1≠i2？——修复事务无持久 fragment 裁决时写面以
+    // matches[0].fragIntentId 强一致……此处行留痕 i1、裁决目标 i2 应被一致门拒？不——一致门比对
+    // 的是「fragment 归因目标 vs repair 行留痕」：不一致即拒。故此处用一致归因 i2 的前提不存在，
+    // 改走与 GPT A-resend 探针同构：行留痕 i1 + 裁决归因 i2 → inconsistent-attribution 拒（r7 已
+    // 立），然后一致归因 i1 才落盘。A 探针验证的是「越权放行」，本测试验「窗后行带 id→一致门
+    // 有据可拦→冷态 i1 排除」——即 r8+r7 两层闭合。
+    const { adjudicateJournal } = await import("../../../apps/server/src/runtime/adjudicate-journal");
+    const before = await readFile(e.abs);
+    const sub = (intentId: string) => ({ kind: "fragment", removedSha256: (r as { removedSha256: string }).removedSha256, byteStart: (r as { byteStart: number }).byteStart, byteEnd: (r as { byteEnd: number }).byteEnd, at: (r as { at: string }).at, intentId }) as const;
+    const bad = await adjudicateJournal({ file: e.file, roots: [e.roots], evidenceDir: e.evidenceDir, subject: sub("i2"), verdict: "resend", operator: "host", buildId: "b1" });
+    expect(bad).toMatchObject({ kind: "aborted", reason: "inconsistent-attribution" }); // 一致门有据（行带 i1）
+    expect((await readFile(e.abs)).equals(before)).toBe(true);
+    const ok = await adjudicateJournal({ file: e.file, roots: [e.roots], evidenceDir: e.evidenceDir, subject: sub("i1"), verdict: "resend", operator: "host", buildId: "b1" });
+    expect(ok.kind).toBe("adjudicated");
+    const { recoverFromJournal } = await import("../../../apps/server/src/runtime/recover");
+    const rec = await recoverFromJournal(e.abs, "q");
+    expect(rec.resendAuthorized).toContain("i1"); // 一致归因 i1→单事务全覆盖→授权成立（R28 补正形同构，经真窗 IO 链）
+    expect(rec.resumable).toContain("i1"); // 覆盖成立→不排除（授权的目的即重发）；越权形（i2 裁决落盘后 i1 失忆重启）已被一致门在上文零落盘拦截
+    expect(rec.resumable).toContain("i3"); // 无关意图不受影响
+    await rm(e.roots, { recursive: true, force: true });
+    await rm(e.evidenceDir, { recursive: true, force: true });
+  });
+  it("RT-r8-3 真窗 abandon：窗后行带 id+一致归因 abandon 裁决→冷态 i1 放弃（不可重发）", async () => {
+    const e = await env([jl("i1"), jl("i2")]);
+    await seedAnchor(e);
+    await appendFile(e.abs, `{"t":"sending","intentId":"i1","x":"y"`, "utf8");
+    await expect(repairJournalTail(OPT(e, { openHandle: crashAfterTruncate2 }))).rejects.toThrow("crash after truncate");
+    const r = await repairJournalTail(OPT(e));
+    expect(r.kind).toBe("repaired");
+    const { adjudicateJournal } = await import("../../../apps/server/src/runtime/adjudicate-journal");
+    const ok = await adjudicateJournal({ file: e.file, roots: [e.roots], evidenceDir: e.evidenceDir, subject: { kind: "fragment", removedSha256: (r as { removedSha256: string }).removedSha256, byteStart: (r as { byteStart: number }).byteStart, byteEnd: (r as { byteEnd: number }).byteEnd, at: (r as { at: string }).at, intentId: "i1" }, verdict: "abandon", operator: "host", buildId: "b1" });
+    expect(ok.kind).toBe("adjudicated");
+    const { recoverFromJournal } = await import("../../../apps/server/src/runtime/recover");
+    const rec = await recoverFromJournal(e.abs, "q");
+    expect(rec.resumable).not.toContain("i1"); // abandon=放弃：i1 永不可重发
+    expect(rec.resumable).toContain("i2");
+    await rm(e.roots, { recursive: true, force: true });
+    await rm(e.evidenceDir, { recursive: true, force: true });
+  });
+  it("RT-r8-4 旧版 marker（无 fragIntentId）残局：保守拒+盘面零动+marker 保留（宿主清 marker 后 fresh 重做取证）", async () => {
+    const e = await env([jl("i1")]);
+    await seedAnchor(e);
+    await appendFile(e.abs, `{"t":"sending","intentId":"i1","x":"y"`, "utf8");
+    await expect(repairJournalTail(OPT(e, { openHandle: crashAfterTruncate2 }))).rejects.toThrow("crash after truncate");
+    // 降级 marker 为旧版（去 fragIntentId 字段）——模拟 r8 前版本写入的残局
+    const mp = join(e.evidenceDir, `${encodeURIComponent(e.file)}.repair-pending.json`);
+    const m = JSON.parse(await readFile(mp, "utf8")) as Record<string, unknown>;
+    delete m.fragIntentId;
+    await writeFile(mp, JSON.stringify(m), "utf8");
+    const before = await readFile(e.abs);
+    const r2 = await repairJournalTail(OPT(e));
+    expect(r2).toMatchObject({ kind: "aborted", reason: "repair-marker-conflict" });
+    if (r2.kind === "aborted") expect(r2.detail).toContain("旧版 marker");
+    expect((await readFile(e.abs)).equals(before)).toBe(true); // 盘面零动
+    expect((await readdir(e.evidenceDir)).some((f) => f.includes("repair-pending"))).toBe(true); // marker 保留
+    await rm(e.roots, { recursive: true, force: true });
+    await rm(e.evidenceDir, { recursive: true, force: true });
   });
 });

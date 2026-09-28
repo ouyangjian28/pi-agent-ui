@@ -808,3 +808,23 @@ describe("r7 结构一致门与影响域并入（GPT r6 P1-r6-1）", () => {
     expect(ok.resumable).toContain("i1"); // 覆盖成立→不排除；无 sending/终态→可重发（授权的目的即重发，与 resendAuthorized 一致）
   });
 });
+
+// r8（GPT r7 P2-r7-1）：N-abandon-official 转正——一致门不挑 verdict：fragment abandon 裁决
+// 归因与 repair 行 fragIntentId 不一致同样拒（R27 只立了 resend 形，审人变异证明 abandon 形可绕）。
+describe("r8 abandon verdict 一致门负例（N-abandon-official 转正）", () => {
+  it("R31 fragment abandon 归因与行留痕不一致→inconsistent-attribution 零追加；一致对照放行", async () => {
+    const repairRowF = (byteStart: number, byteEnd: number, removedSha256: string, at: string, fragIntentId: string | null) =>
+      JSON.stringify({ t: "repair", reason: "torn-tail", byteStart, byteEnd, removedSha256, buildId: "b1", contractVersion: 2, at, fragIntentId });
+    const torn = '{"t":"sending","intentId":"i1","x":"y"';
+    const H = sha(torn); const at = "2026-10-05T00:00:00.000Z";
+    const e = await env([jl("i1"), jl("i2"), repairRowF(30, 66, H, at, "i1")]);
+    await seedAnchor(e);
+    const before = await readFile(e.abs);
+    const r1 = await adjudicateJournal(opts(e, fragSubject(H, 30, 66, at, "i2"), "abandon"));
+    expect(r1).toMatchObject({ kind: "aborted", reason: "inconsistent-attribution" }); // abandon 同拦
+    expect(await readFile(e.abs)).toEqual(before);
+    const r2 = await adjudicateJournal(opts(e, fragSubject(H, 30, 66, at, "i1"), "abandon"));
+    expect(r2.kind).toBe("adjudicated"); // 一致归因放行
+    await cleanup(e);
+  });
+});
