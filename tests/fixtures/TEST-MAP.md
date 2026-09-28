@@ -1021,3 +1021,15 @@
 - **测试**（adjudicate 30+repair-tail 42；全仓 1407 绿）：**RT-r8-1** marker 携身份两形（可归因 i1/不可归因 null）；**RT-r8-2** resend 真窗全链（崩溃→重试行带 id→i2 归因被一致门零落盘拦→一致归因 i1 授权=resendAuthorized+resumable 双含）；**RT-r8-3** abandon 真窗（i1 永不可重发）；**RT-r8-4** 旧 marker 双形保守拒（无尾走顶部门/有尾走入口门）；**R31** abandon verdict 一致门负例（N-abandon-official 转正：不一致 abandon 同拒+一致放行）；**RT37** 更新双形（界内任意尾收敛重写+超界长尾仍拒）。
 - **变异五点全杀**（基线 6eb761f/后补杀点提交后注入；五步单链）：Mu-r8-1 顶部门删→RT-r8-4 无尾形杀；Mu-r8-1b 入口门删→RT-r8-4 有尾形杀；Mu-r8-2 fresh marker 去字段→RT-r8-1/2/3 杀；Mu-r8-3 补完恒 null→RT-r8-2 杀；Mu-r8-4 上界删→RT37 超界形杀。全部 checkout 还原复绿。
 - **文档勘误**（P2-r7-1）：§12 三处（严格前缀说法→部分行限定；「矛盾裁决自此不可持久化」→加 r7 崩溃窗例外；未归因门兜底→收窄为「事务至少被看过」不保证归因正确）；scopeCovers 头注分向澄清（resend 全覆盖/abandon 任一在场即排除）；§13 新节。
+
+## P0-1b r9 缺证据残局留置+cleanup 分级批（GPT r8 审 84 NO-GO 修复；报告=audits/gpt-p01b-r8-review-2026-10-08.md；2026-10-08）
+
+**范围**：P1-r8-1（缺证据残局「清 marker 后 fresh」指引=N2 洗白路径）+P2-r8-1（isPartialRow 内容证据恢复+停写前提勘误）+P3-r8-1（加载器非空校验）+P2-r8-2（文档四勘误）。权威语义=设计稿 §13 r9 修订段。
+
+- **cleanup-only 分级前置**（repair-tail.ts）：行已落盘+事务事实匹配+全文件锚匹配→幂等清冗余 marker（含旧版形）——「物理健康≠已授权重发」：未裁决事务仍由读面 repairShadow 阻断。缺身份形（截断/部分行）继续留置拒。
+- **禁删指引**：两处门 detail 撤「宿主清 marker 后 fresh 重做取证」→「留置调查——禁止仅删除 marker（尾已消失，marker 是唯一修复事实；删除后冷捕获将以无裁决恢复全部意图重启）；需以原始证据独立处置」。
+- **判据收窄**：isPartialRow=起点吻合+（新行严格前缀 ‖ 旧行形枚举 legacyMrow 严格前缀）——内容证据恢复；信任前提勘误=修复期外部停写为必要部署条件（pendingRepair 只是恢复阻断状态非文件锁，FileDurability.append 不检查 marker，evidenceDir 隔离不保护 journal 尾）。
+- **加载器**：fragIntentId 非空校验（对齐行 schema）——空串 corrupt 拒（防空串补完写 schema 非法行）。
+- **测试**（repair-tail 45+adjudicate 30；全仓 1410 绿）：**RT37 三形重写**（真短写=新行前缀收敛/旧行 `}` 无换形=legacy 前缀收敛/非前缀垃圾短尾+超界长尾拒——N1 转正）；**RT-r9-1** cleanup 分级（N5 转正：旧版 marker 幂等清+盘面零动+resumable=[]）；**RT-r9-2** 缺证据留置（N2 转正：幂等拒+detail 禁删+违规清 marker 洗白后果红线演示）；**RT-r9-3** 空串 marker corrupt 拒零改盘。
+- **变异四连全杀**（基线 01ab0ec 后注入；五步单链）：Mu-r9-1 cleanup 前置块删→RT-r9-1 杀；Mu-r9-2 detail 回退→RT-r9-2 杀；Mu-r9-3 legacy 枚举删→RT37 形二杀；Mu-r9-4 非空校验删→RT-r9-3 杀。全部 checkout 还原复绿。
+- **文档**（P2-r8-2）：§13 不变式限定（「默认可重启」仅限无修复阴影的普通 enqueue；repairShadow 形=阻断）+r9 修订段；buildRepairRow 头注（旧完整行非新行前缀，部分行判定=前缀+枚举）；RT-r8-2 标题+注释改实际执行路径（错误归因被拦→一致归因授权）；RT-r8-3/R31 分工表述（组合覆盖两 verdict，非各自双形）。
