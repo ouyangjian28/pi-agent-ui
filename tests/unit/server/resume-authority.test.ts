@@ -9,6 +9,7 @@
 //  W-ra-5  generationFor=registry.statusFor(file).process.generation 直查（键=原样）
 import { describe, expect, it } from "vitest";
 import { makeResumeAuthority } from "../../../apps/server/src/composition.ts";
+import { ComputeSemaphore, ComputeGateQueueTimeout } from "../../../apps/server/src/ws/compute-semaphore.ts";
 import type { RecoveryEvidenceResult } from "../../../apps/server/src/runtime/recovery-evidence-source.ts";
 
 function fakeProvider() {
@@ -125,5 +126,27 @@ describe("P0-2 r3b：executeFor 执行点读+资源面", () => {
     p.set(null);
     const a = makeResumeAuthority({ roots: ["/srv/j"], provider: p.fn, registry: fakeRegistry(null).impl });
     expect(await a.executeFor("/srv/j/s1.jsonl", "i-1")).toBe(null);
+  });
+
+  it("W-ra-10 跨文件闸（r3b-fix K3 P2-1）：并发两 file 真串行；闸超时抛 ComputeGateQueueTimeout", async () => {
+    const p = fakeProvider();
+    p.set(null);
+    let active = 0, peak = 0;
+    const slowFn = async (file: string, _signal: AbortSignal): Promise<RecoveryEvidenceResult | null> => {
+      active++; peak = Math.max(peak, active); calls.push(file);
+      await new Promise((res) => setTimeout(res, 30));
+      active--; return null;
+    };
+    const calls: string[] = [];
+    const sem = new ComputeSemaphore(1, 60_000); // 单槽长超时：串行面
+    const a = makeResumeAuthority({ roots: ["/srv/j"], provider: slowFn, registry: fakeRegistry(null).impl, semaphore: sem });
+    await Promise.allSettled([a.reportFor("/srv/j/s1.jsonl"), a.reportFor("/srv/j/s2.jsonl")]);
+    expect(peak).toBe(1); // 跨文件并发度 1（in-flight 合并只去重同 file；跨 file 由闸串行）
+    // 超时面：单槽被占+排队超时 1ms
+    const sem2 = new ComputeSemaphore(1, 1);
+    const a2 = makeResumeAuthority({ roots: ["/srv/j"], provider: slowFn, registry: fakeRegistry(null).impl, semaphore: sem2 });
+    const hold = a2.reportFor("/srv/j/s1.jsonl"); // 占住唯一槽
+    await expect(a2.reportFor("/srv/j/s2.jsonl")).rejects.toBeInstanceOf(ComputeGateQueueTimeout);
+    await hold;
   });
 });

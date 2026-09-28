@@ -15,7 +15,7 @@
 import { WsServerAdapter, gatewayMetaFrom } from "./ws/ws-transport.ts";
 import { TokenAuthority } from "./ws/token-auth.ts";
 import { WsGateway } from "./ws/ws-gateway.ts";
-import { ComputeSemaphore } from "./ws/compute-semaphore.ts";
+import { ComputeSemaphore, ComputeGateQueueTimeout, type AcquireResult } from "./ws/compute-semaphore.ts";
 import { DualHistorySource } from "./runtime/dual-history-source.ts";
 import { createRecoveryEvidenceProvider, isRecoverySnapshot, type RecoveryEvidenceResult } from "./runtime/recovery-evidence-source.ts";
 import { recoverFromSnapshot } from "./runtime/recover.ts";
@@ -135,18 +135,30 @@ function requireAbsPaths(name: string, paths: readonly string[]): readonly strin
 * r3b 资源面（K3 审 P2-3）：per-file in-flight 合并（并发读共享同次 provider 调用；**完成即删不缓存**
 * ——无失效钩子下缓存 resume #1 快照跨 send 不失效→同 matchKey 双发面，正确性否决缓存）；
 * 断连取消=r3a 同口径不提供（帧应答前断连=send 已提交不可撤，读取消意义小）；预算闸=evidence-source
-* 合计 8MiB 入口门（同源）。 */
+* 合计 8MiB 入口门（同源）。
+* r3b-fix（K3 审 P2-1）：跨文件并发闸=semaphore（与 get-recovery 同一 ComputeSemaphore 实例，composition
+* 注入）；先查 in-flight（同文件合并不占两次槽）→miss 才进闸；排队超时抛 ComputeGateQueueTimeout
+* （网关转 4409 retryable，与 get-recovery 超时同构）。 */
 export function makeResumeAuthority(deps: {
   roots: readonly string[];
   provider: (file: string, signal: AbortSignal) => Promise<RecoveryEvidenceResult | null>;
   registry: { statusFor(file: string): { process: { generation: number | null } } };
+  semaphore?: { acquire(): { promise: Promise<AcquireResult>; cancel(): void } }; // 结构类型（AcquireResult 宽松形；测试替身同形）
 }): ResumeAuthority {
-  const { roots, provider, registry } = deps;
+  const { roots, provider, registry, semaphore: gate } = deps;
   const inflight = new Map<string, Promise<RecoveryEvidenceResult | null>>();
   const readOnce = (logical: string): Promise<RecoveryEvidenceResult | null> => {
     const hit = inflight.get(logical);
     if (hit !== undefined) return hit; // 并发合并：同 file 并发 resume/reportFor 只做一次盘读
-    const p = provider(logical, new AbortController().signal)
+    const run = async (): Promise<RecoveryEvidenceResult | null> => {
+      if (gate === undefined) return provider(logical, new AbortController().signal);
+      const acq = gate.acquire();
+      const r = await acq.promise;
+      if (!r.ok) throw new ComputeGateQueueTimeout(); // kind=timeout/canceled 皆=忙面（cancel 由读幂等性兜底）
+      try { return await provider(logical, new AbortController().signal); }
+      finally { r.release(); }
+    };
+    const p = run()
       .finally(() => { if (inflight.get(logical) === p) inflight.delete(logical); }); // 完成即删（不缓存）
     inflight.set(logical, p);
     return p;
@@ -275,7 +287,7 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
       writeHost: createRpcWriteHost({
         sessionFor: (file: string) => registry!.sessionFor(file),
         audit,
-        resumeAuthority: makeResumeAuthority({ roots: config.roots, provider: recoveryEvidence, registry: { statusFor: (f: string) => registry!.statusFor(f) } }),
+        resumeAuthority: makeResumeAuthority({ roots: config.roots, provider: recoveryEvidence, registry: { statusFor: (f: string) => registry!.statusFor(f) }, semaphore }),
       }),
     } : {}),
     audit,

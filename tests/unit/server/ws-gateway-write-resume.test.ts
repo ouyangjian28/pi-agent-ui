@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WsGateway, type ConnMeta, type GatewayConnHooks, type WsGatewayOpts } from "../../../apps/server/src/ws/ws-gateway.ts";
 import { createRpcWriteHost, type ResumeAuthority } from "../../../apps/server/src/ws/rpc-write-host.ts";
+import { ComputeGateQueueTimeout } from "../../../apps/server/src/ws/compute-semaphore.ts";
 import { TokenAuthority } from "../../../apps/server/src/ws/token-auth.ts";
 import type { SessionSendResult } from "../../../apps/server/src/runtime/rpc-session.ts";
 import type { WriteSendOutcomeDTO } from "@pi-agent-ui/protocol";
@@ -45,7 +46,7 @@ class FakeConn {
 /** 会话替身：记录 send 调用（零副作用断言=从不触发）。 */
 class RecordingSession {
   sends: string[] = [];
-  async send(message: string): Promise<SessionSendResult> { this.sends.push(message); return { kind: "launched", key: { intentId: "i-x", commandId: 1 } }; }
+  async send(message: string): Promise<SessionSendResult> { this.sends.push(message); return { kind: "launched", key: { intentId: "i-x", commandId: 1, generation: 1 } }; }
   async stop(): Promise<{ kind: "confirmed"; exit: { code: number | null; signal: string | null } }> { return { kind: "confirmed", exit: { code: 0, signal: null } }; }
 }
 
@@ -62,6 +63,7 @@ interface Rig {
     liveGen: number | null;
     throwReport: boolean;
     throwExec: boolean;
+    throwGateTimeout: boolean; // W-res-18：闸排队超时（ComputeGateQueueTimeout）
     execNull: boolean; // executeFor→null（执行点无数据面）
     execReport: { resendAuthorized: readonly string[]; resumeBlocked: boolean } | null; // 执行点复核报告（缺省复用门序报告）
     payload: { rawText: string } | null; // 执行点载荷（null=payload-unavailable）
@@ -78,6 +80,7 @@ async function makeRig(): Promise<Rig> {
     liveGen: 3 as number | null,
     throwReport: false,
     throwExec: false,
+    throwGateTimeout: false, // W-res-18：闸排队超时（ComputeGateQueueTimeout）
     execNull: false,
     execReport: null as { resendAuthorized: readonly string[]; resumeBlocked: boolean } | null,
     payload: { rawText: "re-hi" } as { rawText: string } | null,
@@ -85,6 +88,7 @@ async function makeRig(): Promise<Rig> {
   const created = { n: 0 };
   const resumeAuthority: ResumeAuthority = {
     reportFor: async () => {
+      if (authority.throwGateTimeout) throw new ComputeGateQueueTimeout();
       if (authority.throwReport) throw new Error("boom-report");
       return authority.report;
     },
@@ -407,7 +411,7 @@ describe("P0-2 r3b 执行面：执行点读+复核+send 接线", () => {
       ];
       let i = 0;
       (r.session as unknown as { send: (m: string) => Promise<SessionSendResult> }).send = async () => {
-        const o = outcomes[i];
+        const o = outcomes[i]!;
         i++;
         return o;
       };
@@ -417,6 +421,21 @@ describe("P0-2 r3b 执行面：执行点读+复核+send 接线", () => {
         expect(resumeAck(c)?.["outcome"]).toEqual(outcomes[k]);
       }
       expect(r.audits.some((l) => l.includes("intentId=i-auth outcome=busy"))).toBe(true);
+    } finally { await r.dispose(); }
+  });
+
+  it("W-res-18 闸排队超时→4409 retryable（r3b-fix K3 P2-1：忙非宿主错，不 4402）", async () => {
+    const r = await makeRig();
+    try {
+      r.authority.throwGateTimeout = true;
+      const c = await authed(r);
+      await c.say({ t: "resume", requestId: "rq1", file: r.inFile, intentId: "i-auth", generation: 3 });
+      const f = errs(c);
+      expect(f.length).toBe(1);
+      expect(f[0]!.code).toBe(4409);
+      expect(f[0]!.retryable).toBe(true);
+      expect(r.created.n).toBe(0); // 零副作用
+      expect(r.audits.some((l) => l.includes("outcome=gate-queue-timeout"))).toBe(true);
     } finally { await r.dispose(); }
   });
 });

@@ -30,7 +30,7 @@ import type { ReadIndex } from "@pi-agent-ui/protocol";
 import { buildRecoveryFrame, buildSessionsFrame } from "@pi-agent-ui/protocol";
 import { utf8Bytes, ConnectionQueue } from "./connection-queue.ts";
 import type { TokenAuthority } from "./token-auth.ts";
-import { ComputeSemaphore } from "./compute-semaphore.ts";
+import { ComputeSemaphore, ComputeGateQueueTimeout } from "./compute-semaphore.ts";
 import { scanSessions } from "./session-scan.ts";
 import type { ScannedSession } from "./session-scan.ts";
 import { resolveWithinRoots } from "./safe-open.ts";
@@ -426,6 +426,12 @@ export class WsGateway {
       this.audit(`write-frame conn=${st.id} t=resume file=${file} intentId=${frame.intentId} outcome=${outcome.kind}${outcome.kind === "identity-rejected" ? ` cause=${outcome.cause}` : ""}`);
       this.enqueue(st, { t: "write-resume-ack", requestId: rid, file, outcome });
     } catch (e: unknown) {
+      if (e instanceof ComputeGateQueueTimeout) {
+        // r3b-fix（K3 审 P2-1）：闸排队超时=忙非错——与 get-recovery 超时同构转 4409 retryable（不与宿主错 4402 混同）
+        this.audit(`write-frame conn=${st.id} t=resume file=${file} intentId=${frame.intentId} outcome=gate-queue-timeout`);
+        this.enqueueIfOpen(st, { t: "error", code: 4409, message: "计算排队超时", retryable: true, requestId: rid });
+        return;
+      }
       this.audit(`write-frame-error conn=${st.id} t=resume file=${file} intentId=${frame.intentId} ${String(e instanceof Error ? e.message : e)}`);
       this.errFrame(st, 4402, "写宿主不可用", rid);
     } finally {

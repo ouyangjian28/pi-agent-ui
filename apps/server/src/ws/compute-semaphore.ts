@@ -18,6 +18,11 @@ interface Waiter {
   done: boolean;
 }
 
+/** 闸排队超时（P0-2 r3b-fix，K3 审 P2-1）：忙而非错——上层转 4409 retryable，不与宿主内部错（4402）混同。 */
+export class ComputeGateQueueTimeout extends Error {
+  constructor() { super("计算排队超时"); this.name = "ComputeGateQueueTimeout"; }
+}
+
 export class ComputeSemaphore {
   private active = 0;
   private readonly waiters: Waiter[] = [];

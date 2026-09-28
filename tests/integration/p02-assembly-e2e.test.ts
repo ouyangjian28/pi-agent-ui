@@ -149,9 +149,9 @@ const d = describe.skipIf(!RUN)("P0-2 r1 W-asm-6 装配面 E2E（真服务重启
     const l = await boot();
     try {
       await send(l.ws, { t: "resume", requestId: "a3-r1", file: f, intentId: "i-a1", generation: 1 });
-      void send;
       await until(() => l.frames.some((x) => x.t === "write-resume-ack"), "write-resume-ack");
       const ack = l.frames.find((x) => x.t === "write-resume-ack")!;
+      expect(ack.requestId).toBe("a3-r1"); // K3 审 P3：帧应答锁定 requestId（配对不被歧义）
       expect(ack.outcome).toEqual({ kind: "identity-rejected", cause: "resume-not-authorized" }); // 非no-recovery-data=真读到了
       expect(audits.some((x) => x.includes("cause=resume-not-authorized"))).toBe(true);
       // journal 零新行（未授权零副作用）

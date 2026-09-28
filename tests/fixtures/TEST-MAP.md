@@ -1118,3 +1118,19 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 **E2E 排障两教训**：①provider 首捕需 trustFirstCapture（B12-1 冷启动权威门：未登记 file 默认 no-evidence-snapshot）→E2E boot 加 trustFirstRecoveryCapture:true（composition config 字段同名；生产=宿主显式声明）。②IntentMatchKey.attachmentIdentity 是 **string**（identity.ts:56，空附件=""，=排序 join(",")）非数组——手造 journal 用 [] 会 schema 拒（嵌套非法 matchKey.attachmentIdentity.attachmentIdentity）致 resumeBlocked。
 
 **变异五杀**（基线 8bfc633；五步单链=注入→git diff 验非空→定向红点名→checkout 还原→复绿；日志 /tmp/mu-r3b-{1..5}.log）：Mu-r3b-1 复核门 resumeBlocked 恒跳→W-res-13；Mu-r3b-2 payload null 门跳→W-res-14；Mu-r3b-3 执行点代次复核跳→W-res-16；Mu-r3b-4 send("") 透传破坏→W-res-8（payload 断言挂）；Mu-r3b-5 in-flight 合并破坏（hit=null）→W-ra-8。全部还原复绿（W-res+W-ra 26/26）。
+
+### P0-2 r3b-fix 修复批（K3 审 89.6≈90 GO 附条件之 P2×3+P3 顺手项；2026-09-28）
+
+**范围**：K3 审（audits/k3-p02-r3b-review-2026-09-28.md）附条件三项+P3 顺手四项。
+
+**实现**（五文件）：
+- P2-1 跨文件并发闸：makeResumeAuthority deps 加 `semaphore?`（AcquireResult 宽松结构型，composition 注入与 get-recovery **同一** ComputeSemaphore 实例）；readOnce 先查 in-flight（同 file 合并不占双槽）→miss 才进闸；排队超时抛 `ComputeGateQueueTimeout`（compute-semaphore.ts 新导出）；rpc-write-host reportFor/executeFor catch 判型透传（不 strip）；ws-gateway handleWriteResume catch 判型→4409 error 帧 retryable（与 get-recovery 超时同构）+审计 outcome=gate-queue-timeout。
+- P2-2 契约文档：ws-ui-contracts-v1.md §10.1 增补（resume 帧/write-resume-ack/身份门序七步/终形枝/闸与预算/断连口径）。
+- P2-3 root tsc：W-res-17 `outcomes[i]!`+RecordingSession TurnKey 补 generation:1（修两条；root 27→25 错=纯既存债基线，resume 文件零错）。
+- P3 顺手：A-3 删死代码 `void send;`；ack 锁 requestId=a3-r1；「七枝」口径统一「执行七枝+两身份/执行失败枝」；兼容面评估依据入档（apps/web 未消费 write-resume-ack+v1.1 未发布=零实际兼容面）。
+
+**测试**：W-res-18（闸超时→4409 retryable+零副作用 created.n=0+审计 gate-queue-timeout）→ws-gateway-write-resume 18 例；W-ra-10（并发两 file peak=1 真串行+单槽 1ms 超时 rejects ComputeGateQueueTimeout）→resume-authority 10 例。server tsc 绿。
+
+**实现期两教训**：①ws-gateway.ts 用 ComputeGateQueueTimeout 忘加 import——运行时 ReferenceError 在 catch 块内静默吞掉后续帧链（W-res-15 r2 案 frames 只剩 welcome 才暴露；vitest Unhandled Errors 有蛛丝马迹）；②git stash pop 前必须 `git stash list` 核对目标——`--quiet` 位置错致 push 失败+误 pop 出 wt/kimi-web-1 老 stash（kimi-a1b-partial）与 master 冲突 4 文件；恢复=checkout HEAD 回冲突文件（stash 条目原样保留，未污染 master）。**禁再用 stash 做局部暂存，改用明确 pathspec 的 diff/apply 或临时 commit**。
+
+**r3c 待办**（K3 审第五节建议）：①send 携带期望代次收窄 TOCTOU 窗口至零（执行点二查→send 内部代次断言）②A-4 正路径 E2E（授权 intent→真 composition launched+新 enqueue 落盘）③断连取消分层（读段复用连接 abortCtl 排队取消；send 段至少一次语义文档化）④资源面四件成表收官（合并/8MiB/跨文件闸/取消口径）。

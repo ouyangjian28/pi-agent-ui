@@ -15,6 +15,7 @@
 import type { WriteSendOutcomeDTO, WriteStopOutcomeDTO, WriteResumeOutcomeDTO, RetireOutcome } from "@pi-agent-ui/protocol";
 import type { SessionSendResult } from "../runtime/rpc-session.ts";
 import type { WriteHostPort } from "./write-host.ts";
+import { ComputeGateQueueTimeout } from "./compute-semaphore.ts";
 
 /** 编码面所需的最小会话形状（结构化依赖：测试可替身，不锁 RpcSession 类）。 */
 export interface RpcLikeSession {
@@ -165,6 +166,7 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
       try {
         report = await authority.reportFor(file);
       } catch (e: unknown) {
+        if (e instanceof ComputeGateQueueTimeout) throw e; // r3b-fix：闸忙≠宿主错——网关转 4409 retryable
         auditSafe(() => `write-host-error op=resume file=${file} ${errText(e)}`);
         throw stripped("resume");
       }
@@ -198,6 +200,7 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
       try {
         exec = await authority.executeFor(file, intentId);
       } catch (e: unknown) {
+        if (e instanceof ComputeGateQueueTimeout) throw e; // r3b-fix：闸忙≠宿主错
         auditSafe(() => `write-host-error op=resume file=${file} ${errText(e)}`);
         throw stripped("resume");
       }

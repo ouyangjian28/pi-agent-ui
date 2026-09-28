@@ -433,3 +433,12 @@ type ServerFrame =
 - v1 只读契约（本文 §1-§9）**逐字冻结不变**：写类 t 仍一律 4405+close 1008（第 4 级冻结门），`writeHost` 未接线时网关行为字节级不变（W1 回归案锁定）。
 - 写侧扩展（开放面=prompt/stop 两 t；帧形/DTO/在途门/64KiB 上限）权威定义=packages/protocol/src/contracts.ts 写侧段+TECH.md B16 节；测试矩阵=tests/unit/server/ws-gateway-write.test.ts（W1-W12）；变异档=tests/fixtures/mutation-records/3c1.md。
 - 本节仅作指针，冲突时以 contracts.ts 源码为准。
+
+### §10.1 写侧身份扩展（r3a/r3b，2026-09-28 增补；正文 v1 冻结不改写）
+
+- 开放面扩为 **prompt/stop/resume** 三 t（contracts.ts WRITE_OPEN_FRAME_TYPES）。resume{requestId,file,intentId,generation} 请求 write 面恢复重发授权与执行；应答帧=**write-resume-ack**（requestId 回带，非 4409 终局帧面）。
+- **身份门序**（宿主面 rpc-write-host.resume；全部拒绝零副作用）：①无权威源→identity-rejected{no-recovery-data}（fail-closed）→②读宿主抛错→4402→③报告 null→no-recovery-data→④resumeBlocked 优先→⑤intentId∉resendAuthorized→resume-not-authorized→⑥活代≠帧代→generation-mismatch（活代 null 放行）→⑦执行面（executeFor 同快照复核+payload 读回+执行点代次重查+send；payload 读不回→execution-failed{payload-unavailable}）。
+- **WriteResumeOutcomeDTO 终形**（r3b 删 execution-pending）：identity-rejected{cause}|execution-failed{payload-unavailable}|执行面七枝（launched{intentId,commandId}/busy/gate-rejected/gate-failed/invalidated/no-process/not-ready{cause?}——与 prompt 面 SessionSendResult 同构、独立声明）。launched.intentId=重发新意图；原意图关联在审计行 newIntentId；journal 不因 resume 加行型（新 enqueue 即无辜新意图，幂等由 matchKey 同文本语义保护）。
+- **prompt 帧**同步加可选 generation（v1 四字段严格形不变——缺省兼容跳过校验）。
+- **闸与预算**：resume 读链跨文件 ComputeSemaphore（与 get-recovery 同闸；排队超时→4409 error 帧 retryable，非 write-resume-ack）；单文件 in-flight 合并（同 file 并发读共享同次盘读）；单读合计 8MiB 预算门与 get-recovery 同源。断连口径：帧应答前断连=send 已提交不可撤（至少一次语义；write-resume-ack 可能因断连丢失但重发已生效）。
+- 权威源码=packages/protocol/src/contracts.ts+apps/server/src/ws/{rpc-write-host.ts,ws-gateway.ts}+apps/server/src/composition.ts（makeResumeAuthority）；设计=docs/p0-2-write-identity-design.md §2/§2b；测试=W-res（ws-gateway-write-resume.test.ts 18 例）/W-ra（resume-authority.test.ts 10 例）/E2E A-3。
