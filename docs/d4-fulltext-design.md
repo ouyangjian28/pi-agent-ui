@@ -1,7 +1,7 @@
 # D4 双源归并读面：全文/思考/工具调用补全设计稿 v5
 
-状态：v5 草案（吸收 v4 复审 84/100 NO-GO 全部 P2-N1/N2+P3-N3..N13；待复评≥85 冻结契约）
-日期：2026-10-10（v1 74→v2 74→v3 80→v4 84→v5；四轮审源见 audits/）
+状态：v5.1 冻结版（v5 复审 86/100 GO——五轮审链 74→74→80→84→86；本版=v5 收尾批：闭合新 P2（rawBytes 口径）+P3-a..h）
+日期：2026-10-10（审源五轮见 audits/）
 前置：D3 全链已合（d0c87d3）；迁移就绪里程碑 M-D4。
 审源：audits/ds-d4-design-review{,-v2,-v3,-v4}-2026-10-10.md。
 
@@ -10,7 +10,8 @@
 | 审项 | v4 缺陷 | v5 裁决 |
 |---|---|---|
 | P2-N1 | 「同一 thinkingVisible 门」无单一真值源、无通往扫描面/entry 面的线；hasThinking 产生位未声明 | **单一真值源=服务端 config `thinkingVisible`（默认 false）**；两条落线：①扫描面=`SessionProjectionInput` 增可选 `thinkingVisible?: boolean`（声明为协议包内部契约变更，加字段不改现有消费者）；②entry 面=同一 config 值传入 entry 读路径。**hasThinking 唯一产生位=session-projection（扫描面）**，门值并入输入（§4.5a） |
-| P2-N2 | 预算判原始 UTF-8 字节=静态账；JSON 编码膨胀（换行 1B→2B、控制符 1B→6B）→30_720B 分配最坏 ~186KB，≤32_768B 承诺破 | 改**两段式**：粗估快筛（同 subscription-engine.ts:217 先例）+**终判整帧 estimateFrameBytes 实测**（同 :234-245）+超限末块再切片重测（编码后字节严格递减=单调收敛）；argsPreview 512 按**编码后字节**计入；上界承诺=终判后帧≤singleEventBytes 恒成立（§4.1b） |
+| P2-N2 | 预算判原始 UTF-8 字节=静态账；JSON 编码膨胀（换行 1B→2B、控制符 1B→6B）→30_720B 分配最坏 ~186KB，≤32_768B 承诺破 | 改**两段式**：粗估快筛（同 subscription-engine.ts:217 先例）+**终判整帧 estimateFrameBytes 实测**（同 :228-250 终判环）+超限末块再切片重测（编码后字节最终递减、下界=信封）；argsPreview 512 按**编码后字节**计入；上界承诺=终判后帧≤singleEventBytes 恒成立（§4.1b） |
+| P2-N1'（v5 复审新） | §4.5b 说 truncated 态不显示 rawBytes，但 §4.1b/§4.4 UI 文案仍写「原文 X KB」→两读并存 | **truncated 帧线上不携带 rawBytes 字段**（wire 级缺席非 UI 隐藏）；文案改「已截断·可见 X KB / Y 块」（§4.1b/§4.4） |
 | P3-N3..N13 | 客户端并发上限/索引换代误并 oversized/index-evicted 触发源/两收编面/缓存失效/按钮触发式/rawBytes 口径/1MiB 理由/两断言/四行号/清单编号 | 全落（§4.3/§4.4/§4.5/§5/§6） |
 
 ## 1. 问题（日用最大缺口）
@@ -32,7 +33,7 @@
 
 ## 3. 决策空间（v3 版维持）
 
-既有机制事实：装页器已有**整帧预算贪心收缩**——subscription-engine.ts:202-245 逐条装页、粗估快筛（:217，envelopeOverheadBytes=256 起算）+终判整帧实测（:234-245，超 `pageFrameBudgetBytes=200_000`（contracts.ts:18）退末条重测）；单帧硬顶 `frameMaxBytes=262_144`（contracts.ts:14，仅入站校验 ws-gateway.ts:347）。故「事件变大→帧爆炸」不成立：帧有界恒成立，真实代价是**页变小、往返变多**。
+既有机制事实：装页器已有**整帧预算贪心收缩**——subscription-engine.ts:202-250 逐条装页、粗估快筛（:217，envelopeOverheadBytes=256 起算）+终判环（:228-250：整帧实测，超 pageFrameBudgetBytes=200_000（contracts.ts:18）退末条重测 :246-249；首条必装仍超=显式失败 :241-245）；同型第二先例=快照帧 projection-frames.ts:26/31（粗估+首条必装失败→显式 null）。单帧硬顶 frameMaxBytes=262_144（contracts.ts:14，仅入站校验 ws-gateway.ts:347）。故「事件变大→帧爆炸」不成立：帧有界恒成立，真实代价是**页变小、往返变多**。
 
 | 案 | 做法 | 真实代价/优点 | 结论 |
 |---|---|---|---|
@@ -55,18 +56,18 @@
 
 - 白名单四形：`{kind:"text", text, truncatedAt?}` / `{kind:"thinking", text, truncatedAt?}`（thinkingSignature 永不投；**thinking 块仅在 thinkingVisible 门开时出现**——§4.5a）/ `{kind:"toolCall", toolCallId, toolName, argsPreview, argsTruncated?}` / `{kind:"attachment", attachmentId}`（attachmentIdOfBlock 派生，session-projection.ts:74；不回 pi 原始 image/base64/path/url）。
 - **独立全文块投影器 `entryBlocksOf`**（新函数，落 session-projection.ts 同文件）：输入=**parseMessageLine 已校验行的全量 content**（同文件内私有通道直传——parseMessageLine 多返回一个内部产物；全量 content 不入 MessageEntry、不进任何导出面），输出=全文块四形。它**不是**「宽松版解析器」而是**同一解析结果的另一投影面**——行 schema 校验、身份判定、digest 全部只在共享路径发生一次；只做投影+净化（§4.5）。
-- **共享面改动口径**：`Block` 导出类型与 `blocksOf` 的**调用点（唯一=parseMessageLine:137）与导出面不变**；文件内私有改动两处——blocksOf 的 thinking 分支 `continue` 改为 `thinkingCount++` 后 continue（行为等价）+`MessageEntry`（未导出、瞬态）增可选 `stats?: {blockCount, thinkingCount}`。`blockCount`=**可见块数**（text+toolCall+attachment，不含 thinking）；现有消费者不读 stats=零外部 ripple；fixtures 增量补充。
+- **共享面改动口径**：`Block`（**未导出内部类型**，v5 复审勘正——非导出面）与 `blocksOf` 的**调用点（唯一=parseMessageLine:137）与现有消费面不变**；文件内私有改动两处——blocksOf 的 thinking 分支 `continue` 改为 `thinkingCount++` 后 continue（行为等价）+`MessageEntry`（未导出、瞬态）增可选 `stats?: {blockCount, thinkingCount}`。`blockCount`=**可见块数**（text+toolCall+attachment，不含 thinking）；现有消费者不读 stats=零外部 ripple；fixtures 增量补充。
 - **事件面字段派生**：历史 message 事件 `hasThinking`（仅门开且 thinkingCount>0 时置 true）+`blockCount`（可见块数）——**唯一产生位=session-projection（扫描面）**，取自 stats；事件面与展开面同源同值。
 
 **4.1b 字节预算与截断（两段式实测版，P2-N2 裁决）**
 
 - **执行点（新建门，如实声明）**：entry 装帧处（网关 entry-get 应答路径内）。`singleEventBytes=32_768`（contracts.ts:19）此前全仓无出站执行点（仅定义+estimateHistoryEventBytes 异常回退常数 :348）；entry 帧预算=**新建执行点**。
-- **两段式预算（同装页器先例 :217/:234-245）**：
+- **两段式预算（同装页器先例 :217/:228-250）**：
   1. **粗估快筛**：按块序装入（信封预留=envelopeOverheadBytes 256+entry 专属开销预留 1_792，块内容可用≈30_720 编码前字节）——整块编码前字节放得下→入；放不下且非空→先按剩余量 UTF-8 安全预截；其后块暂不计入。
-  2. **终判整帧实测**：装帧后 `estimateFrameBytes`（contracts.ts:342-344，JSON.stringify→byteLength，**编码后字节**）实测——超 singleEventBytes →对末块再切片（编码后字节严格递减）重测，至收敛；其后块省略并计数。**上界承诺：终判后帧 ≤ singleEventBytes 恒成立**（JSON 转义膨胀——换行 1B→2B、控制符 1B→6B——由终判+单调收敛吸收）。
+  2. **终判整帧实测**：装帧后 `estimateFrameBytes`（contracts.ts:342-344，JSON.stringify→byteLength，**编码后字节**）实测——超 singleEventBytes →对末块再切片（**UTF-8 安全预截**，同粗估段纪律）重测，至收敛；其后块省略并计数。**收敛性**：每轮切片编码后字节最终递减且下界=信封（首刀可能被新写入的 truncatedAt 字段净增 ~15-20B 抵消，非严格递减；最小 entry 骨架实测 ≈306B ≪ 32_768，工程上必收敛）；**基例（照抄先例 :241-245/projection-frames.ts:31）：末块切到空仍超=显式失败（改发 4414 reason=oversized，不走装帧出口）**。**上界承诺：终判后帧 ≤ singleEventBytes 恒成立**（JSON 转义膨胀——换行 1B→2B、控制符 1B→6B——由终判+单调收敛吸收）。
 - **结果态**：全部块装得下=`state:"ok"`；预算尽=`state:"truncated"`（被截块记 `truncatedAt` 块内码位、其后块省略计数）——**预算尽时恒 truncated、永不因预算 oversized**。`argsPreview` 限 512 **编码后字节**（截断置 argsTruncated:true，计入同一预算）。
-- `truncatedAt` 在块级；顶层 `rawBytes`（原行字节数，口径见 §4.5）+`totalBlockCount`（可见块总口径）——UI 可显示「已截断·原文 X KB·Y 块」。截断只影响展示不影响身份（digest 仍对全行）。
-- **行硬读限=1 MiB（产品取值）**：readLineAt 读窗超此=4414 reason=oversized，不重读。（依据=本机 session 行长预算+帧上限同量级；>1MiB 行多为内嵌 base64 附件，展开本就只回 attachmentId。）**oversized 仅此一因**（读级失败；「索引换代」归 stale/index-evicted——P3-N4 裁决）。
+- `truncatedAt` 在块级，口径声明：与既有 `SESSION_PREVIEW_LIMIT` 同为 UTF-16 代码单元切位（非 Unicode 码位——两口径一致，代理对不切断由安全预截保证）；顶层 `rawBytes`（原行字节数，口径见 §4.5）+`totalBlockCount`（可见块总口径）——**rawBytes 仅 ok 态携带；truncated 帧线上不携带 rawBytes 字段**（wire 级缺席，P2-N1' 裁决），UI 文案「已截断·可见 X KB / Y 块」不展示原文规模。截断只影响展示不影响身份（digest 仍对全行）。
+- **行硬读限=1 MiB（产品取值）**：readLineAt 读窗超此=4414 reason=oversized，不重读。（依据=本机 session 行长预算——与单帧硬顶 262_144B 为 4× 量级关系、与入站 transportMaxPayloadBytes 同数值但互不借用，均为独立产品取值；>1MiB 行多为内嵌 base64 附件，展开本就只回 attachmentId。）**oversized 仅此一因+末块切空仍超一因**（读级/装帧级失败；「索引换代」归 stale/index-evicted——P3-N4 裁决）。
 - **单帧量级解耦（表述修正）**：entry 帧终判后 ≤32_768B，单帧量级不构成 ConnectionQueue 压力；但 entry 帧与所有出站帧同经队列（ws-gateway.ts:1426-1432），积压溢出时任何帧类（含 entry）都可能被 4431 关连接裁掉——与帧类无关，属连接级背压。
 
 **4.1c digest 与 ts**
@@ -93,7 +94,7 @@
 ### 4.3 错误码与在途路由
 
 - **新码 4414**（entry-get 请求级专用；不复用 4409——既有语义绑定 pending.kind 路由+流通局 resync（subscribe-client.ts:958-975）；不复用 4413——语义为会话身份损坏）。
-- **同步面清单（P3-N13 统一编号，共 7 行）**：①contracts.ts:55 ErrorCode 联合；②error 帧**形状加 `reason?:` 字段**（六值枚举 stale/unknown-entry/oversized/index-evicted/not-subscribed/in-flight，contracts.ts:320 形状区）；③docs/ws-ui-contracts-v1.md 错误矩阵（码+reason+retryable 档位）；④subscribe-client.ts:164 KNOWN_ERROR_CODES；⑤ws-client.ts:83 闭码表；⑥write-client.ts:148 闭码表；⑦subscribe-client.ts:504-516 errorTextFor 文案映射。**另两处收编面（P3-N6，非码表但漏挂=帧被静默丢）**：⑧contracts.ts:372 validateClientFrame+ClientFrame 联合（entry-get 请求不过此门恒 4404）；⑨contracts.ts:313-325 ServerFrame 联合+subscribe-client.ts:765/822-824 客户端帧分派 switch（漏挂 case "entry" → entry 帧落 default 安全忽略 → 前端只走 10s 超时不报错）。**漏任一处=parseError/分派静默丢弃 UI 永挂**——§5 断言钉死①-⑦全含 4414、⑧⑨收编 entry/entry-get。
+- **同步面清单（P3-N13 统一编号，共 7 行）**：①contracts.ts:55 ErrorCode 联合；②error 帧**形状加 `reason?:` 字段**（六值枚举 stale/unknown-entry/oversized/index-evicted/not-subscribed/in-flight，contracts.ts:320 形状区）；③docs/ws-ui-contracts-v1.md 错误矩阵（码+reason+retryable 档位）**含 :331 entry 帧行 shape 补行（P3-e 裁决）**；④subscribe-client.ts:164 KNOWN_ERROR_CODES；⑤ws-client.ts:83 闭码表；⑥write-client.ts:148 闭码表；⑦subscribe-client.ts:504-516 errorTextFor 文案映射。**另两处收编面（P3-N6，非码表但漏挂=帧被静默丢）**：⑧contracts.ts:372 validateClientFrame+ClientFrame 联合（entry-get 请求不过此门恒 4404）+**ServerFrame 联合 :313-325 entry 帧变体**；⑨subscribe-client.ts:765/822-824 客户端帧分派 switch（漏挂 case "entry" → entry 帧落 default 安全忽略 → 前端只走 10s 超时不报错）。**漏任一处=parseError/分派静默丢弃 UI 永挂**——§5 断言钉死①-⑦全含 4414、⑧⑨收编 entry/entry-get。
 - **retryable 按 reason 分档**：stale/in-flight=true（瞬态可重试）；unknown-entry/not-subscribed/oversized/index-evicted=false。
 - **网关新出口 `entryErrFrame`**：enqueue error 帧（code:4414, reason, retryable, requestId）——**不入 errFrame**（后者签名仅 4401|4402|4403|4404|4405 且 4404 无条件计数 3→close 1002，ws-gateway.ts:572-580）；不计数、不绑订阅、不 close。
 - **在途门分流**：通用在途门在 dispatch 之前（ws-gateway.ts:392-397）——门内**按 frame.t 分流**：`t==="entry-get"` 的重复 requestId/超限（第 5 个）→entryErrFrame(4414, reason=in-flight)，不走 4404 出口；其余帧类维持既有 4404 出口。未订阅 file 上 entry-get→4414 reason=not-subscribed。entry 族错误**永不过 4404 计数器**。
@@ -102,9 +103,9 @@
 
 ### 4.4 事件面最小增量+渲染（K3 前端批）
 
-- 历史 `message` 事件补 `hasThinking`（仅门开且 thinkingCount>0 时置 true）+`blockCount`（可见块数）（取自 stats，session-projection.ts:268-288 增两字段；快照/续页同源）。
+- 历史 `message` 事件补 `hasThinking`（仅门开且 thinkingCount>0 时置 true）+`blockCount`（可见块数）（取自 stats，事件推送点 session-projection.ts:274-281/:285-289；快照/续页同源）。
 - **展开按钮触发口径（P3-N8 裁决）**：`hasThinking || blockCount>0 || textPreview?.truncated`（三条件其一即显示）——toolCall-only/attachment-only 条目（无 textPreview）也有展开入口。
-- HistoryRow 预览行尾「展开」按钮→entry-get→展开态渲染 blocks（thinking 折叠区默认关，门开时才有 thinking 块）；toolCall 行显示 toolName+argsPreview；truncated 态显示「已截断·原文 X KB·Y 块」+不可再放大。
+- HistoryRow 预览行尾「展开」按钮→entry-get→展开态渲染 blocks（thinking 折叠区默认关，门开时才有 thinking 块）；toolCall 行显示 toolName+argsPreview；truncated 态文案=「**已截断·可见 X KB / Y 块**」（P2-N1'：不展示 rawBytes=原文规模——truncated 帧线上根本不携带该字段）+不可再放大；ok 态可展示 rawBytes（行无截断，规模无泄露面）。
 - **展开缓存失效（P3-N7 裁决）**：展开态缓存按 `(streamId, entryId)` 键控；handleStreamTerminal/换流（与 entryRequests 清理同址）一并清展开缓存——session 文件改写（换流/重扫）后不残留旧全文。
 
 ### 4.5 安全面
@@ -113,21 +114,21 @@
 
 - **单一真值源**：服务端 config `thinkingVisible: boolean`（默认 false）。现状：该 opt 仅存在于 live-aggregator.ts（:25 接口/:116 字段/:129 缺省 false/:165/:173 门控点），唯一构造点（:105）不传 opts=直播面今天也吃默认关；D4 把它升格为**服务级 config**，三面同源：
   - **直播面**：composition 构造 LiveAggregator 时传同一 config 值（今日不传=默认 false，行为等价，接线为新增）。
-  - **扫描面**：`SessionProjectionInput`（session-projection.ts:40-46）增可选字段 `thinkingVisible?: boolean`（默认 false；**声明为协议包内部输入契约变更**——加字段，现有调用者不传=行为不变）。`hasThinking` **唯一产生位=扫描面**（=thinkingVisible && thinkingCount>0）；`stats.thinkingCount` 内部计数恒算，外发字段受门控。
+  - **扫描面**：`SessionProjectionInput`（session-projection.ts:40-46）增可选字段 `thinkingVisible?: boolean`（默认 false；**声明为协议包内部输入契约变更**——加字段，现有调用者不传=行为不变）。**连线点（P3-d 点名）：唯一生产调用点=dual-history-source.ts:119 `sessionToScanRows({ sessionText, enqueues, consumed })`——加字段后由该点从调用方 opts/config 传入**。`hasThinking` **唯一产生位=扫描面**（=thinkingVisible && thinkingCount>0，事件推送点 session-projection.ts:274-281（message 本体）/:285-289（toolCall 子事件），P3-f 精锚）；`stats.thinkingCount` 内部计数恒算，外发字段受门控。
   - **entry 面**：网关 entry 读路径把同一 config 值传入 entryBlocksOf 投影（门关=不产 thinking 块）。
 - 门关时：entry 帧无 thinking 块、事件不置 hasThinking、blockCount/totalBlockCount 按可见块口径（thinking 不计数）→**零行为变更真成立**（存在性不泄露，见下）。
 
 **4.5b 其余安全面**
 
 - **姿态继承**：D1 冻结「只透 assistant 正文（system 不外泄）；thinking 缺省不透（opts 开关）」（contracts.ts:181-182）。协议默认关+部署默认也关（config opt-in）；REQ 落决策行。system 条目索引登记时跳过（请求已登记 system entryId=4414 unknown-entry）。
-- **rawBytes 口径（P3-N9 裁决）**：rawBytes/digest 均对**全行**（含隐藏 thinking）计算——属弱推断面（truncated 态可由「可见≪原文」反推隐藏段规模，读不出内容）。口径声明：truncated 态 UI 文案只显示可见块字节与总块数，**不显示 rawBytes**（rawBytes 仅 ok 态展示——ok 态行内无截断，规模泄露无意义）；digest 已禁渲染缓存键。
+- **rawBytes 口径（P3-N9/P2-N1' 裁决）**：rawBytes/digest 均对**全行**（含隐藏 thinking）计算——属弱推断面（可见≪原文可反推隐藏段规模）。**口径钉死：rawBytes 仅 ok 态携带与展示（ok 态行无截断，规模泄露无意义）；truncated 帧线上不携带 rawBytes 字段（wire 级缺席），UI 文案只显示可见块字节与总块数**；digest 已禁渲染缓存键。
 - 权限：entry-get 校验=与 subscribe 同面（token+file 订阅权）。
 - **净化（两路）**：①argsPreview 在 JSON.stringify(arguments) 前按键走结构化 denylist：键名（含嵌套）匹配 `token|secret|password|passwd|key|authorization|cookie|credential`（不区分大小写）→值替换 `[redacted]`；②toolResult 正文=纯文本无键名→只 sanitizeText+展开区常驻风险提示头部。
 - 审计：entry-get 不写 journal、不触 writerEpoch（纯读面）；审计行 `entry-get file=… id=… state=ok|truncated|err:4414/<reason>`。
 
 ## 5. 测试计划
 
-- W-d4-s*（单测·读面）：readLineAt 三判据（行首/行尾/raw 不含 \n 各正反例——判据③含 \n 变体必红）；索引登记/首见为准/触顶（index.overBudget→index-evicted 可达性：旧 entryId 迟到请求 vs 未登记→unknown-entry 二态可辨）；system/corrupt/unknown 排除；**thinking 门控两态**（门关⇒entry 帧无 thinking 块+事件不置 hasThinking+blockCount 可见口径+rawBytes 不外显（truncated 态）；门开⇒帧含 thinking 块）；denylist（嵌套键+大小写+toolResult 纯文本路）；ts 回退 null；stats 计数同源；**两段式预算**（ok/预算尽恒 truncated/中文多块有内容/**终判实测上界：含 50% 换行与控制字符恶意行终判后仍 ≤32_768B**/argsPreview 512 编码后字节）；**行硬读限 >1MiB→4414 oversized**；**成功帧无 oversized 态**。
+- W-d4-s*（单测·读面）：readLineAt 三判据（行首/行尾/raw 不含 \n 各正反例——判据③含 \n 变体必红）；索引登记/首见为准/触顶（index.overBudget→index-evicted 可达性：旧 entryId 迟到请求 vs 未登记→unknown-entry 二态可辨）；system/corrupt/unknown 排除；**thinking 门控两态**（门关⇒entry 帧无 thinking 块+事件不置 hasThinking+blockCount 可见口径；门开⇒帧含 thinking 块）；denylist（嵌套键+大小写+toolResult 纯文本路）；ts 回退 null；stats 计数同源；**两段式预算**（ok/预算尽恒 truncated/中文多块有内容/**终判实测上界：含 50% 换行与控制字符恶意行终判后仍 ≤32_768B**/argsPreview 512 编码后字节/**末块切空仍超→4414 oversized 基例**）；**行硬读限 >1MiB→4414 oversized**；**成功帧无 oversized 态**；**truncated 帧线上无 rawBytes 字段断言**。
 - W-d4-g*（网关）：帧形状/权限/not-subscribed/在途分流（entry-get 第 5 个+重复=4414，余帧类 4404 不变）/entry 错误×5 不断连/streamId 锚/源可辨/**①-⑦ 同含 4414 断言+⑧⑨ 收编断言**。
 - W-d4-c*（客户端）：keyed map 独立槽（订阅 init 在飞时 entry-get 不覆盖 pending）；同 entryId 合流；**在飞上限 2（超限排队/复位）**；10s 超时+按钮复位；迟到 4414/entry 帧静默丢；终局/resync 瞬间清 entryRequests+**展开缓存**（不残留）；**展开按钮三条件触发**（toolCall-only 条目有入口）。
 - E2E（E-d4-1）：FakeRpcHost 落长文+thinking+toolCall 条目→订阅→entry.get→断言两态+blocks 同形；直播-历史交错（同 entryId 不双显）。
@@ -136,7 +137,7 @@
 ## 6. 事实核验附录（2026-10-10；正文即真值；v5 勘误=v4 报 P3-N12 四处已回灌）
 
 - message 行=`{id, message:{content, role, sections, timestamp, toolsAdded}, parentId, timestamp, type:"message"}`。toolCall 块=`{type, id, name, arguments:dict}`。thinking 块=`{type, thinking, thinkingSignature}`。行型全集：message/custom/custom_message/model_change/session/thinking_level_change。
-- 关键行号索引（v5 全部重核）：contracts.ts:10 envelopeOverheadBytes=256/:14 frameMaxBytes=262_144/:16 transportMaxPayloadBytes=1_048_576/:18 pageFrameBudgetBytes=200_000/:19 singleEventBytes=32_768/:21 connQueueBytes=1_048_576（:22=socketBufferedBytes=4_194_304 非 1MiB 族）/:25 inFlightRequestsPerConn=4/:55 ErrorCode/:181-182 D1 冻结/:187 message-final/:313-325 ServerFrame 联合/:320 error 形状/:342-344 estimateFrameBytes/:348 回退常数/:372 validateClientFrame；session-projection.ts:7/:19 ts 声明位/:31/:40-46 SessionProjectionInput/:74/:95-107 blocksOf/:104/:105/:114/:137/:176/:195 撕裂注释/:225-229 扫描期 complete/:243 offset 累加/:256/:266/:270-276/:274-291；history-projection.ts:6 ts 声明位/:15 journal 预览限；read-index.ts:41-43/:49/:69-73 append/:72/:113/:124 注释/:125 overBudget getter/:147/:164-169；subscription-engine.ts:217 粗筛/:234-245 终判；safe-open.ts:107/:111-115；history-source.ts:73-90；live-aggregator.ts:25/:105 构造点/:116/:129/:165/:173；ws-gateway.ts:347/:392-397 在途门/:572-580 errFrame/:812,853,921 append/:814,841,855,916,930,1223 overBudget 关订阅/:851 replace 重建/:1426-1432 enqueue；subscribe-client.ts:164/:361/:504-516/:519-523/:765 分派 switch/:798-815/:822-824 default 安全忽略/:839-840/:841-854/:958-975/:989/:1000-1005；ws-client.ts:83；write-client.ts:148；dual-history-source.ts:155-161。
+- 关键行号索引（v5.1 全部重核；subscription-engine 终判环精锚=228-250：信封测量段 :234-245、退末条 :246-249、首条超=显式失败 :241-245）：contracts.ts:10 envelopeOverheadBytes=256/:14 frameMaxBytes=262_144/:16 transportMaxPayloadBytes=1_048_576/:18 pageFrameBudgetBytes=200_000/:19 singleEventBytes=32_768/:21 connQueueBytes=1_048_576（:22=socketBufferedBytes=4_194_304 非 1MiB 族）/:25 inFlightRequestsPerConn=4/:55 ErrorCode/:181-182 D1 冻结/:187 message-final/:313-325 ServerFrame 联合/:320 error 形状/:342-344 estimateFrameBytes/:348 回退常数/:372 validateClientFrame；session-projection.ts:7/:19 ts 声明位/:31/:40-46 SessionProjectionInput/:74/:95-107 blocksOf/:104/:105/:114/:137/:176/:195 撕裂注释/:225-229 扫描期 complete/:243 offset 累加/:256/:266/:270-276/:274-281 message 事件推送/:285-289 toolCall 子事件；history-projection.ts:6 ts 声明位/:15 journal 预览限；read-index.ts:41-43/:49/:69-73 append/:72/:113/:124 注释/:125 overBudget getter/:147/:164-169；subscription-engine.ts:217 粗筛/:228-250 终判环/:241-245 首条超显式失败/:246-249 退末条；projection-frames.ts:26/:31 快照帧粗估+首条必装失败先例；safe-open.ts:107/:111-115；history-source.ts:73-90；dual-history-source.ts:119 sessionToScanRows 唯一生产调用点/:155-161；live-aggregator.ts:25/:105 构造点/:116/:129/:165/:173；ws-gateway.ts:347/:392-397 在途门/:572-580 errFrame/:812,853,921 append/:814,841,855,916,930,1223 overBudget 关订阅/:851 replace 重建/:1426-1432 enqueue；subscribe-client.ts:164/:361/:504-516/:519-523/:765 分派 switch/:798-815/:822-824 default 安全忽略/:839-840/:841-854/:958-975/:989/:1000-1005；ws-client.ts:83；write-client.ts:148。
 
 ## 7. 开放问题（v5 全收敛）
 
@@ -146,3 +147,5 @@
 4. ~~ts~~ 随本批+不对称契约+fixture 清点（§4.1c）。
 5. ~~thinking 姿态~~ 与 thinkingVisible 同开关、三面同源单一真值源、双默认关、存在性不泄露（§4.5a）。
 6. ~~预算字节口径~~（v5 新收敛）两段式：粗估快筛+终判整帧实测+单调收敛（§4.1b）。
+7. ~~rawBytes 展示面~~（v5.1 新收敛）仅 ok 态携带与展示；truncated 帧线上不携带（§4.1b/§4.4/§4.5b）。
+8. ~~收敛基例~~（v5.1 新收敛）末块切空仍超=4414 oversized 显式失败（照抄 :241-245/projection-frames.ts:31 先例；§4.1b）。
