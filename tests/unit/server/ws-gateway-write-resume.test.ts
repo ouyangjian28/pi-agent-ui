@@ -8,10 +8,10 @@
 //  W-res-6  intentId ∉ resendAuthorized→resume-not-authorized
 //  W-res-7  generation 不匹配→generation-mismatch
 //  W-res-8  全过→execution-pending（r3b 执行面占位）+write-resume-ack 帧结构+requestId 槽归还
-//  W-res-9  零副作用：全部 identity-rejected 路径 sessionFor 从未被调
-//  W-res-10 prompt.generation 旧代→identity-rejected{generation-mismatch}（write-ack 面）；
-//           缺省 generation→放行（v1 兼容）；无活进程（generationFor→null）→放行
+//  W-res-9  无活进程（generationFor→null）→放行（无冒充对象）
+//  W-res-10 prompt.generation：旧代→identity-rejected（write-ack 面）+零副作用；缺省→放行（v1 兼容）；无活进程→放行
 //  W-res-11 authority.reportFor 抛错→stripped（write-host-internal: resume）→网关 4402
+//  W-res-12 prompt.generation+无权威源→no-recovery-data（K3 审 P2-1 fail-closed；零副作用）
 import { describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -117,6 +117,10 @@ describe("P0-2 r3a 帧身份门：resume/prompt.generation", () => {
       await c2.say({ t: "resume", requestId: "r4", file: r.inFile, intentId: "i-auth", generation: 3.5 }); // 非整数
       await c2.say({ t: "resume", requestId: "r5", file: r.inFile, intentId: "i-auth", generation: 3, extra: 1 }); // 多余字段
       expect(errs(c2).filter((f) => f.code === 4404).length).toBe(2);
+      const c3 = await authed(r);
+      await c3.say({ t: "resume", requestId: "r6", file: r.inFile, intentId: "i-x\noutcome=execution-pending", generation: 3 }); // K3 审 P2-2：审计注入形（换行）
+      await c3.say({ t: "resume", requestId: "r7", file: r.inFile, intentId: "", generation: 3 }); // 空串
+      expect(errs(c3).filter((f) => f.code === 4404).length).toBe(2);
       expect(r.session.sends.length).toBe(0);
     } finally { await r.dispose(); }
   });
@@ -269,5 +273,34 @@ describe("P0-2 r3a 帧身份门：resume/prompt.generation", () => {
       expect(r.audits.some((l) => l.includes("write-host-error op=resume"))).toBe(true);
       expect(resumeAck(c)).toBeUndefined();
     } finally { await r.dispose(); }
+  });
+
+  it("W-res-12 prompt.generation+无权威源→no-recovery-data（fail-closed；零副作用）", async () => {
+    const d = await mkdtemp(join(tmpdir(), "ws-resume-pna-"));
+    const audits: string[] = [];
+    const session = new RecordingSession();
+    let created = 0;
+    const writeHost = createRpcWriteHost({ sessionFor: () => { created += 1; return session; }, audit: (l) => { audits.push(l); } }); // 无 resumeAuthority
+    const gw = new WsGateway({
+      tokens: TokenAuthority.fromTokens(["tok-ok"]), roots: [d], scanDir: d,
+      allowedOrigins: ["http://localhost:5173"], heartbeat: { pingMs: 0, idleMs: 0 },
+      audit: (l) => { audits.push(l); }, writeHost,
+    });
+    try {
+      const c = new FakeConn();
+      gw.attach(c, c.hooks(), { origin: "http://localhost:5173", loopback: true, tls: false } satisfies ConnMeta);
+      await c.say({ t: "hello", protocolVersion: 1, token: "tok-ok" });
+      await c.say({ t: "prompt", requestId: "r1", file: "s1.jsonl", text: "hi", generation: 2 });
+      const ack = c.sent.map((s) => JSON.parse(s) as Record<string, unknown>).find((f) => f["t"] === "write-ack");
+      expect(ack?.["outcome"]).toEqual({ kind: "identity-rejected", cause: "no-recovery-data" });
+      expect(session.sends.length).toBe(0);
+      expect(created).toBe(0); // 零副作用：fail-closed 拒在 sessionFor 之前
+      expect(audits.some((l) => l.includes("op=prompt") && l.includes("cause=no-recovery-data") && l.includes("source=absent"))).toBe(true);
+      // v1 兼容面不受影响：缺省 generation 照常放行（无权威源≠写面关闭）
+      await c.say({ t: "prompt", requestId: "r2", file: "s1.jsonl", text: "hi2" });
+      const ack2 = c.sent.map((s) => JSON.parse(s) as Record<string, unknown>).filter((f) => f["t"] === "write-ack").pop();
+      expect(ack2?.["outcome"]).not.toEqual({ kind: "identity-rejected", cause: "no-recovery-data" });
+      expect(session.sends.length).toBe(1);
+    } finally { gw.dispose(); await rm(d, { recursive: true, force: true }); }
   });
 });

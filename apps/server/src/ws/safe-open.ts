@@ -7,7 +7,7 @@
 //   常规文件不受 O_NONBLOCK 影响（Linux 忽略；win32 无此旗标则跳过）。
 // 前提声明（文档级）：祖先目录不可被非信任方替换（部署前提：roots 归宿主管理；Node 无 openat 链，逐级 dirfd 不可移植）。
 import { open, constants } from "node:fs/promises";
-import { isAbsolute, normalize, resolve, sep } from "node:path";
+import { isAbsolute, normalize, relative, resolve, sep } from "node:path";
 
 export type SafeOpenErrorKind =
   | "outside-roots" // 不在任何授权根内（含越界遍历/分隔边界绕过）
@@ -31,6 +31,18 @@ export function resolveWithinRoots(file: string, roots: readonly string[]): stri
     const abs = resolve(normalize(root), file); // file 相对 root 解析（file 归一化由正则+sep 检查兜底）
     const nr = normalize(root) + sep;
     if (abs === normalize(root) || abs.startsWith(nr)) return abs;
+  }
+  return null;
+}
+
+/** resolveWithinRoots 反函数（P0-2 r3a P1 修复/K3 审）：journal 绝对路径→首个匹配根下的逻辑名。
+ * 无匹配返回 null（调用方 fail-open 原样透传——归一失败不制造拒因，键面仍由 provider 侧现有约束兜底）。 */
+export function logicalNameWithinRoots(abs: string, roots: readonly string[]): string | null {
+  if (!isAbsolute(abs) || !roots.every(isAbsolute)) return null;
+  for (const root of roots) {
+    const nr = normalize(root);
+    if (abs === nr) return ".";
+    if (abs.startsWith(nr + sep)) return relative(nr, abs);
   }
   return null;
 }

@@ -41,6 +41,9 @@ export const LIMITS = {
   maxEventsPerLiveFrame: 7,   // 7×32k=229,376B + 信封预留 256B < 262,144B（C5-03：严格小于且留信封余量；旧值 8×32k=262,144 恰等上限不严格）
   filePattern: /^[\w.-]{1,114}\.jsonl$/,
   requestIdPattern: /^[\w-]{1,64}$/,
+  /** resume.intentId 形态（r3a P2-2/K3 审）：真实形态=i-<十进制>（rpc-session intentSeq）；
+   *  \w 集禁换行/引号/空格——审计行拼接面防注入，对齐 requestId 风格。 */
+  intentIdPattern: /^[\w-]{1,64}$/,
   idPattern: /^[\w:.-]{1,128}$/,
   toolNamePattern: /^[\w:.-]{1,64}$/,
   titleLimit: 80,
@@ -442,9 +445,9 @@ export const WRITE_OPEN_FRAME_TYPES: readonly string[] = ["prompt", "stop", "res
 export const WRITE_TEXT_MAX_BYTES = 65_536;
 
 export type WriteClientFrame =
-  | { readonly t: "prompt"; readonly requestId: string; readonly file: string; readonly text: string; readonly generation?: number } // v1.1 帧身份：可选进程代次（提供则网关校验活代匹配——v1 客户端缺省跳过）
+  | { readonly t: "prompt"; readonly requestId: string; readonly file: string; readonly text: string; readonly generation?: number } // v1.1 帧身份：可选进程代次（提供则宿主身份门校验活代匹配——v1 客户端缺省跳过）
   | { readonly t: "stop"; readonly requestId: string; readonly file: string }
-  | { readonly t: "resume"; readonly requestId: string; readonly file: string; readonly intentId: string; readonly generation: number }; // v1.1：恢复意图重发（身份门：授权/阻断/代次三校验）
+  | { readonly t: "resume"; readonly requestId: string; readonly file: string; readonly intentId: string; readonly generation: number }; // v1.1：恢复意图重发（身份门四校验：恢复数据在场/未阻断/授权/代次）
 
 export type WriteFrameCheck =
   | { readonly ok: true; readonly frame: WriteClientFrame }
@@ -481,7 +484,7 @@ export function validateWriteFrame(raw: unknown): WriteFrameCheck {
     const rid = ridWrite(obj); if (typeof rid !== "string") return rid;
     const file = fileWrite(obj); if (typeof file !== "string") return file;
     const intentId = obj["intentId"];
-    if (typeof intentId !== "string" || intentId.length === 0 || intentId.length > 256) return badWrite(4404, "intentId 非法");
+    if (typeof intentId !== "string" || !LIMITS.intentIdPattern.test(intentId)) return badWrite(4404, "intentId 非法");
     const g = obj["generation"];
     if (typeof g !== "number" || !Number.isSafeInteger(g) || g < 0) return badWrite(4404, "generation 非法");
     return okFrame({ t: "resume", requestId: rid, file, intentId, generation: g });
@@ -523,7 +526,7 @@ export type WriteSendOutcomeDTO =
   | { readonly kind: "invalidated"; readonly stage: "enqueue" | "sending" | "post-send" | "first-byte" }
   | { readonly kind: "no-process" }
   | { readonly kind: "not-ready"; readonly cause?: string }
-  | { readonly kind: "identity-rejected"; readonly cause: "generation-mismatch" }; // v1.1：prompt 携旧代次→恒拒（零副作用）
+  | { readonly kind: "identity-rejected"; readonly cause: "no-recovery-data" | "generation-mismatch" }; // v1.1：prompt 携代次断言→无权威源/旧代恒拒（零副作用；K3 审 P2-1 fail-closed）
 
 /** v1.1 写侧身份拒细节（identity-rejected.cause）。 */
 export type WriteIdentityRejectCause =

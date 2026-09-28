@@ -27,9 +27,9 @@ export interface RpcWriteHostOpts {
   sessionFor(file: string): RpcLikeSession | Promise<RpcLikeSession>;
   /** 宿主审计（内部异常/gate-failed 细节唯一出口；格式化与回调异常均被隔离）。 */
   audit?(line: string): void;
-  /** v1.1 帧身份权威源（r3a）：resume/prompt-generation 身份门数据。缺省=恒 no-recovery-data
-   *  （resume 面 fail-closed；prompt.generation 缺省不受影响，提供则恒拒 generation-mismatch——
-   *  无权威源时不放行任何代次断言）。 */
+  /** v1.1 帧身份权威源（r3a）：resume/prompt-generation 身份门数据。缺省=恒拒（fail-closed）
+   * ——resume 面恒 no-recovery-data；prompt.generation 缺省不受影响，提供则拒（无权威源→
+   * no-recovery-data；有权威源旧代→generation-mismatch；K3 审 P2-1 口径）。 */
   resumeAuthority?: ResumeAuthority;
 }
 
@@ -115,7 +115,13 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
       try {
         // v1.1 帧身份门（prompt 面）：客户端携带代次≠当前活代→恒拒（零副作用：不触 sessionFor/send）
         if (generation !== undefined) {
-          const live = opts.resumeAuthority?.generationFor(file) ?? null;
+          // K3 审 P2-1：无权威源=身份断言不可验证→fail-closed（对齐端口注释承诺；v1 缺省 generation 不受影响）。
+          const auth0 = opts.resumeAuthority;
+          if (auth0 === undefined) {
+            auditSafe(() => `write-identity-reject op=prompt file=${file} cause=no-recovery-data source=absent`);
+            return { kind: "identity-rejected", cause: "no-recovery-data" };
+          }
+          const live = auth0.generationFor(file);
           if (live !== null && live !== generation) {
             auditSafe(() => `write-identity-reject op=prompt file=${file} cause=generation-mismatch frame=${generation} live=${live}`);
             return { kind: "identity-rejected", cause: "generation-mismatch" };
@@ -165,7 +171,13 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
         auditSafe(() => `write-resume file=${file} intentId=${intentId} outcome=identity-rejected cause=resume-not-authorized`);
         return { kind: "identity-rejected", cause: "resume-not-authorized" };
       }
-      const live = authority.generationFor(file);
+      let live: number | null;
+      try {
+        live = authority.generationFor(file);
+      } catch (e: unknown) {
+        auditSafe(() => `write-host-error op=resume file=${file} ${errText(e)}`);
+        throw stripped("resume"); // K3 审 P3：generationFor 与 reportFor 同 stripped 口径（宿主两层契约一致）
+      }
       if (live !== null && live !== generation) {
         auditSafe(() => `write-resume file=${file} intentId=${intentId} outcome=identity-rejected cause=generation-mismatch frame=${generation} live=${live}`);
         return { kind: "identity-rejected", cause: "generation-mismatch" };

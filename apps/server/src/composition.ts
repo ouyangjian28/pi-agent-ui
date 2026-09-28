@@ -17,14 +17,14 @@ import { TokenAuthority } from "./ws/token-auth.ts";
 import { WsGateway } from "./ws/ws-gateway.ts";
 import { ComputeSemaphore } from "./ws/compute-semaphore.ts";
 import { DualHistorySource } from "./runtime/dual-history-source.ts";
-import { createRecoveryEvidenceProvider, isRecoverySnapshot } from "./runtime/recovery-evidence-source.ts";
+import { createRecoveryEvidenceProvider, isRecoverySnapshot, type RecoveryEvidenceResult } from "./runtime/recovery-evidence-source.ts";
 import { recoverFromSnapshot } from "./runtime/recover.ts";
 import { createSessionRegistry, type SessionRegistry } from "./runtime/session-registry.ts";
 import { createGuardedJournalWriterFactory } from "./runtime/guarded-journal-writer.ts";
 import { randomUUID } from "node:crypto";
 import { PiProcessHost } from "./host/process-host.ts";
-import { createRpcWriteHost } from "./ws/rpc-write-host.ts";
-import { resolveWithinRoots } from "./ws/safe-open.ts";
+import { createRpcWriteHost, type ResumeAuthority } from "./ws/rpc-write-host.ts";
+import { logicalNameWithinRoots, resolveWithinRoots } from "./ws/safe-open.ts";
 import type { WriteHostPort } from "./ws/write-host.ts";
 import { createStaticHandler } from "./ws/static-serve.ts";
 import { createLoginRoute, newSessionSecret } from "./http/login-route.ts";
@@ -128,6 +128,28 @@ function requireAbsPaths(name: string, paths: readonly string[]): readonly strin
 }
 
 /** 启动生产服务（fail-closed：任何配置/环境错误=抛错，不启动）。 */
+/** resumeAuthority 真源工厂（P0-2 r3a P1 修复/K3 审，导出供装配层测试）。
+* 键口径：reportFor 入参=网关传来的 journal 绝对路径→归一为逻辑名再喂 provider（与 get-recovery
+* 同键；seen-store/锚点持久键单一宇宙，B13-2 一致性）；generationFor 入参=绝对路径直查 registry
+* （write 面口径——sendPrompt/stop/sessionFor 链全是绝对路径键）。 */
+export function makeResumeAuthority(deps: {
+  roots: readonly string[];
+  provider: (file: string, signal: AbortSignal) => Promise<RecoveryEvidenceResult | null>;
+  registry: { statusFor(file: string): { process: { generation: number | null } } };
+}): ResumeAuthority {
+  const { roots, provider, registry } = deps;
+  return {
+    reportFor: async (file: string) => {
+      const logical = logicalNameWithinRoots(file, roots) ?? file;
+      const snap = await provider(logical, new AbortController().signal); // r3a：身份门读取（无用户取消面——进程内即答；provider 预算保护同源）
+      if (snap === null || !isRecoverySnapshot(snap)) return null;
+      const r = recoverFromSnapshot(snap);
+      return { resendAuthorized: [...r.resendAuthorized], resumeBlocked: r.resumeBlocked };
+    },
+    generationFor: (file: string) => registry.statusFor(file).process.generation,
+  };
+}
+
 export async function startServer(config: ServerConfig): Promise<PiAgentUiServer> {
   if (config.allowedOrigins.length === 0) throw new Error("allowedOrigins 为空：拒绝启动（空白名单=配置错误）");
   for (const o of config.allowedOrigins) {
@@ -225,15 +247,7 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
       writeHost: createRpcWriteHost({
         sessionFor: (file: string) => registry!.sessionFor(file),
         audit,
-        resumeAuthority: {
-          reportFor: async (file: string) => {
-            const snap = await recoveryEvidence(file, new AbortController().signal); // r3a：身份门读取（无用户取消面——进程内即答；provider 预算保护同源）
-            if (snap === null || !isRecoverySnapshot(snap)) return null;
-            const r = recoverFromSnapshot(snap);
-            return { resendAuthorized: [...r.resendAuthorized], resumeBlocked: r.resumeBlocked };
-          },
-          generationFor: (file: string) => registry!.statusFor(file).process.generation,
-        },
+        resumeAuthority: makeResumeAuthority({ roots: config.roots, provider: recoveryEvidence, registry: { statusFor: (f: string) => registry!.statusFor(f) } }),
       }),
     } : {}),
     audit,
