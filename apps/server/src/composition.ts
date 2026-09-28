@@ -20,7 +20,7 @@ import { DualHistorySource } from "./runtime/dual-history-source.ts";
 import { createRecoveryEvidenceProvider, isRecoverySnapshot, type RecoveryEvidenceResult } from "./runtime/recovery-evidence-source.ts";
 import { recoverFromSnapshot } from "./runtime/recover.ts";
 import { createSessionRegistry, type SessionRegistry } from "./runtime/session-registry.ts";
-import { LiveAggregator, type LiveContentEvent } from "./runtime/live-aggregator.ts";
+import { LiveAggregator, type LiveContentEvent, shouldBroadcastLive } from "./runtime/live-aggregator.ts";
 import { createGuardedJournalWriterFactory } from "./runtime/guarded-journal-writer.ts";
 import { randomUUID } from "node:crypto";
 import { PiProcessHost } from "./host/process-host.ts";
@@ -258,7 +258,7 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
       // 记账行已在 enqueue 时落——非未记账）；dropped-stale-generation（旧代事件）/overflow-closed
       // （gate 溢出已弃）不广播。旧「只 delivered」门把回复期事件全滤掉了（D1-E2E 探针实证）。
       onPiEvent: (file: string, ev: unknown, _generation: number, disposition: string) => {
-        if (disposition === "dropped-stale-generation" || disposition === "overflow-closed") return;
+        if (!shouldBroadcastLive(disposition)) return;
         if (liveSink === null) return;
         // 键归一（r3a 修复批同款）：registry 面=journal 绝对路径；watchers 面=roots 相对逻辑名。
         const logical = logicalNameWithinRoots(file, config.roots) ?? file;

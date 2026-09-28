@@ -1,7 +1,7 @@
 // D1 直播面聚合器单元（设计稿 docs/d1-live-stream-design.md §6 W-d1-2..6）。
-// delivered 过滤（W-d1-1）在 composition 接线层——本文件不覆盖（变异 Mu-d1-4 在 composition 面）。
+// disposition 门（W-d1-8b）已提成 shouldBroadcastLive 纯函数——本文件覆盖。
 import { describe, expect, it } from "vitest";
-import { LiveAggregator, assistantFinalText, type LiveContentEvent } from "../../../apps/server/src/runtime/live-aggregator.ts";
+import { LiveAggregator, assistantFinalText, shouldBroadcastLive, type LiveContentEvent } from "../../../apps/server/src/runtime/live-aggregator.ts";
 
 /** 手动时钟：收集定时器，advance 触发到期回调（节流窗测试）。 */
 class ManualTimer {
@@ -44,6 +44,17 @@ describe("D1 LiveAggregator（docs/d1-live-stream-design.md）", () => {
       { kind: "message-delta", part: "thinking", contentIndex: 0, delta: "显" },
       { kind: "message-part-end", part: "thinking", contentIndex: 0 },
     ]);
+  });
+
+  it("W-d1-3d 缺省窗=80ms：schedule 延时参数=80（锁缺省值——缺省 0=每 delta 即发，节流失效）", () => {
+    const delays: number[] = [];
+    const t = new ManualTimer();
+    const a = collect();
+    const wrap = (fn: () => void, ms: number) => { delays.push(ms); return t.schedule(fn, ms); };
+    const agg = new LiveAggregator({ schedule: wrap }); // 不传 windowMs——锁缺省值
+    agg.onPiEvent({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta: "x" } }, a.sink);
+    expect(a.events).toEqual([]);  // 入窗挂起（ManualTimer 不自动跑）
+    expect(delays).toEqual([80]);  // 首窗延时=缺省 80ms（杀 Mu-d1-1：缺省 0）
   });
 
   it("W-d1-3 节流窗合并：窗内同段多 delta 一帧；窗到才发；text_end 即时 flush", () => {
@@ -131,5 +142,14 @@ describe("D1 LiveAggregator（docs/d1-live-stream-design.md）", () => {
     expect(assistantFinalText([{ type: "text", text: "a" }, { type: "thinking", thinking: "b" }, { type: "text", text: "c" }])).toBe("ac");
     expect(assistantFinalText(42)).toBeNull();
     expect(assistantFinalText([{ type: "tool_use" }])).toBe("");
+  });
+});
+
+describe("shouldBroadcastLive disposition 门", () => {
+  it("W-d1-8b buffered/delivered 放行；dropped-stale-generation/overflow-closed 拒（杀 Mu-d1-4）", () => {
+    expect(shouldBroadcastLive("delivered")).toBe(true);
+    expect(shouldBroadcastLive("buffered")).toBe(true);
+    expect(shouldBroadcastLive("dropped-stale-generation")).toBe(false);
+    expect(shouldBroadcastLive("overflow-closed")).toBe(false);
   });
 });

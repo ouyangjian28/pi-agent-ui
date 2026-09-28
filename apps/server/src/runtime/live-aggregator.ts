@@ -57,6 +57,13 @@ export function assistantFinalText(content: unknown): string | null {
   return out;
 }
 
+/** D1 disposition 门（docs/d1-live-stream-design.md §5）：buffered/delivered 均广播
+ *（buffered=response 未回绑的正常回复期，记账行已在 enqueue 时落）；dropped-stale-generation
+ *（旧代事件——新写者已接管）/overflow-closed（gate 溢出已弃）不广播。 */
+export function shouldBroadcastLive(disposition: string): boolean {
+  return disposition !== "dropped-stale-generation" && disposition !== "overflow-closed";
+}
+
 export class LiveAggregator {
   private readonly windowMs: number;
   private readonly maxChunk: number;
