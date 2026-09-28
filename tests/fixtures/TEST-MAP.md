@@ -1221,3 +1221,14 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - **P2-2（已修）**：composition 适配层 note 方向归一（原仅 opt-in E-ui-4 覆盖）与零订阅回 cancelled 分支（原零测试）两支恰为本批修复缺陷类。修复=E-ui-1b（notify→live ui-note 帧断言）+E-ui-2b（断开后新提问→无帧+stdin cancelled 恰一次+no-subscriber 审计）；顺带删 161 行恒真 until（谓词被 148 行包含=零信号）。
 - **P3 处置**：P3-1 tests/integration 已入根 tsconfig（本批文件零错；既存 33 错+tests/unit 既存 38 错=71 根段欠账**具名留观**：typecheck 根段红属既存面，非本批引入，待专项批）/P3-2 恒真断言已删/P3-4 E-ui-0 改 dispose-then-assert 干净红/P3-3 mark 切片边界+P3-5 多根同名歧义（既存面，filePattern 禁 / 无法根限名消歧）具名留观。
 - 审读人署名勘误：报告自署「GLM」有误，实际通道=deepseek-flash（存档已披露更正）。
+
+**D3-T1 E2E 审读批（DS-flash，2026-10-10，审报=projects/pi-agent-ui/audits/ds-d3t1-e2e-review-2026-10-10.md；修复批 6d49c98，全仓 1597 绿+双 tsc 零错）**
+- 审读链四通道接力史：K3 r2 派单秒死（Kimi 5h 窗尽 403）→GPT r2 两派皆死（前台探活实锤 usage limit reached）→Gemini 429 免费层 PerDay=0→**第四通道 DeepSeek 接棒**（deepseek-reasoner 128K 上下文过压流式退化猝死→deepseek-flash 1M 版+上下文经济纪律四条完成）。教训：额度耗尽诊断先前台探活再定通道；哨兵链式派单守卫必须 while 循环等而非 [ -f ] 单查。
+- 审读结果 88/100 GO 无 P1；P2-1=extraPiArgs「不得替换 --mode/--session 基底」仅注释承诺（pi 参数 last-wins 可静默换会话文件→registry 身份锚劈裂无显式报错）→修复=composition.ts 拒启门（--mode/--session/--session-id 三项 forbidden Set）+E-ui-0b 三项负向；P2-2=note 方向归一与零订阅分支无默认 CI→E-ui-1b（notify→live ui-note 帧断言 origin=live+notifyType=warning）/E-ui-2b（零订阅→cancelled 落 stdin 恰一次+无 ui-request 帧+no-subscriber 审计）；P3-4=E-ui-0 改 dispose-then-assert（门回归时不留真监听挂起）；P3-2=删恒真 until（谓词被 148 行 launched 包含，零信号）；P3-1=tests/integration 入根 tsconfig include（本批文件零错；既存 71 错=unit 38+integration 33 首入视野，具名留观待专项批）。
+- 审读人署名勘误：报告自署「GLM」有误，实际=deepseek-flash，存档附录披露。
+
+**D4 设计稿 v1 审读（DS 深审，2026-10-10，审报=projects/pi-agent-ui/audits/ds-d4-design-review-2026-10-10.md）→v2 重写（9069057）**
+- v1 74/100 NO-GO：7 P1（A 案否决理由失实——装页预算收缩已存在；决策表缺 A′/E/F；digest 双口径矛盾且客户端无对标物；entry 帧无字节预算；readBounded 无 offset 定位读基建不存在；**与 D1 冻结安全姿态冲突（thinking 默认+system 外泄）**；展开入口信号缺失）+8 P2+6 P3。
+- v2 重写裁决：digest=scanDigest 派生+客户端不比对改 streamId 锚（subscribe-client.ts:843-854）；帧三态 ok/truncated/oversized 纳入 estimateFrameBytes 实测；readLineAt 新读器+三命中判据（行首 0x0A/行尾 \n/scanDigest 身份对账——缺一=残片当正文静默错显）；thinking=同源开关默认关部署配置开+system 白名单排除（对齐 D1 冻结，不需用户重拍）；message 事件补 hasThinking/blockCount 最小摘要；索引归 ReadIndex 内部（键=(file,source,entryId) 首见为准）；4404 计数隔离（entry 错误 4409 族新号不进 close 1002 门）；denylist 净化（token/secret/password/key 等 JSON 键名→[redacted]）；blocks 只回投影同形块（不回 pi 原始 image/base64）；ts 三件（epoch ms+失败回退 null+journal 不对称契约）。
+- 审源行号核验（M-244 纪律）：三处勘误——read-index/subscription-engine 实位于 packages/protocol/src；ws-gateway append 三点=812/853/921；subscribe-client binding.streamId=843-854。
+- v2 复审已派 DS-flash（哨兵 /tmp/d4v2-done，40m schedule 兜底）。
