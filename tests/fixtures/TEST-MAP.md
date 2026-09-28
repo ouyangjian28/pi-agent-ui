@@ -1134,3 +1134,13 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 **实现期两教训**：①ws-gateway.ts 用 ComputeGateQueueTimeout 忘加 import——运行时 ReferenceError 在 catch 块内静默吞掉后续帧链（W-res-15 r2 案 frames 只剩 welcome 才暴露；vitest Unhandled Errors 有蛛丝马迹）；②git stash pop 前必须 `git stash list` 核对目标——`--quiet` 位置错致 push 失败+误 pop 出 wt/kimi-web-1 老 stash（kimi-a1b-partial）与 master 冲突 4 文件；恢复=checkout HEAD 回冲突文件（stash 条目原样保留，未污染 master）。**禁再用 stash 做局部暂存，改用明确 pathspec 的 diff/apply 或临时 commit**。
 
 **r3c 待办**（K3 审第五节建议）：①send 携带期望代次收窄 TOCTOU 窗口至零（执行点二查→send 内部代次断言）②A-4 正路径 E2E（授权 intent→真 composition launched+新 enqueue 落盘）③断连取消分层（读段复用连接 abortCtl 排队取消；send 段至少一次语义文档化）④资源面四件成表收官（合并/8MiB/跨文件闸/取消口径）。
+
+### P0-2 前端批（K3 写·GLM 审 93 GO；2026-09-28，a7439bb 合并）
+
+**范围**：write-client resume() 客户端全链路+use-write resuming 态+composer 折叠演示位（完整恢复面板=后续批）。红线=只 apps/web+tests/unit/web ✓。
+
+**要点**：resumeState={phase:"resuming",files} 集合形（file×kind 分账，跨 file 并行真实允许——服务端 per-file in-flight 同构）；isResumeOutcome 全域判别（identity-rejected 四 cause 闭集+execution-failed 仅 payload-unavailable+执行七枝委托 isSendOutcome）；4409 双口径刻意（resume=闸排队超时专用文案「计算排队超时，可重试（4409）」/prompt=写面游标过期通用文案，双测试例锁定）；isSendOutcome 补 identity-rejected 漏枝（顺手修真缺陷：contracts.ts:529 有此枝而形状门漏判→prompt 携代次被拒 ack 整帧忽略悬挂）；无客户端定时器（三途结算：ack/匹配 error/连接终局）。
+
+**口径差异注记**：generation 客户端要求正整数≥1（UI 默认 1），服务端 schema ≥0——0=代次无真实场景（从 1 起），收紧认可（GLM 审注意点③裁决）。
+
+**测试**：tests/unit/web 273→290（+17：write-client 10 例+use-write 7 例含 composer 真实链两例）；合后全仓 1490 预期。tsc web 面零命中；eslint 净。
