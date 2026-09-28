@@ -206,7 +206,7 @@ export function createRecoveryEvidenceProvider(
   opts: RecoveryEvidenceSourceOptions,
 ): (file: string, signal?: AbortSignal) => Promise<RecoveryEvidenceResult> {
   const maxBytes = opts.maxCombinedBytes ?? DEFAULT_RECOVERY_COMBINED_BYTES;
-  if (!Number.isFinite(maxBytes) || !Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > 1024 * 1024 * 1024) {
+  if (!Number.isFinite(maxBytes) || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 1024 * 1024 * 1024) {
     throw new Error(`maxCombinedBytes 非法（须有限正整数≤1GiB）：${String(maxBytes)}——拒绝创建 provider（B11-4 纵深）`);
   }
   if (!isAbsolute(opts.evidenceDir)) throw new Error("evidenceDir 非法（须绝对路径）——拒绝创建 provider");
@@ -339,7 +339,7 @@ export function createRecoveryEvidenceProvider(
           try {
             const parsed = JSON.parse(txt) as Partial<EvidenceAnchor>;
             if (parsed && parsed.version === 1 && typeof parsed.file === "string" && parsed.file === file &&
-                typeof parsed.len === "number" && Number.isInteger(parsed.len) && parsed.len >= 0 &&
+                typeof parsed.len === "number" && Number.isSafeInteger(parsed.len) && parsed.len >= 0 &&
                 typeof parsed.sha === "string" && /^[0-9a-f]{64}$/.test(parsed.sha)) {
               anchor = { version: 1, file, len: parsed.len, sha: parsed.sha };
             } else anchorCorrupt = true; // 形状非法

@@ -109,7 +109,7 @@ async function readAnchorFact(evidenceDir: string, file: string): Promise<Legacy
     };
     if (
       typeof parsed?.len === "number" &&
-      Number.isInteger(parsed.len) &&
+      Number.isSafeInteger(parsed.len) &&
       parsed.len >= 0 &&
       typeof parsed?.sha === "string" &&
       /^[0-9a-f]{64}$/.test(parsed.sha)

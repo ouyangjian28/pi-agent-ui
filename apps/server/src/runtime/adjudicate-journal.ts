@@ -92,7 +92,7 @@ async function loadAnchor(evidenceDir: string, file: string): Promise<AnchorFile
     // r4（GPT r3 B-r3-3）：严格锚 schema——与 repair-tail parseAnchor 逐项对齐（version=1+绑定
     // 当前 file+len 非负安全整数+sha 64 位小写 hex）。只验两个字段类型时非法身份锚可被新锚洗白。
     if (a !== null && typeof a === "object" && a.version === 1 && a.file === file &&
-        typeof a.len === "number" && Number.isInteger(a.len) && a.len >= 0 &&
+        typeof a.len === "number" && Number.isSafeInteger(a.len) && a.len >= 0 &&
         typeof a.sha === "string" && /^[0-9a-f]{64}$/.test(a.sha)) {
       return a;
     }
@@ -244,31 +244,36 @@ async function adjudicateWithHandle(
   const existing = lines.filter((l): l is JournalLine & { t: "adjudicate" } => l.t === "adjudicate");
   const priors = existing.filter((a) => repairKey(a.subject) === wantKey);
   if (priors.length > 0) {
-    const verdicts = new Set(priors.map((a) => a.verdict));
-    if (verdicts.size > 1) {
-      return { kind: "aborted", reason: "conflicting-verdict", detail: `该修复事务已有矛盾裁决集（${[...verdicts].join("/")}），矛盾证据不追加新裁决` };
+    // r5（GPT r4 P1-r4-2）：候选加入后组一致性二维判定先于 kind 内幂等——verdicts 含本次请求、
+    // targets 不限定请求 kind。旧形只验 priors 内部+新 kind 首行直接放行：repair abandon 在场+
+    // fragment resend 追加=写入后读面整组剔除→恢复锁死；多目标组收到 repair 请求同样落行。
+    const candVerdicts = new Set<string>([...priors.map((a) => a.verdict), opts.verdict]);
+    if (candVerdicts.size > 1) {
+      return { kind: "aborted", reason: "conflicting-verdict", detail: `候选加入后组矛盾（verdicts=${[...candVerdicts].join("/")}），终局不可翻转` };
     }
-    const targets = [...new Set(priors.map((a) => (a.subject.kind === "fragment" ? a.subject.intentId : null)).filter((t): t is IntentId => t !== null))];
-    if (subject.kind === "fragment" && targets.length > 1) {
-      return { kind: "aborted", reason: "conflicting-verdict", detail: `该修复事务已绑定多个归因目标（${targets.join("/")}），矛盾证据不追加` };
+    const candTargets = new Set<IntentId>(priors.map((a) => (a.subject.kind === "fragment" ? a.subject.intentId : null)).filter((t): t is IntentId => t !== null));
+    if (subject.kind === "fragment" && subject.intentId !== undefined) candTargets.add(subject.intentId);
+    if (candTargets.size > 1) {
+      return { kind: "aborted", reason: "conflicting-verdict", detail: `候选加入后组矛盾（归因目标=${[...candTargets].join("/")}），终局不可静默更换` };
     }
     const first = priors[0];
-    const onlyTarget = targets.length === 1 ? targets[0] : undefined;
+    const onlyTarget = candTargets.size === 1 ? [...candTargets][0] : undefined;
     if (first === undefined) return { kind: "aborted", reason: "conflicting-verdict", detail: "既有裁决集不可读（矛盾证据拒）" };
     // r4（GPT r3 B-r3-2 双证）：repair 裁决（对账）与 fragment 裁决（归因）同四元组同 verdict=合法共存
-    // （不同 subject，互不构成翻转）；幂等/终局翻转判定按 kind 分域。
+    // （不同 subject，互不构成翻转）；幂等/终局翻转判定按 kind 分域（组一致性已验，此处为 kind 内幂等面）。
     const sameKind = priors.filter((a) => a.subject.kind === subject.kind);
     const sameKindFirst = sameKind[0];
     if (sameKindFirst !== undefined) {
       if (sameKindFirst.verdict === opts.verdict && (subject.kind !== "fragment" || (onlyTarget !== undefined && onlyTarget === subject.intentId))) {
         return { kind: "idempotent", at: sameKindFirst.at };
       }
+      // 防御保留（组一致性已拦同 kind 翻 verdict/换目标；此处不可达）
       if (subject.kind === "fragment" && onlyTarget !== undefined && onlyTarget !== subject.intentId) {
         return { kind: "aborted", reason: "conflicting-verdict", detail: `该修复事务已绑定归因目标 ${onlyTarget}（终局不可静默更换）` };
       }
       return { kind: "aborted", reason: "conflicting-verdict", detail: `已裁决 ${sameKindFirst.verdict}，终局不可翻转` };
     }
-    // 该 kind 首行：跨 kind 双证追加（verdicts 已验全同，targets 已验≤1，无矛盾面）
+    // 该 kind 首行：跨 kind 双证追加（candVerdicts/candTargets 已验单一，无矛盾面）
   }
 
   // 落盘：盘面门保证无撕裂尾（sep 逻辑保留作防御）；append+sync。

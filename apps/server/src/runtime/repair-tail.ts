@@ -114,7 +114,7 @@ function parseAnchor(txt: string, file: string): AnchorFile | "corrupt" {
   try {
     const p = JSON.parse(txt) as Partial<AnchorFile>;
     if (p !== null && typeof p === "object" && p.version === 1 && p.file === file &&
-        typeof p.len === "number" && Number.isInteger(p.len) && p.len >= 0 &&
+        typeof p.len === "number" && Number.isSafeInteger(p.len) && p.len >= 0 &&
         typeof p.sha === "string" && /^[0-9a-f]{64}$/.test(p.sha)) {
       return { version: 1, file, len: p.len, sha: p.sha };
     }
@@ -135,8 +135,8 @@ async function loadMarker(evidenceDir: string, file: string): Promise<RepairMark
   try {
     const p = JSON.parse(txt) as Partial<RepairMarker>;
     if (p !== null && typeof p === "object" && p.version === 1 && p.file === file &&
-        typeof p.byteStart === "number" && Number.isInteger(p.byteStart) && p.byteStart >= 0 &&
-        typeof p.byteEnd === "number" && Number.isInteger(p.byteEnd) && p.byteEnd > p.byteStart &&
+        typeof p.byteStart === "number" && Number.isSafeInteger(p.byteStart) && p.byteStart >= 0 &&
+        typeof p.byteEnd === "number" && Number.isSafeInteger(p.byteEnd) && p.byteEnd > p.byteStart &&
         typeof p.removedSha256 === "string" && /^[0-9a-f]{64}$/.test(p.removedSha256) &&
         typeof p.startedAt === "string" && p.startedAt.length > 0) {
       return { version: 1, file, byteStart: p.byteStart, byteEnd: p.byteEnd, removedSha256: p.removedSha256, startedAt: p.startedAt };
