@@ -34,7 +34,9 @@ import type { TokenAuthority } from "./token-auth.ts";
 import { ComputeSemaphore, ComputeGateQueueTimeout } from "./compute-semaphore.ts";
 import { scanSessions } from "./session-scan.ts";
 import type { ScannedSession } from "./session-scan.ts";
-import { resolveWithinRoots } from "./safe-open.ts";
+import { resolveWithinRoots, openSafeFile, readLineAt } from "./safe-open.ts";
+import { parseMessageLine, entryBlocksOf, assembleEntryFrame, fnv1a64Hex } from "@pi-agent-ui/protocol";
+import type { EntryErrorReason } from "@pi-agent-ui/protocol";
 import { recoverFromSnapshot, snapshotEvidenceHash } from "../runtime/recover.ts";
 import type { RecoveryEvidenceSnapshot } from "../runtime/recover.ts";
 import { isRecoverySnapshot } from "../runtime/recovery-evidence-source.ts";
@@ -131,6 +133,12 @@ export interface WsGatewayOpts {
   readonly handshakePerMinute?: number;
   /** R6（3b-1）：per-IP 认证失败限速+退避（键=传输层 clientIp；受控测试可注入小窗）。 */
   readonly authRate?: { limit?: number; windowMs?: number; baseBlockMs?: number; maxBlockMs?: number };
+  /** D4 批②：entry-get 读链路径解析（file 逻辑名→绝对路径；不中/journal-only→null→4414 unknown-entry）。
+ *  ws 包不 import runtime（D3-T1 分层纪律）——composition 侧包装 SessionRegistry.sessionFor 注入。 */
+  readonly entryAbsFor?: (file: string) => string | null;
+  /** D4 批②：thinking 可见门（v5.1 §4.5a 三面同源；默认 false；===true 才传 entryBlocksOf——与
+ *  扫描面/直播面同式）。 */
+  readonly thinkingVisible?: boolean;
 }
 
 interface SubEntry {
@@ -390,16 +398,24 @@ export class WsGateway {
       this.enqueue(st, { t: "pong", nonce: frame.nonce });
       return;
     }
-    // 请求级帧：requestId 在途门（重复→4404；第 5 个并发→4404〔契约 §369〕）
+    // 请求级帧：requestId 在途门（重复→4404；第 5 个并发→4404〔契约 §369〕）。
+    // D4 批②（v5.1 §4.3）：entry-get 帧内分流——重复/超限走 entryErrFrame(4414, in-flight)，
+    // 不入 4404 计数（entry 族错误永不过 4404 计数器）；其余帧类维持 4404 出口。
     const requestId = frame.requestId;
-    if (st.inflight.has(requestId)) { this.errFrame(st, 4404, "requestId 在途重复", requestId); return; }
-    if (st.inflight.size >= LIMITS.inFlightRequestsPerConn) { this.errFrame(st, 4404, "在途请求超限", requestId); return; }
+    if (frame.t === "entry-get") {
+      if (st.inflight.has(requestId)) { this.entryErrFrame(st, "in-flight", requestId, "requestId 在途重复"); return; }
+      if (st.inflight.size >= LIMITS.inFlightRequestsPerConn) { this.entryErrFrame(st, "in-flight", requestId, "在途请求超限"); return; }
+    } else {
+      if (st.inflight.has(requestId)) { this.errFrame(st, 4404, "requestId 在途重复", requestId); return; }
+      if (st.inflight.size >= LIMITS.inFlightRequestsPerConn) { this.errFrame(st, 4404, "在途请求超限", requestId); return; }
+    }
     st.inflight.add(requestId); // 同步占位（原子受理边界；各 handler finally 归还）
     switch (frame.t) {
       case "subscribe": void this.handleSubscribe(st, frame); return;
       case "unsubscribe": this.handleUnsubscribe(st, frame); return;
       case "list-sessions": void this.handleList(st, frame); return;
       case "get-recovery": void this.handleRecovery(st, frame); return;
+      case "entry-get": void this.handleEntryGet(st, frame).finally(() => { st.inflight.delete(frame.requestId); }); return;
       case "ui-answer": {
         // r2 P2-A（DS 判分 2026-10-10）：handleUiAnswer 同步路由内 answer() 端口同步抛
         // （如关停窗 registry 已 dispose→sessionFor 拒绝）会跳过还槽→inflight 永久泄漏，
@@ -577,6 +593,79 @@ export class WsGateway {
       st.err4404Count++;
       if (st.err4404Count >= 3) this.closeConn(st, 1002, "too-many-4404");
     }
+  }
+
+  /** D4 批②（v5.1 §4.3）：entry-get 请求级专用错误出口——**不入 errFrame**（后者 4404 无条件计数
+   *  3→close 1002）；不计数、不绑订阅、不 close。retryable 按 reason 分档（stale/in-flight=true——
+   *  行游标失效可重订阅后再试/在途重复可等待或换 id；其余 false）。 */
+  private entryErrFrame(st: ConnState, reason: EntryErrorReason, requestId: string, message: string): void {
+    this.enqueue(st, { t: "error", code: 4414, reason, message, retryable: reason === "stale" || reason === "in-flight", requestId });
+  }
+
+  /** D4 批②（v5.1 §4.1-4.3）：entry-get 读链——索引命中→offset 定点读→digest 对账（判据③）→
+   *  共享解析器身份复核→entryBlocksOf 投影→两段式装帧。链内任一环失败→entryErrFrame(4414,
+   *  <reason>)，永不过 4404 计数器；审计行 entry-get file=… id=… state=…（纯读面：不写 journal、
+   *  不触 writerEpoch、不触碰订阅状态机）。 */
+  private async handleEntryGet(st: ConnState, frame: Extract<ClientFrame, { t: "entry-get" }>): Promise<void> {
+    const rid = frame.requestId;
+    const file = frame.file;
+    const entryId = frame.entryId;
+    const fail = (reason: EntryErrorReason, message: string): void => {
+      this.entryErrFrame(st, reason, rid, message);
+      this.audit(`entry-get conn=${st.id} file=${file} id=${entryId} state=err:4414/${reason}`);
+    };
+    // 权限面：与 subscribe 同面——file 越界走 4404（协议面，保留计数）；未订阅→4414 not-subscribed。
+    if (resolveWithinRoots(file, this.opts.roots) === null) {
+      this.errFrame(st, 4404, "file 越界", rid);
+      return;
+    }
+    if (!st.subs.has(file)) { fail("not-subscribed", "未订阅该 file"); return; }
+    // 索引可达（订阅在→索引应在；LRU 挤出/换流窗口→unknown-entry）；触顶→index-evicted。
+    const index = this.registry.peek(file);
+    if (index === undefined) { fail("unknown-entry", "无索引"); return; }
+    if (index.overBudget) { fail("index-evicted", "索引触顶废弃"); return; }
+    const hit = index.entryOf("session", entryId);
+    if (hit === undefined) { fail("unknown-entry", "条目未登记"); return; }
+    // 路径解析（D3-T1 分层：ws 不 import runtime——entryAbsFor 注入；不中→unknown-entry）。
+    const abs = this.opts.entryAbsFor?.(file) ?? null;
+    if (abs === null) { fail("unknown-entry", "file 无会话映射"); return; }
+    // 定点读：行硬读限 1MiB（v5.1 §4.1b）；四 reason 映射（bad-start/torn/invalid-utf8→stale；
+    // oversized→oversized）。
+    let line: { raw: string } | { reason: "bad-start" | "oversized" | "torn" | "invalid-utf8" };
+    try {
+      const { fh } = await openSafeFile(abs);
+      try {
+        const r = await readLineAt(fh, Number(hit.locator), 1_048_576, file);
+        line = r.ok ? { raw: r.raw } : { reason: r.reason };
+      } finally {
+        await fh.close();
+      }
+    } catch {
+      fail("stale", "文件不可读");
+      return;
+    }
+    if (!("raw" in line)) {
+      fail(line.reason === "oversized" ? "oversized" : "stale", line.reason === "oversized" ? "行超硬读限" : "行界失效");
+      return;
+    }
+    // 判据③：digest 字节级身份对账（scanDigest 同式三元组：[source, locator, raw]；重写后
+    //  同形残片/同名行≠登记行）。不重建 raw 级 digest 是因为登记值本就是三元组式。
+    if (fnv1a64Hex(JSON.stringify(["session", hit.locator, line.raw])) !== hit.digest) { fail("stale", "digest 对账失败"); return; }
+    // 共享解析器身份复核（同解析器非第二解析；行身份漂移→stale）。
+    const parsed = parseMessageLine(line.raw, Number(hit.locator));
+    if (parsed === "not-message" || parsed === "bad-shape" || parsed.entryId !== entryId) { fail("stale", "行身份漂移"); return; }
+    const blocks = entryBlocksOf(parsed.rawContent, {
+      thinkingVisible: this.opts.thinkingVisible === true,
+      role: parsed.role,
+    });
+    const r = assembleEntryFrame({
+      requestId: rid, entryId, digest: hit.digest, blocks,
+      ...(parsed.stopReason !== null ? { stopReason: parsed.stopReason } : {}),
+      rawBytes: Buffer.byteLength(line.raw, "utf8"),
+    });
+    if ("oversized" in r) { fail("oversized", "末块切空仍超预算"); return; }
+    this.enqueue(st, r.frame);
+    this.audit(`entry-get conn=${st.id} file=${file} id=${entryId} state=${r.frame.state}`);
   }
 
   // ---- 订阅（§3.6 三分支互斥；同连接同 file 唯一；≤8；W1-04 数据入口+W1-05 原子切换）----

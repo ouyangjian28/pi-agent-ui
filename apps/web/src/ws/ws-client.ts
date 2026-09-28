@@ -80,7 +80,7 @@ const INITIAL: SessionsSnapshot = {
 // ---------------------------------------------------------------------------
 
 /** §5.3 错误码全集（ErrorCode 的运行时镜像；新码未登记=按未知帧保守拒绝，宁可少展示不盲信）。 */
-const ERROR_CODES: ReadonlySet<number> = new Set([4401, 4402, 4403, 4404, 4405, 4409, 4413, 4429, 4431, 4432]);
+const ERROR_CODES: ReadonlySet<number> = new Set([4401, 4402, 4403, 4404, 4405, 4409, 4413, 4414, 4429, 4431, 4432]);
 
 function isErrorCode(v: unknown): v is ErrorCode {
   return typeof v === "number" && ERROR_CODES.has(v);

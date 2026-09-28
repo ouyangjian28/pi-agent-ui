@@ -327,6 +327,9 @@ type ServerFrame =
       liveSeq: number; refSeq: null; events: LiveEvent[] }                         // live 旁路（refSeq 显式 null，非缺字段）
   | { t: "status"; subscriptionId: SubscriptionId; status: SessionStatus }
   | { t: "recovery"; requestId: string; file: string } & AvailableRecovery         // unavailable→recovery 帧带 availability（C3-R06）
+  | { t: "entry"; requestId: string; entryId: string; digest: string; state: "ok" | "truncated";
+      blocks: EntryBlock[]; totalBlockCount: number; rawBytes?: number; truncatedAt?: number;
+      stopReason?: "stop" | "length" | "aborted" | "toolUse" }   // D4 批②：entry-get 全文帧（rawBytes 仅 ok 态；truncatedAt=代码单元切位）
   | { t: "resync-required"; subscriptionId: SubscriptionId; reason: "server-side-gap" | "stream-replaced" }
   | { t: "error"; code: ErrorCode; message: string; retryable: boolean; requestId?: string; subscriptionId?: SubscriptionId }
   | { t: "pong"; nonce: string };
@@ -345,6 +348,7 @@ type ServerFrame =
 | 4405 | 只读协议拒绝写类帧 | 连接 close 1008 | false |
 | 4409 | 游标过期/流已替换/证据已变更 | 请求级 | true |
 | 4413 | 会话身份损坏 | 请求级 | false |
+| 4414 | entry 全文展开失败（reason 六值 stale\|unknown-entry\|oversized\|index-evicted\|not-subscribed\|in-flight；retryable=stale\|in-flight=true） | 请求级（不计数不 close，不走 4404 闸门） | reason 依档 |
 | 4429 | 订阅数超限 | 请求级 | false |
 | 4431（订阅级） | 订阅出帧超预算/订阅缓冲超限（1024 帧/256KB） | **订阅 close**（error 4431 后该订阅终局；连接与其余订阅不受影响） | false（该订阅已终局；恢复=新 subscribe 请求） |
 | 4431（连接级） | 连接统一发送队列超限（1024 帧/1MB；接线层实现） | 连接 close（尽力 4431 后 destroy） | true（重连后原请求可续；按游标补齐） |

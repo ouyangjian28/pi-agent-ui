@@ -161,7 +161,7 @@ const INITIAL: SessionDetailSnapshot = {
 // ---------------------------------------------------------------------------
 
 /** §5.3 错误码全集（运行时镜像；未登记码=未知帧保守拒绝）。 */
-const KNOWN_ERROR_CODES: ReadonlySet<number> = new Set([4401, 4402, 4403, 4404, 4405, 4409, 4413, 4429, 4431, 4432]);
+const KNOWN_ERROR_CODES: ReadonlySet<number> = new Set([4401, 4402, 4403, 4404, 4405, 4409, 4413, 4414, 4429, 4431, 4432]);
 
 type WelcomeFrame = Extract<ServerFrame, { readonly t: "welcome" }>;
 type ErrorFrame = Extract<ServerFrame, { readonly t: "error" }>;
@@ -510,6 +510,7 @@ function errorTextFor(code: number): string {
     case 4405: return "只读协议拒绝该操作（4405）";
     case 4409: return "请求游标或状态已过期（4409）";
     case 4413: return "会话身份损坏（4413）";
+    case 4414: return "全文展开失败，稍后重试（4414）";
     case 4429: return "订阅数量超限（4429）";
     case 4431: return "服务端出帧预算超限（4431）";
     case 4432: return "心跳超时（4432）";
@@ -772,6 +773,10 @@ export class SubscribeClient {
       }
       case "snapshot":
         this.handleSnapshot(parsed);
+        return;
+      case "entry":
+        // D4 批②⑨收编：entry 帧分派挂接（批③接入 keyed map 请求面；此提前置安全忽略占位——
+        // 漏挂 case 会落 default 静默丢+UI 只走 10s 超时，此处显式占位防漏）。
         return;
       case "events":
         this.handleEvents(parsed);

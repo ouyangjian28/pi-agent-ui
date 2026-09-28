@@ -360,6 +360,11 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
           registry!.sessionFor(resolveWithinRoots(file, config.roots) ?? file).answerUi(requestId, payload),
       },
     } : {}),
+    // D4 批②：entry-get 读面端口。映射同扫描面口径（DualHistorySource session 子源同源 sessionFor：
+    // 键=逻辑 file，值=session 绝对路径）；未配 sessionFor→session 子源不存在→entryOf 查不到→
+    // unknown-entry 天然安全（无默认映射——pi 会话目录是宿主配置而非约定，dual-history-source.ts:14 同理）。
+    ...(config.sessionFor !== undefined ? { entryAbsFor: (file: string) => config.sessionFor!(file) } : {}),
+    ...(config.thinkingVisible === true ? { thinkingVisible: true } : {}),
     audit,
   });
 

@@ -145,7 +145,7 @@ const INITIAL_SNAPSHOT: WriteSnapshot = {
 // ---------------------------------------------------------------------------
 
 /** §5.3 错误码全集（运行时镜像；未登记码=未知帧保守拒绝）。 */
-const ERROR_CODES: ReadonlySet<number> = new Set([4401, 4402, 4403, 4404, 4405, 4409, 4413, 4429, 4431, 4432]);
+const ERROR_CODES: ReadonlySet<number> = new Set([4401, 4402, 4403, 4404, 4405, 4409, 4413, 4414, 4429, 4431, 4432]);
 
 type WelcomeFrame = Extract<ServerFrame, { readonly t: "welcome" }>;
 type ErrorFrame = Extract<ServerFrame, { readonly t: "error" }>;

@@ -51,10 +51,12 @@ export interface SessionProjectionInput {
 }
 
 /** 消息行形状校验后的最小投影（内部中间结构；D4：+ts 行级时间戳+stats 可见块计数）。 */
-interface MessageEntry {
+export interface MessageEntry {
   readonly entryId: string;
   readonly role: "user" | "assistant" | "toolResult" | "system";
   readonly content: readonly Block[];
+  /** D4 批②：pi 原始 content（未投影全量——entry 面经 entryBlocksOf 另投；扫描面不读）。 */
+  readonly rawContent: unknown;
   readonly stopReason: "stop" | "length" | "aborted" | "toolUse" | null;
   readonly toolCallId: string | null;
   readonly raw: string;
@@ -123,8 +125,10 @@ function blocksOf(content: unknown): { blocks: Block[]; thinkingCount: number } 
 
 /** 单行解析：message 行→MessageEntry；非 message 行→"not-message"（占位分支归 unknown-line）；
  *  自称 message 但形状非法（缺 id/角色非法/缺 message 体）→"bad-shape"（归 corrupt-entry——
- *  契约口径：message 声明在而身份不可用=坏行，不是未知行）。 */
-function parseMessageLine(raw: string, offset: number): MessageEntry | "not-message" | "bad-shape" {
+ *  契约口径：message 声明在而身份不可用=坏行，不是未知行）。
+ *  D4 批②导出：entry-get 重读链共享此解析器（身份判定只在共享路径发生一次；entry 面取
+ *  rawContent 经 entryBlocksOf 另投——非第二解析器）。 */
+export function parseMessageLine(raw: string, offset: number): MessageEntry | "not-message" | "bad-shape" {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -149,7 +153,7 @@ function parseMessageLine(raw: string, offset: number): MessageEntry | "not-mess
   const toolCallId = typeof tcRaw === "string" && tcRaw !== "" ? tcRaw : null;
   const { blocks, thinkingCount } = blocksOf(msg["content"]);
   return {
-    entryId: id, role: role as MessageEntry["role"], content: blocks, stopReason, toolCallId, raw, offset,
+    entryId: id, role: role as MessageEntry["role"], content: blocks, rawContent: msg["content"], stopReason, toolCallId, raw, offset,
     ts: lineTsOf(line["timestamp"]),
     stats: { blockCount: blocks.length, thinkingCount },
   };
