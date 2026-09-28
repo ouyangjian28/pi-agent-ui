@@ -134,7 +134,8 @@ function requireAbsPaths(name: string, paths: readonly string[]): readonly strin
 * （write 面口径——sendPrompt/stop/sessionFor 链全是绝对路径键）。
 * r3b 资源面（K3 审 P2-3）：per-file in-flight 合并（并发读共享同次 provider 调用；**完成即删不缓存**
 * ——无失效钩子下缓存 resume #1 快照跨 send 不失效→同 matchKey 双发面，正确性否决缓存）；
-* 断连取消=r3a 同口径不提供（帧应答前断连=send 已提交不可撤，读取消意义小）；预算闸=evidence-source
+* 断连取消=r3c 已实装（连接级 abortCtl 信号透传：排队中 abort→acq.cancel；读段=provider 步骤间
+* 观察；信号不覆盖 send 执行本身——口径详设设计稿 §2b 四件表）；预算闸=evidence-source
 * 合计 8MiB 入口门（同源）。
 * r3b-fix（K3 审 P2-1）：跨文件并发闸=semaphore（与 get-recovery 同一 ComputeSemaphore 实例，composition
 * 注入）；先查 in-flight（同文件合并不占两次槽）→miss 才进闸；排队超时抛 ComputeGateQueueTimeout
