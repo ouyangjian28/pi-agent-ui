@@ -466,9 +466,10 @@ export function buildRecoverReport(lines: readonly JournalLine[], sessionId: Ses
   const scopeCovers = (id: IntentId, grants: Map<IntentId, Set<string>>, kind: "resend" | "abandon"): boolean => {
     const have = grants.get(id);
     if (!have) return false;
+    if (kind === "abandon") return true; // r6（GPT r5 P1-r5-2）：放弃是终局负向证据——任一裁决在场即排除（保守方向=多排除不重发），不随无源全覆盖收紧（旧形：无关事务加入使排除失效→已放弃意图复活 resumable=r5 新回归）；与正向授权的「无法证明即拒」方向相反：无法证明授权=保守拒，撤销已证的排除=激进
     const need = unknownShas.get(id);
     if (!need || need.size === 0) {
-      return repairLog.every((rf) => effectiveFragAdj.some((l) => repairKey(l.subject) === repairKey(rf) && l.subject.kind === "fragment" && l.subject.intentId === id && l.verdict === kind)); // 冷/无源面：归因全覆盖全部事务才放行；多意图多事务各归其一时无法证明来源归属→阻断
+      return repairLog.every((rf) => effectiveFragAdj.some((l) => repairKey(l.subject) === repairKey(rf) && l.subject.kind === "fragment" && l.subject.intentId === id && l.verdict === kind)); // 冷/无源面：归因全覆盖全部事务才放行；多意图多事务各归其一时无法证明来源归属→阻断（仅 resend 面）
     }
     for (const s of need) {
       const txs = shasToTxKeys.get(s);
@@ -477,6 +478,7 @@ export function buildRecoverReport(lines: readonly JournalLine[], sessionId: Ses
     }
     return true;
   };
+  const txImpacted = new Set<IntentId>(effectiveFragAdj.filter((l) => l.verdict === "resend").map((l) => l.subject.intentId)); // r6（GPT r5 P1-r5-1）：事务归因影响域——有 fragment resend 裁决归因到本意图的事务集所涉意图（冷捕获丢残片后 enqueue-only 盘面无 unknown 证据，但其尾段可能含本意图的 sending——「证据缺失」不得免检授权）
   const resendCovers = (id: IntentId): boolean => scopeCovers(id, resendKeys, "resend");
   const abandonExcludes = (id: IntentId): boolean => scopeCovers(id, abandonKeys, "abandon");
   // G2 裁决（s4h H2 整批冲突校验）：同一 raw 的有效目标集>1=冲突裁决——两条都不是重复，整条证据
@@ -537,7 +539,7 @@ export function buildRecoverReport(lines: readonly JournalLine[], sessionId: Ses
     resumable: resumeBlocked
       ? [] // R1/F1：有未裁决坏行或不可关联残片→不给任何重发授权
       : intents
-          .filter((r) => (!(unknown.has(r.intentId) && !resendCovers(r.intentId))) && !abandonExcludes(r.intentId) && !r.sending && r.lastVerdict === null && !r.responseTimeoutRecorded && !r.cancelled)
+          .filter((r) => (!((unknown.has(r.intentId) || txImpacted.has(r.intentId)) && !resendCovers(r.intentId))) && !abandonExcludes(r.intentId) && !r.sending && r.lastVerdict === null && !r.responseTimeoutRecorded && !r.cancelled)
           .map((r) => r.intentId), // 未裁决/不可关联残片并入的 unknown 意图不可重发；resend 裁决=作用域内授权重发覆盖（r3 B1：授权锢在裁决四元组证据链，旧裁决不越事务授权新证据）；abandon 裁决终局放弃不重发（R9）；r5（GPT r4 P1-r4-3）：在途 sending 一律不可自动重发（旧 resend 授权无执行静止/尝试代次绑定，可覆盖之后的新完整 sending=双发面），授权证明走 resendAuthorized 呈现字段，宿主接线（P0-3）再消费
     resendAuthorized: resumeBlocked ? [] : [...resendKeys.keys()].filter((id) => resendCovers(id) && !abandonExcludes(id)), // r5：授权证明面（区别于执行资格面）——通过作用域覆盖判定的 resend 授权意图（含在途 sending：授权已证但执行静止未证，宿主据此呈现/操作，不自动重发）
     settledCount: intents.filter((r) => r.lastVerdict === "settled").length,

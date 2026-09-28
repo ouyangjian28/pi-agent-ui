@@ -12,9 +12,10 @@
 //     唯一匹配（多条同四元组=歧义拒）；fragment 另验 intentId∈重放 enqueue∪sending 集。raw 全文
 //     不入 subject（r2 B4：写面构造最小 subject 白名单拷贝，不透传额外属性；schema 拒 raw 的运行时
 //     兑底在 protocol 层）。
-//   ④幂等/冲突终局（r1 B3 + r2 B3）：同四元组已有任一裁决→收集全部裁决集检测：同 verdict 且
-//     （fragment）同归因目标=idempotent 返回原时点；多 verdict/多目标/kind 混合（含手写盘面冲突
-//     组）=conflicting-verdict（矛盾证据不追加新裁决，不信任首行）。
+//   ④幂等/冲突终局（r1 B3 + r2 B3 + r4 双证）：同四元组已有任一裁决→候选加入后统一二维判定：
+//     verdicts（priors 全部+本次）>1 或归因目标（fragment 面）>1=conflicting-verdict（矛盾证据不
+//     追加新裁决，不信任首行，r5 起不限定请求 kind）；同 verdict 的 repair+fragment 双行=双证合法
+//     共存（对账+归因，kind 维不判矛盾）；kind 内同 verdict 同目标=idempotent 返回原时点。
 //   ⑤锚预检门（r2 L4）：锚损坏/不可读=aborted anchor-corrupt 写前拒（证据链已坏，追加裁决不
 //     修复证据链，需人工）。前缀漂移不拒（修复流程截尾使 byteLength<anchor.len 是常态），落盘后
 //     跳过转移留审计，待 recapture/人工核验（不承诺自动收敛）。
