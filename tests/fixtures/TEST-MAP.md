@@ -1155,7 +1155,7 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 
 **测试**：tests/unit/web 273→290（+17：write-client 10 例+use-write 7 例含 composer 真实链两例）；合后全仓 1490 预期。tsc web 面零命中；eslint 净。
 
-## D1 直播面（pi 回复增量广播；设计稿=docs/d1-live-stream-design.md；2026-10-09，GLM 写·待 GPT 审）
+## D1 直播面（pi 回复增量广播；设计稿=docs/d1-live-stream-design.md；2026-10-09，GLM 写·K3 审 80 NO-GO→修复批 3d1b927 全项闭合·待 K3 复审）
 
 **范围**：自举 D1 批——pi 事件流（rpc-session onPiEvent 钩子）→节流聚合→gateway.broadcastLive→订阅引擎 events 帧（origin=live）。契约=LiveEvent v1.1 扩三形（message-delta/message-part-end/message-final）。
 
@@ -1167,10 +1167,12 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 
 **测试**：
 - tests/unit/server/live-aggregator.test.ts 10 例（W-d1-2/3/3b/3d/4/5/6+边界+assistantFinalText+W-d1-8b 门）。
-- tests/unit/server/ws-gateway.test.ts D1 describe 两例（W-d1-7 只投活跃订阅/W-d1-8 无订阅零开销）。
-- tests/integration/d1-live-e2e.test.ts（PI_E2E=1，13.5s：真 pi 一轮→delta 流+final+拼接前缀校验）。
-- 变异四杀全验真：Mu-d1-1（缺省窗 80→0→W-d1-3d schedule 延时断言红）/Mu-d1-2（thinking 缺省透→W-d1-2）/Mu-d1-3（final role 滤去→W-d1-6）/Mu-d1-4（disposition 门去→W-d1-8b）。教训：Mu-d1-4 首轮杀点缺失（门内联在 composition 闭包）→提成纯函数；checkout 误伤未提交杀点改动→**杀点补强必须先提交再注杀**（M-245 家族新变体）。
+- tests/unit/server/ws-gateway.test.ts D1 describe 两例（W-d1-7 只投活跃订阅/W-d1-8 无订阅零开销+退订后零投+engine phase 门）。
+- tests/integration/d1-live-e2e.test.ts（PI_E2E=1，20s：真 pi 一轮→delta 流+final+拼接前缀校验；修复批后复跑绿）。
+- 变异七杀全验真：Mu-d1-1（缺省窗 80→0→W-d1-3d schedule 延时断言红）/Mu-d1-2（thinking 缺省透→W-d1-2）/Mu-d1-3（final role 滤去→W-d1-6）/Mu-d1-4（disposition 门去→W-d1-8b；修复批升级为路由工厂层杀点 Mu-d1-4b）/Mu-d1-5（turn_start 复位删→W-d1-9 跨 turn 恢复红）/Mu-d1-11（byteLen 回退码元→W-d1-11 中文字节口径红）。教训：Mu-d1-4 首轮杀点缺失（门内联在 composition 闭包）→提成纯函数+makeLiveOnPiEvent 路由工厂（修复批）；checkout 误伤未提交杀点改动→**杀点补强必须先提交再注杀**（M-245 家族新变体）。
+
+**修复批（3d1b927，K3 审 80 NO-GO 全项闭合）**：P1-1 turn 预算跨 turn 复位（agent_start/turn_start 边界 turnBytes=0/overBudget=false+W-d1-9）/P2-1 disposition 门黑名单→白名单（delivered/buffered 放行，未知态拒）+文档三处口径同步/P2-2 rpc-session agent_settled 也透传 onPiEvent（清窗兑底可达，coordinator 结算序不变）/P2-3 预算/切分 UTF-8 字节口径（byteLen+sliceByBytes 二分安全切片）/P2-4 dispose 收口（liveSink=null+聚合器 dispose 撤定时器+清 Map）/P2-5 超限只发 delta 不补提前 part-end/P2-6 接线闭包提取 makeLiveOnPiEvent 工厂+W-d1-1 a/b 接线级+W-d1-8 恒真断言废→真实退订零投+W-d1-8c engine phase 门（paging 期丢/live 期投）/P3-1 onTurnEnd 死 API 删。新增测试：W-d1-9/10/11+W-d1-1 a/b+接线级白名单杀点+W-d1-8b 晚绑定+agent_settled 透传单测。全仓 1516 绿。
 
 **E2E 杂项教训**：tokens.json 须 {version:1,tokens:[...]}；订阅文件须预存（4402 fail-closed）手造 writer 行；短回复整体在窗内被 final 权威吸收→prompt 要长回复（~120 字）断言 delta 流非空。
 
-**提交**：e5ee54d（基线）+9c670a9（杀点补强）。
+**提交**：e5ee54d（基线）+9c670a9（杀点补强）+81e9a7e（TEST-MAP D1 节）+3cd454d（web 尾债）+3d1b927（修复批）。
