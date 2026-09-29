@@ -10,7 +10,7 @@
 // 单元测试注入 spawnFn+PassThrough；真 pi 冒烟走 integration。
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { LinePump } from "./line-pump.ts";
-import type { ProcessHandle, ProcessHostPort, ProcessSpawnHandlers } from "@pi-agent-ui/protocol";
+import type { ProcessExitMeta, ProcessHandle, ProcessHostPort, ProcessSpawnHandlers } from "@pi-agent-ui/protocol";
 
 export interface PiProcessHostOpts {
   /** pi 可执行文件（默认 PATH 解析 "pi"；测试/部署可换绝对路径）。 */
@@ -47,11 +47,11 @@ export class PiProcessHost implements ProcessHostPort {
     this.procs.set(id, child);
     // 本句柄出口去重：error（折算路径）与 exit 只报一次；后到的只进 stderr 记录。
     let exited = false;
-    const reportExit = (code: number | null, signal: string | null): void => {
+    const reportExit = (code: number | null, signal: string | null, meta?: ProcessExitMeta): void => {
       if (exited) return;
       exited = true;
       this.procs.delete(id);
-      h.onExit(code, signal);
+      h.onExit(code, signal, meta);
     };
     // 生命周期级 stdin 错误吸收器（S4-01）：writeStdin 结算后的迟到流错误不得成为未捕获异常。
     child.stdin.on("error", (e: unknown) => {
@@ -67,7 +67,7 @@ export class PiProcessHost implements ProcessHostPort {
       }
       // S4-02 分立：仅「进程未创建」（pid undefined，ENOENT 等异步 spawn 失败，不伴随 exit）折算退出；
       // 存活进程上的运行错误（kill EPERM 等）保留句柄，等真实 exit（唯一退出证据）。
-      if (child.pid === undefined) reportExit(null, null);
+      if (child.pid === undefined) reportExit(null, null, { neverBorn: true }); // S4-02：进程未创建→neverBorn 元事实（监管器分类 spawn-failed）
       else this.audit(`error-runtime-kept handle=${id} pid=${child.pid}`); // 不删句柄：后续 write/stop 仍可用
     });
     child.on("exit", (code, signal) => {

@@ -388,8 +388,9 @@ describe("RpcSession（受控替身）", () => {
     expect((await startB)).toMatchObject({ kind: "ready", generation: 2 });
     expect(host.stopSignals.length).toBe(0); // B 未被旧续体打扰
     const ra = await startA; // A 旧超时续体恢复（~120ms）
-    expect(ra).toMatchObject({ kind: "superseded", generation: 1 });
-    expect(host.stopSignals.length).toBe(0); // 关键：没把 SIGTERM 打到 gen2
+    // M-OPS 语义收紧（E2E 腿3a 发现）：意外秒退归 spawn-exited（detail 链）；superseded 只留宿主退役/新代接管纯竞态面
+    expect(ra).toMatchObject({ kind: "spawn-exited", generation: 1 });
+    expect(host.stopSignals.length).toBe(0); // 关键：没把 SIGTERM 打到 gen2（不动新代不变量保留）
     const stopP = session.stop();
     await until(() => host.stopSignals.includes("SIGTERM"), "B 正常退役");
     host.emitExit(0, null);
@@ -403,7 +404,8 @@ describe("RpcSession（受控替身）", () => {
     // 同一同步段：回执后立即退出（探针续体还没跑）
     host.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true });
     host.emitExit(0, null);
-    expect((await startA)).toMatchObject({ kind: "superseded", generation: 1 });
+    // M-OPS 语义收紧：意外退出（即使探针刚成功）归 spawn-exited；「不报 ready+收口 idle」不变量保留
+    expect((await startA)).toMatchObject({ kind: "spawn-exited", generation: 1 });
     expect(session.getState().supervisor).toMatchObject({ phase: "idle" });
   });
 
@@ -576,8 +578,9 @@ describe("RpcSession（受控替身）", () => {
     // 探针续体微任务与退出微任务交替：退出在 start 最终返回前落定
     queueMicrotask(() => host.emitExit(0, null));
     const ra = await startA; // 旧代码=ready(1) 而 supervisor=idle/generation=null（P2 反例）
-    expect(ra.kind).not.toBe("ready");
-    expect(ra).toMatchObject({ kind: "superseded", generation: 1 });
+    expect(ra.kind).not.toBe("ready"); // P2 终窗不变量：绝不报 ready
+    // M-OPS 语义收紧：意外退出秒面归 spawn-exited（原 superseded）
+    expect(ra).toMatchObject({ kind: "spawn-exited", generation: 1 });
   });
 
   it("S4-B2c 探针成功路径内同步退出（readyGeneration 已置→finish 前窗口）：返回前复核兜底", async () => {

@@ -34,11 +34,17 @@ export interface ProcessHandle {
   readonly id: string;
 }
 
-/** spawn 时挂到宿主上的回调（监管器闭包捕获对应代次登记项）。 */
+/** spawn 时挂到宿主上的回调（监管器闭包捕获对应代次登记项）。
+ *  exitMeta（M-OPS）：neverBorn=进程从未创建（异步 spawn 失败如 ENOENT——S4-02 折算路径），
+ *  监管器据此分类 spawn-failed（而非笼统 spawn-exited：用户语义「可执行文件不存在」≠「启动后退出」）。 */
+export interface ProcessExitMeta {
+  readonly neverBorn?: true;
+}
+
 export interface ProcessSpawnHandlers {
   onEvent(ev: unknown): void;
   onStderr(text: string): void;
-  onExit(code: number | null, signal: string | null): void;
+  onExit(code: number | null, signal: string | null, meta?: ProcessExitMeta): void;
 }
 
 /** 进程宿主端口：spawn/writeStdin/stop。退出确认=宿主只在 waitpid/proc 消失口径下回调 onExit。 */
@@ -125,8 +131,23 @@ export class ProcessSupervisor {
   private phase: SupervisorPhase = "idle";
   private current: GenEntry | null = null;
   private nextGeneration = 0;
+  /** 代次→退出事实登记（M-OPS E2E 发现的语义缺口修复：启动等待期内异步 exit/error 面，
+   *  宿主 start() 复核时归类 spawn-exited 而非笼统 superseded；环形有界防膨胀）。
+   *  origin 维度（S4-04 族回归发现）：unexpected=意外退出（监管器 running 相位收到 exit——归类依据）；
+   *  retired=宿主主动退役路径（stop/换代的 SIGTERM 退出——Y-C1 契约仍归 superseded，不入分类）。 */
+  private readonly exitFacts = new Map<
+    number,
+    Readonly<{ code: number | null; signal: string | null; meta?: ProcessExitMeta; origin: "unexpected" | "retired" }>
+  >();
 
   constructor(private readonly opts: SupervisorDeps) {}
+
+  /** 只读：某代次意外退出事实（未退出/宿主退役退出/已淘汰出环形→null）。 */
+  exitOf(generation: number): Readonly<{ code: number | null; signal: string | null; meta?: ProcessExitMeta }> | null {
+    const f = this.exitFacts.get(generation);
+    if (f === undefined || f.origin !== "unexpected") return null;
+    return f;
+  }
 
   getState(): { phase: SupervisorPhase; generation: number | null; retired: boolean } {
     return {
@@ -168,7 +189,7 @@ export class ProcessSupervisor {
           }
           this.opts.onStderr?.(t, entry.generation);
         },
-        onExit: (code, signal) => this.onExit(entry, code, signal),
+        onExit: (code, signal, meta) => this.onExit(entry, code, signal, meta),
       });
     } catch (error) {
       entry.retired = true; // 该代次无进程产生，直接视为已退役
@@ -394,12 +415,23 @@ export class ProcessSupervisor {
     this.opts.onProcessEvent?.(ev, entry.generation);
   }
 
-  private onExit(entry: GenEntry, code: number | null, signal: string | null): void {
+  private onExit(entry: GenEntry, code: number | null, signal: string | null, meta?: ProcessExitMeta): void {
     if (entry.exit !== null) {
       this.audit(`process-exit-duplicate generation=${entry.generation}`);
       return;
     }
     entry.exit = { code, signal };
+    this.exitFacts.set(
+      entry.generation,
+      meta !== undefined
+        ? { code, signal, meta, origin: this.phase === "stopping" ? "retired" : "unexpected" }
+        : { code, signal, origin: this.phase === "stopping" ? "retired" : "unexpected" },
+    );
+    if (this.exitFacts.size > 32) {
+      // 环形淘汰：最老代次先出（Map 插入序=代次升序）
+      const oldest = this.exitFacts.keys().next().value;
+      if (oldest !== undefined) this.exitFacts.delete(oldest);
+    }
     for (const w of entry.exitWaiters.splice(0)) w();
     if (entry !== this.current) {
       this.audit(`process-exit-stale generation=${entry.generation}`);

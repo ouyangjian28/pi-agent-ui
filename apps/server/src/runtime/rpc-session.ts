@@ -235,7 +235,12 @@ export class RpcSession {
       gate: this.gate,
       onProcessEvent: (ev, generation) => this.demux(ev, generation),
       // D3：代次终结（retire/意外退出/EOF 交接）→撤本代全部待答提问（不写死进程 stdin）
-      onGenerationEnded: (generation, reason) => this.closeUiForGeneration(generation, reason),
+      onGenerationEnded: (generation, reason) => {
+        this.closeUiForGeneration(generation, reason);
+        // M-OPS：意外退出时取消挂起的 readiness 探针（秒退/ENOENT 面不再等满超时；
+        // 分类由 start() exitOf 复核归 spawn-exited）。
+        this.cancelReadiness(generation);
+      },
       onStderr: (t, generation) => {
         // M-OPS（v1.4）：尾部环缓冲（启动失败 detail 源；保留尾 16 行/每行 4KiB 截断）
         const line = t.length > 4096 ? t.slice(0, 4096) : t;
@@ -652,8 +657,21 @@ export class RpcSession {
       // 探针失败（超时/被拒/写失败/superseded）：先复核所有权，只退役自己这一代（S4-04）。
       // Y-C1（s4c 契约固化）：宿主已 stop/retire（phase=stopping）时本启动操作已作废→superseded；
       // 不再发 readiness-timeout+retire=stopping（退役已由宿主发起，结果分类不得依赖 exit 送达时序）。
+      // M-OPS 语义缺口修复（E2E 腿3a/3b 发现）：探针写失败常因进程秒退/ENOENT（异步 exit/error
+      // 事件，非 spawn 同步退）——本代 exit 事实已在→归 spawn-exited（detail=stderr 尾行链恢复：
+      // 坏模型 id 场景 stderr 正文明文透传，不再笼统 superseded 丢 detail）。
       const cur = this.supervisor.getState();
       if (cur.generation !== r.generation || cur.phase !== "running") {
+        const exitFact = this.supervisor.exitOf(r.generation);
+        if (exitFact !== null) {
+          this.safeAudit(
+            `rpc-session start-exit-after-probe generation=${r.generation} code=${exitFact.code} signal=${exitFact.signal}${exitFact.meta?.neverBorn === true ? " neverBorn（进程未创建）" : ""}（异步退出面归 spawn-族）`,
+          );
+          // neverBorn=异步 spawn 失败（ENOENT 等，进程从未创建）→spawn-failed；否则进程创建后退出的秒退面→spawn-exited
+          if (exitFact.meta?.neverBorn === true)
+            return { kind: "spawn-failed", error: new Error(this.stderrTail.at(-1) ?? "pi 进程未创建（可执行文件不存在或不可执行）") };
+          return { kind: "spawn-exited", generation: r.generation, exit: exitFact };
+        }
         this.safeAudit(
           `rpc-session readiness-failed-superseded generation=${r.generation} current=${cur.phase}/${cur.generation ?? "无"}（不动当前代）`,
         );
