@@ -84,6 +84,15 @@
   spawn-exited 路+detail 含模型名）。变异面：Mu-o1 spawn 尾追删→N2 红/Mu-o2 not-ready
   detail 剥离→N3 红/Mu-o3 prompt.model 校验死→非法模型 4404 不回红/Mu-o4 detail 控制字符
   净化删→断言红（K3 建议加）。
+- **E2E 实交同步（2026-10-10，Kimi 审 P2-1）**：实交=七腿真 composition+假 pi
+  （tests/integration/m-ops-e2e.test.ts+fixture mops-fake-pi.mjs 五模式），非上述原计划。
+  映射：N2 spawn 断言→腿2（argv 尾两值+sidecar，真进程面取代 FakeRpcHost）；N3 错模型
+  →腿3a（假 pi exit 模式，替换 PI_E2E=1 真 pi 腿——替代理由=①假 pi 常跑无门可进 CI
+  常规套件（真 pi 腿 PI_E2E=1 门历史上极少开）；②确定性：坏模型 stderr 面可精确驱动；
+  ③正是它钓出 P1 语义缺口——真 pi 探针往返已有 pi-child.smoke 覆盖不重复）。N1 新建
+  全链→前端消费面已有 real-app 假链覆盖（E2E 增量在服务端装配面，不重验）；
+  超出原计划的腿：1/1b 清单链/3b ENOENT/3c 超时/4 4405。变异实交 Mu-e1..e4 见 TEST-MAP
+  M-OPS E2E 批节。
 - 分工（K3 建议采纳：契约先行冻结→两批并行）：GLM 契约批（v1.4 三处=prompt.model+
   get-models/models-list+not-ready.detail→K3 审单点）→GLM 后端批（清单服务+spawn 透传+
   sidecar+stderr 聚合+网关 case）∥Kimi 前端批（新建入口+下拉+红条+sendPrompt 形参）→E2E/

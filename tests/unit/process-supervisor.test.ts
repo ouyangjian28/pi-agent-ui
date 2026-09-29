@@ -764,3 +764,36 @@ describe("进程代次监管器（ProcessSupervisor，切片3）", () => {
     expect(h2.host.procs[0]!.stopSignals).toEqual(["SIGTERM"]);
   });
 });
+  // M-OPS E2E 批补（Kimi 审 P3-4）：exitFacts/exitOf/neverBorn/origin 的 protocol 层直接单测
+  describe("M-OPS exitFacts 查询面（Kimi 审 P3-4）", () => {
+    it("意外退出（running 相位 exit）→exitOf 命中 unexpected；宿主退役退出（stopping）→null", async () => {
+      const h = makeHarness();
+      h.sup.spawnNext([]);
+      h.host.procs[0]!.handlers.onExit(1, null); // running 相位意外退出
+      expect(h.sup.exitOf(1)).toMatchObject({ code: 1, signal: null });
+      // spawn 第二代→宿主主动退役（stopping 相位）→exitOf 返 null（retired origin）
+      h.sup.spawnNext([]);
+      const retireP = h.sup.retireCurrent();
+      h.host.procs[1]!.handlers.onExit(0, null); // stopping 相位收口
+      await retireP;
+      expect(h.sup.exitOf(2)).toBeNull();
+    });
+
+    it("neverBorn meta 透传（异步 spawn 失败折算路径）；未退出/未知代→null", () => {
+      const h = makeHarness();
+      h.sup.spawnNext([]);
+      h.host.procs[0]!.handlers.onExit(null, null, { neverBorn: true }); // host 层 S4-02 折算口径
+      expect(h.sup.exitOf(1)).toMatchObject({ code: null, signal: null, meta: { neverBorn: true } });
+      expect(h.sup.exitOf(999)).toBeNull(); // 未知代
+    });
+
+    it("环形淘汰：33 代后最老代次事实被淘汰（Map 插入序=代次升序）", () => {
+      const h = makeHarness();
+      for (let g = 0; g < 33; g += 1) {
+        h.sup.spawnNext([]);
+        h.host.procs[g]!.handlers.onExit(g, null);
+      }
+      expect(h.sup.exitOf(1)).toBeNull(); // 最老被淘汰（33 条>32 上限）
+      expect(h.sup.exitOf(2)).not.toBeNull(); // 次老起留存
+    });
+  });

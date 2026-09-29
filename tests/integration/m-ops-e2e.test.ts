@@ -171,9 +171,7 @@ describe("M-OPS E2E（真 composition+假 pi）", () => {
   }, 20_000);
 
   it("腿3b：piBin 不存在→not-ready{cause:spawn-failed}", async () => {
-    const rig = await makeRig(null, { noPiBin: true });
-    // noPiBin rig 无法走 prompt 面——此腿直接构造：换 piBin 指向不存在路径的 rig
-    await rig.dispose();
+    // 直接构造（Kimi 审 P3-2：裸构造+try/finally 防泄漏——去 makeRig 废操作）
     const dir = await mkdtemp(join(tmpdir(), "mops-e2e-3b-"));
     await mkdir(join(dir, "sessions"), { recursive: true });
     const tokenFile = join(dir, "tokens.json");
@@ -188,19 +186,22 @@ describe("M-OPS E2E（真 composition+假 pi）", () => {
       trustFirstRecoveryCapture: true,
     });
     const ws = new WebSocket(`ws://127.0.0.1:${server.port}`, { origin: ORIGIN });
-    await new Promise<void>((res, rej) => { ws.on("open", res); ws.on("error", (e) => rej(e as Error)); });
-    const frames: Frame[] = [];
-    ws.on("message", (data) => frames.push(JSON.parse(String(data))));
-    ws.send(JSON.stringify({ t: "hello", protocolVersion: 1, token: TOKEN }));
-    await until(() => frames.some((f) => f.t === "welcome"), "welcome");
-    ws.send(JSON.stringify({ t: "prompt", requestId: "p3", file: FILE, text: "hi" }));
-    await until(() => frames.some((f) => f.t === "write-ack" && f.requestId === "p3"), "write-ack p3");
-    const ack = frames.find((f) => f.t === "write-ack" && f.requestId === "p3");
-    expect(ack?.outcome?.kind).toBe("not-ready");
-    expect(ack?.outcome?.cause).toBe("spawn-failed");
-    try { ws.close(); } catch { /* 已关 */ }
-    await server.dispose().catch(() => {});
-    await rm(dir, { recursive: true, force: true }).catch(() => {});
+    try {
+      await new Promise<void>((res, rej) => { ws.on("open", res); ws.on("error", (e) => rej(e as Error)); });
+      const frames: Frame[] = [];
+      ws.on("message", (data) => frames.push(JSON.parse(String(data))));
+      ws.send(JSON.stringify({ t: "hello", protocolVersion: 1, token: TOKEN }));
+      await until(() => frames.some((f) => f.t === "welcome"), "welcome");
+      ws.send(JSON.stringify({ t: "prompt", requestId: "p3", file: FILE, text: "hi" }));
+      await until(() => frames.some((f) => f.t === "write-ack" && f.requestId === "p3"), "write-ack p3");
+      const ack = frames.find((f) => f.t === "write-ack" && f.requestId === "p3");
+      expect(ack?.outcome?.kind).toBe("not-ready");
+      expect(ack?.outcome?.cause).toBe("spawn-failed");
+    } finally {
+      try { ws.close(); } catch { /* 已关 */ }
+      await server.dispose().catch(() => {});
+      await rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
   });
 
   it("腿3c：timeout 模式+小 readiness 超时→not-ready{cause:readiness-timeout}", async () => {

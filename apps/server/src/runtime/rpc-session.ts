@@ -684,6 +684,14 @@ export class RpcSession {
     const fin = this.supervisor.getState();
     if (fin.generation !== r.generation || fin.phase !== "running") {
       this.safeAudit(`rpc-session ready-superseded-at-return generation=${r.generation} current=${fin.phase}/${fin.generation ?? "无"}`);
+      // P3-1（Kimi 审）：终窗分支同查 exitOf——与 B2b 同物理现象（意外退出）分类对齐 spawn-exited（detail 链）；
+      // 宿主退役面（retired origin）仍归 superseded（exitOf 返 null）。
+      const exitFact = this.supervisor.exitOf(r.generation);
+      if (exitFact !== null) {
+        if (exitFact.meta?.neverBorn === true)
+          return { kind: "spawn-failed", error: new Error(this.stderrTail.at(-1) ?? "pi 进程未创建（可执行文件不存在或不可执行）") };
+        return { kind: "spawn-exited", generation: r.generation, exit: exitFact };
+      }
       return { kind: "superseded", generation: r.generation };
     }
     return { kind: "ready", generation: r.generation };

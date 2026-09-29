@@ -607,7 +607,8 @@ describe("RpcSession（受控替身）", () => {
     host6.emitEvent({ id: "ready-1", type: "response", command: "get_state", success: true });
     const ra = await startA; // 探针成功路径内已退出：终窗复核不得返回 ready
     expect(ra.kind).not.toBe("ready");
-    expect(ra).toMatchObject({ kind: "superseded", generation: 1 });
+    // P3-1（Kimi 审）对齐：终窗分支同查 exitOf——意外退出与 B2b 同分类 spawn-exited
+    expect(ra).toMatchObject({ kind: "spawn-exited", generation: 1 });
   });
 
   it("S5-R3：构造拒绝——sessionFile 与 piArgs 都缺（无持久身份不得启用回收生命周期）", () => {

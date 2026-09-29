@@ -45,7 +45,7 @@ export class PiProcessHost implements ProcessHostPort {
     });
     const id = `proc-${++PiProcessHost.seq}`;
     this.procs.set(id, child);
-    // 本句柄出口去重：error（折算路径）与 exit 只报一次；后到的只进 stderr 记录。
+    // 本句柄出口去重：error（折算路径）与 exit 只报一次；后到的直接丢弃（不重复报）。
     let exited = false;
     const reportExit = (code: number | null, signal: string | null, meta?: ProcessExitMeta): void => {
       if (exited) return;

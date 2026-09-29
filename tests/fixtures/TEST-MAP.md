@@ -1340,3 +1340,14 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - **P1 语义缺口（E2E 发现）**：真进程异步 exit/error（坏模型秒退/ENOENT）面——start() 探针复核恒归 superseded 且丢 detail，M-OPS 核心价值（stderr 明文→用户）在最常见真路径断链。修复三件：①ProcessSupervisor exitFacts 登记（origin=unexpected/retired 区分宿主退役退出——stopping 相位=retired；环形 32 上限）+exitOf 查询口；②ProcessExitMeta{neverBorn}——host 层 S4-02 折算路径（pid undefined 的 error 事件）带元事实→ENOENT 归 spawn-failed（「可执行文件不存在」≠「启动后退出」）；③rpc-session start() 复核分支查 exitOf 归 spawn 族+onGenerationEnded 意外退出顺带 cancelReadiness（秒退不等满超时——性能面非正确性，Mu-e4 无杀点记档）。
 - 契约收紧三例（S4-04a/04b/B2b 断言 superseded→spawn-exited）：意外秒退归 spawn-exited（信息增益=detail 链）；「不动新代+不报 ready+收口 idle」不变量保留；superseded 只留宿主退役/新代接管纯竞态面。**Kimi 审须重点核此契约面**。
 - 变异 4/4（基线 e489c24 先 commit——M-245 铁律）：Mu-e1 exitOf 分类死→腿3a/3b 红/Mu-e2 neverBorn 死→腿3b 红/Mu-e3 origin 维度死（stopping 也 unexpected）→S4-04c/B1b/B2a 三例红/Mu-e4 cancelReadiness 挂钩死→**无杀点**（探针等满超时结果分类同——纯性能优化面，诚实记档不为杀而杀）。还原后 46 绿复跑。
+
+### M-OPS E2E 审后修复批（Kimi 审 GO 88 处置；2026-10-10）
+
+- Kimi 交叉审 GO 88/0 P1/P2×1+P3×5（审报 ~/ai projects/pi-agent-ui/audits/ 归档）。P2-1+P3-1/2/3/4/5+另注全处：
+  - P2-1 设计 §5 同步段（七腿映射 N2/N3+假 pi 替代理由三条+N1 归宿说明）。
+  - P3-1 B2c 终窗分支同查 exitOf（与 B2b 分类对齐 spawn-exited；rpc-session.ts fin 复核分支）+S4-B2c 断言同族收紧。
+  - P3-2 腿3b 裸构造+try/finally 防泄漏（去 makeRig 废操作）。
+  - P3-3 坑位固化：**并存 rig 共享 process.env 脆弱**——腿1b 内 rig2(list) 改全局 env 现靠「list 结果 10min 缓存不再 spawn」成立；日后加腿易踩，改法=per-spawn env 传递（M-DEPLOY 前如需再动）。
+  - P3-4 protocol 层直接单测 3 例（tests/unit/process-supervisor.test.ts M-OPS exitFacts 查询面节：unexpected/retired origin 分野+neverBorn 透传+环形淘汰 33 代）。
+  - P3-5 CW3 flake 观察项（/bin/cat 真链 300ms readiness 窗负载敏感，首跑红单跑绿，pre-existing；再犯则放宽窗口或加重试）。
+  - 另注 process-host 出口去重注释勘正（「只进 stderr 记录」→「直接丢弃」）。
