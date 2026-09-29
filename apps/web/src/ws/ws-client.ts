@@ -1,6 +1,6 @@
 // A1a 只读面 WS 客户端：hello 握手（带 token）→welcome 后才发 list-sessions→维护会话列表快照。
 // 帧类型唯一权威=@pi-agent-ui/protocol（仅 type 导入，运行时不依赖协议包，前端不重定义帧形状）。
-// 红线：①只发 hello/list-sessions——OutgoingFrame 类型层封闭，写类帧（WRITE_FRAME_TYPES）无从构造；
+// 红线：①只发 hello/list-sessions/get-models——OutgoingFrame 类型层封闭，写类帧（WRITE_FRAME_TYPES）无从构造；
 // ②实际消费的帧（welcome/sessions/error 及 SessionSummaryDTO）先过文件内运行时形状校验，校验失败
 //   连同未知帧类型（含写类 ack）一律按未知帧安全忽略（零副作用：不改快照/不通知/不清在途/不发后续帧）；
 // ③close()=不可逆停止屏障（任何状态可关、迟到回调零副作用、幂等）；closed=终态，无自动重连；
@@ -9,10 +9,10 @@
 
 // 直接从自包含的 contracts 模块引类型（绕开 barrel：index.ts 会拉入 NodeNext 风格 .ts 扩展 import，
 // 与 apps/web Bundler 解析不兼容；contracts.ts 零 import 无副作用）。
-import type { ClientFrame, ErrorCode, ServerFrame, SessionSummaryDTO } from "@pi-agent-ui/protocol/src/contracts";
+import type { ClientFrame, ErrorCode, ModelInfoDTO, ServerFrame, SessionSummaryDTO } from "@pi-agent-ui/protocol/src/contracts";
 
 /** 本客户端允许发送的帧（§5.1 六客户端帧的只读子集；写类 t 在类型层即不可达）。 */
-type OutgoingFrame = Extract<ClientFrame, { readonly t: "hello" } | { readonly t: "list-sessions" }>;
+type OutgoingFrame = Extract<ClientFrame, { readonly t: "hello" } | { readonly t: "list-sessions" } | { readonly t: "get-models" }>;
 
 /** 五态状态机：connecting→authenticating→ready；任一前置态可落 closed/error。 */
 export type WsClientState = "connecting" | "authenticating" | "ready" | "closed" | "error";
@@ -37,6 +37,15 @@ export interface SessionsSnapshot {
   readonly sessions: readonly SessionSummaryDTO[] | null;
   readonly total: number;
   readonly listVersion: number | null;
+  /** M-OPS（v1.4）模型清单面：idle=未请求/loading=在途/ok=清单/failed=空表+cause（服务端降级口径）。 */
+  readonly models: ModelsState;
+}
+
+/** M-OPS（v1.4）：get-models 状态面（uiRequests keyed map 同源的单一快照字段；失败不判错——服务端明确降级为空表+cause）。 */
+export interface ModelsState {
+  readonly status: "idle" | "loading" | "ok" | "failed";
+  readonly items: readonly ModelInfoDTO[];
+  readonly cause: string | null;
 }
 
 /** 可注入的 WebSocket 最小面（测试用 FakeWebSocket 顶替浏览器原生实现，不依赖真 ws 库）。 */
@@ -62,6 +71,8 @@ const defaultFactory: WebSocketFactory = (url) => {
 
 /** list-sessions 请求 ID（§5.7 requestIdPattern=/^[\w-]{1,64}$/）。 */
 const LIST_REQUEST_ID = "list-sessions-1";
+/** M-OPS（v1.4）get-models 请求 ID（同 §5.7 pattern；清单面单请求，固定 id 即可）。 */
+const MODELS_REQUEST_ID = "get-models-1";
 
 const INITIAL: SessionsSnapshot = {
   state: "connecting",
@@ -70,6 +81,7 @@ const INITIAL: SessionsSnapshot = {
   sessions: null,
   total: 0,
   listVersion: null,
+  models: { status: "idle", items: [], cause: null },
 };
 
 // ---------------------------------------------------------------------------
@@ -89,6 +101,28 @@ function isErrorCode(v: unknown): v is ErrorCode {
 type WelcomeFrame = Extract<ServerFrame, { readonly t: "welcome" }>;
 type SessionsFrame = Extract<ServerFrame, { readonly t: "sessions" }>;
 type ErrorFrame = Extract<ServerFrame, { readonly t: "error" }>;
+type ModelsListFrame = Extract<ServerFrame, { readonly t: "models-list" }>;
+
+/** M-OPS（v1.4）：ModelInfoDTO 形状（provider/id 必须 string；context/thinking 可缺但必须 string）。 */
+function isModelInfo(v: unknown): v is ModelInfoDTO {
+  if (!isPlainObject(v) || !isString(v.provider) || !isString(v.id)) return false;
+  if (v.context !== undefined && !isString(v.context)) return false;
+  if (v.thinking !== undefined && !isString(v.thinking)) return false;
+  return true;
+}
+
+/** M-OPS（v1.4）models-list：requestId 必须 string；models 数组逐条 ModelInfoDTO（任一畸形整帧拒绝）；cause 可缺但必须 string。 */
+function asModelsListFrame(v: Record<string, unknown>): ModelsListFrame | null {
+  if (!isString(v.requestId)) return null;
+  if (!Array.isArray(v.models)) return null;
+  const models: ModelInfoDTO[] = [];
+  for (const item of v.models) {
+    if (!isModelInfo(item)) return null;
+    models.push(item);
+  }
+  if (v.cause !== undefined && !isString(v.cause)) return null;
+  return { t: "models-list", requestId: v.requestId, models, ...(v.cause === undefined ? {} : { cause: v.cause }) };
+}
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -193,6 +227,8 @@ export class WsClient {
   private snapshot: SessionsSnapshot = INITIAL;
   private readonly listeners = new Set<() => void>();
   private listRequestPending = false;
+  /** M-OPS（v1.4）：get-models 在途位（同 listRequestPending 语义；回帧/迟到零副作用）。 */
+  private modelsRequestPending = false;
   /** R3 不可逆停止位：close() 置位后一切回调零副作用、connect() 永久拒绝、重复 close 幂等。 */
   private stopped = false;
 
@@ -237,10 +273,21 @@ export class WsClient {
     if (this.stopped) return;
     this.stopped = true;
     this.listRequestPending = false;
+    this.modelsRequestPending = false; // M-OPS（v1.4）：清单在途随连接天折（状态面定格不清空）
     if (this.snapshot.state !== "closed" && this.snapshot.state !== "error") {
       this.transition({ state: "closed" });
     }
     this.socket?.close();
+  }
+
+  /** M-OPS（v1.4）：请求模型清单（幂等：在途/已 ok 不重发；failed 可重发=用户新显式动作）。
+   * 仅 ready 态可发（握手前发非 hello 帧会被 4401）；未连接/已关静默忽略（调用方以状态面为准）。 */
+  requestModels(): void {
+    if (this.stopped || this.snapshot.state !== "ready") return;
+    if (this.modelsRequestPending || this.snapshot.models.status === "ok") return;
+    this.modelsRequestPending = true;
+    if (this.snapshot.models.status !== "loading") this.transition({ models: { status: "loading", items: [], cause: null } });
+    this.sendFrame({ t: "get-models", requestId: MODELS_REQUEST_ID });
   }
 
   /** 订阅快照变更（含状态迁移）；返回退订函数。签名与 useSyncExternalStore 直接对齐。 */
@@ -288,6 +335,21 @@ export class WsClient {
         if (frame === null || frame.requestId !== LIST_REQUEST_ID) return;
         this.listRequestPending = false;
         this.transition({ sessions: frame.sessions, total: frame.total, listVersion: frame.listVersion });
+        return;
+      }
+      case "models-list": {
+        // M-OPS（v1.4）：清单回帧——在途中才接受（未请求/迟到=零副作用）；形状失败不消耗在途；
+        // 服务端降级口径：失败=空表+cause（不判错、不连坐主连接状态）。
+        if (!this.modelsRequestPending) return;
+        const frame = asModelsListFrame(parsed);
+        if (frame === null || frame.requestId !== MODELS_REQUEST_ID) return;
+        this.modelsRequestPending = false;
+        this.transition({
+          models:
+            frame.cause === undefined
+              ? { status: "ok", items: frame.models, cause: null }
+              : { status: "failed", items: [], cause: frame.cause },
+        });
         return;
       }
       case "error": {

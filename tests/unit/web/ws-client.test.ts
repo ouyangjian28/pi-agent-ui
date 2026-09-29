@@ -437,3 +437,84 @@ describe("C1 握手期非认证失败受控反馈", () => {
     expect(FakeWebSocket.instances).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// M-OPS（v1.4）模型清单面：get-models 发送器+models-list 载入+降级口径+零副作用门。
+// ---------------------------------------------------------------------------
+
+describe("M-OPS 模型清单面（get-models/models-list）", () => {
+  it("ready 后 requestModels 发 get-models（requestId 过 pattern）；回帧 ok→快照 items；再调幂等不重发", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    const before = ws.sent.length;
+    client.requestModels();
+    const frame = ws.sentFrames()[before] as { t: string; requestId: string };
+    expect(frame.t).toBe("get-models");
+    expect(frame.requestId).toMatch(/^[\w-]{1,64}$/);
+    expect(client.getSnapshot().models.status).toBe("loading");
+    ws.receive({
+      t: "models-list",
+      requestId: frame.requestId,
+      models: [
+        { provider: "openai-codex", id: "gpt-6", context: "400k" },
+        { provider: "kimi-coding", id: "k3" },
+      ],
+    });
+    const m = client.getSnapshot().models;
+    expect(m.status).toBe("ok");
+    expect(m.items).toHaveLength(2);
+    expect(m.items[0]).toEqual({ provider: "openai-codex", id: "gpt-6", context: "400k" });
+    expect(m.cause).toBeNull();
+    const sentAfter = ws.sent.length;
+    client.requestModels(); // ok 后幂等：不重发
+    expect(ws.sent).toHaveLength(sentAfter);
+  });
+
+  it("服务端降级口径：回帧带 cause→failed+空表+cause；failed 后可重发（新显式动作）", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    client.requestModels();
+    const rid = (ws.sentFrames().at(-1) as { requestId: string }).requestId;
+    ws.receive({ t: "models-list", requestId: rid, models: [], cause: "pi --list-models 退出码 1" });
+    const m = client.getSnapshot().models;
+    expect(m.status).toBe("failed");
+    expect(m.items).toEqual([]);
+    expect(m.cause).toBe("pi --list-models 退出码 1");
+    expect(client.getSnapshot().state).toBe("ready"); // 不连坐主连接状态
+    client.requestModels();
+    expect(client.getSnapshot().models.status).toBe("loading");
+    expect(ws.sentFrames().filter((f) => (f as { t: string }).t === "get-models")).toHaveLength(2);
+  });
+
+  it("R1 形状拒：条目缺 provider 整帧拒绝、在途保持、后续合法帧成功", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    client.requestModels();
+    const rid = (ws.sentFrames().at(-1) as { requestId: string }).requestId;
+    expect(client.getSnapshot().models.status).toBe("loading");
+    ws.receive({ t: "models-list", requestId: rid, models: [{ id: "no-provider" }] }); // 畸形条目
+    expect(client.getSnapshot().models.status).toBe("loading"); // 在途未消耗
+    ws.receive({ t: "models-list", requestId: rid, models: [{ provider: "p", id: "m" }] }); // 坏帧后合法仍成功
+    expect(client.getSnapshot().models.status).toBe("ok");
+  });
+
+  it("零副作用门：未请求的 models-list 忽略；close 后 requestModels 静默不抛", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    ws.receive({ t: "models-list", requestId: "get-models-1", models: [{ provider: "p", id: "m" }] }); // 未请求
+    expect(client.getSnapshot().models.status).toBe("idle");
+    client.close();
+    expect(() => client.requestModels()).not.toThrow();
+    expect(ws.sentFrames().filter((f) => (f as { t: string }).t === "get-models")).toHaveLength(0);
+  });
+
+  it("握手前 requestModels 静默不发（welcome 前非 hello 帧会被 4401）", () => {
+    const { client, ws } = setup();
+    ws.open(); // authenticating 期
+    client.requestModels();
+    expect(ws.sentFrames().filter((f) => (f as { t: string }).t === "get-models")).toHaveLength(0);
+    handshake(ws); // welcome 到达
+    client.requestModels(); // ready 后可发
+    expect(ws.sentFrames().filter((f) => (f as { t: string }).t === "get-models")).toHaveLength(1);
+  });
+});
