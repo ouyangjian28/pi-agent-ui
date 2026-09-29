@@ -44,6 +44,9 @@ export const LIMITS = {
   /** resume.intentId 形态（r3a P2-2/K3 审）：真实形态=i-<十进制>（rpc-session intentSeq）；
    *  \w 集禁换行/引号/空格——审计行拼接面防注入，对齐 requestId 风格。 */
   intentIdPattern: /^[\w-]{1,64}$/,
+  /** M-OPS（v1.4）：prompt.model 形态——只收精确模型 id（provider/id 及 thinking 后缀），
+   *  非 glob pattern；K3 实测 39/39 现役 id 全过。 */
+  modelPattern: /^[\w./:-]{1,128}$/,
   idPattern: /^[\w:.-]{1,128}$/,
   toolNamePattern: /^[\w:.-]{1,64}$/,
   titleLimit: 80,
@@ -267,6 +270,7 @@ export type ClientFrame =
   | { readonly t: "unsubscribe"; readonly requestId: string; readonly subscriptionId: SubscriptionId }
   | { readonly t: "get-recovery"; readonly requestId: string; readonly file: string; readonly offset?: number; readonly evidenceHash?: string }
   | { readonly t: "ping"; readonly nonce: string }
+  | { readonly t: "get-models"; readonly requestId: string } // v1.4（M-OPS）：模型清单请求（挂 list 连接）
   | UiAnswerFrame
   | EntryGetFrame;
 
@@ -349,6 +353,25 @@ export interface EntryFrame {
   readonly totalBlockCount?: number;
 }
 
+// ---------------------------------------------------------------------------
+// M-OPS 模型清单帧（docs/m-ops-design.md §3，契约 v1.4）：数据源=pi --list-models（进程内缓存）。
+// ---------------------------------------------------------------------------
+/** v1.4：单个模型条目（provider/id 必具；context/thinking 为清单列可选透传）。 */
+export interface ModelInfoDTO {
+  readonly provider: string;
+  readonly id: string;
+  readonly context?: string;
+  readonly thinking?: string;
+}
+
+/** v1.4：S→C 模型清单响应。失败→空表+cause（不新设错误码——K3 核实闭码面不涉）。 */
+export interface ModelsListFrame {
+  readonly t: "models-list";
+  readonly requestId: string;
+  readonly models: readonly ModelInfoDTO[];
+  readonly cause?: string;
+}
+
 export type ServerFrame =
   | { readonly t: "welcome"; readonly serverBootId: string; readonly serverBuildId: string; readonly protocolVersion: 1 }
   | { readonly t: "sessions"; readonly requestId: string; readonly sessions: readonly SessionSummaryDTO[]; readonly total: number; readonly offset: number; readonly hasMore: boolean; readonly listVersion: number;
@@ -369,7 +392,8 @@ export type ServerFrame =
   | { readonly t: "write-resume-ack"; readonly requestId: string; readonly file: string; readonly outcome: WriteResumeOutcomeDTO } // v1.1（r3a）
   | UiRequestFrame // v1.2（D3）
   | UiClosedFrame
-  | EntryFrame; // v1.3（D4）
+  | EntryFrame // v1.3（D4）
+  | ModelsListFrame; // v1.4（M-OPS）
 
 export interface SessionSummaryDTO {
   readonly sessionId: string | null;
@@ -507,6 +531,12 @@ export function validateClientFrame(raw: unknown): FrameCheck {
       if (typeof eid !== "string" || eid.length === 0 || eid.length > 256) return bad(4404, "entryId 非法");
       return ok({ t: "entry-get", requestId, file, entryId: eid });
     }
+    case "get-models": {
+      // v1.4（M-OPS）：两字段恰具；清单拉取/缓存归网关（同步面七处之一，docs/m-ops-design.md §3）。
+      const r0 = requireExact(obj, ["t", "requestId"]); if (r0) return r0;
+      const requestId = reqId(obj); if (!isStr(requestId)) return requestId;
+      return ok({ t: "get-models", requestId });
+    }
     case "ping": {
       const r0 = requireExact(obj, ["t", "nonce"]); if (r0) return r0;
       const nonce = obj["nonce"];
@@ -564,7 +594,7 @@ export const WRITE_OPEN_FRAME_TYPES: readonly string[] = ["prompt", "stop", "res
 export const WRITE_TEXT_MAX_BYTES = 65_536;
 
 export type WriteClientFrame =
-  | { readonly t: "prompt"; readonly requestId: string; readonly file: string; readonly text: string; readonly generation?: number } // v1.1 帧身份：可选进程代次（提供则宿主身份门校验活代匹配——v1 客户端缺省跳过）
+  | { readonly t: "prompt"; readonly requestId: string; readonly file: string; readonly text: string; readonly generation?: number; readonly model?: string } // v1.1 帧身份：可选进程代次（提供则宿主身份门校验活代匹配——v1 客户端缺省跳过）；v1.4（M-OPS）可选模型 id（spawn 尾道 --model 尾追恒胜+sidecar 持久化，docs/m-ops-design.md §3）
   | { readonly t: "stop"; readonly requestId: string; readonly file: string }
   | { readonly t: "resume"; readonly requestId: string; readonly file: string; readonly intentId: string; readonly generation: number }; // v1.1：恢复意图重发（身份门四校验：恢复数据在场/未阻断/授权/代次）
 
@@ -582,8 +612,9 @@ export function validateWriteFrame(raw: unknown): WriteFrameCheck {
   if (!WRITE_OPEN_FRAME_TYPES.includes(t)) return badWrite(4405, "写类帧未开放");
   if (t === "prompt") {
     // v1.1：generation 为可选域——先从探测副本剥除，再走四字段集合等值（v1 帧仍严格原形）。
-    const probe: Record<string, unknown> = has(obj, "generation") ? { ...obj } : obj;
-    if (probe !== obj) delete probe["generation"];
+    // v1.4（M-OPS）：model 同式可选域（精确 id 非 glob；非空校验走 LIMITS.modelPattern）。
+    const probe: Record<string, unknown> = has(obj, "generation") || has(obj, "model") ? { ...obj } : obj;
+    if (probe !== obj) { delete probe["generation"]; delete probe["model"]; }
     const r0 = exactWrite(probe, ["t", "requestId", "file", "text"]); if (r0) return r0;
     const rid = ridWrite(obj); if (typeof rid !== "string") return rid;
     const file = fileWrite(obj); if (typeof file !== "string") return file;
@@ -596,7 +627,16 @@ export function validateWriteFrame(raw: unknown): WriteFrameCheck {
       if (typeof g !== "number" || !Number.isSafeInteger(g) || g < 0) return badWrite(4404, "generation 非法");
       generation = g;
     }
-    return okFrame(generation === undefined ? { t: "prompt", requestId: rid, file, text } : { t: "prompt", requestId: rid, file, text, generation });
+    let model: string | undefined; // v1.4（M-OPS）可选：精确模型 id（LIMITS.modelPattern）
+    if (has(obj, "model")) {
+      const m = obj["model"];
+      if (typeof m !== "string" || !LIMITS.modelPattern.test(m)) return badWrite(4404, "model 非法");
+      model = m;
+    }
+    const extras: { generation?: number; model?: string } = {};
+    if (generation !== undefined) extras.generation = generation;
+    if (model !== undefined) extras.model = model;
+    return okFrame(Object.keys(extras).length === 0 ? { t: "prompt", requestId: rid, file, text } : { t: "prompt", requestId: rid, file, text, ...extras });
   }
   if (t === "resume") {
     const r0 = exactWrite(obj, ["t", "requestId", "file", "intentId", "generation"]); if (r0) return r0;
@@ -644,7 +684,7 @@ export type WriteSendOutcomeDTO =
   | { readonly kind: "gate-failed"; readonly stage: "enqueue" | "sending" }
   | { readonly kind: "invalidated"; readonly stage: "enqueue" | "sending" | "post-send" | "first-byte" }
   | { readonly kind: "no-process" }
-  | { readonly kind: "not-ready"; readonly cause?: string }
+  | { readonly kind: "not-ready"; readonly cause?: string; readonly detail?: string } // v1.4（M-OPS）：detail=启动失败 stderr 尾行（≤500 字符+strip 控制字符；明文政策显式裁决=docs/m-ops-design.md §4，M-DEPLOY 多用户面前须再评）
   | { readonly kind: "identity-rejected"; readonly cause: "no-recovery-data" | "generation-mismatch" }; // v1.1：prompt 携代次断言→无权威源/旧代恒拒（零副作用；K3 审 P2-1 fail-closed）
 
 /** v1.1 写侧身份拒细节（identity-rejected.cause）。 */

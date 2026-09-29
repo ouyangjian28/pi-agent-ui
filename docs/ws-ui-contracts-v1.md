@@ -468,3 +468,12 @@ type ServerFrame =
   - LiveEvent v1.2 `{kind:"ui-note", notifyType:"info"|"warning"|"error", message}`（即显族 notify 耐久流；setStatus 等四法 v1 不透传，审计 ui-unsupported）。
 - 规则表：派发=广播给订阅 file 全部活跃连接（任意相可答）；零订阅→立即回 pi cancelled；答案=首答胜出（此后同 requestId→4404 未知或已答）；跨文件答案→4404 非订阅者；方法级校验（select→value∈options；confirm→confirmed；input/editor→value；任一法可 cancelled）违者 4404；末订阅者断开→该 file pending 全回 cancelled；进程换代→pending 全灭+ui-closed(process-retired)；每会话 pending≤8（第 9 个起立即 cancelled+overflow）；宿主不设超时（pi 侧 timeout 自治；晚答照转，pi 忽略过期 id）；ui-answer 未接线→4405。
 - 实现源码=apps/server/src/runtime/rpc-session.ts（demux/handleUiRequest/answerUi/closeUiForGeneration）+apps/server/src/ws/{ui-host.ts,ws-gateway.ts}（broadcastUi*/handleUiAnswer/cancelPendingUiForFile）+apps/server/src/composition.ts（晚绑定 uiSink+answer 端口适配）；测试=tests/unit/server/{rpc-session-ui.test.ts（W-ui-s1..9）,ws-gateway-ui.test.ts（W-ui-g1..9）}。
+
+### §10.4 运营三件（M-OPS，契约 v1.4 增补；正文 v1 冻结不改写）
+
+- 权威设计=docs/m-ops-design.md v2；协议源码=packages/protocol/src/contracts.ts M-OPS 段。三处：
+  - **prompt.model?**（写帧可选域，v1.1 generation 同式剥除+组装）：精确模型 id（LIMITS.modelPattern=`^[\w./:-]{1,128}$`，非 glob pattern；K3 实测 39/39 现役 id 全过）。语义=spawn 尾追 `--model`（piArgs 序=基底+extraPiArgs+`--model` 尾追恒胜；extraPiArgs 携带 --model=拒启门禁集扩列，E-ui-0b 同式）；会话级记忆=sidecar `<file>.model`（优先级 prompt.model>sidecar>pi 默认）。
+  - **get-models / models-list 帧对**（挂 list 连接）：C→S `{t:"get-models", requestId}`（两字段恰具）；S→C `{t:"models-list", requestId, models:[{provider,id,context?,thinking?}], cause?}`（失败→空表+cause，不新设错误码）。数据源=spawn `pi --list-models`（首次请求触发+进程内缓存 10min；表头列偏移+`\s{2,}` 切分+列数校验）。
+  - **write-ack not-ready.detail?**：启动失败 stderr 尾行（≤500 字符+strip 控制字符；per-generation stderr ring buffer——onStderr 现状生产面未接线，本批新捕获面顺手落审计）。错误源三路=spawn-failed/spawn-exited/readiness-timeout（kind 五值不变；错模型真腿=spawn-exited 实测：spawn 即退 exit=1+stderr 单行含模型名）。**明文政策显式裁决**：write-composer「服务端自由文本永不入 DOM」姿态有意变更（知情价值>泄露风险；React 转义+strip+本机自用；M-DEPLOY 多用户面前须再评——docs/m-ops-design.md §4）。
+- 新建会话（§2 面）：file 名 `ops-YYYYMMDD-HHmmss.jsonl`（同秒冲突=并入同会话，声明可接受）；新建态不发 subscribe（时序=写先行，4402=引导文案非错误）；实际落 roots[0]（resolveWithinRoots 相对名恒命中）。
+- 测试=tests/unit/contracts-v14.test.ts（V1-V7 纯校验面）+后端批（清单解析/sidecar 优先序/尾追序/detail 净化）+E2E N1-N3（docs/m-ops-design.md §5；N3 断言写死 spawn-exited 路）。
