@@ -1332,3 +1332,11 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - 变异重验（基线 1b6d9be 先提交后变异——M-245 正序）：Mu-f5 detail 门死→P2-1 例红/Mu-f6 ready 补拉门死（effect 去 wsState 依赖）→P2-3 例红/Mu-f7 恢复死→P3-2 例红。三杀真红+还原 68 绿。
 - **M-245 第三犯（本批教训固化）**：修复批五处 edit 落盘后未 commit 即跑变异——Mu-f5/f6/f7/f8 的 git checkout -- 把未提交修复一并还原到 HEAD，779db70 只含测试面（源面四处修复全丢）→全仓跑 4 红暴露→1b6d9be 重应用。铁律重申：**变异前基线必先 commit；变异后 checkout 还原必须 git log 核对目标文件最新 commit 含修复**。
 - 终态：全仓 1720 绿+web tsc 0；1714→1720（+6：P2-1 杀例/换模型例/P2-3 例/迟到门例/composer 2 例）。
+
+## M-OPS E2E 批（真 composition+假 pi 七腿+P1 语义缺口修复；2026-10-10，GLM 写·待 Kimi 交叉审）
+
+- fixture tests/fixtures/mops-fake-pi.mjs 五模式（env MOPS_FAKE_PI_MODE 惰性继承——**rig env 必须存续期保持、dispose 才恢复**（首请求才 spawn，boot 后立即恢复=模式全回默认 ready 的坑）；MOPS_ARGV_FILE 捕获 argv；shebang env node+chmod +x，piBin 直接指 fixture——**piBin=node+extraPiArgs=[fixture] 顺序错**（argv 基底在前=node 收 --mode 报错 exit 9）。
+- 七腿（tests/integration/m-ops-e2e.test.ts，1727 全绿含真跑）：1 ok 解析（context=string 断言——ModelInfoDTO 契约）/1b listfail 空表+cause 含「退出码」不连坐/2 ready prompt{model}→launched+argv 尾两值=[--model,id]+sidecar `<file>.session.model` 落盘/3a exit→not-ready{spawn-exited,detail 含 stderr}/3b piBin 不存在→{spawn-failed}/3c timeout→{readiness-timeout,detail 可缺省——进程活着无 stderr}/4 未配 piBin→get-models 4405。
+- **P1 语义缺口（E2E 发现）**：真进程异步 exit/error（坏模型秒退/ENOENT）面——start() 探针复核恒归 superseded 且丢 detail，M-OPS 核心价值（stderr 明文→用户）在最常见真路径断链。修复三件：①ProcessSupervisor exitFacts 登记（origin=unexpected/retired 区分宿主退役退出——stopping 相位=retired；环形 32 上限）+exitOf 查询口；②ProcessExitMeta{neverBorn}——host 层 S4-02 折算路径（pid undefined 的 error 事件）带元事实→ENOENT 归 spawn-failed（「可执行文件不存在」≠「启动后退出」）；③rpc-session start() 复核分支查 exitOf 归 spawn 族+onGenerationEnded 意外退出顺带 cancelReadiness（秒退不等满超时——性能面非正确性，Mu-e4 无杀点记档）。
+- 契约收紧三例（S4-04a/04b/B2b 断言 superseded→spawn-exited）：意外秒退归 spawn-exited（信息增益=detail 链）；「不动新代+不报 ready+收口 idle」不变量保留；superseded 只留宿主退役/新代接管纯竞态面。**Kimi 审须重点核此契约面**。
+- 变异 4/4（基线 e489c24 先 commit——M-245 铁律）：Mu-e1 exitOf 分类死→腿3a/3b 红/Mu-e2 neverBorn 死→腿3b 红/Mu-e3 origin 维度死（stopping 也 unexpected）→S4-04c/B1b/B2a 三例红/Mu-e4 cancelReadiness 挂钩死→**无杀点**（探针等满超时结果分类同——纯性能优化面，诚实记档不为杀而杀）。还原后 46 绿复跑。
