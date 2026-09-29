@@ -15,13 +15,16 @@ class FakeRpcHost implements ProcessHostPort {
   readonly frames: string[] = [];
   /** S5-R3：跨代 spawn 参数记录（同文件断言用）。 */
   readonly spawnArgs: string[][] = [];
+  /** v1.5（批A）：跨代 spawn cwd 记录（undefined=继承）。 */
+  readonly spawnCwds: Array<string | undefined> = [];
   writeMode: "ok" | "fail" | "hang" = "ok";
   private handler: ProcessSpawnHandlers | null = null;
   private stopped: string[] = [];
   handle: ProcessHandle | null = null;
 
-  spawn(args: readonly string[], h: ProcessSpawnHandlers): ProcessHandle {
+  spawn(args: readonly string[], h: ProcessSpawnHandlers, cwd?: string): ProcessHandle {
     this.spawnArgs.push([...args]);
+    this.spawnCwds.push(cwd);
     this.handler = h;
     this.handle = { id: `fake-${Date.now()}-${Math.random().toString(36).slice(2)}` };
     return this.handle;
@@ -1037,5 +1040,40 @@ describe("RpcSession（受控替身）", () => {
         spy.mockRestore();
       }
     });
+  });
+});
+
+// v1.5（批A）：cwd 透传——RpcSession opts.cwd→spawnNext→host.spawn（会话寿命内跨代沿用）。
+describe("批A cwd 管道", () => {
+  it("A1 opts.cwd→首代 spawn 携 cwd；缺省=undefined（继承服务进程）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "rpc-cwd-"));
+    dirs.push(dir);
+    const mk = async (cwd?: string): Promise<FakeRpcHost> => {
+      const host = new FakeRpcHost();
+      const jp = join(dir, `j-${Math.random().toString(36).slice(2)}.jsonl`);
+      const session = new RpcSession({
+        sessionFile: join(dir, `p-${Math.random().toString(36).slice(2)}.session`),
+        journalPath: jp,
+        sessionId: "s-cwd",
+        host,
+        durability: new FileDurability(jp),
+        readinessTimeoutMs: 500,
+        timeoutPollMs: 20,
+        disableIdleReaper: true,
+        ...(cwd !== undefined ? { cwd } : {}),
+        audit: () => {},
+      });
+      sessions.push(session);
+      const ready = session.start();
+      await until(() => host.frames.some((f) => f.includes("get_state")), "探针帧");
+      const probe = JSON.parse(host.frames.filter((f) => f.includes("get_state")).slice(-1)[0]!) as { id: string };
+      host.emitEvent({ id: probe.id, type: "response", command: "get_state", success: true, data: {} });
+      expect((await ready).kind).toBe("ready");
+      return host;
+    };
+    const h1 = await mk("/proj/alpha");
+    expect(h1.spawnCwds).toEqual(["/proj/alpha"]);
+    const h2 = await mk(); // 缺省案
+    expect(h2.spawnCwds).toEqual([undefined]);
   });
 });

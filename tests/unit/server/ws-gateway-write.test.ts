@@ -38,7 +38,7 @@ class FakeConn {
 
 /** 写宿主替身：记录调用；可编程 outcome 与抛错。 */
 class FakeWriteHost implements WriteHostPort {
-  prompts: Array<{ file: string; text: string }> = [];
+  prompts: Array<{ file: string; text: string; generation?: number; model?: string; cwd?: string }> = [];
   stops: string[] = [];
   next: WriteSendOutcomeDTO = { kind: "launched", intentId: "i-1", commandId: 1 };
   nextStop: WriteStopOutcomeDTO = { kind: "confirmed", exit: { code: 0, signal: null } };
@@ -47,8 +47,8 @@ class FakeWriteHost implements WriteHostPort {
   throwStop = false;
   /** W8/W14：挂起门——非空时 sendPrompt 等待该 promise（造在途窗口；用可释放 deferred）。 */
   gatePrompt: Promise<void> | null = null;
-  async sendPrompt(file: string, text: string): Promise<WriteSendOutcomeDTO> {
-    this.prompts.push({ file, text });
+  async sendPrompt(file: string, text: string, generation?: number, model?: string, cwd?: string): Promise<WriteSendOutcomeDTO> {
+    this.prompts.push({ file, text, generation, model, cwd });
     if (this.gatePrompt !== null) await this.gatePrompt;
     if (this.throwPrompt) throw new Error("boom-prompt");
     return this.next;
@@ -357,6 +357,63 @@ describe("3c-1 写侧帧：网关派发面", () => {
       await c.say({ t: "ping", nonce: "n1" });
       expect(c.frames().some((f) => f.t === "welcome")).toBe(true);
       expect(c.frames().some((f) => f.t === "pong")).toBe(true);
+    } finally { await r.dispose(); }
+  });
+
+  // v1.5（批A）：prompt 帧 cwd 域（项目目录）——网关授权门+透传。
+  it("W16 prompt 携 cwd（根内目录）→透传宿主（write-ack launched；cwd 原样）", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      await c.say({ t: "prompt", requestId: "r16", file: r.inFile, text: "hi", cwd: r.dir });
+      expect(c.frames().some((f) => f.t === "write-ack" && (f as { outcome?: { kind?: string } }).outcome?.kind === "launched")).toBe(true);
+      expect(r.host.prompts).toEqual([{ file: r.inAbs, text: "hi", generation: undefined, model: undefined, cwd: r.dir }]);
+    } finally { await r.dispose(); }
+  });
+
+  it("W17 prompt 携 cwd 越界（根外绝对路径）→4404 且宿主未被调", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      const outside = await mkdtemp(join(tmpdir(), "outside-"));
+      try {
+        await c.say({ t: "prompt", requestId: "r17", file: r.inFile, text: "hi", cwd: outside });
+        expect(errs(c).some((f) => f.code === 4404)).toBe(true);
+        expect(r.host.prompts.length).toBe(0);
+      } finally { await rm(outside, { recursive: true, force: true }); }
+    } finally { await r.dispose(); }
+  });
+
+  it("W18 prompt 携 cwd 非目录（根内文件）→4404；cwd 相对路径→4404（校验器形状层拒）", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      await c.say({ t: "prompt", requestId: "r18a", file: r.inFile, text: "hi", cwd: join(r.dir, "not-dir") }); // 根内但不存在
+      expect(errs(c).some((f) => f.code === 4404)).toBe(true);
+      await c.say({ t: "prompt", requestId: "r18b", file: r.inFile, text: "hi", cwd: "relative/path" }); // 非绝对→形状层拒
+      expect(errs(c).some((f) => f.code === 4404)).toBe(true);
+      expect(r.host.prompts.length).toBe(0);
+    } finally { await r.dispose(); }
+  });
+
+  it("W19 prompt 不携 cwd→宿主收 undefined（缺省=继承服务进程；不新增拒因）", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      await c.say({ t: "prompt", requestId: "r19", file: r.inFile, text: "hi" });
+      expect(r.host.prompts).toEqual([{ file: r.inAbs, text: "hi", generation: undefined, model: undefined, cwd: undefined }]);
+    } finally { await r.dispose(); }
+  });
+
+  // v1.5（批A）：get-roots 帧（目录选择器数据源）。
+  it("W20 get-roots→roots-list（授权根原序下发；requestId 回显）", async () => {
+    const r = await makeRig();
+    try {
+      const c = await authed(r);
+      await c.say({ t: "get-roots", requestId: "rr1" });
+      const f = c.frames().find((fr) => fr.t === "roots-list") as { roots?: string[] } | undefined;
+      expect(f).toBeDefined();
+      expect(f?.roots).toEqual([r.dir]);
     } finally { await r.dispose(); }
   });
 });

@@ -24,8 +24,10 @@ export interface RpcLikeSession {
 }
 
 export interface RpcWriteHostOpts {
-  /** 宿主会话工厂：journal 绝对路径→会话实例（同 file 恰调一次=pending 共享；失败后允许重试）。 */
-  sessionFor(file: string): RpcLikeSession | Promise<RpcLikeSession>;
+  /** 宿主会话工厂：journal 绝对路径→会话实例（同 file 恰调一次=pending 共享；失败后允许重试）。
+   *  v1.5（批A）：cwd=冷启动首建时的项目目录（仅首次调用携带；已建会话后续帧不同 cwd 被忽略——
+   *  会话寿命内 pi 进程工作目录固定）。 */
+  sessionFor(file: string, cwd?: string): RpcLikeSession | Promise<RpcLikeSession>;
   /** 宿主审计（内部异常/gate-failed 细节唯一出口；格式化与回调异常均被隔离）。 */
   audit?(line: string): void;
   /** v1.1 帧身份权威源（r3a）：resume/prompt-generation 身份门数据。缺省=恒拒（fail-closed）
@@ -104,17 +106,17 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
   // 第19轮加固：收 thunk——字符串化/格式化（含恶意 toString/message getter 再抛）也在隔离域内，
   // 最后无条件抛固定 stripped Error（剥离承诺不依赖被拒绝值的行为）。
   const auditSafe = (make: () => string): void => { try { opts.audit?.(make()); } catch { /* 审计+格式化异常隔离 */ } };
-  const sessionOf = (file: string): Promise<RpcLikeSession> => {
+  const sessionOf = (file: string, cwd?: string): Promise<RpcLikeSession> => {
     const hit = settled.get(file);
-    if (hit !== undefined) return Promise.resolve(hit);
+    if (hit !== undefined) return Promise.resolve(hit); // 已建会话：cwd 被忽略（会话寿命内固定；见 opts.sessionFor 注释）
     const inflight = pending.get(file);
-    if (inflight !== undefined) return inflight; // single-flight：首次并发共享同一次创建
+    if (inflight !== undefined) return inflight; // single-flight：首次并发共享同一次创建（cwd 取首调用者）
     // 槽对象持引用：身份校验不自引用 let/const（tsc 赋前使用与 eslint prefer-const 两难）；
     // 工厂压微任务后 pending.set 必先于工厂执行——同步 throw 也能正确走身份删除（防陈旧占位）。
     const slot: { p?: Promise<RpcLikeSession> } = {};
     slot.p = (async () => {
       try {
-        const s = await Promise.resolve().then(() => opts.sessionFor(file));
+        const s = await Promise.resolve().then(() => opts.sessionFor(file, cwd));
         settled.set(file, s);
         return s;
       } finally {
@@ -127,7 +129,7 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
     return creating;
   };
   return {
-    async sendPrompt(file: string, text: string, generation?: number, model?: string): Promise<WriteSendOutcomeDTO> {
+    async sendPrompt(file: string, text: string, generation?: number, model?: string, cwd?: string): Promise<WriteSendOutcomeDTO> {
       try {
         // v1.1 帧身份门（prompt 面）：客户端携带代次≠当前活代→恒拒（零副作用：不触 sessionFor/send）
         let liveGen: number | null = null; // r3c：门验过的活代传给 send（期望代次断言收窗；live=null 冷启动放行）
@@ -144,7 +146,7 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
             return { kind: "identity-rejected", cause: "generation-mismatch" };
           }
         }
-        const raw = await (await sessionOf(file)).send(text, liveGen ?? undefined, model); // r3c：期望代次=门验活代（null=无断言，冷启动拉起兼容）；model=M-OPS v1.4 会话级模型记忆
+        const raw = await (await sessionOf(file, cwd)).send(text, liveGen ?? undefined, model); // r3c：期望代次=门验活代（null=无断言，冷启动拉起兼容）；model=M-OPS v1.4 会话级模型记忆；cwd=v1.5 首建项目目录
         const g = gateFailedDetail(raw);
         if (g !== null) auditSafe(() => g);
         return encodeSendOutcome(raw);

@@ -11,8 +11,10 @@
 import type { WriteSendOutcomeDTO, WriteStopOutcomeDTO, WriteResumeOutcomeDTO } from "@pi-agent-ui/protocol";
 
 export interface WriteHostPort {
-  /** 发一轮用户消息（prompt 帧）。generation=v1.1 可选进程代次（提供则身份门校验活代匹配）。 */
-  sendPrompt(file: string, text: string, generation?: number, model?: string): Promise<WriteSendOutcomeDTO>;
+  /** 发一轮用户消息（prompt 帧）。generation=v1.1 可选进程代次（提供则身份门校验活代匹配）；
+   *  model=v1.4（M-OPS）会话级模型；cwd=v1.5（批A）可选项目目录（仅冷启动建会话时采纳——
+   *  pi 进程工作目录与 journal 树分离；网关已验授权域；会话寿命内固定，后续帧不同 cwd 被忽略）。 */
+  sendPrompt(file: string, text: string, generation?: number, model?: string, cwd?: string): Promise<WriteSendOutcomeDTO>;
   /** 停止会话进程（stop 帧）。 */
   stop(file: string): Promise<WriteStopOutcomeDTO>;
   /** v1.1 恢复意图重发（resume 帧）。身份门四校验（恢复数据在场/未阻断/授权/代次）在宿主面；

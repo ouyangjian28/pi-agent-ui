@@ -271,6 +271,7 @@ export type ClientFrame =
   | { readonly t: "get-recovery"; readonly requestId: string; readonly file: string; readonly offset?: number; readonly evidenceHash?: string }
   | { readonly t: "ping"; readonly nonce: string }
   | { readonly t: "get-models"; readonly requestId: string } // v1.4（M-OPS）：模型清单请求（挂 list 连接）
+  | { readonly t: "get-roots"; readonly requestId: string } // v1.5（批A）：授权根列表请求（目录选择器数据源；挂 list 连接）
   | UiAnswerFrame
   | EntryGetFrame;
 
@@ -372,8 +373,16 @@ export interface ModelsListFrame {
   readonly cause?: string;
 }
 
+/** v1.5（批A）：S→C 授权根列表（prompt 帧 cwd 域数据源——目录选择器）。 */
+export interface RootsListFrame {
+  readonly t: "roots-list";
+  readonly requestId: string;
+  readonly roots: readonly string[]; // 绝对路径（服务端 --root 序）
+}
+
 export type ServerFrame =
   | { readonly t: "welcome"; readonly serverBootId: string; readonly serverBuildId: string; readonly protocolVersion: 1 }
+  | RootsListFrame
   | { readonly t: "sessions"; readonly requestId: string; readonly sessions: readonly SessionSummaryDTO[]; readonly total: number; readonly offset: number; readonly hasMore: boolean; readonly listVersion: number;
       /** 页级可靠性（c6 C5-07）：本页含任一条目 partial→partial；条目级仍见 SessionSummaryDTO.listReliability */
       readonly listReliability: "full" | "partial" }
@@ -537,6 +546,12 @@ export function validateClientFrame(raw: unknown): FrameCheck {
       const requestId = reqId(obj); if (!isStr(requestId)) return requestId;
       return ok({ t: "get-models", requestId });
     }
+    case "get-roots": {
+      // v1.5（批A）：两字段恰具；授权根列表下发（prompt 帧 cwd 域数据源）。
+      const r0 = requireExact(obj, ["t", "requestId"]); if (r0) return r0;
+      const requestId = reqId(obj); if (!isStr(requestId)) return requestId;
+      return ok({ t: "get-roots", requestId });
+    }
     case "ping": {
       const r0 = requireExact(obj, ["t", "nonce"]); if (r0) return r0;
       const nonce = obj["nonce"];
@@ -594,8 +609,8 @@ export const WRITE_OPEN_FRAME_TYPES: readonly string[] = ["prompt", "stop", "res
 export const WRITE_TEXT_MAX_BYTES = 65_536;
 
 export type WriteClientFrame =
-  | { readonly t: "prompt"; readonly requestId: string; readonly file: string; readonly text: string; readonly generation?: number; readonly model?: string } // v1.1 帧身份：可选进程代次（提供则宿主身份门校验活代匹配——v1 客户端缺省跳过）；v1.4（M-OPS）可选模型 id（spawn 尾追 --model 恒胜（禁集拒启：extraPiArgs 携 --model）+sidecar 持久化，优先级 prompt.model>sidecar>pi 默认，docs/m-ops-design.md §3）
   | { readonly t: "stop"; readonly requestId: string; readonly file: string }
+  | { readonly t: "prompt"; readonly requestId: string; readonly file: string; readonly text: string; readonly generation?: number; readonly model?: string; readonly cwd?: string } // v1.1 帧身份：可选进程代次（提供则宿主身份门校验活代匹配——v1 客户端缺省跳过）；v1.4（M-OPS）可选模型 id（spawn 尾追 --model 恒胜（禁集拒启：extraPiArgs 携 --model）+sidecar 持久化，优先级 prompt.model>sidecar>pi 默认，docs/m-ops-design.md §3）；v1.5（批A）可选 cwd 绝对路径（pi 进程工作目录=项目目录，与 journal 树分离；网关校验在授权 roots 内；仅首次冷启动生效——会话寿命内 cwd 固定）
   | { readonly t: "resume"; readonly requestId: string; readonly file: string; readonly intentId: string; readonly generation: number }; // v1.1：恢复意图重发（身份门四校验：恢复数据在场/未阻断/授权/代次）
 
 export type WriteFrameCheck =
@@ -613,8 +628,9 @@ export function validateWriteFrame(raw: unknown): WriteFrameCheck {
   if (t === "prompt") {
     // v1.1：generation 为可选域——先从探测副本剥除，再走四字段集合等值（v1 帧仍严格原形）。
     // v1.4（M-OPS）：model 同式可选域（精确 id 非 glob；非空校验走 LIMITS.modelPattern）。
-    const probe: Record<string, unknown> = has(obj, "generation") || has(obj, "model") ? { ...obj } : obj;
-    if (probe !== obj) { delete probe["generation"]; delete probe["model"]; }
+    // v1.5（批A）：cwd 同式可选域（绝对路径字符串；根内校验在网关——契约层只验形状）。
+    const probe: Record<string, unknown> = has(obj, "generation") || has(obj, "model") || has(obj, "cwd") ? { ...obj } : obj;
+    if (probe !== obj) { delete probe["generation"]; delete probe["model"]; delete probe["cwd"]; }
     const r0 = exactWrite(probe, ["t", "requestId", "file", "text"]); if (r0) return r0;
     const rid = ridWrite(obj); if (typeof rid !== "string") return rid;
     const file = fileWrite(obj); if (typeof file !== "string") return file;
@@ -633,9 +649,16 @@ export function validateWriteFrame(raw: unknown): WriteFrameCheck {
       if (typeof m !== "string" || !LIMITS.modelPattern.test(m)) return badWrite(4404, "model 非法");
       model = m;
     }
-    const extras: { generation?: number; model?: string } = {};
+    let cwd: string | undefined; // v1.5（批A）可选：项目目录绝对路径（形状校验；授权域在网关 resolveWithinRoots）
+    if (has(obj, "cwd")) {
+      const c = obj["cwd"];
+      if (typeof c !== "string" || c.length === 0 || !c.startsWith("/")) return badWrite(4404, "cwd 非法（须绝对路径）");
+      cwd = c;
+    }
+    const extras: { generation?: number; model?: string; cwd?: string } = {};
     if (generation !== undefined) extras.generation = generation;
     if (model !== undefined) extras.model = model;
+    if (cwd !== undefined) extras.cwd = cwd;
     return okFrame(Object.keys(extras).length === 0 ? { t: "prompt", requestId: rid, file, text } : { t: "prompt", requestId: rid, file, text, ...extras });
   }
   if (t === "resume") {

@@ -18,6 +18,7 @@
 // 3a=受控端口注入（无真网络）；3b 换 ws 库适配同一端口面（真网络分片）。
 // 传输级说明：本层只处理**应用帧**；传输级 ping/pong/close 由端口透传（onPong→心跳记账）。
 import { createHash } from "node:crypto";
+import { existsSync, statSync } from "node:fs";
 import type {
   ClientFrame, LiveEvent, RecoveryBlockReason, SanitizedText, ServerFrame, SessionStatus,
 } from "@pi-agent-ui/protocol";
@@ -419,6 +420,15 @@ export class WsGateway {
       case "list-sessions": void this.handleList(st, frame); return;
       case "get-recovery": void this.handleRecovery(st, frame); return;
       case "get-models": void this.handleGetModels(st, frame).finally(() => { st.inflight.delete(frame.requestId); }); return; // M-OPS v1.4
+      case "get-roots": { // v1.5（批A）：授权根下发（同步面；roots 为网关常量）
+        try {
+          this.audit(`get-roots conn=${st.id} count=${this.opts.roots.length}`);
+          this.enqueue(st, { t: "roots-list", requestId: frame.requestId, roots: [...this.opts.roots] });
+        } finally {
+          st.inflight.delete(frame.requestId);
+        }
+        return;
+      }
       case "entry-get": void this.handleEntryGet(st, frame).finally(() => { st.inflight.delete(frame.requestId); }); return;
       case "ui-answer": {
         // r2 P2-A（DS 判分 2026-10-10）：handleUiAnswer 同步路由内 answer() 端口同步抛
@@ -441,7 +451,14 @@ export class WsGateway {
     try {
       const abs = resolveWithinRoots(file, this.opts.roots);
       if (abs === null) { this.errFrame(st, 4404, "file 越界", rid); return; }
-      const outcome = await this.opts.writeHost!.sendPrompt(abs, frame.text, frame.generation, frame.model); // v1.1：可选代次透传身份门；v1.4（M-OPS）：model 会话级模型
+      // v1.5（批A）：可选 cwd（项目目录）——授权域校验：必须在 roots 内（与 file 同一门），否则拒。
+      // 仅冷启动建会话时生效（ RpcWriteHost→SessionRegistry 首建采纳；会话寿命内 cwd 固定，后续帧携带不同 cwd 被忽略）。
+      if (frame.cwd !== undefined) {
+        const cwdAbs = resolveWithinRoots(frame.cwd, this.opts.roots);
+        if (cwdAbs === null) { this.errFrame(st, 4404, "cwd 越界", rid); return; }
+        if (!existsSync(cwdAbs) || !statSync(cwdAbs).isDirectory()) { this.errFrame(st, 4404, "cwd 目录不存在", rid); return; }
+      }
+      const outcome = await this.opts.writeHost!.sendPrompt(abs, frame.text, frame.generation, frame.model, frame.cwd); // v1.1：可选代次透传身份门；v1.4（M-OPS）：model 会话级模型；v1.5（批A）：cwd 首建项目目录
       this.audit(`write-frame conn=${st.id} t=prompt file=${file} outcome=${outcome.kind}`);
       this.enqueue(st, { t: "write-ack", requestId: rid, file, outcome });
     } catch (e: unknown) {

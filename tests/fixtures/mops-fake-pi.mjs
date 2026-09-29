@@ -9,6 +9,7 @@
 //   exit      捕获 argv；stderr 打「model "nope" not found」+ exit 127（腿3a spawn-exited）
 //   timeout   捕获 argv；静默挂起（不回探针——readiness 超时腿）
 //   timeout-k 捕获 argv；回探针后就绪但 prompt 命令静默不答（备用：response 超时面）
+//   cwd      批A 生产烟测：启动即把 {cwd,argv,pid} 写到 $FAKE_PI_CWD_FILE；探针应答常驻（同 ready）。
 import { appendFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
@@ -36,6 +37,10 @@ if (process.env.MOPS_ARGV_FILE) appendFileSync(process.env.MOPS_ARGV_FILE, JSON.
 if (mode === "exit") {
   process.stderr.write('fake-pi: fatal: model "nope" not found in provider registry\n');
   process.exit(127);
+}
+
+if (mode === "cwd" && process.env.FAKE_PI_CWD_FILE) {
+  appendFileSync(process.env.FAKE_PI_CWD_FILE, JSON.stringify({ cwd: process.cwd(), argv: args, pid: process.pid }) + "\n");
 }
 
 if (mode === "timeout") {

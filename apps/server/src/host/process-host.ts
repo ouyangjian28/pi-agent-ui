@@ -36,12 +36,15 @@ export class PiProcessHost implements ProcessHostPort {
     }
   }
 
-  spawn(args: readonly string[], h: ProcessSpawnHandlers): ProcessHandle {
+  spawn(args: readonly string[], h: ProcessSpawnHandlers, cwd?: string): ProcessHandle {
     const bin = this.opts.piBin ?? "pi";
     const spawnFn = this.opts.spawnFn ?? spawn;
     const child = spawnFn(bin, [...args], {
       stdio: ["pipe", "pipe", "pipe"],
       detached: process.platform !== "win32",
+      // v1.5（批A）：per-session 工作目录（undefined=继承宿主进程——服务进程 cwd）；
+      // 会话=项目语义：pi 在 cwd 读写项目文件；journal 路径由 --session 绝对路径决定不受 cwd 影响。
+      ...(cwd !== undefined ? { cwd } : {}),
     });
     const id = `proc-${++PiProcessHost.seq}`;
     this.procs.set(id, child);

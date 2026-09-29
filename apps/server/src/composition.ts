@@ -350,7 +350,7 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     // P0-2 r3a：帧身份权威源——报告=恢复证据链（与 get-recovery 同源同适配）；代次=registry 真源。
     ...(registry !== null ? {
       writeHost: createRpcWriteHost({
-        sessionFor: (file: string) => registry!.sessionFor(file),
+        sessionFor: (file: string, cwd?: string) => registry!.sessionFor(file, cwd), // v1.5（批A）：cwd 首建采纳透传（项目目录）
         audit,
         resumeAuthority: makeResumeAuthority({ roots: config.roots, provider: recoveryEvidence, registry: { statusFor: (f: string) => registry!.statusFor(f) }, semaphore }),
       }),

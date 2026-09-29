@@ -49,7 +49,7 @@ export interface ProcessSpawnHandlers {
 
 /** 进程宿主端口：spawn/writeStdin/stop。退出确认=宿主只在 waitpid/proc 消失口径下回调 onExit。 */
 export interface ProcessHostPort {
-  spawn(args: readonly string[], h: ProcessSpawnHandlers): ProcessHandle;
+  spawn(args: readonly string[], h: ProcessSpawnHandlers, cwd?: string): ProcessHandle; // cwd=v1.5（批A）可选工作目录（undefined=继承宿主进程；per-session 项目目录）
   /** 返回的 Promise resolve=字节已交给宿主（背压含）；reject 呈现给 submitTurn 调用方。 */
   writeStdin(h: ProcessHandle, text: string): Promise<void>;
   stop(h: ProcessHandle, signal: "SIGTERM" | "SIGKILL"): void;
@@ -161,7 +161,7 @@ export class ProcessSupervisor {
    * 拉起下一进程代次。仅 idle 可用（串行化交接：旧写者退出确认前不 spawn 新写者）。
    * spawn 抛错=无进程产生，回滚到 idle 可重试。
    */
-  spawnNext(args: readonly string[]): SpawnOutcome {
+  spawnNext(args: readonly string[], cwd?: string): SpawnOutcome {
     if (this.phase !== "idle") {
       this.audit(`process-spawn-rejected phase=${this.phase}`);
       return { kind: "rejected", reason: "not-idle" };
@@ -190,7 +190,7 @@ export class ProcessSupervisor {
           this.opts.onStderr?.(t, entry.generation);
         },
         onExit: (code, signal, meta) => this.onExit(entry, code, signal, meta),
-      });
+      }, cwd);
     } catch (error) {
       entry.retired = true; // 该代次无进程产生，直接视为已退役
       this.current = null;

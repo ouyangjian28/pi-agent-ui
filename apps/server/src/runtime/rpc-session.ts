@@ -44,6 +44,9 @@ export interface RpcSessionOpts {
   readonly extraPiArgs?: readonly string[];
   /** journal 路径（意图/sending/超时记录行；append-only+逐行 fdatasync）。 */
   readonly journalPath: string;
+  /** v1.5（批A）：pi 进程工作目录（项目目录，与 journal 树分离；undefined=继承服务进程 cwd）。
+   *  会话寿命内固定（首建采纳；换代 spawn 沿用——pi 跨回收同项目）。 */
+  readonly cwd?: string;
   readonly sessionId: string;
   /** 进程宿主（生产=PiProcessHost；测试=受控替身）。 */
   readonly host: ProcessHostPort;
@@ -645,6 +648,7 @@ export class RpcSession {
     this.stderrTail = [];
     const r = this.supervisor.spawnNext(
       this.sessionModel !== undefined ? [...this.piArgs, "--model", this.sessionModel] : this.piArgs,
+      this.opts.cwd, // v1.5（批A）：per-session 项目目录（undefined=继承服务进程）
     );
     if (r.kind !== "spawned") {
       if (r.kind === "rejected") return { kind: "rejected", reason: r.reason };

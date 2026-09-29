@@ -53,6 +53,17 @@ const until = async (f: () => boolean, what: string, ms = 1000): Promise<void> =
 };
 
 describe("PiProcessHost（注入式假 child）", () => {
+  it("批A：spawn 携 cwd→spawnFn options.cwd 原样（项目目录）；缺省=不传 cwd 键（继承服务进程）", () => {
+    const calls: Array<{ bin: string; cwd?: string }> = [];
+    const host = new PiProcessHost({
+      spawnFn: (bin: string, _args: string[], options?: { cwd?: string }) => { calls.push({ bin, cwd: options?.cwd }); return new FakeChild() as unknown as ChildProcessWithoutNullStreams; },
+    });
+    host.spawn(["--version"], undefined, "/proj/alpha");
+    host.spawn(["--version"]);
+    expect(calls[0]?.cwd).toBe("/proj/alpha");
+    expect(calls[1]?.cwd).toBeUndefined();
+  });
+
   it("spawn：事件泵解析好行/坏行分流+撕裂行跨块拼接+stderr 透传", async () => {
     const { host, child } = makeHost();
     const rec = handlers();

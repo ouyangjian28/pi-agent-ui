@@ -219,3 +219,31 @@ describe("3c-2 宿主适配：createRpcWriteHost", () => {
     expect(audits.some((l) => l.includes("write-host-gate-failed-detail") && l.includes("stage=sending") && l.includes("内部细节-XYZ"))).toBe(true);
   });
 });
+
+// v1.5（批A）：cwd 首建采纳（会话寿命内固定；已建会话后续帧 cwd 被忽略）。
+describe("3c-2 写宿主 cwd 首建采纳", () => {
+  const mkSession = (result: SessionSendResult = { kind: "launched", key: { intentId: "i-1", commandId: 1, generation: 1 } }) => ({
+    send: () => Promise.resolve(result),
+    stop: () => Promise.resolve({ kind: "no-process" } as const),
+  });
+  it("C1 首次 prompt 携 cwd→sessionFor 收 (file, cwd)；write-ack 正常", async () => {
+    const seen: Array<[string, string | undefined]> = [];
+    const host = createRpcWriteHost({ sessionFor: (f, cwd) => { seen.push([f, cwd]); return mkSession(); } });
+    const out = await host.sendPrompt("/abs/s.jsonl", "hi", undefined, undefined, "/proj");
+    expect(out.kind).toBe("launched");
+    expect(seen).toEqual([["/abs/s.jsonl", "/proj"]]);
+  });
+  it("C2 同 file 第二次 prompt 携不同 cwd→sessionFor 只调一次（cwd 被忽略）", async () => {
+    const seen: Array<[string, string | undefined]> = [];
+    const host = createRpcWriteHost({ sessionFor: (f, cwd) => { seen.push([f, cwd]); return mkSession(); } });
+    await host.sendPrompt("/abs/s.jsonl", "a", undefined, undefined, "/proj1");
+    await host.sendPrompt("/abs/s.jsonl", "b", undefined, undefined, "/proj2");
+    expect(seen).toEqual([["/abs/s.jsonl", "/proj1"]]); // 恰一次；第二 cwd 不达工厂
+  });
+  it("C3 不携 cwd→sessionFor 收 (file, undefined)", async () => {
+    const seen: Array<[string, string | undefined]> = [];
+    const host = createRpcWriteHost({ sessionFor: (f, cwd) => { seen.push([f, cwd]); return mkSession(); } });
+    await host.sendPrompt("/abs/s.jsonl", "hi");
+    expect(seen).toEqual([["/abs/s.jsonl", undefined]]);
+  });
+});

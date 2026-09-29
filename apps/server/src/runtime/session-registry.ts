@@ -50,7 +50,7 @@ export interface SessionRegistryOpts {
 
 export interface SessionRegistry {
   /** 同步/幂等/缓存：同 file 同实例；dispose 后抛错。 */
-  sessionFor(file: string): RpcSession;
+  sessionFor(file: string, cwd?: string): RpcSession; // cwd=v1.5（批A）首建采纳（已建会话忽略）
   /** 观测：已构造的 journal 文件（排序快照）。 */
   files(): readonly string[];
   /** statusFor 真源（见文件头注；未构造=进程 idle 真值+其余 unknown 语义）。 */
@@ -113,10 +113,10 @@ export function createSessionRegistry(opts: SessionRegistryOpts): SessionRegistr
   };
 
   return {
-    sessionFor(file: string): RpcSession {
+    sessionFor(file: string, cwd?: string): RpcSession {
       if (disposed) throw new Error("session-registry: 已销毁，拒绝构造会话");
       const cached = sessions.get(file);
-      if (cached !== undefined) return cached;
+      if (cached !== undefined) return cached; // 已建会话：cwd 被忽略（v1.5 批A：会话寿命内工作目录固定）
       const sessionFile = mapped(file);
       const s = new RpcSession({
         journalPath: file,
@@ -124,6 +124,7 @@ export function createSessionRegistry(opts: SessionRegistryOpts): SessionRegistr
         sessionId: sessionIdOf(file),
         host: opts.host,
         durability: opts.durabilityFor?.(file) ?? new FileDurability(file),
+        ...(cwd !== undefined ? { cwd } : {}), // v1.5（批A）：首建采纳的项目目录（undefined=继承服务进程）
         ...(opts.responseTimeoutMs !== undefined ? { responseTimeoutMs: opts.responseTimeoutMs } : {}),
         ...(opts.turnTimeoutMs !== undefined ? { turnTimeoutMs: opts.turnTimeoutMs } : {}),
         ...(opts.readinessTimeoutMs !== undefined ? { readinessTimeoutMs: opts.readinessTimeoutMs } : {}),
