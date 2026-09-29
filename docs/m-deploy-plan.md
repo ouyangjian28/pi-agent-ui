@@ -23,9 +23,9 @@ https://pi.yangyijian.com/?token=… —— 外网可达，token 门拦一切（
 - nginx server 块模板（pi. 443 TLS→127.0.0.1:8787；WS Upgrade/Connection 头；HSTS；client_max_body_size 1m）。
 - 部署 runbook（deploy/README.md：装 node/clone/构建/起服/切 nginx/验证/回滚）。
 
-### 批③ 两钉复核（硬前置）
-- 钉①：detail 形状门（后端 string 断言+前端 isSendOutcome 双门）——已落（DS-flash P2-1 修复批）；批①审时复核杀点仍在。
-- 钉②：detail 显文政策公网态复评——单用户+token 门+TLS 下维持显文（m-ops-design §4 政策不变）；结论记 TECH。
+### 批③ 两钉复核（硬前置）——✅ 2026-09-29 复核通过
+- 钉①：detail 形状门——前端 isSendOutcome 双门在（write-client.ts:190 cause‖detail 均 isString 门，畸形 write-ack 不结算 NotReadyBanner）；write-client 58 例绿。后端侧 detail=stderr 环缓冲 string 天然门（m-ops 后端批）。
+- 钉②：detail 显文政策公网态维持——单用户+token 门（timingSafeEqual）+TLS 传输下，detail=pi 进程 stderr 尾行对**唯一合法用户**可见的知情价值 > 泄露风险（攻击者无 token 连 hello 都过不了，谈不上读 detail）；React 默认转义+服务端 ≤500 strip 双净化不变。政策原文=m-ops-design §4，无需修改。
 
 ### 批④ 上线+外网验证（需用户开服务器通道）
 - 服务器（43.108.11.202）：装 node 24/clone 仓/构建/写 env（token）/systemd 起/nginx 加 pi. server 块/证书（现有证书若无 pi. SAN 则 certbot 扩）/reload。
