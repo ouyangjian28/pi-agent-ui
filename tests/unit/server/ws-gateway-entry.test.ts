@@ -170,7 +170,9 @@ describe("D4 批② W-d4-g：正路径两态", () => {
   });
 
   it("g3 thinking 门关（默认）：thinking 块被门控；门开（opts.thinkingVisible=true）：透传 entryBlocksOf", async () => {
-    const content = [{ type: "thinking", text: "独白" }, { type: "text", text: "答" }];
+    // pi 真格式字段=thinking（设计稿 §6；K3 批④审 P2-1：原 fixture 写 text=自我实现偏见同型残留，
+    // 只数块数对内容错读失明——修复 r["text"]回退变异时本例仍绿）
+    const content = [{ type: "thinking", thinking: "独白" }, { type: "text", text: "答" }];
     for (const [vis, expectCount] of [[false, 1], [true, 2]] as const) {
       const r = await makeRig(vis ? { thinkingVisible: true } : {});
       try {
@@ -183,6 +185,7 @@ describe("D4 批② W-d4-g：正路径两态", () => {
         expect((f.blocks as unknown[]).length).toBe(expectCount);
         const blocks = f.blocks as Array<Record<string, unknown>>;
         if (!vis) expect(blocks.some((b) => b.kind === "thinking")).toBe(false); // P3-1：判别字段=kind 非 type（原 type 恒 undefined 永真）
+        else expect(blocks[0]!.text).toBe("独白"); // K3 P2-1：内容级断言（字殦错读必红）
       } finally { await r.dispose(); }
     }
   });

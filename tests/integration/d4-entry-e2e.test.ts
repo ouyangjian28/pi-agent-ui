@@ -141,6 +141,8 @@ describe("D4 批④ E-d4-1：真组合根 entry-get 整链（门关实例）", (
   });
 
   it("E-d4-1c stale：装载后改写行→4414 digest 对账拒（retryable=true）+audit 行", async () => {
+    // 依赖 1a 的 subscribe 建立索引（it 间耦合——-t 单跑 1c 会 not-subscribed/unknown-entry 而非 stale）；
+    // 改写后立即 entry-get 实测未触发 fs.watch 重扫（投递延迟 >> 立即查询；重扫先至则 digest 匹配返 ok=潜伏 flake 窗，K3 P3-2）
     // 改写 m1 行内容（等长前缀替换：正文第一块→正文第二块——行边界不变，digest 必变）
     const text = await import("node:fs/promises").then((m) => m.readFile(r.sessionAbs, "utf8"));
     const rewritten = text.replace("正文第一块", "正文第二块");
