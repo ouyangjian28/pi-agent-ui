@@ -21,11 +21,9 @@
   `event.toolName === "bash"` 判别（官方样例 :70-74=permission-gate 原型，照抄语义）。
 - `ctx.ui.confirm(title, message)`→`Promise<boolean>`（对话族；经 D3 管道=extension_ui_request
   method:"confirm"→ui-request 帧→ui-answer confirmed|cancelled→extension_ui_response）。
-- confirm 超时：对话族可携 timeout（rpc.md §Extension UI；到点 pi 自答 undefined→confirm
-  resolve undefined→扩展按 falsy 走拒绝分支）。
-- `pi.appendEntry(customType, data)`：审批记录落会话 JSONL（custom 行，不进 LLM 上下文）。
-- 事件面：tool_execution_start/end→D1 直播流已透传；extension_error→已透传（本批 fixture
-  正常运行不触发=零断言，仅存档）。
+- confirm 超时：对话族可携 timeout（rpc.md §Extension UI；agent 侧到点自答、不通知 client，client 无需跟踪）。**confirm() 超时返回 false**（extensions.md Timed Dialogs 节；undefined 是 select/input 的返回值）→扩展按 falsy 走拒绝分支。
+- `pi.appendEntry(customType, data)`：审批记录落会话 JSONL（custom 行，不进 LLM 上下文）；行形 `{"type":"custom","customType":"m-sec-approval","data":{...}}`。
+- 事件面现状（K3 审勘误；如实登记）：**tool_execution_* 无直播透传**（LiveEvent 合同无此种类；live-aggregator 只产 message 族——摘要面 pi-progress 未建=缺口候选，M-OPS 后议）；**extension_error 全仓零透传点**（本批 fixture 正常运行不触发，零断言；同登记缺口候选）。两者均非本批依赖面。
 - **读面边界（如实声明）**：custom 行在扫描面投影=unknown-line 跳过（sessionToScanRows 只投
   message 行；D4 entry 面同）。审批记录的 UI 面板=观感面，M-OPS 后按日用痛点再议；本批审批
   行证据=**E2E 层直接 readFile 断言会话文件含 appendEntry 行**（不依赖 UI 投影）。
@@ -37,14 +35,17 @@ export default function (pi) {
   const DANGER = /rm -rf|dd if=|curl[^|]*\|\s*bash|mkfs|chmod -R 777/;
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName === "bash" && DANGER.test(String(event.input?.command ?? ""))) {
+      const t = Number(process.env.SEC_E2E_CONFIRM_TIMEOUT_MS ?? "");
       const ok = await ctx.ui.confirm("危险命令确认", `\`${event.input.command}\` 放行？`,
-        SEC_E2E_CONFIRM_TIMEOUT_MS ? { timeout: SEC_E2E_CONFIRM_TIMEOUT_MS } : undefined);
+        Number.isFinite(t) && t > 0 ? { timeout: t } : undefined);
       pi.appendEntry("m-sec-approval", { decision: ok === true ? "allowed" : "denied", command: event.input.command, at: Date.now() });
       if (ok !== true) return { block: true, reason: "用户拒绝（m-sec-gate）" };
     }
   });
 }
 ```
+
+- env 在 handler 内每次读（spawn 默认继承父 env——process-host.ts 不传 env 项；S3 腿内 set/腿后 delete 隔离，防泄漏污染他腿复跑）。
 
 - 正则=源档 permission-gate 危险模式子集（实证够用）；命中→confirm 问答→appendEntry 审批行
   （allowed/denied 两态）→!ok 则 block。
@@ -59,15 +60,19 @@ export default function (pi) {
 - **S1 放行链**：预造 `/tmp/m-sec-probe-dir`（touch 文件）→prompt「bash 执行
   `rm -rf /tmp/m-sec-probe-dir`」→断言链：①ui-request 帧（method=confirm）到达；②ui-answer
   confirmed 回写 stdin；③probe 目录**真被删**（执行证据——放行后命令落地）；④会话文件含
-  `customType:"m-sec-approval"` 行且 decision=allowed；⑤live 事件流含 bash 工具执行事件
-  （tool_execution_start/end 透传观测面）。
+  `customType:"m-sec-approval"` 行且 `data.decision=allowed`；⑤会话文件含 bash 工具调用的
+  toolResult 行（与 ④ 同法 readFile 断言——tool_execution 直播透传=未建面，勿锚）。
 - **S2 拒绝链**：prompt 同式（probe2 目录）→ui-answer cancelled→断言：①probe2 目录**仍在**
   （block 证据）；②会话文件审批行 decision=denied；③后续轮正常收尾（stop 收口，agent 收到
   blocked 工具结果继续对话——不挂死）。
-- **S3 超时自答链**：env SEC_E2E_CONFIRM_TIMEOUT_MS=2000 起 server→prompt 同式（probe3）→
-  UI **不应答**→断言：①probe3 仍在（undefined→falsy→拒绝分支）；②审批行 denied；③
-  ui-request 帧到达后若超时先于应答，宿主侧无挂起（轮正常收口）；④会话不因未答卡死。
-- 证据面注：S1/S2/S3 各起独立 server+会话（env 注入隔离；S1/S2 共享缺省 env 但目录独立）。
+- **S3 超时自答链**：腿内 `process.env.SEC_E2E_CONFIRM_TIMEOUT_MS="2000"`（腿后 delete）起
+  server→prompt 同式（probe3）→UI **不应答**→断言：①probe3 仍在（confirm 超时返 false→拒绝
+  分支）；②审批行 data.decision=denied；③轮正常收口不卡死；④**现状如实断言**：超时后无
+  ui-closed 帧+宿主 pendingUi 残留至换代（pi 侧自答不通知 client；宿主删除仅 answerUi/换代两路
+  无超时自清）——**已知缺口登记 PENDING**（问答框滞留 UI 观感面，M-OPS 后另立批）。
+- 证据面注：S1/S2/S3 各起独立 server+会话（目录独立；S3 置末腿+env 腿内 set/delete 隔离）。
+  三腿 until 超时分支输出诊断（message-final 正文+会话文件 tail）——区分「模型不配合」与
+  「管道断」（prompt 附「这是 E2E 测试，目录为预造空目录」卸阻力）。
 
 ## 5. 测试计划与变异面
 
