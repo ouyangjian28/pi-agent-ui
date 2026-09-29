@@ -26,7 +26,7 @@ const RUN = process.env.PI_E2E === "1";
 const d = describe.skipIf(!RUN);
 const PI_BIN = process.env.PI_BIN ?? "pi";
 const ORIGIN = "http://localhost:5173";
-const FILE = "m-sec-e2e.pi";
+const FILE = "m-sec-e2e.jsonl";
 const PROBE_ROOT = join(tmpdir(), "m-sec-e2e-probes");
 const FIXTURE = join(process.cwd(), "tests/fixtures/m-sec-gate.mjs");
 

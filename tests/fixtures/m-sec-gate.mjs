@@ -1,10 +1,8 @@
 // M-SEC E2E fixture：permission-gate 语义子集（设计稿 docs/m-sec-design.md §3）
 // 危险正则命中→confirm 问答→appendEntry 审批行→!ok 则 block。
 // timeout 经 env SEC_E2E_CONFIRM_TIMEOUT_MS 注入（S3 腿用短超时；缺省不带=长等待 UI 应答）。
-export default function (pi: {
-  on: (kind: "tool_call", h: (event: ToolCallEvent, ctx: UiCtx) => Promise<ToolCallVerdict | void>) => void;
-  appendEntry: (customType: string, data: unknown) => void;
-}) {
+// 纯 JS（.mjs）——pi 用 Node 直接加载，禁 TS 语法。
+export default function (pi) {
   const DANGER = /rm -rf|dd if=|curl[^|]*\|\s*bash|mkfs|chmod -R 777/;
   pi.on("tool_call", async (event, ctx) => {
     const command = String(event.input?.command ?? "");
@@ -24,8 +22,3 @@ export default function (pi: {
     }
   });
 }
-
-// —— 以下仅为类型占位（fixture 以 .mjs 运行，pi 不加载此文件，类型仅助读）——
-interface ToolCallEvent { toolName: string; input?: { command?: string } & Record<string, unknown>; }
-interface UiCtx { ui: { confirm: (title: string, message: string, opts?: { timeout?: number }) => Promise<boolean> }; }
-interface ToolCallVerdict { block: boolean; reason?: string; terminate?: boolean; }
