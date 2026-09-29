@@ -3,9 +3,12 @@
 // 职责：受控文本域+发送/停止按钮+状态行+错误横幅+最近结果行。
 //
 // 保真清单（重写锚点，对应 write-client/use-write 契约）：
-// ①受控文本（value/onChange），无 innerHTML/dangerouslySetInnerHTML；服务端自由文本（error.message、
-//   not-ready.cause）永不入 DOM——结果文案只做 kind 域内映射（launched 的 intentId/commandId、exit 的
-//   code/signal 为服务端受类型域约束的进程事实，作为文本节点渲染）；
+// ①受控文本（value/onChange），无 innerHTML/dangerouslySetInnerHTML；服务端自由文本（error.message）
+//   不入 DOM——结果文案只做 kind 域内映射（launched 的 intentId/commandId、exit 的
+//   code/signal 为服务端受类型域约束的进程事实，作为文本节点渲染）。
+//   【M-OPS v1.4 政策更新】not-ready.cause/detail 是唯一例外：明文政策已显式裁决（docs/m-ops-design.md §4，
+//   知情价值>泄露风险；推翻本文件旧政策「永不入 DOM」）——经 NotReadyBanner 呈现：cause 只作枚举键映射人话，
+//   detail（服务端已 ≤500+strip）作纯文本节点（React 默认转义，永不 HTML 渲染）；
 // ②禁用态三源：未选会话（file=null）/连接未就绪（!view.ready）/在途（sending∨stopping）；发送另有空文本
 //   （text.length===0，与 write-client 本地预校验同口径）；停止在 sending 态保持可用——「发送后立即停止」
 //   合法流（prompt×stop 按 requestId 分账并行）；
@@ -19,10 +22,11 @@
 
 import React, { useRef, useState } from "react";
 import { useWrite } from "../ws/use-write";
+import { NotReadyBanner } from "./not-ready-banner";
 import type { WriteClientSurface, WriteLastResult, WriteResumeResult } from "../ws/write-client";
 import type { WriteResumeOutcomeDTO, WriteSendOutcomeDTO, WriteStopOutcomeDTO } from "@pi-agent-ui/protocol/src/contracts";
 
-/** prompt 结果文案（kind 域内映射；not-ready.cause=服务端自由文本，不渲染）。 */
+/** prompt 结果文案（kind 域内映射；not-ready 细节由 NotReadyBanner 呈现，此处只留一行摘要）。 */
 function promptOutcomeText(outcome: WriteSendOutcomeDTO): string {
   switch (outcome.kind) {
     case "launched": return `已入队（intentId=${outcome.intentId}）`;
@@ -34,7 +38,7 @@ function promptOutcomeText(outcome: WriteSendOutcomeDTO): string {
       return `消息已作废（${stage}阶段）`;
     }
     case "no-process": return "未入队：无写进程";
-    case "not-ready": return "未入队：会话未就绪";
+    case "not-ready": return "未入队：会话未就绪（见下方启动失败红条）";
     case "identity-rejected": return `未入队：写面身份校验拒（${outcome.cause}）`; // r3c 契约枝（web 面补齐）
   }
 }
@@ -174,6 +178,7 @@ export function WriteComposer({ client, file }: { client: WriteClientSurface; fi
           {view.errorMessage}
         </p>
       ) : null}
+      {view.notReady !== null ? <NotReadyBanner info={view.notReady} /> : null}
       {view.lastResult !== null ? (
         <p role="status">{lastResultText(view.lastResult)}</p>
       ) : null}

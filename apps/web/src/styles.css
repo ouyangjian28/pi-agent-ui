@@ -697,3 +697,26 @@ hr {
     display: none;
   }
 }
+
+/* M-OPS（v1.4）not-ready 响亮红条 */
+.not-ready-banner {
+  border: 1px solid #b91c1c;
+  background: #fef2f2;
+  color: #7f1d1d;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 6px 0;
+}
+.not-ready-banner .not-ready-detail pre {
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 12px;
+  margin: 4px 0 0;
+  max-height: 8em;
+  overflow: auto;
+}
+.not-ready-banner .not-ready-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}

@@ -43,10 +43,26 @@ export interface WriteView {
   readonly lastResumeResult: WriteResumeResult | null;
   /** 受控错误文案（连接级硬错误或最近一次发送失败）。 */
   readonly errorMessage: string | null;
+  /** M-OPS（v1.4）not-ready 面：最近一次发送收到 not-ready ack（启动失败；cause+detail=stderr 尾行）。
+   * 与 errorMessage 分立：这不是发送失败——ack 已到，是进程启动失败需响亮呈现+重试/换模型动作。
+   * 同锚点③身份门（他文件启动失败不透出）。 */
+  readonly notReady: NotReadyInfo | null;
 }
 
-/** 快照→写视图派生（纯函数；锚点①②）。localError=hook 捕获的最近一次 send 拒绝文案（瞬态，重试即清）。 */
-export function writeViewOf(snap: WriteSnapshot, file: string | null, localError: string | null): WriteView {
+/** M-OPS（v1.4）：not-ready 受控信息（服务端 detail 已 ≤500+strip；前端 React 默认转义渲染）。 */
+export interface NotReadyInfo {
+  readonly cause: string | null;
+  readonly detail: string | null;
+}
+
+/** 快照→写视图派生（纯函数；锚点①②）。localError=hook 捕获的最近一次 send 拒绝文案（瞬态，重试即清）；
+ * notReady=同源瞬态 not-ready 记录（M-OPS v1.4；已过身份过滤后传入）。 */
+export function writeViewOf(
+  snap: WriteSnapshot,
+  file: string | null,
+  localError: string | null,
+  notReady: NotReadyInfo | null = null,
+): WriteView {
   const hasPrompt = file !== null && snap.inflight.some((e) => e.file === file && e.kind === "prompt");
   const hasStop = file !== null && snap.inflight.some((e) => e.file === file && e.kind === "stop");
   const hasResume = file !== null && snap.resumeState.phase === "resuming" && snap.resumeState.files.includes(file);
@@ -70,6 +86,7 @@ export function writeViewOf(snap: WriteSnapshot, file: string | null, localError
     lastResult,
     lastResumeResult,
     errorMessage: connError ?? localError,
+    notReady,
   };
 }
 
@@ -88,6 +105,15 @@ function failureText(error: unknown): string {
   return "发送失败：未知错误";
 }
 
+/** M-OPS（v1.4）：瞬态 not-ready 记录（同 TransientFailure 锚点③身份门：client×file+动作序号）。 */
+interface TransientNotReady {
+  readonly client: WriteClientSurface;
+  readonly file: string;
+  readonly seq: number;
+  readonly cause: string | null;
+  readonly detail: string | null;
+}
+
 /** 写动作返回契约（锚点⑤）：true=收到合法 ack；false=被拒（受控文案已进 errorMessage 视图）。 */
 export interface UseWrite {
   readonly view: WriteView;
@@ -102,6 +128,7 @@ export interface UseWrite {
 export function useWrite(client: WriteClientSurface, file: string | null): UseWrite {
   const snap = useSyncExternalStore(client.subscribe, client.getSnapshot);
   const [failure, setFailure] = useState<TransientFailure | null>(null);
+  const [notReady, setNotReady] = useState<TransientNotReady | null>(null);
   /** 动作序号（每次 send/stop 尝试递增）：迟到失败回调只认最新动作（锚点③）。 */
   const attemptSeq = useRef(0);
 
@@ -109,6 +136,7 @@ export function useWrite(client: WriteClientSurface, file: string | null): UseWr
   const beginAttempt = (): number => {
     attemptSeq.current += 1;
     setFailure(null); // 瞬态错误随新尝试清除
+    setNotReady(null); // M-OPS：not-ready 面同瞬态语义（新尝试作废旧呈现）
     return attemptSeq.current;
   };
 
@@ -125,7 +153,14 @@ export function useWrite(client: WriteClientSurface, file: string | null): UseWr
       if (file === null) return Promise.resolve(false);
       const seq = beginAttempt();
       return client.sendPrompt(file, text, model).then(
-        () => true,
+        (outcome) => {
+          // M-OPS（v1.4）：not-ready=ack 已到但进程启动失败——受控信息落账（非错误路径）；
+          // 迟到门：非最新动作不覆盖新动作/当前身份状态。
+          if (outcome.kind === "not-ready" && seq === attemptSeq.current) {
+            setNotReady({ client, file, seq, cause: outcome.cause ?? null, detail: outcome.detail ?? null });
+          }
+          return true;
+        },
         (error: unknown) => recordFailure(seq, file, error),
       );
     },
@@ -159,5 +194,10 @@ export function useWrite(client: WriteClientSurface, file: string | null): UseWr
   // 派生期身份门（锚点③）：瞬态错误仅当属当前 client×file 身份时透出；file=null 全隐。
   const visibleFailure =
     failure !== null && failure.client === client && failure.file === file ? failure.message : null;
-  return { view: writeViewOf(snap, file, visibleFailure), send, stop, resume };
+  // M-OPS（v1.4）：not-ready 同身份门（他文件启动失败不透出；file=null 全隐）。
+  const visibleNotReady: NotReadyInfo | null =
+    notReady !== null && notReady.client === client && notReady.file === file
+      ? { cause: notReady.cause, detail: notReady.detail }
+      : null;
+  return { view: writeViewOf(snap, file, visibleFailure, visibleNotReady), send, stop, resume };
 }

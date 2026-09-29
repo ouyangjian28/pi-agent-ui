@@ -81,6 +81,8 @@ class StubWriteClient {
   private readonly listeners = new Set<() => void>();
   readonly calls: string[] = [];
   rejectWith: WriteSendError | null = null;
+  /** M-OPS：sendPrompt resolve 值可注入（默认 LAUNCHED；not-ready 面测试用）。 */
+  resolveWith: unknown = LAUNCHED;
   private snap: WriteSnapshot = writeSnap({});
   readonly subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -91,7 +93,7 @@ class StubWriteClient {
   readonly getSnapshot = (): WriteSnapshot => this.snap;
   sendPrompt(file: string, text: string, model?: string): Promise<unknown> {
     this.calls.push(`prompt:${file}:${text}:${model ?? "∅"}`);
-    return this.rejectWith === null ? Promise.resolve(LAUNCHED) : Promise.reject(this.rejectWith);
+    return this.rejectWith === null ? Promise.resolve(this.resolveWith) : Promise.reject(this.rejectWith);
   }
   sendStop(file: string): Promise<unknown> {
     this.calls.push(`stop:${file}`);
@@ -290,6 +292,38 @@ describe("useWrite hook", () => {
       expect(await probe!.send("again")).toBe(true);
     });
     expect(client.calls).toEqual(["prompt:a.jsonl:hi:openai/gpt-5.3", "prompt:a.jsonl:again:∅"]);
+  });
+
+  it("M-OPS not-ready：ack 到达但启动失败→view.notReady 落账（cause+detail）；resolve 仍 true；新尝试清除", async () => {
+    const client = new StubWriteClient();
+    client.resolveWith = { kind: "not-ready", cause: "spawn-exited", detail: "Error: model \"nope\" not found" };
+    render(React.createElement(Probe, { client, file: "a.jsonl" }));
+    let ok = false;
+    await act(async () => {
+      ok = await probe!.send("hi");
+    });
+    expect(ok).toBe(true); // 合法 ack（非错误路径）
+    expect(probe?.view.notReady).toEqual({ cause: "spawn-exited", detail: "Error: model \"nope\" not found" });
+    expect(probe?.view.errorMessage).toBeNull(); // 不连坐错误面
+    client.resolveWith = LAUNCHED;
+    await act(async () => {
+      await probe!.send("again");
+    });
+    expect(probe?.view.notReady).toBeNull(); // 新尝试清除瞬态 not-ready
+  });
+
+  it("M-OPS not-ready 身份门：换文件后旧文件的 not-ready 不透出；file=null 全隐", async () => {
+    const client = new StubWriteClient();
+    client.resolveWith = { kind: "not-ready", cause: "readiness-timeout" };
+    const { rerender } = render(React.createElement(Probe, { client, file: "a.jsonl" }));
+    await act(async () => {
+      await probe!.send("hi");
+    });
+    expect(probe?.view.notReady?.cause).toBe("readiness-timeout");
+    rerender(React.createElement(Probe, { client, file: "b.jsonl" }));
+    expect(probe?.view.notReady).toBeNull(); // 他文件启动失败不污染当前会话
+    rerender(React.createElement(Probe, { client, file: null }));
+    expect(probe?.view.notReady).toBeNull(); // file=null 全隐
   });
 });
 
