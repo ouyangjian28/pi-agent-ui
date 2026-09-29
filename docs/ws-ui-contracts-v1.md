@@ -469,7 +469,7 @@ type ServerFrame =
 - 规则表：派发=广播给订阅 file 全部活跃连接（任意相可答）；零订阅→立即回 pi cancelled；答案=首答胜出（此后同 requestId→4404 未知或已答）；跨文件答案→4404 非订阅者；方法级校验（select→value∈options；confirm→confirmed；input/editor→value；任一法可 cancelled）违者 4404；末订阅者断开→该 file pending 全回 cancelled；进程换代→pending 全灭+ui-closed(process-retired)；每会话 pending≤8（第 9 个起立即 cancelled+overflow）；宿主不设超时（pi 侧 timeout 自治；晚答照转，pi 忽略过期 id）；ui-answer 未接线→4405。
 - 实现源码=apps/server/src/runtime/rpc-session.ts（demux/handleUiRequest/answerUi/closeUiForGeneration）+apps/server/src/ws/{ui-host.ts,ws-gateway.ts}（broadcastUi*/handleUiAnswer/cancelPendingUiForFile）+apps/server/src/composition.ts（晚绑定 uiSink+answer 端口适配）；测试=tests/unit/server/{rpc-session-ui.test.ts（W-ui-s1..9）,ws-gateway-ui.test.ts（W-ui-g1..9）}。
 
-### §10.4 运营三件（M-OPS，契约 v1.4 增补；正文 v1 冻结不改写）
+### §10.3 运营三件（M-OPS，契约 v1.4 增补；正文 v1 冻结不改写）
 
 - 权威设计=docs/m-ops-design.md v2；协议源码=packages/protocol/src/contracts.ts M-OPS 段。三处：
   - **prompt.model?**（写帧可选域，v1.1 generation 同式剥除+组装）：精确模型 id（LIMITS.modelPattern=`^[\w./:-]{1,128}$`，非 glob pattern；K3 实测 39/39 现役 id 全过）。语义=spawn 尾追 `--model`（piArgs 序=基底+extraPiArgs+`--model` 尾追恒胜；extraPiArgs 携带 --model=拒启门禁集扩列，E-ui-0b 同式）；会话级记忆=sidecar `<file>.model`（优先级 prompt.model>sidecar>pi 默认）。
