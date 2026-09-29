@@ -1351,3 +1351,4 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
   - P3-4 protocol 层直接单测 3 例（tests/unit/process-supervisor.test.ts M-OPS exitFacts 查询面节：unexpected/retired origin 分野+neverBorn 透传+环形淘汰 33 代）。
   - P3-5 CW3 flake 观察项（/bin/cat 真链 300ms readiness 窗负载敏感，首跑红单跑绿，pre-existing；再犯则放宽窗口或加重试）。
   - 另注 process-host 出口去重注释勘正（「只进 stderr 记录」→「直接丢弃」）。
+  - 修复批变异 Mu-e5（基线 4be3064 先 commit）：B2c 终窗 exitOf 死→S4-B2c 红；还原后 39 绿复跑。
