@@ -1,0 +1,38 @@
+# pi-agent-ui systemd unit（M-DEPLOY 批②）
+# 安装：cp deploy/pi-agent-ui.service /etc/systemd/system/ && systemctl daemon-reload
+# 注意：NODE_BIN/APP_DIR 两处按服务器实况改（runbook §2）；env 文件 /etc/pi-agent-ui/env 0600。
+[Unit]
+Description=pi-agent-ui (self-hosted coding agent Web UI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 专用用户运行（runbook §1 建 piagent 用户+目录授权）；写面需起 pi 子进程+写 repo/run 目录
+User=piagent
+Group=piagent
+WorkingDirectory=/opt/pi-agent-ui
+# NODE_BIN=/usr/local/bin/node（runbook 装 node 24 后 which node 实况）
+ExecStart=/usr/local/bin/node --experimental-transform-types apps/server/src/main.ts \
+  --port 18787 \
+  --host 127.0.0.1 \
+  --token-file /etc/pi-agent-ui/tokens.json \
+  --root /opt/pi-agent-ui/sessions \
+  --static-dir /opt/pi-agent-ui/apps/web/dist \
+  --origin https://pi.yangyijian.com
+# token 等敏感 env 不入 unit（unit 644 可读）；tokens.json 0600 piagent 属主
+Restart=on-failure
+RestartSec=3
+# 硬化（可上线后按需收紧；ProtectSystem=strict 会挡 pi 子进程写 sessions/——用 full+ReadWritePaths 白名单）
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/pi-agent-ui/sessions
+PrivateTmp=true
+# 日志走 journald（audit 面 console.log → journalctl -u pi-agent-ui）
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pi-agent-ui
+
+[Install]
+WantedBy=multi-user.target
