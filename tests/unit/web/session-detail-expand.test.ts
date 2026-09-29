@@ -201,4 +201,22 @@ describe("D4 批③ 展开链（触发→加载→渲染）", () => {
     expect(screen.queryByText("旧文件全文")).toBeNull(); // 缓存已清，不残留旧全文
     expect(screen.getByRole("button", { name: "展开" })).toBeTruthy(); // 新 file 可重新展开
   });
+
+  it("跨文件迟到回包丢弃（GLM 审批③ P3-2）：file A 展开在途→切 file B→A 的回包不写入 B 缓存（同 entryId 错位防护）", async () => {
+    const client = new ExpandStubClient(
+      detailSnap({ events: [msgEvent(1, { blockCount: 1, textPreview: { text: "A 预览", truncated: true } })] }),
+    );
+    const view = render(React.createElement(SessionDetail, { client, file: "a.jsonl" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开" })); // A 在途（不 settle）
+    act(() => {
+      view.rerender(React.createElement(SessionDetail, { client, file: "b.jsonl" }));
+    });
+    client.push(
+      detailSnap({ file: "b.jsonl", events: [msgEvent(1, { blockCount: 1, textPreview: { text: "B 预览", truncated: true } })] }),
+    );
+    // A 的回包迟到：不得写入 B 的缓存（若写入，B 同 entryId 条目会显示 A 的全文/错误态）
+    await client.settleLast({ ok: true, frame: entryFrame({ blocks: [{ kind: "text", text: "A 文件全文" }] }) });
+    expect(screen.queryByText("A 文件全文")).toBeNull(); // 错位防护：迟到回包被丢弃
+    expect(screen.getByRole("button", { name: "展开" })).toBeTruthy(); // B 条目保持可展开（未被错位 error/全文态占据）
+  });
 });

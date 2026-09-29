@@ -235,6 +235,9 @@ export function SessionDetail({
   // D4 批③：展开缓存（组件本地 state，key=entryId；§4.4 P3-N7——换 file/流终局一并清，
   // 与 subscribe-client entryRequests 清理同址精神：session 文件改写后不残留旧全文）。
   const [expansions, setExpansions] = React.useState<ReadonlyMap<string, ExpansionState>>(new Map());
+  /** GLM 审批③ P3-2：当前 file 的同步镜像（promise 迟到回包丢弃判据——ref 随渲染换代无闭包冻结）。 */
+  const fileRef = React.useRef(file);
+  fileRef.current = file;
   React.useEffect(() => {
     setExpansions(new Map());
   }, [file]);
@@ -247,6 +250,9 @@ export function SessionDetail({
       const entryId = event.entryId;
       setExpansions((prev) => new Map(prev).set(entryId, { status: "loading" }));
       void client.expandEntry(file, entryId).then((result) => {
+        // GLM 审批③ P3-2 修复：换 file 后旧 promise 迟到回包不写入新 file 的缓存（旧 entryId 跨文件可重合，
+        // 错位写入会把 A 文件的错误/全文显示在 B 文件同 id 条目上）。fileRef 随 [file] effect 同步换代。
+        if (fileRef.current !== file) return;
         setExpansions((prev) => {
           const next = new Map(prev);
           next.set(entryId, result.ok ? { status: "ok", frame: result.frame } : { status: "error", message: result.message });
