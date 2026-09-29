@@ -43,6 +43,11 @@ class StubClient {
     this.calls.push(`answer:${requestId}`);
     this.answers.push({ requestId, answer });
   }
+  // D4 批③：SubscribeClientSurface 增 expandEntry——存根默认返回不可用错误态（展开链专测=session-detail-expand.test.ts）
+  expandEntry(): Promise<never> {
+    this.calls.push("expandEntry");
+    return Promise.reject(new Error("StubClient 未实现 expandEntry（请用 session-detail-expand.test.ts 的专用存根）"));
+  }
   push(next: SessionDetailSnapshot): void {
     this.snap = next;
     act(() => {

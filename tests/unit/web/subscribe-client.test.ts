@@ -8,7 +8,7 @@
 //  （K4 发现1 d0de86b 的客户端对应面）；终局信封 12 组合矩阵（4409/4431/4402 × 新/旧信封 × 活动/非活动）；
 //  K3-B2 首页在途取消留痕补退订；K3-C2 跨字段/续页绑定一致性；C5 空串 requestId 连接级口径；
 //  R 系（形状门坏帧零副作用/受控文案/close 停止屏障）。
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SubscribeClient, type WebSocketLike } from "../../../apps/web/src/ws/subscribe-client";
 import type { EventCursor, HistoryEvent, LiveEvent } from "@pi-agent-ui/protocol/src/contracts";
 
@@ -754,28 +754,215 @@ describe("受控错误文案（远端 error.message 永不进快照）", () => {
   });
 });
 
-describe("D4 批②同步面收编断言（K3 审批② P2-3：闭码表+errorTextFor+分派占位——批③动分派前的安全网）", () => {
-  it("4414 错误帧被闭码表接受：受控文案含 4414（非整帧丢弃/非 unknown）", () => {
+describe("D4 批②同步面收编断言（批③已动分派——本节改为真路径断言：4414 前置分流+entry keyed map 未命中零副作用）", () => {
+  it("4414 不命中在途 entry 请求（含 requestId 撞在途 subscribe）：静默丢零副作用——不落订阅失败/连接级处置", () => {
     const { client, ws } = setup();
     handshake(ws);
     client.subscribeSession("a.jsonl");
-    const requestId = (ws.sentFrames()[1] as { requestId: string }).requestId;
-    // 4414 不绑订阅（entryErrFrame 无 subscriptionId）：requestId 在途路由（同 4402 案形）
-    ws.receive({ t: "error", code: 4414, reason: "stale", requestId, message: "digest mismatch", retryable: true });
-    const snap = client.getSnapshot();
-    expect(snap.errorMessage).toContain("4414"); // errorTextFor(4414) 受控文案
-    expect(snap.errorMessage).toContain("全文展开失败");
-    expect(JSON.stringify(snap)).not.toContain("digest mismatch"); // 远端 message 不进快照
+    const initRequestId = (ws.sentFrames()[1] as { requestId: string }).requestId;
+    const frozen = client.getSnapshot();
+    // 4414 是 entry-get 请求级专用码：即便 requestId 撞在途 init，也不得冒充订阅请求失败
+    ws.receive({ t: "error", code: 4414, reason: "stale", requestId: initRequestId, message: "digest mismatch", retryable: true });
+    expect(client.getSnapshot()).toBe(frozen); // 订阅状态机/快照零触碰（errorMessage 不置、phase 不变）
+    ws.receive({ t: "error", code: 4414, message: "no req", retryable: false }); // 无 requestId 同静默
+    expect(client.getSnapshot()).toBe(frozen);
+    expect(client.getSnapshot().phase).toBe("subscribing"); // 在途 init 照常等首页
   });
 
-  it("entry 帧分派占位：不抛+零副作用（批③接 keyed map；今不丢即不挂 10s 超时面的前置）", () => {
+  it("entry 帧未命中 keyed map（未知 requestId）：不抛+零副作用（真路径=handleEntry 静默忽略分支）", () => {
     const { client, ws, subscriptionId } = livePhase();
     const frozen = client.getSnapshot();
     expect(() =>
       ws.receive({ t: "entry", requestId: "e-1", entryId: "m1", source: "session", digest: "d", state: "ok", blocks: [] }),
     ).not.toThrow();
-    expect(client.getSnapshot()).toBe(frozen); // 占位=安全忽略（零快照污染）
+    expect(client.getSnapshot()).toBe(frozen); // 未命中=安全忽略（零快照污染）
     void subscriptionId;
+  });
+});
+
+describe("D4 批③ expandEntry（entry-get→entry/4414 全文展开链）", () => {
+  afterEach(() => {
+    vi.useRealTimers(); // 超时例用 fake timers，兜底复位防串例
+  });
+
+  function entryFrameOf(ws: FakeWebSocket): { requestId: string } {
+    const last = ws.sentFrames().at(-1) as Record<string, unknown>;
+    expect(last.t).toBe("entry-get");
+    return last as { requestId: string };
+  }
+
+  it("①往返 ok：尾帧 entry-get 恰四字段；receive entry→resolve ok；快照零触碰（不触订阅状态机）", async () => {
+    const { client, ws } = livePhase();
+    const resultP = client.expandEntry("a.jsonl", "e-2");
+    const last = ws.sentFrames().at(-1) as Record<string, unknown>;
+    expect(Object.keys(last).sort()).toEqual(["entryId", "file", "requestId", "t"]);
+    expect(last).toEqual({
+      t: "entry-get",
+      requestId: expect.stringMatching(/^[\w-]{1,64}$/),
+      file: "a.jsonl",
+      entryId: "e-2",
+    });
+    const frozen = client.getSnapshot();
+    const frame = {
+      t: "entry",
+      requestId: last.requestId as string,
+      entryId: "e-2",
+      source: "session",
+      digest: "fnv1a64:abc",
+      state: "ok",
+      blocks: [
+        { kind: "thinking", text: "想了一下" },
+        { kind: "text", text: "正文全文" },
+        { kind: "toolCall", toolCallId: "tc-1", toolName: "bash", argsPreview: "{\"cmd\":\"ls\"}" },
+        { kind: "attachment", attachmentId: "att-1" },
+      ],
+      stopReason: "stop",
+      rawBytes: 2048,
+      totalBlockCount: 3,
+    };
+    ws.receive(frame);
+    const result = await resultP;
+    expect(result).toEqual({ ok: true, frame });
+    expect(client.getSnapshot()).toBe(frozen); // entry 帧不触碰订阅状态机（subs/phase/cursor 不动）
+  });
+
+  it("②4414 命中分流：resolve 错误态（reason 透传+受控文案不透远端 message）；快照冻结；map 清后迟到帧零副作用", async () => {
+    const { client, ws } = livePhase();
+    const resultP = client.expandEntry("a.jsonl", "e-1");
+    const { requestId } = entryFrameOf(ws);
+    const frozen = client.getSnapshot();
+    ws.receive({ t: "error", code: 4414, reason: "index-evicted", requestId, message: "evicted e-1 secret", retryable: false });
+    const result = await resultP;
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("index-evicted"); // reason 透传
+      expect(result.message).toContain("4414"); // 本文件受控文案
+      expect(result.message).not.toContain("evicted"); // 远端 message 不透出
+    }
+    expect(client.getSnapshot()).toBe(frozen); // 快照冻结证明不触订阅面
+    // map 已清：同 requestId 迟到 entry/4414 零副作用
+    ws.receive({ t: "entry", requestId, entryId: "e-1", source: "session", digest: "d", state: "ok", blocks: [] });
+    ws.receive({ t: "error", code: 4414, reason: "stale", requestId, message: "late", retryable: true });
+    expect(client.getSnapshot()).toBe(frozen);
+  });
+
+  it("③4414 不命中（未知 requestId/无 requestId）：静默丢——不落 4409/连接级处置，快照零变化", () => {
+    const { client, ws } = livePhase();
+    const frozen = client.getSnapshot();
+    ws.receive({ t: "error", code: 4414, reason: "stale", requestId: "entry-999", message: "unknown", retryable: true });
+    ws.receive({ t: "error", code: 4414, message: "no-req", retryable: false });
+    expect(client.getSnapshot()).toBe(frozen);
+    expect(client.getSnapshot().connState).toBe("ready"); // 不升级连接级
+  });
+
+  it("④超时：10s 兜底 resolve timeout 受控文案；同 entryId 再点=新 requestId 重发（按钮复位）；迟到帧零副作用", async () => {
+    vi.useFakeTimers();
+    const { client, ws } = livePhase();
+    const resultP = client.expandEntry("a.jsonl", "e-1");
+    const firstReq = entryFrameOf(ws).requestId;
+    vi.advanceTimersByTime(10_000);
+    const result = await resultP;
+    expect(result).toEqual({ ok: false, reason: "timeout", message: "内容获取超时，稍后重试" });
+    // 超时后同 entryId 重试=新 requestId 重发
+    const retryP = client.expandEntry("a.jsonl", "e-1");
+    const secondReq = entryFrameOf(ws).requestId;
+    expect(secondReq).not.toBe(firstReq);
+    // 旧 requestId 迟到帧零副作用（新请求不被冒名定局）
+    let settled = false;
+    void retryP.then(() => { settled = true; });
+    ws.receive({ t: "entry", requestId: firstReq, entryId: "e-1", source: "session", digest: "d", state: "ok", blocks: [] });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    ws.receive({ t: "entry", requestId: secondReq, entryId: "e-1", source: "session", digest: "d", state: "ok", blocks: [] });
+    expect((await retryP).ok).toBe(true);
+  });
+
+  it("⑤在飞上限 2：第 3 个不同 entryId 本地拒（local-limit）不发帧；一席释放后可再发", async () => {
+    const { client, ws } = livePhase();
+    void client.expandEntry("a.jsonl", "e-1");
+    void client.expandEntry("a.jsonl", "e-2");
+    const sentCount = ws.sentFrames().length;
+    const third = await client.expandEntry("a.jsonl", "e-3");
+    expect(third).toEqual({ ok: false, reason: "local-limit", message: "展开请求过多，稍候" });
+    expect(ws.sentFrames().length).toBe(sentCount); // 本地拒=零帧成本
+    // 释放一席（e-1 定局）后 e-3 可正常发帧
+    const firstReq = (ws.sentFrames().at(-2) as { requestId: string }).requestId;
+    ws.receive({ t: "entry", requestId: firstReq, entryId: "e-1", source: "session", digest: "d", state: "ok", blocks: [] });
+    void client.expandEntry("a.jsonl", "e-3");
+    expect((ws.sentFrames().at(-1) as { entryId: string }).entryId).toBe("e-3");
+  });
+
+  it("⑥同 entryId 合流：复用同一 Promise，不重复发帧", () => {
+    const { client, ws } = livePhase();
+    const p1 = client.expandEntry("a.jsonl", "e-1");
+    const p2 = client.expandEntry("a.jsonl", "e-1");
+    expect(p1).toBe(p2);
+    expect(ws.sentFrames().filter((f) => (f as { t: string }).t === "entry-get")).toHaveLength(1);
+  });
+
+  it("⑦终局清：流终局（4431）→在途 resolve 取消态；其后 entry 帧零副作用", async () => {
+    const { client, ws, subscriptionId } = livePhase();
+    const resultP = client.expandEntry("a.jsonl", "e-1");
+    const { requestId } = entryFrameOf(ws);
+    ws.receive(terminalError(4431, subscriptionId));
+    const result = await resultP;
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("cancelled");
+    ws.receive({ t: "entry", requestId, entryId: "e-1", source: "session", digest: "d", state: "ok", blocks: [] });
+    expect(client.getSnapshot().phase).toBe("closed"); // 仅流终局语义，entry 帧不再有任何归宿
+  });
+
+  it("⑦b 换订阅（换 file）→在途 resolve 取消态；close() 同清", async () => {
+    const { client } = livePhase();
+    const p1 = client.expandEntry("a.jsonl", "e-1");
+    client.subscribeSession("b.jsonl"); // 换订阅=在途 entry 请求取消（entryId 锚旧文件）
+    const r1 = await p1;
+    expect(r1.ok).toBe(false);
+    if (!r1.ok) expect(r1.reason).toBe("cancelled");
+    const p2 = client.expandEntry("b.jsonl", "e-9"); // 新订阅面可正常发起
+    client.close();
+    const r2 = await p2;
+    expect(r2.ok).toBe(false);
+    if (!r2.ok) expect(r2.reason).toBe("cancelled");
+  });
+
+  it("⑧entry 帧形状门：畸形（state 枚举外/未知块 kind/缺 digest/entryId 不匹配）不消费在途；合法帧正常定局", async () => {
+    const { client, ws } = livePhase();
+    const resultP = client.expandEntry("a.jsonl", "e-1");
+    const { requestId } = entryFrameOf(ws);
+    let settled = false;
+    void resultP.then(() => { settled = true; });
+    const frozen = client.getSnapshot();
+    ws.receive({ t: "entry", requestId, entryId: "e-1", source: "session", digest: "d", state: "oversized", blocks: [] });
+    ws.receive({ t: "entry", requestId, entryId: "e-1", source: "session", digest: "d", state: "ok", blocks: [{ kind: "mystery", x: 1 }] });
+    ws.receive({ t: "entry", requestId, entryId: "e-1", source: "session", state: "ok", blocks: [] }); // 缺 digest
+    ws.receive({ t: "entry", requestId, entryId: "e-OTHER", source: "session", digest: "d", state: "ok", blocks: [] }); // 身份不符
+    await Promise.resolve();
+    expect(settled).toBe(false); // 畸形/身份不符均不消费在途
+    expect(client.getSnapshot()).toBe(frozen); // 快照零副作用
+    ws.receive({ t: "entry", requestId, entryId: "e-1", source: "session", digest: "d", state: "truncated", blocks: [{ kind: "text", text: "半截", truncatedAt: 2 }], totalBlockCount: 5 });
+    const result = await resultP;
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.frame.state).toBe("truncated");
+      expect("rawBytes" in result.frame).toBe(false); // truncated 帧 wire 级不携 rawBytes
+    }
+  });
+
+  it("⑨本地预检与可用性：空 entryId=invalid 零帧；非 ready/close 后=unavailable 零帧", async () => {
+    const { client, ws } = setup();
+    const notReady = await client.expandEntry("a.jsonl", "e-1"); // connecting 态
+    expect(notReady).toEqual({ ok: false, reason: "unavailable", message: "连接未就绪，无法展开" });
+    handshake(ws);
+    client.subscribeSession("a.jsonl");
+    const sentCount = ws.sentFrames().length;
+    const invalid = await client.expandEntry("a.jsonl", "");
+    expect(invalid).toEqual({ ok: false, reason: "invalid", message: "条目缺少标识，无法展开" });
+    expect(ws.sentFrames().length).toBe(sentCount); // 预检拒=零帧
+    client.close();
+    const stopped = await client.expandEntry("a.jsonl", "e-1");
+    expect(stopped.ok).toBe(false);
+    if (!stopped.ok) expect(stopped.reason).toBe("unavailable");
   });
 });
 

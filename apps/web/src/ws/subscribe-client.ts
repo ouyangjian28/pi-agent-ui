@@ -42,6 +42,9 @@
 import { LIMITS } from "@pi-agent-ui/protocol/src/contracts";
 import type {
   ClientFrame,
+  EntryBlock,
+  EntryErrorReason,
+  EntryFrame,
   ErrorCode,
   EventCursor,
   HistoryEvent,
@@ -61,7 +64,11 @@ import type {
  * 不触 journal/writerEpoch；写类 t 在类型层仍不可达）。 */
 type OutgoingFrame = Extract<
   ClientFrame,
-  { readonly t: "hello" } | { readonly t: "subscribe" } | { readonly t: "unsubscribe" } | { readonly t: "ui-answer" }
+  | { readonly t: "hello" }
+  | { readonly t: "subscribe" }
+  | { readonly t: "unsubscribe" }
+  | { readonly t: "ui-answer" }
+  | { readonly t: "entry-get" } // D4 批③：全文展开请求（只读面；服务端契约冻结于批①）
 >;
 
 /** 连接级五态：connecting→authenticating→ready；任一前置态可落 closed/error（无自动重连）。 */
@@ -362,6 +369,7 @@ function parseError(v: Record<string, unknown>): ErrorFrame | null {
   if (!str(v.message) || !bool(v.retryable)) return null;
   if (v.requestId !== undefined && !str(v.requestId)) return null;
   if (v.subscriptionId !== undefined && !transportId(v.subscriptionId)) return null;
+  if (v.reason !== undefined && !ENTRY_ERROR_REASONS.includes(v.reason as string)) return null; // D4：4414 reason 六值域
   return {
     t: "error",
     code: v.code as ErrorCode,
@@ -369,6 +377,7 @@ function parseError(v: Record<string, unknown>): ErrorFrame | null {
     retryable: v.retryable,
     ...(v.requestId === undefined ? {} : { requestId: v.requestId }),
     ...(v.subscriptionId === undefined ? {} : { subscriptionId: v.subscriptionId }),
+    ...(v.reason === undefined ? {} : { reason: v.reason as EntryErrorReason }),
   };
 }
 
@@ -498,6 +507,62 @@ function parseUiClosed(v: Record<string, unknown>): UiClosedFrame | null {
 }
 
 // ---------------------------------------------------------------------------
+// D4 批③：entry 帧形状门（宽松口径=同 parseXxx 先例：字段存在+类型+枚举域，不拒多余键）
+// ---------------------------------------------------------------------------
+
+const ENTRY_ERROR_REASONS: readonly string[] = ["stale", "unknown-entry", "oversized", "index-evicted", "not-subscribed", "in-flight"];
+
+/** EntryBlock 四形逐字段（kind 判别；truncatedAt=块级非负有限数；toolCall 三字段含 null 域）。 */
+function entryBlockOk(v: unknown): v is EntryBlock {
+  if (!rec(v)) return false;
+  switch (v.kind) {
+    case "text":
+    case "thinking":
+      if (!str(v.text)) return false;
+      if (v.truncatedAt !== undefined && !nonNegNum(v.truncatedAt)) return false;
+      return true;
+    case "toolCall":
+      if (!(v.toolCallId === null || transportId(v.toolCallId))) return false;
+      if (!(v.toolName === null || str(v.toolName))) return false;
+      if (!str(v.argsPreview)) return false;
+      if (v.argsTruncated !== undefined && v.argsTruncated !== true) return false;
+      return true;
+    case "attachment":
+      return transportId(v.attachmentId);
+    default:
+      return false;
+  }
+}
+
+/** entry（D4 §4.1）：身份域+state 枚举+blocks 逐块校验；可选域在场即验形。任一块畸形=整帧拒收。 */
+function parseEntryFrame(v: Record<string, unknown>): EntryFrame | null {
+  if (!transportId(v.requestId)) return null;
+  if (!transportId(v.entryId)) return null;
+  if (v.source !== "session") return null;
+  if (!str(v.digest)) return null;
+  if (v.state !== "ok" && v.state !== "truncated") return null;
+  if (!Array.isArray(v.blocks)) return null;
+  for (const block of v.blocks) {
+    if (!entryBlockOk(block)) return null;
+  }
+  if (v.stopReason !== undefined && !STOP_REASONS.includes(v.stopReason as (typeof STOP_REASONS)[number])) return null;
+  if (v.rawBytes !== undefined && !nonNegNum(v.rawBytes)) return null;
+  if (v.totalBlockCount !== undefined && !nonNegNum(v.totalBlockCount)) return null;
+  return {
+    t: "entry",
+    requestId: v.requestId,
+    entryId: v.entryId,
+    source: "session",
+    digest: v.digest,
+    state: v.state,
+    blocks: v.blocks as readonly EntryBlock[],
+    ...(v.stopReason === undefined ? {} : { stopReason: v.stopReason as EntryFrame["stopReason"] & string }),
+    ...(v.rawBytes === undefined ? {} : { rawBytes: v.rawBytes }),
+    ...(v.totalBlockCount === undefined ? {} : { totalBlockCount: v.totalBlockCount }),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // 受控错误文案（保真③：code 域封闭=内嵌安全；远端 message 仅服务端审计用，前端不留存）
 // ---------------------------------------------------------------------------
 
@@ -516,6 +581,30 @@ function errorTextFor(code: number): string {
     case 4432: return "心跳超时（4432）";
     default: return `服务端错误（${code}）`;
   }
+}
+
+/** D4 批③：展开失败原因（本文件受控）。timeout/local-limit/cancelled/unavailable/invalid=客户端本地产出；
+ *  其余=服务端 4414 reason 透传（六值见 contracts.ts EntryErrorReason）。 */
+export type EntryFetchFailureReason =
+  | "timeout" // 10s 兜底超时（按钮复位，可重试）
+  | "local-limit" // 客户端在飞上限 2（P3-N3）——本地拒发帧
+  | "cancelled" // 终局清理（流终局/换订阅/连接终局/close）
+  | "unavailable" // 连接未 ready/已停止
+  | "invalid" // entryId 本地预检不合（空串/超 256）
+  | EntryErrorReason;
+
+/** D4 批③：expandEntry 结果（判别联合）。message 全部本文件受控文案——远端 error.message 不透出。 */
+export type EntryFetchResult =
+  | { readonly ok: true; readonly frame: EntryFrame }
+  | { readonly ok: false; readonly reason: EntryFetchFailureReason; readonly message: string };
+
+/** 在途 entry-get 请求（keyed map 值；同 uiRequests 键控模式，但不落快照——请求级瞬态）。 */
+interface EntryRequest {
+  readonly requestId: string;
+  readonly entryId: string;
+  readonly file: string;
+  readonly resolve: (result: EntryFetchResult) => void;
+  readonly timer: ReturnType<typeof setTimeout>;
 }
 
 /** 在途请求上下文：kind 决定 4409 的处置（page/resync=可续读终局；init=请求级失败）。 */
@@ -556,6 +645,10 @@ export class SubscribeClient {
   private readonly cancelledBuilds = new Map<string, true>();
   /** 续页实例绑定（保真⑨）。 */
   private binding: SnapshotBinding | null = null;
+  /** D4 批③：在途 entry-get 请求（key=requestId；在飞上限 2，见 expandEntry）。 */
+  private readonly entryRequests = new Map<string, EntryRequest>();
+  /** D4 批③：同 entryId 合流表（key=entryId → 在途 Promise；二次点击复用不重复发帧）。 */
+  private readonly inflightEntries = new Map<string, Promise<EntryFetchResult>>();
 
   constructor(
     private readonly url: string,
@@ -603,6 +696,7 @@ export class SubscribeClient {
     // 显式退旧：活动订阅先发退订帧（§3.6 c5 B01：新 subscribe 先退旧）；本地退役使旧流帧此后一律忽略
     this.dropActiveSubscription(true);
     this.noteCancelledBuild(); // K3-B2：被作废的建订在途留痕——迟到首页用于识别并补发退订（不写当前快照）
+    this.cancelEntryRequests(); // D4 批③：换订阅（换 file）=在途 entry 请求取消（entryId 锚旧文件，不得跨文件兑现）
     this.seenSeqs.clear();
     this.lastLiveSeq = null;
     this.queuedFile = file;
@@ -649,7 +743,44 @@ export class SubscribeClient {
     this.queuedFile = null;
     this.noteCancelledBuild(); // 首包前退订——建订在途留痕，迟到首页只补退订不落快照
     this.dropActiveSubscription(true);
+    this.cancelEntryRequests(); // D4 批③：退订=在途 entry 请求取消
     this.transition({ phase: "idle", cursor: null, streamNote: null, errorKind: null, errorMessage: null, uiRequests: [] });
+  }
+
+  /**
+   * D4 批③：展开历史条目全文（§4.3 客户端路由）。发 {t:"entry-get",requestId,file,entryId} 并等 entry/4414/超时定局。
+   * - 同 entryId 在途→复用同一 Promise（合流，不重复发帧）；
+   * - 客户端在飞上限 2（P3-N3）：第 3 个不同 entryId 本地立即拒（reason=local-limit，不发帧）；
+   * - 10s 超时兜底→reason=timeout（按钮复位：同 entryId 再点=新 requestId 重发）；
+   * - 终局清理（流终局/换订阅/连接终局/close）→reason=cancelled。
+   * message 全部本文件受控文案，远端 error.message 不透出；本方法永不 reject。
+   */
+  expandEntry(file: string, entryId: string): Promise<EntryFetchResult> {
+    if (this.stopped || this.snapshot.connState !== "ready") {
+      return Promise.resolve({ ok: false, reason: "unavailable", message: "连接未就绪，无法展开" });
+    }
+    if (entryId.length === 0 || entryId.length > 256) {
+      return Promise.resolve({ ok: false, reason: "invalid", message: "条目缺少标识，无法展开" });
+    }
+    const existing = this.inflightEntries.get(entryId);
+    if (existing !== undefined) return existing; // 合流：同 entryId 复用在途 Promise
+    if (this.entryRequests.size >= 2) {
+      return Promise.resolve({ ok: false, reason: "local-limit", message: "展开请求过多，稍候" });
+    }
+    const requestId = this.nextRequestId("entry");
+    const promise = new Promise<EntryFetchResult>((resolve) => {
+      const timer = setTimeout(() => {
+        const req = this.entryRequests.get(requestId);
+        if (req === undefined) return; // 已定局（entry/4414/终局清理先到）零副作用
+        this.entryRequests.delete(requestId);
+        this.inflightEntries.delete(req.entryId);
+        req.resolve({ ok: false, reason: "timeout", message: "内容获取超时，稍后重试" });
+      }, 10_000);
+      this.entryRequests.set(requestId, { requestId, entryId, file, resolve, timer });
+    });
+    this.inflightEntries.set(entryId, promise);
+    this.sendFrame({ t: "entry-get", requestId, file, entryId });
+    return promise;
   }
 
   /**
@@ -674,6 +805,7 @@ export class SubscribeClient {
     this.pending = null;
     this.queuedFile = null;
     this.cancelledBuilds.clear(); // 终态：连接关闭即服务端释放订阅，无需留痕
+    this.cancelEntryRequests(); // D4 批③：停止屏障清在途 entry 请求（取消态）
     if (this.snapshot.connState !== "closed" && this.snapshot.connState !== "error") {
       this.transition({ connState: "closed" });
     }
@@ -775,8 +907,7 @@ export class SubscribeClient {
         this.handleSnapshot(parsed);
         return;
       case "entry":
-        // D4 批②⑨收编：entry 帧分派挂接（批③接入 keyed map 请求面；此提前置安全忽略占位——
-        // 漏挂 case 会落 default 静默丢+UI 只走 10s 超时，此处显式占位防漏）。
+        this.handleEntry(parsed);
         return;
       case "events":
         this.handleEvents(parsed);
@@ -918,6 +1049,39 @@ export class SubscribeClient {
     // 未知 origin 忽略
   }
 
+  /** D4 批③：entry 帧接线——形状门→requestId∈map 且 entryId 匹配→resolve ok 态；其余零副作用。 */
+  private handleEntry(v: Record<string, unknown>): void {
+    const frame = parseEntryFrame(v);
+    if (frame === null) return; // 形状门：畸形整帧拒收，不消费在途
+    const req = this.entryRequests.get(frame.requestId);
+    if (req === undefined) return; // 迟到/未知请求（含超时后）静默忽略
+    if (req.entryId !== frame.entryId) return; // 身份不符不消费在途（防盗刷串请求）
+    this.settleEntryRequest(frame.requestId, { ok: true, frame });
+  }
+
+  /** entry 请求定局统一出口：清双 map+clearTimeout+resolve（超时/取消后迟到帧因 map 已清天然零副作用）。 */
+  private settleEntryRequest(requestId: string, result: EntryFetchResult): void {
+    const req = this.entryRequests.get(requestId);
+    if (req === undefined) return;
+    this.entryRequests.delete(requestId);
+    this.inflightEntries.delete(req.entryId);
+    clearTimeout(req.timer);
+    req.resolve(result);
+  }
+
+  /** D4 批③终局清理（同址原则）：在途 entry 请求全部 resolve 取消态+clearTimeout+清双 map。
+   *  任何 entry 帧/清理均不触碰订阅状态机（subs/phase/cursor 一律不动）。 */
+  private cancelEntryRequests(): void {
+    if (this.entryRequests.size === 0) return;
+    const pending = [...this.entryRequests.values()];
+    this.entryRequests.clear();
+    this.inflightEntries.clear();
+    for (const req of pending) {
+      clearTimeout(req.timer);
+      req.resolve({ ok: false, reason: "cancelled", message: "订阅或连接已结束，展开已取消" });
+    }
+  }
+
   private handleResyncRequired(v: Record<string, unknown>): void {
     const frame = parseResyncRequired(v);
     if (frame === null) return;
@@ -928,17 +1092,31 @@ export class SubscribeClient {
       this.activeSub = null;
       this.binding = null;
       this.pending = null;
+      this.cancelEntryRequests(); // D4 批③：换流=在途 entry 请求取消（entryId 锚旧流，不得跨流兑现）
       this.transition({ phase: "closed", subscriptionId: null, streamNote: "订阅已被新订阅替换，旧流已停止", uiRequests: [] });
       return;
     }
     // server-side-gap：服务端缺口——无自动重同步（用户显式续读）；快照与 cursor 保留
     this.pending = null;
+    this.cancelEntryRequests(); // D4 批③：同上——续读后流身份换代，旧 entryId 请求不得兑现
     this.transition({ phase: "resync-needed", streamNote: "检测到服务端事件缺口，需要重新同步后继续", uiRequests: [] });
   }
 
   private handleError(v: Record<string, unknown>): void {
     const frame = parseError(v);
     if (frame === null) return; // 畸形 error 帧（未知码/message 缺失等）整帧忽略
+    // D4 批③ 4414 前置分流（entry-get 请求级专用码）：命中在途 entry 请求→resolve 错误态并清；
+    // 不命中（requestId 未知/缺省/已超时清理）→静默丢。4414 永不落订阅状态机/快照/连接级处置。
+    if (frame.code === 4414) {
+      if (frame.requestId !== undefined && this.entryRequests.has(frame.requestId)) {
+        this.settleEntryRequest(frame.requestId, {
+          ok: false,
+          reason: frame.reason ?? "stale", // reason 缺省兜底=stale（retryable 档；契约应恒携，防御性取值）
+          message: errorTextFor(4414),
+        });
+      }
+      return;
+    }
     if (frame.code === 4401) {
       this.failConnection("auth-failed", errorTextFor(4401));
       return;
@@ -1008,6 +1186,7 @@ export class SubscribeClient {
     this.activeSub = null;
     this.binding = null;
     this.pending = null; // 该流在途请求不再期待回包——清理属流终局，不置请求失败文案（新信封不指认请求）
+    this.cancelEntryRequests(); // D4 批③：流终局同步清在途 entry 请求（resolve 取消态）
     if (code === 4409) {
       this.transition({ phase: "resync-needed", streamNote: errorTextFor(4409), uiRequests: [] }); // 无活动流，瞬态提问不再可答
       return;
@@ -1025,6 +1204,7 @@ export class SubscribeClient {
     }
     this.pending = null; // 连接终态清在途/排队，迟到回包不再有归属
     this.queuedFile = null;
+    this.cancelEntryRequests(); // D4 批③：连接终局同步清在途 entry 请求
     this.transition({ connState: "closed", uiRequests: [] }); // 连接终态；无自动重连；瞬态提问不重放
   }
 
@@ -1032,6 +1212,7 @@ export class SubscribeClient {
   private failConnection(errorKind: DetailErrorKind, errorMessage: string): void {
     this.pending = null;
     this.queuedFile = null;
+    this.cancelEntryRequests(); // D4 批③：连接级失败同步清在途 entry 请求
     this.transition({ connState: "error", errorKind, errorMessage, uiRequests: [] });
   }
 
@@ -1052,5 +1233,5 @@ export class SubscribeClient {
 /** 组件/hook 所需客户端面（subscribe/getSnapshot 对齐 useSyncExternalStore；其余为订阅生命周期动作+D3 问答）。 */
 export type SubscribeClientSurface = Pick<
   SubscribeClient,
-  "subscribe" | "getSnapshot" | "subscribeSession" | "unsubscribeSession" | "resyncFromCursor" | "answerUi"
+  "subscribe" | "getSnapshot" | "subscribeSession" | "unsubscribeSession" | "resyncFromCursor" | "answerUi" | "expandEntry"
 >;

@@ -22,7 +22,7 @@ import { WriteComposer } from "./write-composer";
 import { LiveStreamView } from "./live-stream";
 import { UiDialog } from "./ui-dialog";
 import type { WriteClientSurface } from "../ws/write-client";
-import type { HistoryEvent, LiveEvent } from "@pi-agent-ui/protocol/src/contracts";
+import type { EntryBlock, EntryFrame, HistoryEvent, LiveEvent } from "@pi-agent-ui/protocol/src/contracts";
 
 const KIND_LABELS: Readonly<Record<HistoryEvent["kind"], string>> = {
   "turn-enqueued": "回合入队",
@@ -50,7 +50,108 @@ const ROLE_LABELS: Readonly<Record<string, string>> = {
   system: "系统",
 };
 
-function HistoryRow({ event }: { event: HistoryEvent }) {
+type MessageHistoryEvent = Extract<HistoryEvent, { readonly kind: "message" }>;
+
+/** D4 批③：展开按钮触发口径（§4.4 P3-N8 裁决，三条件其一）——hasThinking（门开）/可见块数>0/预览被截断；
+ *  toolCall-only/attachment-only 条目（无 textPreview）经 blockCount 条件也有入口。 */
+function expandable(event: HistoryEvent): event is MessageHistoryEvent {
+  return (
+    event.kind === "message" &&
+    (event.hasThinking === true || (event.blockCount ?? 0) > 0 || event.textPreview?.truncated === true)
+  );
+}
+
+/** D4 批③：展开态（组件本地缓存值；key=entryId）。 */
+type ExpansionState =
+  | { readonly status: "loading" }
+  | { readonly status: "ok"; readonly frame: EntryFrame }
+  | { readonly status: "error"; readonly message: string };
+
+function kbOf(bytes: number): string {
+  return (bytes / 1024).toFixed(1);
+}
+
+/** 可见块字节估算（truncated 态文案用：text/thinking 正文+argsPreview 长度；rawBytes  truncated 帧 wire 级缺席不展示）。 */
+function visibleBytesOf(blocks: readonly EntryBlock[]): number {
+  let total = 0;
+  for (const block of blocks) {
+    if (block.kind === "text" || block.kind === "thinking") total += block.text.length;
+    else if (block.kind === "toolCall") total += block.argsPreview.length;
+  }
+  return total;
+}
+
+/** 单块渲染：text 正文；thinking 折叠区默认收起（门开才有 thinking 块）；toolCall=toolName+argsPreview
+ * （argsPreview 服务端已 denylist 净化，直接展示）；attachment 只显 id（不回原始内容）。 */
+function EntryBlockView({ block }: { block: EntryBlock }) {
+  switch (block.kind) {
+    case "text":
+      return (
+        <p className="entry-text">
+          {block.text}
+          {block.truncatedAt !== undefined ? "…" : ""}
+        </p>
+      );
+    case "thinking":
+      return (
+        <details className="entry-thinking">
+          <summary>思考</summary>
+          <p>
+            {block.text}
+            {block.truncatedAt !== undefined ? "…" : ""}
+          </p>
+        </details>
+      );
+    case "toolCall":
+      return (
+        <p className="entry-toolcall">
+          <small>
+            工具调用：{block.toolName ?? "（未知工具）"}
+            {block.argsPreview ? `：${block.argsPreview}` : ""}
+            {block.argsTruncated === true ? "…" : ""}
+          </small>
+        </p>
+      );
+    case "attachment":
+      return (
+        <p className="entry-attachment">
+          <small>附件：{block.attachmentId}</small>
+        </p>
+      );
+  }
+}
+
+/** 展开态渲染（§4.4）：blocks 逐块；truncated 态文案「已截断·可见 X KB / Y 块」+不可再放大；
+ *  ok 态可显示 rawBytes（行无截断，规模无泄露面）。 */
+function ExpandedEntry({ frame }: { frame: EntryFrame }) {
+  return (
+    <div className="entry-fulltext">
+      {frame.state === "truncated" ? (
+        <p className="entry-truncated" role="note">
+          已截断·可见 {kbOf(visibleBytesOf(frame.blocks))} KB / {frame.blocks.length} 块
+        </p>
+      ) : frame.rawBytes !== undefined ? (
+        <p className="entry-size">
+          <small>全文 {kbOf(frame.rawBytes)} KB</small>
+        </p>
+      ) : null}
+      {frame.blocks.map((block, index) => (
+        <EntryBlockView key={index} block={block} />
+      ))}
+    </div>
+  );
+}
+
+function HistoryRow({
+  event,
+  expansion = null,
+  onExpand = null,
+}: {
+  event: HistoryEvent;
+  /** D4 批③：本条目的展开态（null=未展开）。 */
+  expansion?: ExpansionState | null;
+  onExpand?: ((event: MessageHistoryEvent) => void) | null;
+}) {
   const detail =
     event.kind === "message"
       ? `${ROLE_LABELS[event.role] ?? event.role}${event.final ? "·完结" : ""}${event.textPreview ? `：${event.textPreview.text}${event.textPreview.truncated ? "…" : ""}` : ""}`
@@ -63,6 +164,27 @@ function HistoryRow({ event }: { event: HistoryEvent }) {
         #{event.seq} {KIND_LABELS[event.kind]}
       </span>
       {detail ? <small> {detail}</small> : null}
+      {expandable(event) && expansion === null && onExpand !== null ? (
+        <button type="button" className="entry-expand" onClick={() => onExpand(event)}>
+          展开
+        </button>
+      ) : null}
+      {expansion?.status === "loading" ? (
+        <button type="button" className="entry-expand" disabled>
+          加载中…
+        </button>
+      ) : null}
+      {expansion?.status === "error" ? (
+        <span className="entry-error" role="alert">
+          <small> {expansion.message}</small>
+          {expandable(event) && onExpand !== null ? (
+            <button type="button" className="entry-expand" onClick={() => onExpand(event)}>
+              重试
+            </button>
+          ) : null}
+        </span>
+      ) : null}
+      {expansion?.status === "ok" ? <ExpandedEntry frame={expansion.frame} /> : null}
     </li>
   );
 }
@@ -110,6 +232,36 @@ export function SessionDetail({
   writeClient?: WriteClientSurface | null;
 }) {
   const view = useSessionDetail(client, file);
+  // D4 批③：展开缓存（组件本地 state，key=entryId；§4.4 P3-N7——换 file/流终局一并清，
+  // 与 subscribe-client entryRequests 清理同址精神：session 文件改写后不残留旧全文）。
+  const [expansions, setExpansions] = React.useState<ReadonlyMap<string, ExpansionState>>(new Map());
+  /** GLM 审批③ P3-2：当前 file 的同步镜像（promise 迟到回包丢弃判据——ref 随渲染换代无闭包冻结）。 */
+  const fileRef = React.useRef(file);
+  fileRef.current = file;
+  React.useEffect(() => {
+    setExpansions(new Map());
+  }, [file]);
+  React.useEffect(() => {
+    if (view.status === "stopped" || view.status === "resync-needed") setExpansions(new Map());
+  }, [view.status]);
+  const onExpand = React.useCallback(
+    (event: MessageHistoryEvent) => {
+      if (file === null) return;
+      const entryId = event.entryId;
+      setExpansions((prev) => new Map(prev).set(entryId, { status: "loading" }));
+      void client.expandEntry(file, entryId).then((result) => {
+        // GLM 审批③ P3-2 修复：换 file 后旧 promise 迟到回包不写入新 file 的缓存（旧 entryId 跨文件可重合，
+        // 错位写入会把 A 文件的错误/全文显示在 B 文件同 id 条目上）。fileRef 随 [file] effect 同步换代。
+        if (fileRef.current !== file) return;
+        setExpansions((prev) => {
+          const next = new Map(prev);
+          next.set(entryId, result.ok ? { status: "ok", frame: result.frame } : { status: "error", message: result.message });
+          return next;
+        });
+      });
+    },
+    [client, file],
+  );
   // 槽位 1（A1c 写面稳定挂载）：仅注入 writeClient 且已选会话且视图∈{empty, streaming,
   // resync-needed, stopped} 时展示；loading/auth-failed/error/closed/unsubscribed 不展示（既有行为）。
   // key=file——同一槽位换会话强制新 composer 实例（旧草稿不泄入新会话）；同一会话内视图切换实例保留
@@ -201,7 +353,12 @@ export function SessionDetail({
         ) : null}
         <ol className="history-list" aria-label="历史事件">
           {view.events.map((event) => (
-            <HistoryRow key={event.seq} event={event} />
+            <HistoryRow
+              key={event.seq}
+              event={event}
+              expansion={event.kind === "message" ? (expansions.get(event.entryId) ?? null) : null}
+              onExpand={onExpand}
+            />
           ))}
         </ol>
         {view.paging ? (
