@@ -523,6 +523,21 @@ describe("G3 受控文案与错误路由", () => {
     ws.receive({ t: "write-stop-ack", requestId: sentRequestId(ws, 1), file: "a.jsonl", outcome: STOP_CONFIRMED });
     await expect(promise).resolves.toEqual(STOP_CONFIRMED);
   });
+
+  it("M-OPS P2-1：not-ready 的 detail 非字符串（对象/数组）=零消费，在途保留，后续合法帧照常结算（DS 审报门不对称实证）", async () => {
+    const { client, ws } = ready();
+    const promise = client.sendPrompt("a.jsonl", "hi");
+    const rid = sentRequestId(ws, 1);
+    ws.receive({
+      t: "write-ack",
+      requestId: rid,
+      file: "a.jsonl",
+      outcome: { kind: "not-ready", detail: { leak: "object-as-detail" } },
+    }); // detail 对象——若当合法 ack 结算会入 NotReadyBanner 致 React 渲染崩
+    expect(client.getSnapshot().inflight).toEqual([{ file: "a.jsonl", kind: "prompt" }]); // 零消费
+    ws.receive({ t: "write-ack", requestId: rid, file: "a.jsonl", outcome: { kind: "not-ready", cause: "spawn-failed" } });
+    await expect(promise).resolves.toEqual({ kind: "not-ready", cause: "spawn-failed" });
+  });
 });
 
 // ---------------------------------------------------------------------------

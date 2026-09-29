@@ -13,9 +13,12 @@ afterEach(cleanup);
 const LAUNCHED = { kind: "launched", intentId: "i-1", commandId: 1 } as const;
 
 function modelsSnap(status: ModelsState["status"], items: ModelsState["items"] = [], cause: string | null = null): ModelsSource {
+  // P2-3/P3-1：stub 补齐响应式面（订阅不触发——静态注入面够用；getSnapshot 引用恒稳满足 useSyncExternalStore 缓存语义）
+  const snap = { models: { status, items, cause }, state: "ready" };
   return {
     requestModels: vi.fn(),
-    getSnapshot: () => ({ models: { status, items, cause } }),
+    subscribe: () => () => {},
+    getSnapshot: () => snap,
   };
 }
 
@@ -121,6 +124,29 @@ describe("M-OPS NewSession", () => {
     expect(write.sent).toHaveLength(2);
   });
 
+  it("换模型=清直达输入（不再发帧直至重提）；P2-2 补断言", async () => {
+    const write = new StubWrite();
+    write.resolveWith = { kind: "not-ready", cause: "spawn-exited", detail: "model not found" };
+    render(
+      React.createElement(NewSession, {
+        wsClient: modelsSnap("ok"),
+        writeClient: write as unknown as WriteClientSurface,
+        rootsHint: "x",
+        onLaunched: vi.fn(),
+        onCancel: vi.fn(),
+      }),
+    );
+    fill("会话文件名", "a.jsonl");
+    fill("首条消息", "hi");
+    fill("模型 id 直达", "nope/bad");
+    fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    const sentBefore = write.sent.length;
+    fireEvent.click(screen.getByRole("button", { name: "换模型" })); // 换模型=清直达（用户改输入后重试）
+    expect((screen.getByLabelText("模型 id 直达") as HTMLInputElement).value).toBe("");
+    expect(write.sent).toHaveLength(sentBefore); // 换模型动作本身零发帧
+  });
+
   it("清单 failed→降级提示含 cause；free-text 仍可用", async () => {
     const { write, onLaunched } = setup(modelsSnap("failed", [], "pi 退出码 1"));
     expect(screen.getByRole("status").textContent).toContain("pi 退出码 1");
@@ -136,20 +162,54 @@ describe("M-OPS NewSession", () => {
     const write = new StubWrite();
     write.resolveWith = { kind: "busy" };
     const onLaunched = vi.fn();
-    const { rerender } = render(
+    const onCancel = vi.fn();
+    render(
       React.createElement(NewSession, {
         wsClient: modelsSnap("ok"),
         writeClient: write as unknown as WriteClientSurface,
         rootsHint: "x",
         onLaunched,
-        onCancel: vi.fn(),
+        onCancel,
       }),
     );
     fill("会话文件名", "a.jsonl");
     fill("首条消息", "hi");
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(onCancel).toHaveBeenCalledTimes(1); // P2-2 补真断言（原版零断言空转）
     fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("busy"));
     expect(onLaunched).not.toHaveBeenCalled();
-    expect(rerender).toBeTruthy();
+  });
+
+  it("P2-3：connecting 期挂载→ws 到 ready 后补拉清单（防 idle 永久停滞）", async () => {
+    const listeners = new Set<() => void>();
+    let snap: { models: ModelsState; state: string } = {
+      models: { status: "idle", items: [], cause: null },
+      state: "connecting",
+    };
+    const requestModels = vi.fn();
+    const wsClient: ModelsSource = {
+      requestModels,
+      subscribe: (l: () => void) => {
+        listeners.add(l);
+        return () => {
+          listeners.delete(l);
+        };
+      },
+      getSnapshot: () => snap,
+    };
+    render(
+      React.createElement(NewSession, {
+        wsClient,
+        writeClient: new StubWrite() as unknown as WriteClientSurface,
+        rootsHint: "x",
+        onLaunched: vi.fn(),
+        onCancel: vi.fn(),
+      }),
+    );
+    expect(requestModels).toHaveBeenCalledTimes(1); // 挂载即拉（connecting 期被 ready 态门丢弃）
+    snap = { ...snap, state: "ready" };
+    listeners.forEach((l) => l());
+    await waitFor(() => expect(requestModels).toHaveBeenCalledTimes(2)); // 到 ready 补拉
   });
 });

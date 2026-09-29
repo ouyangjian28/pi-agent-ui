@@ -325,6 +325,34 @@ describe("useWrite hook", () => {
     rerender(React.createElement(Probe, { client, file: null }));
     expect(probe?.view.notReady).toBeNull(); // file=null 全隐
   });
+
+  it("M-OPS not-ready 迟到门（P3-5 独立杀点）：后续动作推进序号后，旧 not-ready 回包不落账", async () => {
+    // 挂起式存根：send 的 resolve 由测试驱动（模拟 write-ack 迟到）
+    let resolver: ((v: unknown) => void) | null = null;
+    class PendingStub extends StubWriteClient {
+      sendPrompt(file: string, text: string): Promise<unknown> {
+        this.calls.push(`prompt:${file}:${text}:∅`);
+        return new Promise((res) => {
+          resolver = res;
+        });
+      }
+    }
+    const client = new PendingStub();
+    render(React.createElement(Probe, { client, file: "a.jsonl" }));
+    let sendPromise: Promise<boolean> = Promise.resolve(false);
+    await act(async () => {
+      sendPromise = probe!.send("hi"); // seq=1 挂起
+    });
+    client.resolveWith = { kind: "no-process" };
+    await act(async () => {
+      await probe!.stop(); // seq=2：序号推进（stop 结算在前）
+    });
+    await act(async () => {
+      resolver?.({ kind: "not-ready", cause: "spawn-failed" }); // seq=1 的迟到 not-ready
+      await sendPromise;
+    });
+    expect(probe?.view.notReady).toBeNull(); // 迟到回包不落账（不覆盖新动作状态）
+  });
 });
 
 // ---------------------------------------------------------------------------

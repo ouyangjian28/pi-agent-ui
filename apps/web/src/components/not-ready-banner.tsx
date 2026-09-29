@@ -23,8 +23,9 @@ export function NotReadyBanner({
   onSwitchModel,
 }: {
   info: NotReadyInfo;
-  onRetry?: () => void;
-  onSwitchModel?: () => void;
+  // exactOptionalPropertyTypes 仓规：可选 prop 显式携 undefined 合法（调用面条件传递）
+  onRetry?: (() => void) | undefined;
+  onSwitchModel?: (() => void) | undefined;
 }): React.JSX.Element {
   return (
     <div className="not-ready-banner" role="alert">
