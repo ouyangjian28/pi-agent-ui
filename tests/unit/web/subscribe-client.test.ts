@@ -754,6 +754,31 @@ describe("受控错误文案（远端 error.message 永不进快照）", () => {
   });
 });
 
+describe("D4 批②同步面收编断言（K3 审批② P2-3：闭码表+errorTextFor+分派占位——批③动分派前的安全网）", () => {
+  it("4414 错误帧被闭码表接受：受控文案含 4414（非整帧丢弃/非 unknown）", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    client.subscribeSession("a.jsonl");
+    const requestId = (ws.sentFrames()[1] as { requestId: string }).requestId;
+    // 4414 不绑订阅（entryErrFrame 无 subscriptionId）：requestId 在途路由（同 4402 案形）
+    ws.receive({ t: "error", code: 4414, reason: "stale", requestId, message: "digest mismatch", retryable: true });
+    const snap = client.getSnapshot();
+    expect(snap.errorMessage).toContain("4414"); // errorTextFor(4414) 受控文案
+    expect(snap.errorMessage).toContain("全文展开失败");
+    expect(JSON.stringify(snap)).not.toContain("digest mismatch"); // 远端 message 不进快照
+  });
+
+  it("entry 帧分派占位：不抛+零副作用（批③接 keyed map；今不丢即不挂 10s 超时面的前置）", () => {
+    const { client, ws, subscriptionId } = livePhase();
+    const frozen = client.getSnapshot();
+    expect(() =>
+      ws.receive({ t: "entry", requestId: "e-1", entryId: "m1", source: "session", digest: "d", state: "ok", blocks: [] }),
+    ).not.toThrow();
+    expect(client.getSnapshot()).toBe(frozen); // 占位=安全忽略（零快照污染）
+    void subscriptionId;
+  });
+});
+
 describe("close 停止屏障与连接级终局（三分支之连接级路径）", () => {
   it("live 态主动 close：迟到帧零副作用、重复 close 幂等、close 后 subscribeSession 拒绝", () => {
     const { client, ws, subscriptionId } = livePhase();

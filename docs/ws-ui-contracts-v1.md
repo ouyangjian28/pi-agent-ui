@@ -327,9 +327,9 @@ type ServerFrame =
       liveSeq: number; refSeq: null; events: LiveEvent[] }                         // live 旁路（refSeq 显式 null，非缺字段）
   | { t: "status"; subscriptionId: SubscriptionId; status: SessionStatus }
   | { t: "recovery"; requestId: string; file: string } & AvailableRecovery         // unavailable→recovery 帧带 availability（C3-R06）
-  | { t: "entry"; requestId: string; entryId: string; digest: string; state: "ok" | "truncated";
-      blocks: EntryBlock[]; totalBlockCount: number; rawBytes?: number; truncatedAt?: number;
-      stopReason?: "stop" | "length" | "aborted" | "toolUse" }   // D4 批②：entry-get 全文帧（rawBytes 仅 ok 态；truncatedAt=代码单元切位）
+  | { t: "entry"; requestId: string; entryId: string; source: "session"; digest: string;
+      state: "ok" | "truncated"; blocks: EntryBlock[]; stopReason?: "stop" | "length" | "aborted" | "toolUse";
+      rawBytes?: number; totalBlockCount?: number }   // D4 批②（K3 审 P2-1 修）：与 contracts.ts EntryFrame 逐字段同形；rawBytes 仅 ok 态；totalBlockCount 可选（可见块=0 时不携）；truncatedAt=块级（EntryBlock 内），帧级无此字段
   | { t: "resync-required"; subscriptionId: SubscriptionId; reason: "server-side-gap" | "stream-replaced" }
   | { t: "error"; code: ErrorCode; message: string; retryable: boolean; requestId?: string; subscriptionId?: SubscriptionId }
   | { t: "pong"; nonce: string };

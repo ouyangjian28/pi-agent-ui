@@ -182,7 +182,7 @@ describe("D4 批② W-d4-g：正路径两态", () => {
         const f = c.frames().find((x) => x.t === "entry") as Record<string, unknown>;
         expect((f.blocks as unknown[]).length).toBe(expectCount);
         const blocks = f.blocks as Array<Record<string, unknown>>;
-        if (!vis) expect(blocks.some((b) => b.type === "thinking")).toBe(false);
+        if (!vis) expect(blocks.some((b) => b.kind === "thinking")).toBe(false); // P3-1：判别字段=kind 非 type（原 type 恒 undefined 永真）
       } finally { await r.dispose(); }
     }
   });
@@ -253,7 +253,9 @@ describe("D4 批② W-d4-g：reason 六值出口", () => {
       await seeded(r, [msgLine("a1", "assistant", "x")]);
       const c = await authed(r);
       await sub(c);
-      // locator=0（首行）；首字节前插无换行内容→offset>0 且前字节非 0x0A→bad-start→stale
+      // 种子行 locator=0（首行）→readLineAt 判据① offset===0 免读前字节（safe-open 短路），
+      // 前插 "xx" 后 locator=0 处读出的行内容多前缀→实走红路径=digest 对账（非 bad-start）。
+      // 判据①（offset>0 前字节非 0x0A）正反例覆盖=批① entry-read-line.test.ts（K3 审批② P3-2 勘正）
       await writeFile(join(r.dir, FILE), `xx${msgLine("a1", "assistant", "x")}\n`, "utf8");
       await c.say({ t: "entry-get", requestId: "e8", file: FILE, entryId: "a1" });
       await c.awaitEntry(1);

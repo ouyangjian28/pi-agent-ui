@@ -620,6 +620,11 @@ export class WsGateway {
       return;
     }
     if (!st.subs.has(file)) { fail("not-subscribed", "未订阅该 file"); return; }
+    // 顶层兑底（K3 审批② P2-2）：entryAbsFor 端口同步抛（宿主 sessionFor 违约/dispose 竞态，
+    // ui-answer r2 P2-A 先例证明端口同步抛真实存在）与 entryBlocksOf/assembleEntryFrame 意外抛
+    // →统一 4414 stale，不逸出 unhandledRejection（void 派发不吞 rejection，进程致命+客户端挂 10s）。
+    // 注：内部体不重排缩进（包入不改变语义）。
+    try {
     // 索引可达（订阅在→索引应在；LRU 挤出/换流窗口→unknown-entry）；触顶→index-evicted。
     const index = this.registry.peek(file);
     if (index === undefined) { fail("unknown-entry", "无索引"); return; }
@@ -666,6 +671,9 @@ export class WsGateway {
     if ("oversized" in r) { fail("oversized", "末块切空仍超预算"); return; }
     this.enqueue(st, r.frame);
     this.audit(`entry-get conn=${st.id} file=${file} id=${entryId} state=${r.frame.state}`);
+    } catch {
+      fail("stale", "读链意外失败");
+    }
   }
 
   // ---- 订阅（§3.6 三分支互斥；同连接同 file 唯一；≤8；W1-04 数据入口+W1-05 原子切换）----
