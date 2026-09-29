@@ -89,8 +89,8 @@ class StubWriteClient {
     };
   };
   readonly getSnapshot = (): WriteSnapshot => this.snap;
-  sendPrompt(file: string, text: string): Promise<unknown> {
-    this.calls.push(`prompt:${file}:${text}`);
+  sendPrompt(file: string, text: string, model?: string): Promise<unknown> {
+    this.calls.push(`prompt:${file}:${text}:${model ?? "∅"}`);
     return this.rejectWith === null ? Promise.resolve(LAUNCHED) : Promise.reject(this.rejectWith);
   }
   sendStop(file: string): Promise<unknown> {
@@ -242,7 +242,7 @@ describe("writeViewOf 派生（纯函数）", () => {
 
 describe("useWrite hook", () => {
   /** 渲染探针：把最近一次视图+动作暴露到模块级变量（每次渲染刷新）。 */
-  let probe: { view: WriteView; send: (text: string) => Promise<boolean>; stop: () => Promise<boolean> } | null = null;
+  let probe: { view: WriteView; send: (text: string, model?: string) => Promise<boolean>; stop: () => Promise<boolean> } | null = null;
   function Probe({ client, file }: { client: StubWriteClient; file: string | null }): React.ReactElement {
     const { view, send, stop } = useWrite(client, file);
     probe = { view, send, stop };
@@ -277,6 +277,19 @@ describe("useWrite hook", () => {
     expect(probe?.view.sending).toBe(true);
     unmount(); // 卸载：不清服务端状态（停止只由用户显式触发）
     expect(client.calls).toEqual([]); // 无任何自动 stop 调用
+  });
+
+  it("M-OPS：send 透传可选 model（带 id→三参齐；缺省→undefined 不带模型）", async () => {
+    const client = new StubWriteClient();
+    render(React.createElement(Probe, { client, file: "a.jsonl" }));
+    await act(async () => {
+      expect(await probe!.send("hi", "openai/gpt-5.3")).toBe(true);
+    });
+    expect(client.calls).toEqual(["prompt:a.jsonl:hi:openai/gpt-5.3"]);
+    await act(async () => {
+      expect(await probe!.send("again")).toBe(true);
+    });
+    expect(client.calls).toEqual(["prompt:a.jsonl:hi:openai/gpt-5.3", "prompt:a.jsonl:again:∅"]);
   });
 });
 

@@ -340,13 +340,15 @@ export class WriteClient {
   }
 
   /**
-   * 发送 prompt（§B16：prompt{requestId,file,text}→write-ack{outcome}）。
+   * 发送 prompt（§B16：prompt{requestId,file,text}→write-ack{outcome}；v1.4 M-OPS 可选 model 域）。
    * 本地预校验（不满足即本地拒、零帧成本）：连接 ready；file 过 filePattern（服务端同判 4404）；
-   * text 非空且 UTF-8 ≤ WRITE_TEXT_MAX_BYTES（服务端同判 4404）；同 file 无在途 prompt。
+   * text 非空且 UTF-8 ≤ WRITE_TEXT_MAX_BYTES（服务端同判 4404）；同 file 无在途 prompt；
+   * model（提供时）过 LIMITS.modelPattern（^[\w./:-]{1,128}$ 精确 id 非 glob，服务端同判 4404）——
+   *   undefined=不改会话模型（帧不携 model 键，v1 帧形兼容）。
    * 不排队：未就绪/预校验失败即受控拒绝，由用户显式重发（无自动重发）。
    */
-  sendPrompt(file: string, text: string): Promise<WriteSendOutcomeDTO> {
-    return this.launch("prompt", file, text) as Promise<WriteSendOutcomeDTO>;
+  sendPrompt(file: string, text: string, model?: string): Promise<WriteSendOutcomeDTO> {
+    return this.launch("prompt", file, text, model) as Promise<WriteSendOutcomeDTO>;
   }
 
   /** 发送 stop（§B16：stop{requestId,file}→write-stop-ack{outcome}）。与同 file 在途 prompt 可并行。 */
@@ -450,7 +452,7 @@ export class WriteClient {
   }
 
   /** prompt/stop 共用派发：本地预校验（锚点④）→占位→发帧；resolve/reject 经在途表按 requestId 结算。 */
-  private launch(kind: "prompt" | "stop", file: string, text?: string): Promise<unknown> {
+  private launch(kind: "prompt" | "stop", file: string, text?: string, model?: string): Promise<unknown> {
     if (this.stopped) {
       return Promise.reject(new WriteSendError("closed", "写连接已关闭，请求未完成"));
     }
@@ -467,6 +469,11 @@ export class WriteClient {
       if (utf8Bytes(text) > WRITE_TEXT_MAX_BYTES) {
         return Promise.reject(new WriteSendError("local-invalid", `消息超出 ${WRITE_TEXT_MAX_BYTES / 1024}KiB 字节上限，未发送`));
       }
+      // v1.4（M-OPS）：可选 model 域本地预校验（LIMITS.modelPattern 精确 id；服务端同判 4404）。
+      // undefined=不改会话模型；空串/越字符集/超长一律本地拒（零帧成本）。
+      if (model !== undefined && !LIMITS.modelPattern.test(model)) {
+        return Promise.reject(new WriteSendError("local-invalid", "模型标识非法，未发送"));
+      }
     }
     const duplicate = this.snapshot.inflight.some((e) => e.file === file && e.kind === kind);
     if (duplicate) {
@@ -480,7 +487,12 @@ export class WriteClient {
       this.publish({ inflight: [...this.snapshot.inflight, { file, kind }] });
       try {
         if (kind === "prompt") {
-          this.emit({ t: "prompt", requestId, file, text: text as string });
+          // v1.4（M-OPS）：model 仅提供时携键（undefined 不出帧——v1 四字段严格形兼容缺省面）
+          this.emit(
+            model === undefined
+              ? { t: "prompt", requestId, file, text: text as string }
+              : { t: "prompt", requestId, file, text: text as string, model },
+          );
         } else {
           this.emit({ t: "stop", requestId, file });
         }

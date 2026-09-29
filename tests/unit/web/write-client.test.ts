@@ -919,3 +919,44 @@ describe("resume 面", () => {
 function writeFaceText4409Prompt(): string {
   return "请求游标或状态已过期（4409）";
 }
+
+// ---------------------------------------------------------------------------
+// M-OPS（v1.4）：sendPrompt 可选 model 形参（docs/m-ops-design.md §3；契约 §10.3）
+// ---------------------------------------------------------------------------
+
+describe("M-OPS sendPrompt model 形参", () => {
+  it("带合法 model：prompt 帧携带 model 域（spawn 尾追 --model 由服务端保证）", async () => {
+    const { client, ws } = ready();
+    const promise = client.sendPrompt("a.jsonl", "你好", "openai/gpt-5.3:high");
+    const frame = ws.frames()[1] as Record<string, unknown>;
+    expect(frame).toMatchObject({ t: "prompt", file: "a.jsonl", text: "你好", model: "openai/gpt-5.3:high" });
+    ws.receive({ t: "write-ack", requestId: sentRequestId(ws, 1), file: "a.jsonl", outcome: LAUNCHED });
+    await expect(promise).resolves.toEqual(LAUNCHED);
+  });
+
+  it("不带 model：prompt 帧无 model 键（undefined=不改会话模型，v1 帧形兼容）", async () => {
+    const { client, ws } = ready();
+    const promise = client.sendPrompt("a.jsonl", "你好");
+    const frame = ws.frames()[1] as Record<string, unknown>;
+    expect("model" in frame).toBe(false);
+    ws.receive({ t: "write-ack", requestId: sentRequestId(ws, 1), file: "a.jsonl", outcome: LAUNCHED });
+    await expect(promise).resolves.toEqual(LAUNCHED);
+  });
+
+  it("显式 undefined：与缺省同语义（帧无 model 键）", () => {
+    const { client, ws } = ready();
+    void client.sendPrompt("a.jsonl", "你好", undefined);
+    const frame = ws.frames()[1] as Record<string, unknown>;
+    expect("model" in frame).toBe(false);
+  });
+
+  it("非法 model（空格/空串/超 128）→本地预校验拒（local-invalid），零帧成本", async () => {
+    const { client, ws } = ready();
+    const before = ws.sent.length;
+    for (const bad of ["has space", "", "m".repeat(129), "bad\nid"]) {
+      const error = await expectWriteError(client.sendPrompt("a.jsonl", "你好", bad));
+      expect(error.kind).toBe("local-invalid");
+    }
+    expect(ws.sent.length).toBe(before); // 一律未发帧
+  });
+});

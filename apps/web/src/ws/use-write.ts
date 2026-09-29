@@ -91,7 +91,8 @@ function failureText(error: unknown): string {
 /** 写动作返回契约（锚点⑤）：true=收到合法 ack；false=被拒（受控文案已进 errorMessage 视图）。 */
 export interface UseWrite {
   readonly view: WriteView;
-  readonly send: (text: string) => Promise<boolean>;
+  /** M-OPS（v1.4）：可选 model——新建态/换模型路径携带；正常会话传 undefined（不改会话模型）。 */
+  readonly send: (text: string, model?: string) => Promise<boolean>;
   readonly stop: () => Promise<boolean>;
   /** 恢复重发（v1.1）：intentId+generation 由调用方提供（演示位手输；默认 generation=1）。 */
   readonly resume: (intentId: string, generation: number) => Promise<boolean>;
@@ -120,10 +121,10 @@ export function useWrite(client: WriteClientSurface, file: string | null): UseWr
   };
 
   const send = useCallback(
-    (text: string): Promise<boolean> => {
+    (text: string, model?: string): Promise<boolean> => {
       if (file === null) return Promise.resolve(false);
       const seq = beginAttempt();
-      return client.sendPrompt(file, text).then(
+      return client.sendPrompt(file, text, model).then(
         () => true,
         (error: unknown) => recordFailure(seq, file, error),
       );
