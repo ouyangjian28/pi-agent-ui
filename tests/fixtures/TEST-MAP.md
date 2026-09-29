@@ -1282,3 +1282,14 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - 变异 4/4（基线 f218abf 提交后做——M-245 纪律）：Mu-e1 composition.ts:366 entryAbsFor 注入删→4 腿全红（unknown-entry——组合根接线唯一数据源）/Mu-e2 composition.ts:367 网关 thinkingVisible 透传删→1d 红（三面同源断链）/Mu-e3 ws-gateway.ts:658 handleEntryGet digest 对账行假死 if(false)→1c 红（E2E 层对账面）/Mu-e4 thinking 修复回退（读 text）→1d 红（修复必要性证）。每杀 checkout 还原，还原后 4 绿复跑。
 - **K3 审 r1（2026-10-10，审报=~/ai projects/pi-agent-ui/audits/k3-d4b4-review-2026-10-10.md）→GO 90/100+修复批**：0 P1；P2-1 批② g3 fixture 同型失真残留（text 字段+只数块数——r["text"]回退变异时仍绿）→fixture 改真格式 thinking 字段+门开分支补 blocks[0].text 内容级断言；P3-1 设计稿 E-d4-1 偏离未披露→本节补说明；P3-2 1c 腿 it 间耦合+fs.watch 潜伏 flake 窗→测试内注释明示；P3-3 行号勘正（修复行=227 非 226；Mu-e3 属 ws-gateway.ts 非 composition）。P3-4 存量两条（history-source fs.watch flake+redactForPreview no-unknown-returns lint 债）记档不修。K3 验真：全仓 1661 绿二跑+E2E 4/4+双 tsc 0+变异 Mu-e4 全链复现（红→还原→绿）。
 - 全仓 1661 绿（1657→1661，21 skip=PI_E2E 门腿）+双 tsc 0。D4 四批链收口：批①服务端读面（K3 审 89 GO）→批②网关 4414 面（K3 审 88 GO）→批③客户端面（GLM 审 90 GO）→批④ E2E+变异（本批）。
+
+## M-SEC 安全扩展实证批（fixture permission-gate×真 pi×D3 管道；设计稿=docs/m-sec-design.md v2；2026-10-10）
+
+- 定性=实证批：宿主源码零改动（TECH §22 三层防线=pi 进程内公民；宿主只三透传）。fixture=tests/fixtures/m-sec-gate.mjs（纯 JS：DANGER 正则 rm -rf 等五式+confirm(timeout 经 env SEC_E2E_CONFIRM_TIMEOUT_MS)+appendEntry("m-sec-approval",{decision,command,at})+!ok block）。E2E=tests/integration/m-sec-e2e.test.ts 三腿（PI_E2E=1 门，真调 LLM 三轮，54.5s）。
+- 三腿全绿：S1 放行（ui-request confirm→ui-answer confirmed→probe 目录真删+会话文件审批行 data.decision=allowed+bash 工具行在场）/S2 拒绝（cancelled→目录仍在+denied+stop 收口 no-process 面不挂）/S3 超时自答（UI 不答→pi 2s 自答 false→denied+目录仍在+**无 ui-closed 帧**=现状缺口如实断言——pi 侧自答不通知 client，宿主 pendingUi 残留至换代，登记 PENDING M-OPS 后议）。
+- 调试两坎（首跑→四跑谱）：①filePattern=/^[\w.-]{1,114}\.jsonl$/（contracts.ts:42）只认 .jsonl——FILE=".pi" 在 validateClientFrame 层 4404 拒（snapshot 永不到）；②fixture .mjs 带 TS 类型注解=Node SyntaxError→pi 扩展加载失败→write-ack 非 launched。教训：E2E 帧不到时先打印帧类序列（诊断函数）再定位层。
+- journal 预写 writer 声明行（D4 批④ fail-closed 教训复用，二跑仍挂证明非根因但必要）。
+- 变异 3/3 全真红（基线 44d99dd 提交后）：Mu-s1 DANGER 恒 false→S1 红（ui-request 永不到，90s 超时）/Mu-s2 confirm 分支反转（!ok→ok）→S2 红（取消反放行→目录被删）/Mu-s3 appendEntry 注释删→S1 红（审批行断言）。每杀 checkout 还原（基线已提交=M-245 纪律）。
+- 设计稿审链：v1（4159e92）K3 审 82 NO-GO（1P1+4P2：S1⑤ 锚在不存在的 tool_execution 直播面——全仓零 LiveEvent 生产者，重锚会话文件 toolResult 行；confirm 超时返 false 非 undefined；appendEntry 行形 customType+data 子键；S3 现状断言补强；env 透传成立）→v2（1c015ad）转 GO 免复审。缺口登记：tool_execution_*/extension_error 零透传=缺口候选（M-OPS 后议）；审批行 custom 行 UI 投影=unknown 边界（观感面缓议）。
+- 宿主零改动实证：E2E 三腿+变异全落在 fixture 层；仓源码 diff=0（b19bd17+44d99dd 仅 tests/fixtures+tests/integration 两新文件）。
+- 全仓 1661 绿（+24 skip=PI_E2E 门腿；D4 收口 1661+M-SEC 三腿 skip 面）+三包 tsc 0（apps/server/packages/protocol/apps/web）；根 tsconfig 102 错=tests 面留观家族（D3 时 71，D4/M-SEC 新测试文件增量——具名留观待专项批，包级全 0 不受影响）。
