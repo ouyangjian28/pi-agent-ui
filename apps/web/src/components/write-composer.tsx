@@ -20,7 +20,7 @@
 //   （编辑后改回同文本=版本已变，不清空），不做字符串相等比较。在途编辑/换会话/换 client 后的旧 ack
 //   一律不清空当前草稿。
 
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useWrite } from "../ws/use-write";
 import { NotReadyBanner } from "./not-ready-banner";
 import type { WriteClientSurface, WriteLastResult, WriteResumeResult } from "../ws/write-client";
@@ -137,6 +137,7 @@ export function WriteComposer({ client, file }: { client: WriteClientSurface; fi
     // 本次发送的那份未编辑草稿、会话与连接身份未换）才清空；否则保留当前草稿（迟到 ack 不得
     // 吞掉用户在途新输入）。
     const sent = { client, file, version: draftVersion.current };
+    lastSentRef.current = text; // P3-2（DS 审）：not-ready 落账时恢复草稿用（冷启动失败不吞输入）
     void send(text).then((ok) => {
       if (
         ok &&
@@ -148,6 +149,16 @@ export function WriteComposer({ client, file }: { client: WriteClientSurface; fi
       }
     });
   };
+
+  // P3-2（DS 审）：not-ready 落账（resolve true=合法 ack 已清草稿）时恢复草稿——已存会话冷启动
+  // 失败不应要求用户重打全文；恢复非用户编辑，不动 draftVersion（重试重发同文本与 NewSession 语义一致）。
+  const lastSentRef = useRef("");
+  const notReadyNow = view.notReady;
+  useEffect(() => {
+    if (notReadyNow !== null && text === "" && lastSentRef.current !== "") {
+      setText(lastSentRef.current);
+    }
+  }, [notReadyNow, text]);
 
   return (
     <section className="write-composer" aria-label={`写消息${file === null ? "" : `：${file}`}`}>
@@ -178,7 +189,9 @@ export function WriteComposer({ client, file }: { client: WriteClientSurface; fi
           {view.errorMessage}
         </p>
       ) : null}
-      {view.notReady !== null ? <NotReadyBanner info={view.notReady} /> : null}
+      {view.notReady !== null ? (
+        <NotReadyBanner info={view.notReady} onRetry={canSend ? onSend : undefined} />
+      ) : null}
       {view.lastResult !== null ? (
         <p role="status">{lastResultText(view.lastResult)}</p>
       ) : null}

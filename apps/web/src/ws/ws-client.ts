@@ -391,6 +391,7 @@ export class WsClient {
   /** 统一错误出口：清在途请求（迟到回包不再变更 error 快照）+受控文案进快照。 */
   private fail(errorKind: WsClientErrorKind, errorMessage: string): void {
     this.listRequestPending = false;
+    this.modelsRequestPending = false; // P3-5（DS 审）：与 close() 同口径——error 面在途清位（状态面定格不清空）
     this.transition({ state: "error", errorKind, errorMessage });
   }
 

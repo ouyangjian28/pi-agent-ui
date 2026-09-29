@@ -185,7 +185,9 @@ function isSendOutcome(v: unknown): v is WriteSendOutcomeDTO {
     case "invalidated":
       return v["stage"] === "enqueue" || v["stage"] === "sending" || v["stage"] === "post-send" || v["stage"] === "first-byte";
     case "not-ready":
-      return v["cause"] === undefined || isString(v["cause"]);
+      // v1.4（M-OPS）：detail 同源必过门（DS 审 P2-1——cause 有门而 detail 无门的不对称；
+      // 畸形 detail 走 React 会「Objects are not valid as a React child」崩渲染）。
+      return (v["cause"] === undefined || isString(v["cause"])) && (v["detail"] === undefined || isString(v["detail"]));
     case "identity-rejected": // v1.1：prompt 携代次断言的身份拒（cause 空间仅两枝，勿与 resume 面四枝并集）
       return v["cause"] === "no-recovery-data" || v["cause"] === "generation-mismatch";
     default:

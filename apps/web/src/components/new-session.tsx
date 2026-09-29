@@ -3,7 +3,7 @@
 // 启动失败（not-ready）→响亮红条（重试=重发同 prompt；换模型=清模型选择重选）。
 // 模型选择双通道：下拉（get-models 清单；loading/failed 均降级）+free-text 输入（优先生效——
 // 清单失败/新模型未入清单仍可手打 id；modelPattern 本地预校验零帧成本）。
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useSyncExternalStore } from "react";
 import { LIMITS } from "@pi-agent-ui/protocol/src/contracts";
 import { NotReadyBanner } from "./not-ready-banner";
 import type { NotReadyInfo } from "../ws/use-write";
@@ -14,7 +14,9 @@ import type { ModelsState } from "../ws/ws-client";
 /** 新建视图消费的清单面（最小接口：真 WsClient 满足；测试可注入 stub）。 */
 export interface ModelsSource {
   readonly requestModels: () => void;
-  readonly getSnapshot: () => { readonly models: ModelsState };
+  /** P2-3/P3-1（DS 审）：响应式订阅——ws 状态到 ready 后补拉（connecting 期挂载的一次拉会被 ready 态门静默丢弃，不补拉则清单永久 idle 停滞）；同时消除直读快照的 tearing 风险。 */
+  readonly subscribe: (cb: () => void) => () => void;
+  readonly getSnapshot: () => { readonly models: ModelsState; readonly state: unknown };
 }
 
 /** 下拉特殊值：不携带 model 域（帧不携键=v1 四字段严格形兼容；pi 用自身默认模型）。 */
@@ -34,12 +36,14 @@ export function NewSession({
   onLaunched: (file: string) => void;
   onCancel: () => void;
 }): React.JSX.Element {
-  // 模型面：挂载即拉清单（幂等）；下拉+free-text 双通道
-  const models = wsClient.getSnapshot().models;
+  // 模型面（P3-1 响应式订阅）：挂载即拉+ws 状态到 ready 时补拉（幂等，ok 后不重发）
+  const snap = useSyncExternalStore(wsClient.subscribe, wsClient.getSnapshot);
+  const models = snap.models;
+  const wsState = snap.state;
   const [freeText, setFreeText] = useState("");
   useEffect(() => {
     wsClient.requestModels();
-  }, [wsClient]);
+  }, [wsClient, wsState]);
   const [file, setFile] = useState("");
   const [text, setText] = useState("");
   const [notReady, setNotReady] = useState<NotReadyInfo | null>(null);
@@ -123,6 +127,9 @@ export function NewSession({
           aria-label="模型选择"
         >
           <option value={MODEL_DEFAULT}>默认（pi 配置）</option>
+          {effectiveModel !== undefined && models.status !== "ok" ? (
+            <option value={effectiveModel}>自定义：{effectiveModel}</option>
+          ) : null}
           {models.status === "ok" &&
             models.items.map((m: ModelInfoDTO) => (
               <option key={`${m.provider}/${m.id}`} value={m.id}>
@@ -145,7 +152,7 @@ export function NewSession({
       </label>
       {models.status === "failed" ? (
         <p className="models-failed" role="status">
-          模型清单拉取失败（{models.cause ?? "原因未知"}）——可手打模型 id 继续
+          模型清单拉取失败（{(models.cause ?? "原因未知").slice(0, 200)}）——可手打模型 id 继续
         </p>
       ) : null}
       <label>
