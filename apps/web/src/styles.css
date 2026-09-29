@@ -698,11 +698,11 @@ hr {
   }
 }
 
-/* M-OPS（v1.4）not-ready 响亮红条 */
+/* M-OPS（v1.4）not-ready 响亮红条（色值只用主题令牌——令牌块外禁硬编码十六进制） */
 .not-ready-banner {
-  border: 1px solid #b91c1c;
-  background: #fef2f2;
-  color: #7f1d1d;
+  border: 1px solid var(--c-err);
+  background: var(--c-err-bg);
+  color: var(--c-err);
   border-radius: 6px;
   padding: 8px 10px;
   margin: 6px 0;
@@ -719,4 +719,25 @@ hr {
   display: flex;
   gap: 8px;
   margin-top: 6px;
+}
+
+/* M-OPS（v1.4）新建会话视图 */
+.new-session {
+  padding: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  max-width: 480px;
+}
+.new-session .panel-heading,
+.new-session .roots-hint {
+  color: var(--c-text-dim);
+  font-size: 12px;
+}
+.new-session-actions {
+  display: flex;
+  gap: 8px;
+}
+.new-session-btn {
+  font-size: 12px;
 }

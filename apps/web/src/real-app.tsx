@@ -3,6 +3,7 @@
 // 断开后不自动重连（现状客户端无重连）：状态条显三客户端连接态+「重新连接」按钮（=重建三件套）。
 // 认证失败（4401，任一客户端 errorKind=auth-failed）→受控错误面+「清除 token 重输」（清 localStorage 回输入面）。
 import React, { useEffect, useState, useSyncExternalStore } from "react";
+import { NewSession } from "./components/new-session";
 import { SessionDetail } from "./components/session-detail";
 import { SessionList } from "./components/session-list";
 import { ThemeToggle } from "./components/theme-toggle";
@@ -167,6 +168,9 @@ function ConnectedApp({
   const wsSnap = useSyncExternalStore(clients.wsClient.subscribe, clients.wsClient.getSnapshot);
   const subSnap = useSyncExternalStore(clients.subscribeClient.subscribe, clients.subscribeClient.getSnapshot);
   const writeSnap = useSyncExternalStore(clients.writeClient.subscribe, clients.writeClient.getSnapshot);
+  // M-OPS（v1.4）新建态：newSession=true 时右栏切 NewSession（不挂 SessionDetail——未建 file 不
+  // subscribe，避免 4402 门；首 prompt launched 后切回正常详情）。
+  const [newSession, setNewSession] = React.useState(false);
 
   const authFailed =
     wsSnap.errorKind === "auth-failed" ||
@@ -212,15 +216,29 @@ function ConnectedApp({
         <nav className="session-panel" aria-label="会话列表">
           <div className="panel-heading">
             <h1>会话</h1>
+            <button type="button" className="new-session-btn" onClick={() => setNewSession(true)}>
+              ＋新建
+            </button>
           </div>
           <SessionList client={clients.wsClient} selectedFile={file} onSelect={onSelectFile} />
         </nav>
         <main className="conversation" aria-label="当前会话">
-          {file === null ? (
+          {newSession ? (
+            <NewSession
+              wsClient={clients.wsClient}
+              writeClient={clients.writeClient}
+              rootsHint="服务端配置的会话目录"
+              onLaunched={(f) => {
+                setNewSession(false);
+                onSelectFile(f);
+              }}
+              onCancel={() => setNewSession(false)}
+            />
+          ) : file === null ? (
             <div className="welcome">
               <span className="welcome-mark">π</span>
               <h1>选择会话开始</h1>
-              <p>从左侧列表选择一个会话文件查看详情并发送消息。</p>
+              <p>从左侧列表选择一个会话文件，或点「＋新建」创建新会话。</p>
             </div>
           ) : (
             <SessionDetail client={clients.subscribeClient} file={file} writeClient={clients.writeClient} />
