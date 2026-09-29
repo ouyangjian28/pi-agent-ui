@@ -2,6 +2,7 @@
 // 三腿：S1 放行（确认→真执行）/S2 拒绝（取消→block）/S3 超时自答（不答→pi 自答 false→拒绝）。
 // 每腿独立 server+会话+probe 目录；S3 env 腿内 set/delete 隔离。
 import { mkdtemp, mkdir, writeFile, readdir, rm, readFile, chmod } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
@@ -82,14 +83,17 @@ async function sessionText(rig: Rig, dir: string): Promise<string> {
   return readFile(join(dir, "sessions", `${FILE}.session`), "utf8");
 }
 
-function diagnose(tag: string, frames: Frame[], _dir: string): string {
+function diagnose(tag: string, frames: Frame[], dir: string): string {
   const lastMsg = frames.filter((f) => f.t === "events" && Array.isArray((f as { events?: unknown[] }).events))
     .slice(-1).map((f) => {
       const ev = (f as { events: Array<{ kind?: string; role?: string; text?: string }> }).events
         .filter((e) => e.kind === "message");
       return ev.map((e) => `[${e.role}] ${String(e.text).slice(0, 200)}`).join(" | ");
     }).join(" ;; ");
-  return `${tag}：最后消息=${lastMsg || "（无）"}；帧类=${frames.map((f) => f.t).join(",")}`;
+  // 设计稿 §4：区分「模型不配合 vs 管道断」补会话文件 tail（readFile 失败容错）
+  let tail = "（无会话文件）";
+  try { const t = readFileSync(join(dir, "sessions", `${FILE}.session`), "utf8"); tail = t.split("\n").slice(-4).join(" ⊕ ").slice(0, 400); } catch { /* 未建 */ }
+  return `${tag}：最后消息=${lastMsg || "（无）"}；会话 tail=${tail}；帧类=${frames.map((f) => f.t).join(",")}`;
 }
 
 async function promptTurn(rig: Rig, text: string, legId: string) {
@@ -108,7 +112,7 @@ d("M-SEC 安全扩展实证", () => {
     for (const dir of dirs) await rm(dir, { recursive: true, force: true });
   });
 
-  it("S1 放行链：confirm 确认→命令真执行→审批行 allowed", { timeout: 240_000 }, async () => {
+  it("S1 放行链：confirm 确认→命令真执行→审批行 allowed", { timeout: 420_000 }, async () => {
     const dir = await mkdtemp(join(tmpdir(), "msec-s1-")); dirs.push(dir);
     const probe = await makeProbe("s1");
     const rig = await startRig(dir, 1); rigs.push(rig);
@@ -125,11 +129,12 @@ d("M-SEC 安全扩展实证", () => {
     }, "审批行 allowed", 60_000);
     await until(async () => {
       const text = await sessionText(rig, dir).catch(() => "");
-      return text.includes("rm -rf") && (text.includes("\"toolResult\"") || text.includes("tool_result") || text.includes("toolCall"));
-    }, "会话文件含 bash 工具行", 60_000);
+      // K3 P3-1 收紧：toolResult 单锚（pi 真形独立行；旧 OR 形 toolCall 过宽+rm -rf 命中 prompt 自文本=永真面）
+      return text.includes("\"type\":\"toolResult\"") && text.includes("rm -rf");
+    }, "会话文件含 toolResult 行", 60_000);
   });
 
-  it("S2 拒绝链：confirm 取消→目录仍在→审批行 denied→轮正常收口", { timeout: 240_000 }, async () => {
+  it("S2 拒绝链：confirm 取消→目录仍在→审批行 denied→轮正常收口", { timeout: 420_000 }, async () => {
     const dir = await mkdtemp(join(tmpdir(), "msec-s2-")); dirs.push(dir);
     const probe = await makeProbe("s2");
     const rig = await startRig(dir, 2); rigs.push(rig);
@@ -147,7 +152,7 @@ d("M-SEC 安全扩展实证", () => {
     await until(() => rig.frames.some((f) => f.t === "write-stop-ack" && f.requestId === "s2-stop"), "write-stop-ack（轮收口不挂死）", 60_000);
   });
 
-  it("S3 超时自答链：UI 不答→pi 2s 自答 false→denied→目录仍在+无 ui-closed（现状缺口登记）", { timeout: 240_000 }, async () => {
+  it("S3 超时自答链：UI 不答→pi 2s 自答 false→denied→目录仍在+无 ui-closed（现状缺口登记）", { timeout: 420_000 }, async () => {
     process.env.SEC_E2E_CONFIRM_TIMEOUT_MS = "2000";
     try {
       const dir = await mkdtemp(join(tmpdir(), "msec-s3-")); dirs.push(dir);
@@ -165,6 +170,7 @@ d("M-SEC 安全扩展实证", () => {
       expect(await exists(probe)).toBe(true);
       // 现状缺口（如实断言）：超时后无 ui-closed 帧（pi 不通知 client）
       await new Promise((r) => setTimeout(r, 3000));
+      // 缺口哨兵（K3 实现审 P2-1）：宿主 pendingUi 无超时自清（删点仅 answerUi/换代）——修复后此断言须反转为 ui-closed 必达
       expect(rig.frames.some((f) => f.t === "ui-closed")).toBe(false);
       rig.ws.send(JSON.stringify({ t: "stop", requestId: "s3-stop", file: FILE }));
       await until(() => rig.frames.some((f) => f.t === "write-stop-ack" && f.requestId === "s3-stop"), "write-stop-ack（轮收口）", 60_000);
