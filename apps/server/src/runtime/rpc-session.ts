@@ -24,6 +24,7 @@ import {
   type TurnKey,
   type UiClosedReason,
   type UiRequestMethod,
+  LIMITS,
 } from "@pi-agent-ui/protocol";
 import { IdleReaper, MapRegistry } from "./idle-reaper.ts";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -279,7 +280,9 @@ export class RpcSession {
     if (opts.sessionFile !== undefined) {
       try {
         const sidecar = readFileSync(`${opts.sessionFile}.model`, "utf8").trim();
-        if (sidecar.length > 0 && sidecar.length <= 128) this.sessionModel = sidecar;
+        // K3 审 P3-2：防御纵深——长度外再复核 modelPattern（normalize 后再入会话级）
+        if (sidecar.length > 0 && sidecar.length <= 128 && LIMITS.modelPattern.test(sidecar))
+          this.sessionModel = sidecar;
       } catch {
         /* 缺失/不可读=正常面（首次会话无 sidecar） */
       }
@@ -633,6 +636,8 @@ export class RpcSession {
       if (!ok) return { kind: "rejected", reason: "not-idle" }; // reopen 仅 closed→idle（B1-01）
     }
     // M-OPS（v1.4）：尾追恒胜——会话模型在 extraPiArgs 之后（--model 为最后项；设计 §3 拍板）
+    // K3 审 P2-1：stderrTail=per-generation 语义——换代 spawn 前清空，防上代残留行错归当代 detail
+    this.stderrTail = [];
     const r = this.supervisor.spawnNext(
       this.sessionModel !== undefined ? [...this.piArgs, "--model", this.sessionModel] : this.piArgs,
     );
@@ -687,9 +692,11 @@ export class RpcSession {
       const sr = await this.start();
       // ②面准备：失败原因结构化透传（cause），UI 不得只显一律「未就绪」
       // M-OPS（v1.4）：三路启动失败附 stderr 尾行 detail（净化口径=strip 控制字符+≤500）
+      // K3 审 P2-2：新捕获面顺手落审计（设计 §4+契约 §10.3）
       if (sr.kind !== "ready") {
         if (sr.kind === "spawn-failed" || sr.kind === "spawn-exited" || sr.kind === "readiness-timeout") {
           const detail = stderrDetailOf(this.stderrTail);
+          this.safeAudit(`rpc-session not-ready cause=${sr.kind} detail=${detail ?? "无"}`);
           return detail === undefined
             ? { kind: "not-ready", cause: sr.kind }
             : { kind: "not-ready", cause: sr.kind, detail }; // exactOptionalPropertyTypes：无 detail 保持原形

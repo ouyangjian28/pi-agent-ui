@@ -1,4 +1,11 @@
 // M-OPS（v1.4）网关 get-models 面单测：接线回帧/未接线 4405/失败 cause 空表（FakeConn 同 entry 测试形态）。
+async function until(cond: () => boolean, ms = 2000): Promise<void> {
+  const t0 = Date.now();
+  while (!cond()) {
+    if (Date.now() - t0 > ms) throw new Error("until 超时");
+    await new Promise((res) => setTimeout(res, 10));
+  }
+}
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -104,16 +111,18 @@ describe("网关 get-models（M-OPS v1.4）", () => {
     expect(c.closes).toHaveLength(0);
   });
 
-  it("G-m-4：get-models 计入在途上限（同 tick 第 5 个→4404）", async () => {
-    const slow = new ModelsListingService({
-      piBin: "pi",
-      spawnImpl: () => new Promise(() => undefined) as Promise<ReturnType<typeof Object>> as never,
-    });
+  it("G-m-4：get-models 计入在途上限（第 5 个 4404；前 4 个不被误杀）", async () => {
+    let release!: (v: { ok: true; models: { provider: string; id: string }[] }) => void;
+    const gate = new Promise<{ ok: true; models: { provider: string; id: string }[] }>((res) => (release = res));
+    const slow = new ModelsListingService({ piBin: "pi", spawnImpl: () => gate as never });
     const r = await makeRig({ modelsListing: slow });
     const c = await authed(r);
     for (let i = 0; i < 5; i++) c.say({ t: "get-models", requestId: `bulk-${i}` } as never); // 同 tick 连发
     await c.drain(2);
     const err = c.frames().find((f) => f.t === "error");
-    expect(err?.code).toBe(4404); // inFlightRequestsPerConn=4
+    expect(err?.code).toBe(4404); // inFlightRequestsPerConn=4：第 5 个拒
+    release({ ok: true, models: [{ provider: "a", id: "m1" }] }); // 放行共享 listing（inflight 去重=一.promise）
+    await until(() => c.frames().filter((f) => f.t === "models-list").length >= 4, 2000);
+    expect(c.frames().filter((f) => f.t === "models-list").length).toBe(4); // K3 审 P3-4：前 4 个各自回帧不误杀
   });
 });

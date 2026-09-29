@@ -156,4 +156,18 @@ describe("M-OPS 模型选择：spawn 尾追+sidecar+detail", () => {
     expect(detail.startsWith("b")).toBe(true); // 取尾非空行（b 行 strip \x00 后 300 字符）
     expect(detail).toHaveLength(300);
   });
+
+  it("W-o-s7：换代 spawn 前清 stderrTail——上代残留行不入当代 detail（K3 审 P2-1）", async () => {
+    const s = await makeSession();
+    s.host.stderrLines = ["gen1 正常运行的 stderr 噪声行"];
+    const p1 = s.session.send("hi");
+    await readyProbe(s.host); // gen1 就绪（stderr 噪声已入环缓冲）
+    const r1 = await p1;
+    expect(r1.kind).toBe("launched");
+    s.host.emitExit(0, null); // gen1 进程退出→换代（残留行留在 session 级缓冲）
+    s.host.failSpawn = true; // 下代 spawn 即抛（无新 stderr）
+    const r2 = await s.session.send("again", undefined, "litellm/next");
+    // 旧实现：detail="gen1 正常运行的 stderr 噪声行"（陈旧行错归当代）；P2-1 修后：缓冲已清→无 detail
+    expect(r2).toEqual({ kind: "not-ready", cause: "spawn-failed" });
+  });
 });
