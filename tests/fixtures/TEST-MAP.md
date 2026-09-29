@@ -1295,6 +1295,11 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - 全仓 1661 绿（+24 skip=PI_E2E 门腿；D4 收口 1661+M-SEC 三腿 skip 面）+三包 tsc 0（apps/server/packages/protocol/apps/web）；根 tsconfig 102 错=tests 面留观家族（D3 时 71，D4/M-SEC 新测试文件增量——具名留观待专项批，包级全 0 不受影响）。
 - **K3 实现审 r1（2026-10-10，审报=~/ai projects/pi-agent-ui/audits/k3-msec-impl-review-2026-10-10.md）→GO 90/100+修复批**：0 P1；P2-1 缺口登记未落权威账本+哨兵断言无反转指引（S3 断言锚 pendingUi 无超时自清=真实现状——修复后须反转为 ui-closed 必达；缺口两行落 PROJECT 收口批）；P3 六项全清：S1⑤ 收紧 toolResult 单锚（旧 OR 形 toolCall 过宽+rm -rf 命中 prompt 自文本=永真面）/diagnose 补会话 tail（readFileSync）/腿 timeout 240→420s（失败路径诊断不截断）/设计稿标题 v2/FILE 值勘正/probe 并发面（固定名 s1-s3，同机两并发 PI_E2E 互删 probe——手动门低风险记档）。K3 验真：S1 单腿独立复跑绿 31.3s+宿主零改动 diff 实证+变异残留逐字节核零。
 
+## M-OPS 修复批（K3 实现审 GO 91 处置；f1283fc；2026-10-10）
+- P2-1 spawnNext 前清 stderrTail（per-generation 语义落实）+W-o-s7 换代残留断言（变异验真：移除清空行→W-o-s7 红=真杀；还原后 7 绿复跑）。
+- P2-2 not-ready 三路失败 safeAudit 落审计（detail 同源）。P3-1 契约 §10.3 补「运行中会话 model 域=下次冷启动生效」。P3-2 sidecar 恢复加 LIMITS.modelPattern 复核（防御纵深）。P3-4 G-m-4 补「前 4 个不被误杀」断言（deferred gate 放行+inflight 去重=一 promise 四回帧）。P3-3（ANSI [31m 残留=有意保留可打印）/P3-5（registry 快路径=session 实例字段，功能等价）记档不改。
+- 全仓 1692 绿+三包 tsc 0。
+
 ## M-OPS 后端批（模型选择服务端+网关面；设计稿=docs/m-ops-design.md v2+契约 v1.4 f18e325/f62d2ae；2026-10-10，GLM 写·待 K3 审）
 
 - 实现面八件（spawn 尾追恒胜+sidecar 持久化+not-ready detail+模型清单服务）：
