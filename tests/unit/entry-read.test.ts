@@ -46,7 +46,7 @@ describe("D4 §4.1a ts 三件", () => {
 
 describe("D4 §4.5a thinking 门控两态（事件面）", () => {
   const content = [
-    { type: "thinking", text: "内心独白", thinkingSignature: "sig-never-out" },
+    { type: "thinking", thinking: "内心独白", thinkingSignature: "sig-never-out" },
     { type: "text", text: "回答" },
   ];
   const line = () => `${msgLine("a1", "assistant", content, { stopReason: "stop" })}\n`;
@@ -80,7 +80,7 @@ describe("D4 §4.1a entryBlocksOf 投影+净化", () => {
   it("四形：text/thinking（门开）/toolCall（id+name+argsPreview）/attachment；thinkingSignature 永不投", () => {
     const content = [
       { type: "text", text: "正文" },
-      { type: "thinking", text: "独白", thinkingSignature: "sig" },
+      { type: "thinking", thinking: "独白", thinkingSignature: "sig" },
       { type: "toolCall", id: "c1", name: "read", arguments: { path: "/x" } },
       { type: "image", data: "base64data", mimeType: "image/png" },
     ];
@@ -90,6 +90,8 @@ describe("D4 §4.1a entryBlocksOf 投影+净化", () => {
     expect(tc && tc.kind === "toolCall" && tc.toolCallId).toBe("c1");
     expect(tc && tc.kind === "toolCall" && tc.toolName).toBe("read");
     expect(tc && tc.kind === "toolCall" && tc.argsPreview).toBe(JSON.stringify({ path: "/x" }));
+    const th = blocks[1];
+    expect(th && th.kind === "thinking" && th.text).toBe("独白"); // 真格式字段=thinking（批④ E2E 抳误读）
     expect(JSON.stringify(blocks)).not.toContain("sig"); // thinkingSignature 不投
     // attachment=attachmentIdOfBlock 派生（sha256(data) 前 12hex），不回原始 base64
     const at = blocks[3];
@@ -97,7 +99,7 @@ describe("D4 §4.1a entryBlocksOf 投影+净化", () => {
     expect(JSON.stringify(blocks)).not.toContain("base64data");
   });
   it("门关：零 thinking 块（存在性不泄露）", () => {
-    const blocks = entryBlocksOf([{ type: "thinking", text: "隐藏" }], { thinkingVisible: false });
+    const blocks = entryBlocksOf([{ type: "thinking", thinking: "隐藏" }], { thinkingVisible: false });
     expect(blocks).toEqual([]);
   });
   it("denylist：嵌套键+大小写不敏感→[redacted]；无关键名不误伤", () => {

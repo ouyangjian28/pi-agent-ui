@@ -223,7 +223,8 @@ export function entryBlocksOf(
     const t = typeof r["type"] === "string" ? r["type"] : "";
     if (t === "text") push({ kind: "text", text: cleanText(typeof r["text"] === "string" ? r["text"] : "") });
     else if (t === "thinking") {
-      if (opts.thinkingVisible) push({ kind: "thinking", text: typeof r["text"] === "string" ? r["text"] : "" });
+      // pi 原始 thinking 块字段=thinking（§6 事实核验；批④ E2E 抳住实现误读 r["text"]恒空）
+      if (opts.thinkingVisible) push({ kind: "thinking", text: typeof r["thinking"] === "string" ? r["thinking"] : "" });
     } else if (t === "toolCall") {
       const argsRaw = r["arguments"];
       const full = argsRaw === undefined ? "" : JSON.stringify(redactForPreview(argsRaw));
