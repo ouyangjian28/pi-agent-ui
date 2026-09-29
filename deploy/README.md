@@ -1,88 +1,64 @@
-# pi-agent-ui 部署 runbook（M-DEPLOY 批②；目标=pi.yangyijian.com 外网可达）
+# pi-agent-ui 部署 runbook v2（M-DEPLOY 批④已上线版；目标=pi.yangyijian.com 外网可达）
 
-> 计划档：docs/m-deploy-plan.md。服务器：43.108.11.202（阿里云 Ubuntu，nginx/1.18.0）。
-> 铁律：凭据（token/模型 API key）只住服务器文件系统（0600），永不入仓/对话/日志。
+> 计划档：docs/m-deploy-plan.md。**v2 架构变更（2026-09-30 实拍板）**：弃批② VPS 直跑方案，改用本机成熟工作流——**服务跑家机（SER9Max）+SSH 反向隧道+VPS nginx 只做管道**（pi-web/dsh/birthprep 同族模式）。VPS 1.6G 内存跑不动 pi 子进程群是主因；家机有 nvm/模型凭据/完整 pi 环境。
+> 铁律：凭据只住 ~/.secrets/（600，家机），永不入仓/对话/日志。
 
-## 0. 前置确认
+## 0. 现行链路（已切流，2026-09-30）
 
-- [ ] DNS：pi.yangyijian.com A 记录 → 43.108.11.202（hichina dns21/22——已有，当前指向旧服务）
-- [ ] webui.yangyijian.com（现有 pi-web-ui）零改动承诺：只新增 server 块，不动旧配置
-- [ ] 443/80 云防火墙已通（现有服务在用）
-
-## 1. 服务器基础（root）
-
-```bash
-useradd -m -s /bin/bash piagent            # 专用用户（写面要起 pi 子进程+写 sessions）
-apt-get update && apt-get install -y nginx
-# node 24（nodesource）：
-curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && apt-get install -y nodejs
-node -v   # 确认 v24.x；ExecStart 的 NODE_BIN 按 which node 改
+```
+浏览器 https://pi.yangyijian.com
+  → VPS(43.108.11.202) nginx 443 SNI 分流(stream.d/sni-split.conf，pi.→默认28085)
+  → conf.d/pi-ser9max.conf server 块(28085 ssl，证书 /etc/nginx/tls/pi.yangyijian.com/)
+  → 127.0.0.1:28148（SSH 反向隧道）
+  → 家机 piagent-web.service（node main.ts --port 18787 --host 127.0.0.1）
 ```
 
-## 2. 应用落地（piagent）
+- 切流备份：VPS `/etc/nginx/conf.d/pi-ser9max.conf.bak-20260930-piagentui`（回滚=cp 回原+reload）
+- 旧链路（28142→30141 pi-web-ui）**保留不断**：webui.yangyijian.com 照旧服务；pi-web-ui.service/pi-web-tunnel.service 不动
+- fail2ban jail nginx-pi-auth 仍在（盯 pi-web.access.log 401；自研面 POST /login 401 同入 log，jail 兼容）
+
+## 1. 家机组件（systemd --user）
+
+| 服务 | 文件 | 作用 |
+|---|---|---|
+| piagent-web.service | ~/.config/systemd/user/ | server 主进程（ts 源直跑=repo pull 即生效） |
+| piagent-tunnel.service | 同上 | ssh -R 127.0.0.1:28148→18787（镜像 birthprep-tunnel 保活参数） |
+
+关键参数：
+- `WorkingDirectory=%h/piagent-sessions`=`--root`（pi 子进程 cwd=会话根；写面最小化——独立树，不掺 ~/ai 仓）
+- `--token-file %h/.secrets/piagent-tokens.json`（0600；{version:1,tokens:[原文]}；热轮换=改文件+SIGHUP）
+- `--static-dir <repo>/apps/web/dist`（前端产物）
+- `--origin https://pi.yangyijian.com`（WS Origin 白名单）
+- Environment：PATH 含 nvm v24.18.0 bin（pi 子进程）+NO_PROXY=localhost,127.0.0.1,::1（防代理劫持，M-033 族）
+
+运维口诀：
+- 起停：`systemctl --user {start|stop|restart} piagent-web piagent-tunnel`
+- 日志：`journalctl --user -u piagent-web -f`
+- 更新：repo `git pull`+`npm run build -w apps/web`→`systemctl --user restart piagent-web`
+- 换 token：写 ~/.secrets/piagent-tokens.json→`systemctl --user kill -s SIGHUP piagent-web`
+
+## 2. token 模式（用户拍板：老一套）
+
+- 浏览器入口：`https://pi.yangyijian.com/?token=<值>`（前端存 localStorage+WS hello 自动携）
+- 登录面：POST /login（HttpOnly cookie sid，Strict）——nginx `location = /login` 挂 pi_auth_rl 限流 5r/m
+- WS 面：hello 帧 {t:"hello",protocolVersion:1,token}；错 token=error 4401+close 1008
+
+## 3. 验证清单（2026-09-30 全绿）
+
+- [x] https 静态 200+TLS（外网）
+- [x] POST /login 错密码 401
+- [x] WS hello 对 token→welcome；错 token→4401+close 1008
+- [ ] 浏览器全功能手测（列表/写会话/读会话/模型下拉/UI 问答/断线重连）——用户面验收
+- [ ] 长跑观察（隧道保活/内存/日志）
+
+## 4. 回滚
 
 ```bash
-sudo -u piagent git clone https://github.com/ouyangjian28/pi-agent-ui.git /opt/pi-agent-ui
-cd /opt/pi-agent-ui && sudo -u piagent npm install && sudo -u piagent npm run build -w apps/web
-# 或本机构建后 rsync dist+src（跳过服务器构建）
-sudo -u piagent mkdir -p /opt/pi-agent-ui/sessions    # --root（会话 journal 落此）
+# VPS 侧（切回 pi-web-ui）：
+ssh aliyun-vps 'cp /etc/nginx/conf.d/pi-ser9max.conf.bak-20260930-piagentui /etc/nginx/conf.d/pi-ser9max.conf && nginx -t && systemctl reload nginx'
+# 家机组件保留不删（不碍事，随时再切回）
 ```
 
-pi CLI（写面要起真 pi）：`sudo -u piagent npm install -g @mariozechner/pi-coding-agent`（版本以仓内 .nvmrc/实际通道为准）；模型 API 凭据放 `piagent` 家目录 600 文件（pi 自身配置面）。
+## 5. 批② VPS 直跑方案（存档备用）
 
-## 3. token 与 systemd
-
-```bash
-mkdir -p /etc/pi-agent-ui && chmod 700 /etc/pi-agent-ui
-# 生成 token（就是浏览器访问用的那个密码）：
-openssl rand -hex 24
-# 写 tokens.json（deploy/tokens.example.json 格式）：
-echo '{"version":1,"tokens":["<生成的 token>"]}' > /etc/pi-agent-ui/tokens.json
-chown piagent:piagent /etc/pi-agent-ui/tokens.json && chmod 600 /etc/pi-agent-ui/tokens.json
-cp /opt/pi-agent-ui/deploy/pi-agent-ui.service /etc/systemd/system/
-systemctl daemon-reload && systemctl enable --now pi-agent-ui
-systemctl status pi-agent-ui   # 看 main ready 行
-curl -s http://127.0.0.1:18787/ -o /dev/null -w "%{http_code}\n"   # 期望 200
-```
-
-## 4. nginx 切流
-
-```bash
-cp /etc/nginx/sites-available/default /etc/nginx/sites-available/default.bak-$(date +%s)  # 全量备份兜底
-cp /opt/pi-agent-ui/deploy/nginx-pi.yangyijian.com.conf /etc/nginx/sites-available/pi.yangyijian.com
-ln -sf /etc/nginx/sites-available/pi.yangyijian.com /etc/nginx/sites-enabled/
-nginx -t && systemctl reload nginx
-```
-
-## 5. TLS 证书
-
-```bash
-# 查现有证书覆盖域：
-openssl x509 -in /etc/letsencrypt/live/yangyijian.com/fullchain.pem -noout -text | grep -A1 "Subject Alternative Name"
-# 无 pi.：certbot --nginx -d pi.yangyijian.com --expand（并回改 nginx conf 证书路径若 live 目录名变化）
-# certbot 自动续期已有（systemctl list-timers | grep certbot）
-```
-
-## 6. 外网验证清单（本机浏览器）
-
-- [ ] https://pi.yangyijian.com/ → 200 出前端
-- [ ] 无 token → hello 4401 面（token 输入框）
-- [ ] `?token=<token>` 直通 → 列表加载
-- [ ] 写会话（新会话+发 prompt+看回包）——云端 pi 起动
-- [ ] 模型下拉（get-models）
-- [ ] UI 问答弹框（若有扩展在飞）
-- [ ] 断线重连（手机热点切网络）
-- [ ] `https://webui.yangyijian.com` 仍正常（旧服务零损）
-
-## 7. 回滚
-
-```bash
-rm /etc/nginx/sites-enabled/pi.yangyijian.com && nginx -t && systemctl reload nginx   # 秒回旧态（DNS 不动）
-systemctl disable --now pi-agent-ui   # 停服务
-```
-
-## 8. 日常运维
-
-- 日志：`journalctl -u pi-agent-ui -f`
-- token 轮换：改 /etc/pi-agent-ui/tokens.json（原子写：写临时文件+mv）→ 自动热轮换（mtime 轮询）或 `systemctl kill -s HUP pi-agent-ui`
-- 升级：`cd /opt/pi-agent-ui && sudo -u piagent git pull && npm install && npm run build -w apps/web && systemctl restart pi-agent-ui`
+原批②方案（VPS /opt/pi-agent-ui 直跑+piagent 用户）档=git 651fbfd..6e88e71 的 deploy/；适用于未来换大内存 VPS 或家机不可达场景。执行按 runbook v1（git 历史）。
