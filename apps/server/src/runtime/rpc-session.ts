@@ -26,6 +26,7 @@ import {
   type UiRequestMethod,
 } from "@pi-agent-ui/protocol";
 import { IdleReaper, MapRegistry } from "./idle-reaper.ts";
+import { readFileSync, writeFileSync } from "node:fs";
 
 export interface RpcSessionOpts {
   /**
@@ -88,7 +89,7 @@ export type SessionStartResult =
     | { readonly kind: "rejected"; readonly reason: "not-idle" }
     | { readonly kind: "spawn-exited"; readonly generation: number; exit: Readonly<{ code: number | null; signal: string | null }> });
 
-export type SessionSendResult = LaunchOutcome | { readonly kind: "no-process" } | { readonly kind: "invalidated"; readonly stage: "first-byte" } | { readonly kind: "not-ready"; readonly cause?: string };
+export type SessionSendResult = LaunchOutcome | { readonly kind: "no-process" } | { readonly kind: "invalidated"; readonly stage: "first-byte" } | { readonly kind: "not-ready"; readonly cause?: string; readonly detail?: string }; // M-OPS（v1.4）：detail=启动失败 stderr 尾行（≤500 字符+strip 控制字符；三路 spawn-failed/spawn-exited/readiness-timeout）
 
 // ---------------------------------------------------------------------------
 // D3 扩展问答（docs/d3-ui-passthrough-design.md）：会话面类型与结果。
@@ -133,6 +134,16 @@ const UI_DIALOG_METHODS = new Set<UiRequestMethod>(["select", "confirm", "input"
  * 采样间完成的短登记不得沿用旧闲置起点。宿主应使用 session.idleRegistry（包装版）
  * 而非自有原始引用，否则活动通知语义失效。
  */
+/** M-OPS（v1.4）：stderr 尾行→detail（strip 控制字符+≤500；空缓冲=undefined）。 */
+function stderrDetailOf(tail: readonly string[]): string | undefined {
+  for (let i = tail.length - 1; i >= 0; i--) {
+    const line = (tail[i] ?? "").replace(/[\x00-\x1f\x7f]/g, "").trim();
+    if (line.length === 0) continue; // 空行跳过——取最后一个非空行
+    return line.length > 500 ? line.slice(0, 500) : line;
+  }
+  return undefined;
+}
+
 function wrapRegistry(raw: import("./idle-reaper.ts").BackgroundTaskRegistry, note: () => void): import("./idle-reaper.ts").BackgroundTaskRegistry {
   return {
     register: (id: string, label?: string) => {
@@ -164,6 +175,13 @@ export class RpcSession {
   private readonly supervisor: ProcessSupervisor;
   /** S5-R3：两代 spawn 共用的 pi 参数（构造时解析：显式 piArgs 或绑定 sessionFile）。 */
   private readonly piArgs: readonly string[];
+  /** M-OPS（v1.4）：会话级模型 id（undefined=用 pi 默认）。首 prompt 带 model→更新+落 sidecar；
+   *  构造期从 sidecar 恢复（server 重启后会话不静默换模型）；优先级=prompt.model>sidecar>pi 默认。 */
+  private sessionModel: string | undefined;
+  /** sidecar 路径（sessionFile 缺省的测试模式=null=不读写 sidecar）。 */
+  private readonly sessionFileSidecar: string | null;
+  /** M-OPS（v1.4）：per-generation stderr 尾部环缓冲（启动失败 detail 源；仅保留尾部 N 行）。 */
+  private stderrTail: string[] = [];
   /** 宿主登记面（S5-R1 包装版：register/complete 同步通知回收器活动；勿绕过它用原始引用）。 */
   readonly idleRegistry: import("./idle-reaper.ts").BackgroundTaskRegistry;
   private reaper: IdleReaper | null = null; // dispose 置 null
@@ -218,6 +236,10 @@ export class RpcSession {
       // D3：代次终结（retire/意外退出/EOF 交接）→撤本代全部待答提问（不写死进程 stdin）
       onGenerationEnded: (generation, reason) => this.closeUiForGeneration(generation, reason),
       onStderr: (t, generation) => {
+        // M-OPS（v1.4）：尾部环缓冲（启动失败 detail 源；保留尾 16 行/每行 4KiB 截断）
+        const line = t.length > 4096 ? t.slice(0, 4096) : t;
+        this.stderrTail.push(line);
+        if (this.stderrTail.length > 16) this.stderrTail.splice(0, this.stderrTail.length - 16);
         try {
           opts.onStderr?.(t, generation);
         } catch (e: unknown) {
@@ -251,6 +273,17 @@ export class RpcSession {
       throw new Error("RpcSession：必须显式提供 sessionFile（生产持久会话）或 piArgs（测试/临时模式）——闲置回收生命周期要求跨回收重启绑定同一会话文件");
     }
     this.piArgs = [...(opts.piArgs ?? ["--mode", "rpc", "--session", opts.sessionFile as string]), ...(opts.extraPiArgs ?? [])];
+    // M-OPS（v1.4）：sidecar 恢复——构造期读 <sessionFile>.model（存在则该会话后续 spawn 沿用同模型；
+    // 读失败=保守忽略（sidecar 非权威面，损坏时回退 pi 默认，审计一行）
+    this.sessionFileSidecar = opts.sessionFile !== undefined ? `${opts.sessionFile}.model` : null;
+    if (opts.sessionFile !== undefined) {
+      try {
+        const sidecar = readFileSync(`${opts.sessionFile}.model`, "utf8").trim();
+        if (sidecar.length > 0 && sidecar.length <= 128) this.sessionModel = sidecar;
+      } catch {
+        /* 缺失/不可读=正常面（首次会话无 sidecar） */
+      }
+    }
     const pollMs = opts.timeoutPollMs ?? 250;
     // 切片5①：闲置回收器（双条件同满足才开始连续计时；回收=EOF 优先优雅链）
     // S5-R1：登记表包装（register/complete 同步通知活动）；宿主用 this.idleRegistry 登记后回收器自动感知
@@ -599,7 +632,10 @@ export class RpcSession {
       const ok = this.gate.reopen();
       if (!ok) return { kind: "rejected", reason: "not-idle" }; // reopen 仅 closed→idle（B1-01）
     }
-    const r = this.supervisor.spawnNext(this.piArgs);
+    // M-OPS（v1.4）：尾追恒胜——会话模型在 extraPiArgs 之后（--model 为最后项；设计 §3 拍板）
+    const r = this.supervisor.spawnNext(
+      this.sessionModel !== undefined ? [...this.piArgs, "--model", this.sessionModel] : this.piArgs,
+    );
     if (r.kind !== "spawned") {
       if (r.kind === "rejected") return { kind: "rejected", reason: r.reason };
       if (r.kind === "spawn-failed") return { kind: "spawn-failed", error: r.error };
@@ -632,14 +668,34 @@ export class RpcSession {
 
   /** 发一轮用户消息（三写硬序在纯逻辑层；本层只渲染帧+对账 id）。expectedGeneration=v1.1
    * 可选期望代次（早拒：入口快照活代≠期望→invalidated；零窗口权威点在 supervisor.submitTurn
-   * 同步比对层——两层把关，早拒层为省协调器记账的快路径）。 */
-  async send(message: string, expectedGeneration?: number): Promise<SessionSendResult> {
+   * 同步比对层——两层把关，早拒层为省协调器记账的快路径）。model=M-OPS（v1.4）可选模型 id
+   * （undefined=不改会话模型；给了→更新会话级模型+落 sidecar，冷启动 spawn 带上）。 */
+  async send(message: string, expectedGeneration?: number, model?: string): Promise<SessionSendResult> {
+    if (model !== undefined) {
+      this.sessionModel = model; // 首 prompt 带 model→会话级记忆（后续 spawn 尾追；进程已在跑时本轮不生效，换代后生效）
+      if (this.sessionFileSidecar !== null) {
+        try {
+          writeFileSync(this.sessionFileSidecar, `${model}\n`, "utf8");
+        } catch (e: unknown) {
+          this.safeAudit(`rpc-session model-sidecar-write-error ${String(e instanceof Error ? e.message : e)}`);
+        }
+      }
+    }
     let st = this.supervisor.getState();
     // 切片5①：闲置回收后无进程——send=明确申请执行，冷启动拉起（查看不拉起；原会话文件+readiness）
     if (st.phase === "idle") {
       const sr = await this.start();
       // ②面准备：失败原因结构化透传（cause），UI 不得只显一律「未就绪」
-      if (sr.kind !== "ready") return { kind: "not-ready", cause: sr.kind };
+      // M-OPS（v1.4）：三路启动失败附 stderr 尾行 detail（净化口径=strip 控制字符+≤500）
+      if (sr.kind !== "ready") {
+        if (sr.kind === "spawn-failed" || sr.kind === "spawn-exited" || sr.kind === "readiness-timeout") {
+          const detail = stderrDetailOf(this.stderrTail);
+          return detail === undefined
+            ? { kind: "not-ready", cause: sr.kind }
+            : { kind: "not-ready", cause: sr.kind, detail }; // exactOptionalPropertyTypes：无 detail 保持原形
+        }
+        return { kind: "not-ready", cause: sr.kind };
+      }
       st = this.supervisor.getState();
     }
     this.reaper?.noteActivity(); // S5-R1：受理即活动（采样间的受理→settled 短轮不得沿用旧起点）

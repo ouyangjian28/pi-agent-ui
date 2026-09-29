@@ -1294,3 +1294,15 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - 宿主零改动实证：E2E 三腿+变异全落在 fixture 层；仓源码 diff=0（b19bd17+44d99dd 仅 tests/fixtures+tests/integration 两新文件）。
 - 全仓 1661 绿（+24 skip=PI_E2E 门腿；D4 收口 1661+M-SEC 三腿 skip 面）+三包 tsc 0（apps/server/packages/protocol/apps/web）；根 tsconfig 102 错=tests 面留观家族（D3 时 71，D4/M-SEC 新测试文件增量——具名留观待专项批，包级全 0 不受影响）。
 - **K3 实现审 r1（2026-10-10，审报=~/ai projects/pi-agent-ui/audits/k3-msec-impl-review-2026-10-10.md）→GO 90/100+修复批**：0 P1；P2-1 缺口登记未落权威账本+哨兵断言无反转指引（S3 断言锚 pendingUi 无超时自清=真实现状——修复后须反转为 ui-closed 必达；缺口两行落 PROJECT 收口批）；P3 六项全清：S1⑤ 收紧 toolResult 单锚（旧 OR 形 toolCall 过宽+rm -rf 命中 prompt 自文本=永真面）/diagnose 补会话 tail（readFileSync）/腿 timeout 240→420s（失败路径诊断不截断）/设计稿标题 v2/FILE 值勘正/probe 并发面（固定名 s1-s3，同机两并发 PI_E2E 互删 probe——手动门低风险记档）。K3 验真：S1 单腿独立复跑绿 31.3s+宿主零改动 diff 实证+变异残留逐字节核零。
+
+## M-OPS 后端批（模型选择服务端+网关面；设计稿=docs/m-ops-design.md v2+契约 v1.4 f18e325/f62d2ae；2026-10-10，GLM 写·待 K3 审）
+
+- 实现面八件（spawn 尾追恒胜+sidecar 持久化+not-ready detail+模型清单服务）：
+  - apps/server/src/ws/model-listing.ts 新建：ModelEntry{provider,id,context?,thinking?}+parseModelsTable（表头 \s{2,} 切分列偏移定位 provider/model/context/thinking+列数不足行跳过+"-" 原样保留解析层不猜测语义+CRLF 兼容）+ModelsListingService（缓存 10min+inflight 并发去重+失败也缓存防故障风暴+now/spawnImpl 可注入）+spawnListModels（10s 超时 SIGKILL+1MiB 读限+非零退出→cause）。
+  - rpc-session.ts：①send(message,expectedGeneration?,model?) 三参——model 给了→sessionModel 更新+sidecar writeFileSync（失败仅审计不断路）；②构造期 sidecar 恢复（readFileSync trim ≤128 才用；损坏/缺失=保守忽略回退 pi 默认）；③spawnNext 尾追 [...piArgs,"--model",id]（恒胜=extraPiArgs 之后；无 model 不加）；④stderrTail 环缓冲（16 行×4KiB）+stderrDetailOf（尾非空行+strip \x00-\x1f\x7f+slice 500）；⑤not-ready 三路（spawn-failed/spawn-exited/readiness-timeout）附 detail（exactOptionalPropertyTypes 条件展开）。
+  - 透传链：RpcLikeSession.send 三参→rpc-write-host sendPrompt(file,text,generation?,model?)→write-host.ts 接口四参→ws-gateway :440 frame.model 透传；encodeSendOutcome not-ready detail 透传。
+  - ws-gateway：case "get-models"+handleGetModels（4405 未接线/正常 models-list 回帧/失败空表+cause 不 close 不 error 帧）+WsGatewayOpts.modelsListing?；inflight 槽位通用面（第 5 个 4404）。
+  - composition.ts：forbidden Set 四项（+--model 拒启门）；modelsListing 接线（config.write?.piBin 有才接——未配=4405 天然拒）。
+- 测试三件 26 例：rpc-session-model.test.ts 6 例（W-o-s1 尾追序+sidecar 落盘/s2 构造期恢复/s3 无 model 不加/s4 损坏忽略/s5 spawn-failed 无 detail+readiness-timeout detail strip 净化/s6 环缓冲取尾+500 截断）；model-listing.test.ts 10 例（M-l-1 正常表/-2 表头缺列/-3 空输出/-4 "-" 保留/-5 列数不足跳过/-6 CRLF/-7 缓存 TTL/-8 过期重拉/-9 并发去重/-10 失败缓存）；ws-gateway-models.test.ts 4 例（G-m-1 4405/G-m-2 回帧/G-m-3 失败空表 cause/G-m-4 在途上限）。+contracts-v14 补边 3 例（V8 128 恰过/V9 非字符串/V10 缺字段向——K3 契约审 P3-1/P3-2 顺带）+E-ui-0b 禁集负向腿扩 --model 四项+composition-write CW3 适配（真链 cat stderr→detail 在场断言——恰证 detail 链路活）。全仓 1691 绿（1658→1691）+三包 tsc 0。
+- K3 契约审 P3 顺带四项全清：P3-1 V8 128 边界/P3-2 V9+V10 两例/P3-3 contracts.ts prompt 注释「尾道→尾追」+补禁集与优先级/P3-4 docs 39→38+「计数以实测当日为准」注。
+- 测试调试三教训：FakeRpcHost 探针回执 id 必须回显探针帧 id（demux 按 id 对账）；readiness-timeout 测试须补 until(SIGTERM)+emitExit（retire 等退出确认）；sidecar 预写须在 new RpcSession 之前（构造期读）。

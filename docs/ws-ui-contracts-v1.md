@@ -472,7 +472,7 @@ type ServerFrame =
 ### §10.3 运营三件（M-OPS，契约 v1.4 增补；正文 v1 冻结不改写）
 
 - 权威设计=docs/m-ops-design.md v2；协议源码=packages/protocol/src/contracts.ts M-OPS 段。三处：
-  - **prompt.model?**（写帧可选域，v1.1 generation 同式剥除+组装）：精确模型 id（LIMITS.modelPattern=`^[\w./:-]{1,128}$`，非 glob pattern；K3 实测 39/39 现役 id 全过）。语义=spawn 尾追 `--model`（piArgs 序=基底+extraPiArgs+`--model` 尾追恒胜；extraPiArgs 携带 --model=拒启门禁集扩列，E-ui-0b 同式）；会话级记忆=sidecar `<file>.model`（优先级 prompt.model>sidecar>pi 默认）。
+  - **prompt.model?**（写帧可选域，v1.1 generation 同式剥除+组装）：精确模型 id（LIMITS.modelPattern=`^[\w./:-]{1,128}$`，非 glob pattern；K3 实测 38/38 现役 id 全过——模型清单为活配置，计数以实测当日为准）。语义=spawn 尾追 `--model`（piArgs 序=基底+extraPiArgs+`--model` 尾追恒胜；extraPiArgs 携带 --model=拒启门禁集扩列，E-ui-0b 同式）；会话级记忆=sidecar `<file>.model`（优先级 prompt.model>sidecar>pi 默认）。
   - **get-models / models-list 帧对**（挂 list 连接）：C→S `{t:"get-models", requestId}`（两字段恰具）；S→C `{t:"models-list", requestId, models:[{provider,id,context?,thinking?}], cause?}`（失败→空表+cause，不新设错误码）。数据源=spawn `pi --list-models`（首次请求触发+进程内缓存 10min；表头列偏移+`\s{2,}` 切分+列数校验）。
   - **write-ack not-ready.detail?**：启动失败 stderr 尾行（≤500 字符+strip 控制字符；per-generation stderr ring buffer——onStderr 现状生产面未接线，本批新捕获面顺手落审计）。错误源三路=spawn-failed/spawn-exited/readiness-timeout（kind 五值不变；错模型真腿=spawn-exited 实测：spawn 即退 exit=1+stderr 单行含模型名）。**明文政策显式裁决**：write-composer「服务端自由文本永不入 DOM」姿态有意变更（知情价值>泄露风险；React 转义+strip+本机自用；M-DEPLOY 多用户面前须再评——docs/m-ops-design.md §4）。
 - 新建会话（§2 面）：file 名 `ops-YYYYMMDD-HHmmss.jsonl`（同秒冲突=并入同会话，声明可接受）；新建态不发 subscribe（时序=写先行，4402=引导文案非错误）；实际落 roots[0]（resolveWithinRoots 相对名恒命中）。

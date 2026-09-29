@@ -24,6 +24,7 @@ import type {
 import { LIMITS, SubscriptionEngine, validateClientFrame, validateWriteFrame, WRITE_FRAME_TYPES, defaultStreamId } from "@pi-agent-ui/protocol";
 import type { WriteClientFrame } from "@pi-agent-ui/protocol";
 import type { WriteHostPort } from "./write-host.ts";
+import type { ModelsListingService } from "./model-listing.ts";
 import type { UiHostPort, UiAskGateway, UiAnswerOutcomeGateway } from "./ui-host.ts";
 import type { ScanRow } from "@pi-agent-ui/protocol";
 import { ReadIndexRegistry, FileOverBudgetError } from "@pi-agent-ui/protocol";
@@ -124,6 +125,8 @@ export interface WsGatewayOpts {
   readonly indexLimits?: { maxEventsPerStream: number };
   /** D1（w1d）：registry 流数上限注入（受控测试小值替 33 活动流挤出场景） */
   readonly registryMaxStreams?: number;
+  /** M-OPS（v1.4）：模型清单服务（缺省=get-models 帧 4405 拒绝；接线后=pi --list-models 缓存 10min）。 */
+  readonly modelsListing?: ModelsListingService;
   readonly heartbeat?: { pingMs?: number; idleMs?: number }; // 默认 30s/90s；0=禁用（受控测试）
   readonly maxLifetimeMs?: number; // 默认 24h
   readonly helloWindowMs?: number; // 默认 10s
@@ -415,6 +418,7 @@ export class WsGateway {
       case "unsubscribe": this.handleUnsubscribe(st, frame); return;
       case "list-sessions": void this.handleList(st, frame); return;
       case "get-recovery": void this.handleRecovery(st, frame); return;
+      case "get-models": void this.handleGetModels(st, frame).finally(() => { st.inflight.delete(frame.requestId); }); return; // M-OPS v1.4
       case "entry-get": void this.handleEntryGet(st, frame).finally(() => { st.inflight.delete(frame.requestId); }); return;
       case "ui-answer": {
         // r2 P2-A（DS 判分 2026-10-10）：handleUiAnswer 同步路由内 answer() 端口同步抛
@@ -437,7 +441,7 @@ export class WsGateway {
     try {
       const abs = resolveWithinRoots(file, this.opts.roots);
       if (abs === null) { this.errFrame(st, 4404, "file 越界", rid); return; }
-      const outcome = await this.opts.writeHost!.sendPrompt(abs, frame.text, frame.generation); // v1.1：可选代次透传身份门
+      const outcome = await this.opts.writeHost!.sendPrompt(abs, frame.text, frame.generation, frame.model); // v1.1：可选代次透传身份门；v1.4（M-OPS）：model 会话级模型
       this.audit(`write-frame conn=${st.id} t=prompt file=${file} outcome=${outcome.kind}`);
       this.enqueue(st, { t: "write-ack", requestId: rid, file, outcome });
     } catch (e: unknown) {
@@ -1419,6 +1423,27 @@ export class WsGateway {
   }
 
   // ---- get-recovery（计算闸+权威证据快照链；B03 禁裸读盘面；W1-06 哈希门+typed adapter）----
+  /** M-OPS（v1.4）：模型清单（缓存 10min；失败=空表+cause，不执错——下拉降级 free-text）。 */
+  private async handleGetModels(st: ConnState, frame: Extract<ClientFrame, { t: "get-models" }>): Promise<void> {
+    const listing = this.opts.modelsListing;
+    if (listing === undefined) {
+      this.errFrame(st, 4405, "模型清单未接线", frame.requestId);
+      return;
+    }
+    try {
+      const r = await listing.list();
+      this.audit(`get-models conn=${st.id} ok=${r.ok} count=${r.ok ? r.models.length : 0}`);
+      this.enqueue(st, {
+        t: "models-list",
+        requestId: frame.requestId,
+        ...(r.ok ? { models: r.models } : { models: [], cause: r.cause }),
+      });
+    } catch (e: unknown) {
+      this.audit(`get-models-error conn=${st.id} ${String(e instanceof Error ? e.message : e)}`);
+      this.errFrame(st, 4404, "模型清单失败", frame.requestId);
+    }
+  }
+
   private async handleRecovery(st: ConnState, frame: Extract<ClientFrame, { t: "get-recovery" }>): Promise<void> {
     const requestId = frame.requestId;
     const file = frame.file;

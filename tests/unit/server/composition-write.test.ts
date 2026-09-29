@@ -91,7 +91,9 @@ describe("3c-3 composition 写侧接线", () => {
     try {
       c.ws.send(JSON.stringify({ t: "prompt", requestId: "r1", file: "s1.jsonl", text: "hi" }));
       const ack = await c.next("write-ack", (f) => f.requestId === "r1");
-      expect(ack.outcome).toEqual({ kind: "not-ready", cause: "readiness-timeout" });
+      // M-OPS v1.4：真链 stderr 面（cat 不认识 --mode 参数→usage 报错）→detail 附带（三路 readiness-timeout 之一）
+      expect(ack.outcome).toMatchObject({ kind: "not-ready", cause: "readiness-timeout" });
+      expect(typeof (ack.outcome as { detail?: string }).detail).toBe("string");
       await new Promise<void>((res) => { const iv = setInterval(() => { if (audits.some((l) => l.includes("session-registry created"))) { clearInterval(iv); res(); } }, 20); setTimeout(() => { clearInterval(iv); res(); }, 3_000); });
       expect(audits.some((l) => l.includes("session-registry created") && l.includes("s1.jsonl"))).toBe(true);
       expect(audits.some((l) => l.includes("readiness"))).toBe(true);

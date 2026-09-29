@@ -594,7 +594,7 @@ export const WRITE_OPEN_FRAME_TYPES: readonly string[] = ["prompt", "stop", "res
 export const WRITE_TEXT_MAX_BYTES = 65_536;
 
 export type WriteClientFrame =
-  | { readonly t: "prompt"; readonly requestId: string; readonly file: string; readonly text: string; readonly generation?: number; readonly model?: string } // v1.1 帧身份：可选进程代次（提供则宿主身份门校验活代匹配——v1 客户端缺省跳过）；v1.4（M-OPS）可选模型 id（spawn 尾道 --model 尾追恒胜+sidecar 持久化，docs/m-ops-design.md §3）
+  | { readonly t: "prompt"; readonly requestId: string; readonly file: string; readonly text: string; readonly generation?: number; readonly model?: string } // v1.1 帧身份：可选进程代次（提供则宿主身份门校验活代匹配——v1 客户端缺省跳过）；v1.4（M-OPS）可选模型 id（spawn 尾追 --model 恒胜（禁集拒启：extraPiArgs 携 --model）+sidecar 持久化，优先级 prompt.model>sidecar>pi 默认，docs/m-ops-design.md §3）
   | { readonly t: "stop"; readonly requestId: string; readonly file: string }
   | { readonly t: "resume"; readonly requestId: string; readonly file: string; readonly intentId: string; readonly generation: number }; // v1.1：恢复意图重发（身份门四校验：恢复数据在场/未阻断/授权/代次）
 

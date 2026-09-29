@@ -12,7 +12,7 @@ import type { WriteSendOutcomeDTO, WriteStopOutcomeDTO, WriteResumeOutcomeDTO } 
 
 export interface WriteHostPort {
   /** 发一轮用户消息（prompt 帧）。generation=v1.1 可选进程代次（提供则身份门校验活代匹配）。 */
-  sendPrompt(file: string, text: string, generation?: number): Promise<WriteSendOutcomeDTO>;
+  sendPrompt(file: string, text: string, generation?: number, model?: string): Promise<WriteSendOutcomeDTO>;
   /** 停止会话进程（stop 帧）。 */
   stop(file: string): Promise<WriteStopOutcomeDTO>;
   /** v1.1 恢复意图重发（resume 帧）。身份门四校验（恢复数据在场/未阻断/授权/代次）在宿主面；

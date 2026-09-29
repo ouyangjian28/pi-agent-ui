@@ -42,4 +42,18 @@ describe("M-OPS 契约 v1.4：validateClientFrame get-models", () => {
   it("V7 requestId 非法→4404", () => {
     expect(validateClientFrame({ t: "get-models", requestId: "坏 id!" })).toMatchObject({ ok: false, code: 4404 });
   });
+
+  // K3 契约审 P3-1/P3-2 补边（同批顺带；base 同 V1-V4 组定义——写帧基座）
+  it("V8 model 128 字符恰过（上限 acceptance 守卫，防正则误改 {1,127} 类回归）", () => {
+    expect(validateWriteFrame({ t: "prompt", requestId: "r1", file: "a.jsonl", text: "hi", model: "x".repeat(128) })).toMatchObject({ ok: true, frame: { model: "x".repeat(128) } });
+  });
+
+  it("V9 model 非字符串类型→4404（typeof 分支覆盖）", () => {
+    expect(validateWriteFrame({ t: "prompt", requestId: "r1", file: "a.jsonl", text: "hi", model: 123 })).toMatchObject({ ok: false, code: 4404 });
+  });
+
+  it("V10 get-models 缺字段/空对象→4404（缺向覆盖——V6 只测了多字段向）", () => {
+    expect(validateClientFrame({ t: "get-models" })).toMatchObject({ ok: false, code: 4404 });
+    expect(validateClientFrame({})).toMatchObject({ ok: false, code: 4404 });
+  });
 });

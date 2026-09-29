@@ -32,6 +32,7 @@ import type { WriteHostPort } from "./ws/write-host.ts";
 import { createStaticHandler } from "./ws/static-serve.ts";
 import { createLoginRoute, newSessionSecret } from "./http/login-route.ts";
 import { createServer, type Server as HttpServer } from "node:http";
+import { ModelsListingService } from "./ws/model-listing.ts";
 import { isAbsolute, join } from "node:path";
 
 export interface ServerConfig {
@@ -268,10 +269,10 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     // E2E 审 P2-1（DS 2026-10-10）：pi 参数 last-wins——extraPiArgs 携 --mode/--session/--session-id
     // 会静默替换基底，会话文件身份锚（registry mapped/sessionIdOf/恢复证据链全按 sessionFile 算）
     // 与 pi 实际写盘文件劈裂，跨回收不变量看似成立实则落空且无显式报错。与 host/piBin 互斥门同构拒启。
-    const forbidden = new Set(["--mode", "--session", "--session-id"]);
+    const forbidden = new Set(["--mode", "--session", "--session-id", "--model"]); // M-OPS v1.4：--model 禁集扩列（尾追恒胜面=RpcSession 专属，配置面禁占）
     const bad = (config.write.extraPiArgs ?? []).find((a) => forbidden.has(a));
     if (bad !== undefined) {
-      throw new Error(`write.extraPiArgs 含基底替换项 ${bad}：--mode/--session/--session-id 由 RpcSession 统一铸造，配置面禁止覆盖`);
+      throw new Error(`write.extraPiArgs 含基底替换项 ${bad}：--mode/--session/--session-id/--model 由 RpcSession 统一铸造，配置面禁止覆盖`);
     }
     const host: ProcessHostPort = config.write.host ?? new PiProcessHost({
       ...(config.write.piBin !== undefined ? { piBin: config.write.piBin } : {}),
@@ -365,6 +366,8 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     // unknown-entry 天然安全（无默认映射——pi 会话目录是宿主配置而非约定，dual-history-source.ts:14 同理）。
     ...(config.sessionFor !== undefined ? { entryAbsFor: (file: string) => config.sessionFor!(file) } : {}),
     ...(config.thinkingVisible === true ? { thinkingVisible: true } : {}),
+    // M-OPS（v1.4）：模型清单服务（pi --list-models 缓存 10min；未配 piBin=不接线→get-models 4405 拒）
+    ...(config.write?.piBin !== undefined ? { modelsListing: new ModelsListingService({ piBin: config.write.piBin }) } : {}),
     audit,
   });
 

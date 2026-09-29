@@ -151,7 +151,8 @@ describe("D3-T1 E2E Leg A：FakeRpcHost composition 全链（常跑）", () => {
     const dir2 = await mkdtemp(join(tmpdir(), "d3t1-basegate-"));
     const tokenFile = join(dir2, "tokens.json");
     await writeFile(tokenFile, JSON.stringify({ version: 1, tokens: ["t"] }), "utf8");
-    for (const bad of ["--mode", "--session", "--session-id"]) {
+    // M-OPS v1.4：--model 入禁集（尾追恒胜面=RpcSession 专属，配置面禁占——K3 契约审建议同式负向腿）
+    for (const bad of ["--mode", "--session", "--session-id", "--model"]) {
       const p = startServer({
         tokenFile, allowedOrigins: [ORIGIN], roots: [dir2], scanDir: dir2, tokenPollMs: 0,
         write: { sessionFor: (f) => f, host: new FakeRpcHost(), extraPiArgs: [bad, "x"], responseTimeoutMs: 1000 },

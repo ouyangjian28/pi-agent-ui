@@ -19,7 +19,7 @@ import { ComputeGateQueueTimeout } from "./compute-semaphore.ts";
 
 /** 编码面所需的最小会话形状（结构化依赖：测试可替身，不锁 RpcSession 类）。 */
 export interface RpcLikeSession {
-  send(message: string, expectedGeneration?: number): Promise<SessionSendResult>; // r3c：期望代次断言（live=null 冷启动面传 undefined）
+  send(message: string, expectedGeneration?: number, model?: string): Promise<SessionSendResult>; // r3c：期望代次断言（live=null 冷启动面传 undefined）；model=M-OPS v1.4 会话级模型记忆
   stop(): Promise<RetireOutcome>;
 }
 
@@ -63,7 +63,11 @@ export function encodeSendOutcome(r: SessionSendResult): WriteSendOutcomeDTO {
     case "gate-failed": return { kind: "gate-failed", stage: r.stage };
     case "invalidated": return { kind: "invalidated", stage: r.stage };
     case "no-process": return { kind: "no-process" };
-    case "not-ready": return r.cause === undefined ? { kind: "not-ready" } : { kind: "not-ready", cause: r.cause };
+    case "not-ready": {
+      // M-OPS（v1.4）：detail 三路附带（契约 not-ready.detail?；无 detail 保持原形——exactOptionalPropertyTypes 禁 ??undefined）
+      const base = r.cause === undefined ? { kind: "not-ready" as const } : { kind: "not-ready" as const, cause: r.cause };
+      return r.detail === undefined ? base : { ...base, detail: r.detail };
+    }
   }
 }
 
@@ -123,7 +127,7 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
     return creating;
   };
   return {
-    async sendPrompt(file: string, text: string, generation?: number): Promise<WriteSendOutcomeDTO> {
+    async sendPrompt(file: string, text: string, generation?: number, model?: string): Promise<WriteSendOutcomeDTO> {
       try {
         // v1.1 帧身份门（prompt 面）：客户端携带代次≠当前活代→恒拒（零副作用：不触 sessionFor/send）
         let liveGen: number | null = null; // r3c：门验过的活代传给 send（期望代次断言收窗；live=null 冷启动放行）
@@ -140,7 +144,7 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
             return { kind: "identity-rejected", cause: "generation-mismatch" };
           }
         }
-        const raw = await (await sessionOf(file)).send(text, liveGen ?? undefined); // r3c：期望代次=门验活代（null=无断言，冷启动拉起兼容）
+        const raw = await (await sessionOf(file)).send(text, liveGen ?? undefined, model); // r3c：期望代次=门验活代（null=无断言，冷启动拉起兼容）；model=M-OPS v1.4 会话级模型记忆
         const g = gateFailedDetail(raw);
         if (g !== null) auditSafe(() => g);
         return encodeSendOutcome(raw);
