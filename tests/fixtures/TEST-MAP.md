@@ -1320,3 +1320,15 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - 件C not-ready 红条（1210a19）：useWrite 加 notReady 瞬态面（TransientNotReady 同 TransientFailure 三重身份门：client×file+动作序号迟到门；resolve 仍 true=合法 ack 非错误路径；新尝试清除）+NotReadyBanner（cause 四源人话映射 spawn-failed/spawn-exited[多半是模型 id 有误]/readiness-timeout/not-running+未知兜底；detail 纯文本 <pre> React 默认转义永不 HTML 渲染；<details open> 默认展开；重试/换模型双钮可选）+composer 接线（政策注释更新：旧「not-ready 永不入 DOM」被 m-ops-design §4 显文政策显式推翻——仅 cause/detail 例外，error.message 仍禁）。banner 4 例+hook 2 例。
 - 件B 新建会话（bb0f5fe）：new-session.tsx（文件名 filePattern 本地校验+模型双通道=下拉[清单 ok 项+provider/id（context）]/free-text 直达输入[优先生效；清单失败仍可用]+首 prompt 三输入）+sendPrompt(file,text,model?)→launched→onLaunched 切 SessionDetail；not-ready→红条（重试=重发同 prompt/换模型=清直达）；real-app ＋新建按钮+newSession 态（不挂 SessionDetail——未建 file 不 subscribe 避免 4402 门；rootsHint 文案位）。theme 纪律：banner 色只用 --c-err/--c-err-bg 令牌（首版硬编码被 theme.test 抓红=令牌纪律活证据）。6 例。主树全绿 1714/1714（app.test 布局 4 例在 pi-agent-ui-kimi clone 红主树绿=环境差异 PENDING 深查）。
 - 变异 4/4 全真红（基线 bb0f5fe 主树；checkout 还原）：Mu-f1 requestModels 幂等门死→ws-client 幂等例红/Mu-f2 notReady 身份门死（恒透出）→身份门例红/Mu-f3 NewSession effectiveModel 恒 undefined→free-text 优先+failed 降级 2 例红/Mu-f4 write-client modelPattern 预校验死→local-invalid 预校验例红（Kimi 件①杀点复核）。还原后四件 121 绿复跑。
+
+## M-OPS 前端批修复（DS-flash 审 GO 88 处置；779db70+1b6d9be；2026-10-10）
+
+- 处置谱：P2×3 全修+P3×7 全处（P3-7 演示壳两套新建面=记档豁免——演示壳 App.tsx fixture 驱动面不接 v1.4，M-DEPLOY 前统一）。审报=/tmp/dsf-mops-fe-report.md（DS-flash 代审通道，127 行）。
+- P2-1 not-ready detail 形状门：write-client.ts isSendOutcome case "not-ready" 补 detail undefined‖isString（cause/detail 对称门）+杀例「detail 非字符串（对象）=零消费在途保留后续合法帧照常结算」。M-DEPLOY 立项时升 P1 硬门（审报附带条件）。
+- P2-2 断言真化：new-session.test 永真断言（expect(rerender).toBeTruthy）删+取消例补 onCancel 真断言+换模型例新增（点换模型→freeText 清空+零发帧）。
+- P2-3+P3-1 响应式订阅：ModelsSource 扩 subscribe+state；NewSession 用 useSyncExternalStore（消除直读快照 tearing）+effect 依赖 wsState（connecting 期挂载→ready 补拉；requestModels 幂等 ok 后不重发）。杀例=connecting 挂载→ready 后 requestModels 二次调用。
+- P3-2 草稿恢复：write-composer lastSentRef+useEffect（notReady 落账且 text 空→恢复草稿；不动 draftVersion=重试重发同文本与 NewSession 语义一致）+banner 挂 onRetry（canSend 时）；not-ready-banner props 扩 (()=>void)|undefined（exactOptionalPropertyTypes）。新文件 write-composer.test.ts 2 例（恢复+重试重发/正常路径不误伤）。
+- P3-3 cause 截断 200（服务端自由文本面第二处入 DOM；与 detail 政策同源但客户端兜底）+P3-4 自定义占位（free-text 有值且清单非 ok→「自定义：<id>」option）+P3-5 迟到门独立杀例（挂起式 stub：send 挂起→stop 推进序号→迟到 not-ready resolve→不落账）+ws-client fail() 补 modelsRequestPending=false（与 close() 同口径；error→重建新 client 实际不达，纯口径卫生，无杀点=接受）+P3-6 typecheck script 补 tsc -p apps/web 腿（root 面 105 错=pre-existing 批前批后同数，不属本批）。
+- 变异重验（基线 1b6d9be 先提交后变异——M-245 正序）：Mu-f5 detail 门死→P2-1 例红/Mu-f6 ready 补拉门死（effect 去 wsState 依赖）→P2-3 例红/Mu-f7 恢复死→P3-2 例红。三杀真红+还原 68 绿。
+- **M-245 第三犯（本批教训固化）**：修复批五处 edit 落盘后未 commit 即跑变异——Mu-f5/f6/f7/f8 的 git checkout -- 把未提交修复一并还原到 HEAD，779db70 只含测试面（源面四处修复全丢）→全仓跑 4 红暴露→1b6d9be 重应用。铁律重申：**变异前基线必先 commit；变异后 checkout 还原必须 git log 核对目标文件最新 commit 含修复**。
+- 终态：全仓 1720 绿+web tsc 0；1714→1720（+6：P2-1 杀例/换模型例/P2-3 例/迟到门例/composer 2 例）。
