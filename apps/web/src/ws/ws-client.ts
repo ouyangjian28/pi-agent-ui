@@ -84,8 +84,10 @@ const defaultFactory: WebSocketFactory = (url) => {
 const LIST_REQUEST_ID = "list-sessions-1";
 /** M-OPS（v1.4）get-models 请求 ID（同 §5.7 pattern；清单面单请求，固定 id 即可）。 */
 const MODELS_REQUEST_ID = "get-models-1";
-/** v1.5（批A）get-roots 请求 ID（同 §5.7 pattern；根面单请求，固定 id 即可）。 */
-const ROOTS_REQUEST_ID = "get-roots-1";
+/** v1.5（批A）get-roots 请求 ID 基座（M-UX 批2 D05：每次请求递增——身份核验用）。 */
+const ROOTS_REQUEST_BASE = "get-roots";
+/** M-UX 批2 D05：roots 请求超时窗（10s timer 捕获所属请求身份；到点身份仍匹配→failed 出口）。 */
+const ROOTS_TIMEOUT_MS = 10_000;
 
 const INITIAL: SessionsSnapshot = {
   state: "connecting",
@@ -304,6 +306,7 @@ export class WsClient {
     this.listDirty = false; // M-UX D02：停止面同口径清位
     this.modelsRequestPending = false; // M-OPS（v1.4）：清单在途随连接天折（状态面定格不清空）
     this.rootsRequestPending = false; // v1.5（批A）：根面同口径
+    if (this.rootsTimer !== null) { clearTimeout(this.rootsTimer); this.rootsTimer = null; } // M-UX 批2 D05：换代清旧 timer
     if (this.snapshot.state !== "closed" && this.snapshot.state !== "error") {
       this.transition({ state: "closed" });
     }
@@ -345,14 +348,34 @@ export class WsClient {
     this.sendFrame({ t: "get-models", requestId: MODELS_REQUEST_ID });
   }
 
+  /** M-UX 批2 D05：roots 请求身份三件——seq 递增 requestId+在途身份+10s timer（捕获所属身份）。
+   * 分域守卫（设计 v7 D05 表）：请求域=client epoch（实例）+requestId 双核验；
+   * force（重试/用户新动作）=旧请求立即失效（新身份生效），旧回包/旧 timer 零覆盖。 */
+  private rootsSeq = 0;
+  private rootsTimer: ReturnType<typeof setTimeout> | null = null;
+
   /** v1.5（批A）：请求授权根列表（幂等：在途/已 ok 不重发；failed 可重发=用户新显式动作）。
-   * 仅 ready 态可发；未连接/已关静默忽略（同 requestModels 口径）。 */
+   * 仅 ready 态可发；未连接/已关静默忽略（同 requestModels 口径）。M-UX 批2：递增 id+10s timer。 */
   requestRoots(): void {
     if (this.stopped || this.snapshot.state !== "ready") return;
     if (this.rootsRequestPending || this.snapshot.roots.status === "ok") return;
     this.rootsRequestPending = true;
+    const reqId = `${ROOTS_REQUEST_BASE}-${++this.rootsSeq}`;
+    if (this.rootsTimer !== null) { clearTimeout(this.rootsTimer); this.rootsTimer = null; }
     if (this.snapshot.roots.status !== "loading") this.transition({ roots: { status: "loading", items: [], journalRoot: null, cause: null } });
-    this.sendFrame({ t: "get-roots", requestId: ROOTS_REQUEST_ID });
+    const sent = this.sendFrame({ t: "get-roots", requestId: reqId });
+    if (!sent) {
+      this.rootsRequestPending = false; // 非 OPEN 静默未发：不算在途（同 list-sessions 回滚口径）
+      return;
+    }
+    // 请求截止域：timer 捕获所属身份；fire 时身份失配（已被 force 替代/已结算）零副作用。
+    const firedSeq = this.rootsSeq;
+    this.rootsTimer = setTimeout(() => {
+      this.rootsTimer = null;
+      if (!this.rootsRequestPending || firedSeq !== this.rootsSeq) return;
+      this.rootsRequestPending = false;
+      this.transition({ roots: { status: "failed", items: [], journalRoot: null, cause: "timeout（10s）" } });
+    }, ROOTS_TIMEOUT_MS);
   }
 
   /** 订阅快照变更（含状态迁移）；返回退订函数。签名与 useSyncExternalStore 直接对齐。 */
@@ -428,11 +451,13 @@ export class WsClient {
         return;
       }
       case "roots-list": {
-        // v1.5（批A）：根回帧——在途中才接受（未请求/迟到=零副作用）；形状失败不消耗在途。
-        if (!this.rootsRequestPending) return;
+        // M-UX 批2 D05：身份核验=当前请求身份（requestId 匹配当前 seq 才结算；迟到旧回包零覆盖）。
+        // 服务缓存写入域：不要求原挂载仍活（组件卸载后迟到回包照常入快照，供列表页/下次挂载用）。
         const frame = asRootsListFrame(parsed);
-        if (frame === null || frame.requestId !== ROOTS_REQUEST_ID) return;
+        if (frame === null || frame.requestId !== `${ROOTS_REQUEST_BASE}-${this.rootsSeq}`) return;
+        if (!this.rootsRequestPending) return; // 未请求/已 force 替代/已超时结算=零副作用
         this.rootsRequestPending = false;
+        if (this.rootsTimer !== null) { clearTimeout(this.rootsTimer); this.rootsTimer = null; } // 成功取消所属 timer
         this.transition({ roots: { status: "ok", items: frame.roots, journalRoot: frame.journalRoot ?? null, cause: null } });
         return;
       }
@@ -452,9 +477,11 @@ export class WsClient {
           this.fail("list-failed", controlledErrorText(frame.code));
           return;
         }
-        if (this.rootsRequestPending && frame.requestId === ROOTS_REQUEST_ID) {
+        if (this.rootsRequestPending && frame.requestId === `${ROOTS_REQUEST_BASE}-${this.rootsSeq}`) {
           // v1.5（批A）：根面失败不连坐主连接——定格 failed+受控文案，可显式重试（同 models 降级哲学）
+          // M-UX 批2：身份核验同回帧域；结算前清所属 timer。
           this.rootsRequestPending = false;
+          if (this.rootsTimer !== null) { clearTimeout(this.rootsTimer); this.rootsTimer = null; }
           this.transition({ roots: { status: "failed", items: [], journalRoot: null, cause: controlledErrorText(frame.code) } });
         }
         return; // 无关联请求的 error 帧安全忽略
