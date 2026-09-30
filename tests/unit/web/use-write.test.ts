@@ -641,7 +641,7 @@ describe("K5 B2：composer 稳定挂载（空态↔内容态不丢草稿/在途/
     sub.push(detailSnap({ phase: "live", events: [], liveEvents: [] })); // 内容→空
     expect(screen.getByLabelText("写入消息内容")).toBe(textarea); // 未重建
     expect(textarea.value).toBe("回切草稿"); // 草稿保留
-    expect(screen.getByRole("heading", { name: "空会话" })).toBeTruthy(); // 确已切到空态视图
+    expect(screen.getByText(/空会话：该会话文件/)).toBeTruthy(); // 确已切到空态视图
   });
 
   it("换 file=新草稿（key=file）；loading/auth-failed/error/closed/unsubscribed 视图不挂 composer（既有行为）", () => {

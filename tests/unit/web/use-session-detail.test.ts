@@ -288,7 +288,7 @@ describe("SessionDetail 空态族（StubClient 推进快照）", () => {
 
   it("empty：订阅成功但空会话文件（live 相位无内容）→空态提示", () => {
     mount(new StubClient(detailSnap({ phase: "live", events: [], liveEvents: [] })));
-    expect(screen.getByRole("heading", { name: "空会话" })).toBeTruthy();
+    expect(screen.getByText(/空会话：该会话文件/)).toBeTruthy();
     expect(screen.getByText(/没有任何事件/)).toBeTruthy();
   });
 
@@ -622,7 +622,7 @@ describe("真实链：SubscribeClient→SessionDetail DOM（假 socket 注入，
         hasMore: false,
       });
     });
-    expect(screen.getByRole("heading", { name: "空会话" })).toBeTruthy();
+    expect(screen.getByText(/空会话：该会话文件/)).toBeTruthy();
   });
 
   it("订阅错误链：4402 反射 token→DOM 呈受控文案；DOM 与快照序列化均不含 token", () => {
