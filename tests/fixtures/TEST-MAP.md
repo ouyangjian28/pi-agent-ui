@@ -1381,3 +1381,12 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - 截图基建=scripts/ui-shots.mjs（playwright+chromium 装仓 devDep；起真 main.ts 六视图 PC 1280×800；**必传 --static-dir 否则纯 WS 模式 404**）。
 - 设计 v1→GPT 设计门审 **REVISE 68**（D01-D09 九必改：DOM 尺寸链到组件根/标题跨端真源/防碰撞/模型状态机/目录意图/概念全映射/P2-06 导航/状态映射/验收硬门）=audits/gpt-uxdesign-review-2026-09-30.md。
 - 设计 v2（designs/m-ux-v2.md，闭合 D01-D09）已送设计门复审。
+- 设计门七轮全谱：68→78→82→87→91→95→**PASS 97**（v3-v7 逐轮闭合；审报=~/ai projects/pi-agent-ui/audits/gpt-uxdesign{,2..7}-review-2026-09-30.md；v7=终稿 designs/m-ux-v7.md）。设计门制首用收口。
+
+### M-UX 批1：D02 标题产线+D03 autoFile（2026-10-10，GLM 写·GPT 实现审在飞）
+
+- 服务端 session-scan.ts：SCAN_LIMITS.titleLimit 20；**foundFirstUser 锁定**（首 user 纯附件/全空白→无标题，不跳第二条 user）；多 text 块非空白 `\n` 拼合整体过 sanitize 产线（完整敏感形态识别先于 limit20 截断）；string content 加 trim 空白检查（测试抓出原 string 分支无检查的真 bug）。
+- web：resolve-title.ts 三级解析（DTO title>auto- 时间戳派生 `M月D日 HH:mm（YYYY）`>file 去 .jsonl；列表/详情单一真值源）；ws-client.ts `requestSessions()`（ready 门+在途记 listDirty+sessions 结算后补拉恰一次；error/close 同口径清 dirty——迟到回包零副作用）；session-list.tsx 列表头+刷新钮；real-app.tsx onLaunched 自动补拉；new-session.tsx `autoFile()` 预填可改（16B CSPRNG→hex32 尾缀；now/random 双注入测试面；碰撞概率非零极低、服务端同名=追加，前端不假造冲突不自动换名）。
+- 测试：server ws-support B1 四例（多块拼合 env 不透片段/非 BMP 无孤立代理/纯附件锁定/空白块跳过）+web mux-b1 12 例（resolveTitle 三级/autoFile CSPRNG+固定源/ready 刷新+dirty 合并四反例/刷新钮/预填可编辑）。全仓 1784 绿+tsc 两包 0。
+- 变异 3/3（基线 e4b5f4c 先 commit）：Mu-b1-1 foundFirstUser 摘除→B1-3 红/Mu-b1-2 dirty 补拉摘除→合并例红/Mu-b1-3 CSPRNG→fill(0)→随机性例红。**变异教训：替换须语法有效（`void 0`/fill(0) 而非注释——注释化会让 TS 编译失败造成 36 绿假象 461ms 异常短）。**
+- 测试帧教训：自造 sessions 帧须带全帧级 hasMore/listReliability+条目 hasRecoveryNotice；error code 须在锚定码表（4429 可，500 不行）——否则形状校验整帧拒绝造成假红定位偏。
