@@ -75,7 +75,13 @@ export function NewSession({
 
   // v1.5（批A）目录选择器：首项=会话记录树（契约定性「非 cwd 候选」）不入选项；
   // 默认选中=候选首项（即 roots 第二项）；无候选→不渲染选择器、不携 cwd（服务端默认目录兜底）。
-  const cwdOptions = roots.status === "ok" ? roots.items.slice(1) : [];
+  // v1.6（批A-r2）：服务端下发 journalRoot 时改用它过滤（精确排除 journal 控制树 D **及其子树**——
+  // 双树布局下 roots=[T(=D/pi),D,项目根…]，slice(1) 会把 D 留在候选里诱导误选；T 在 D 内也被
+  // 一并排除——journal/转录两树都是服务内部结构，非 cwd 候选）；
+  // 无 journalRoot（旧服务端/rig）=slice(1) 旧语义兼容。
+  const cwdOptions = roots.status !== "ok" ? [] : (roots.journalRoot ?? null) !== null
+    ? roots.items.filter((r) => r !== roots.journalRoot && !r.startsWith(roots.journalRoot + "/"))
+    : roots.items.slice(1);
   const effectiveCwd =
     cwdOptions.length === 0 ? undefined : cwdChoice !== null && cwdOptions.includes(cwdChoice) ? cwdChoice : cwdOptions[0];
 

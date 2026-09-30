@@ -50,10 +50,12 @@ export interface ModelsState {
   readonly cause: string | null;
 }
 
-/** v1.5（批A）：get-roots 状态面（同 models 面口径；服务端同步回 roots-list，failed 仅 error 帧路径）。 */
+/** v1.5（批A）get-roots 状态面（同 models 面口径；服务端同步回 roots-list，failed 仅 error 帧路径）。
+ * v1.6（批A-r2）：journalRoot=journal 控制树（服务端可选下发；前端目录选择器过滤基准）。 */
 export interface RootsState {
   readonly status: "idle" | "loading" | "ok" | "failed";
   readonly items: readonly string[];
+  readonly journalRoot: string | null;
   readonly cause: string | null;
 }
 
@@ -93,7 +95,7 @@ const INITIAL: SessionsSnapshot = {
   total: 0,
   listVersion: null,
   models: { status: "idle", items: [], cause: null },
-  roots: { status: "idle", items: [], cause: null },
+  roots: { status: "idle", items: [], journalRoot: null, cause: null },
 };
 
 // ---------------------------------------------------------------------------
@@ -138,11 +140,12 @@ function asModelsListFrame(v: Record<string, unknown>): ModelsListFrame | null {
 }
 
 /** v1.5（批A）roots-list：requestId 必须 string；roots 数组逐项 string（任一畸形整帧拒绝——
- * 授权根是 cwd 校验基准，错认不得入快照）。 */
+ * 授权根是 cwd 校验基准，错认不得入快照）。v1.6（批A-r2）：journalRoot 可选（提供时须 string）。 */
 function asRootsListFrame(v: Record<string, unknown>): RootsListFrame | null {
   if (!isString(v.requestId)) return null;
   if (!Array.isArray(v.roots) || !v.roots.every(isString)) return null;
-  return { t: "roots-list", requestId: v.requestId, roots: v.roots };
+  if (v.journalRoot !== undefined && !isString(v.journalRoot)) return null;
+  return { t: "roots-list", requestId: v.requestId, roots: v.roots, ...(v.journalRoot === undefined ? {} : { journalRoot: v.journalRoot }) };
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -320,7 +323,7 @@ export class WsClient {
     if (this.stopped || this.snapshot.state !== "ready") return;
     if (this.rootsRequestPending || this.snapshot.roots.status === "ok") return;
     this.rootsRequestPending = true;
-    if (this.snapshot.roots.status !== "loading") this.transition({ roots: { status: "loading", items: [], cause: null } });
+    if (this.snapshot.roots.status !== "loading") this.transition({ roots: { status: "loading", items: [], journalRoot: null, cause: null } });
     this.sendFrame({ t: "get-roots", requestId: ROOTS_REQUEST_ID });
   }
 
@@ -392,7 +395,7 @@ export class WsClient {
         const frame = asRootsListFrame(parsed);
         if (frame === null || frame.requestId !== ROOTS_REQUEST_ID) return;
         this.rootsRequestPending = false;
-        this.transition({ roots: { status: "ok", items: frame.roots, cause: null } });
+        this.transition({ roots: { status: "ok", items: frame.roots, journalRoot: frame.journalRoot ?? null, cause: null } });
         return;
       }
       case "error": {
@@ -414,7 +417,7 @@ export class WsClient {
         if (this.rootsRequestPending && frame.requestId === ROOTS_REQUEST_ID) {
           // v1.5（批A）：根面失败不连坐主连接——定格 failed+受控文案，可显式重试（同 models 降级哲学）
           this.rootsRequestPending = false;
-          this.transition({ roots: { status: "failed", items: [], cause: controlledErrorText(frame.code) } });
+          this.transition({ roots: { status: "failed", items: [], journalRoot: null, cause: controlledErrorText(frame.code) } });
         }
         return; // 无关联请求的 error 帧安全忽略
       }

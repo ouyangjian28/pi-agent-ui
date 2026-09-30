@@ -12,7 +12,7 @@ afterEach(cleanup);
 
 const LAUNCHED = { kind: "launched", intentId: "i-1", commandId: 1 } as const;
 
-const ROOTS_IDLE: RootsState = { status: "idle", items: [], cause: null };
+const ROOTS_IDLE: RootsState = { status: "idle", items: [], journalRoot: null, cause: null };
 
 function modelsSnap(
   status: ModelsState["status"],
@@ -231,7 +231,9 @@ describe("M-OPS NewSession", () => {
 // ---------------------------------------------------------------------------
 
 describe("v1.5 NewSession 目录选择器（批A roots）", () => {
-  const ROOTS3: RootsState = { status: "ok", items: ["/srv/sessions", "/srv/proj-a", "/home/yyj/ai"], cause: null };
+  const ROOTS3: RootsState = { status: "ok", items: ["/srv/sessions", "/srv/proj-a", "/home/yyj/ai"], journalRoot: null, cause: null };
+  // v1.6（批A-r2）双树布局：roots=[T(=D/pi),D,项目根]+journalRoot=D——两树均非 cwd 候选。
+  const ROOTS_DUAL: RootsState = { status: "ok", items: ["/srv/sessions/pi", "/srv/sessions", "/srv/proj-a"], journalRoot: "/srv/sessions", cause: null };
 
   function fillAndCreate(): void {
     fill("会话文件名", "a.jsonl");
@@ -273,9 +275,18 @@ describe("v1.5 NewSession 目录选择器（批A roots）", () => {
     expect(write.sent[0]!.cwd).toBe("/home/yyj/ai");
   });
 
+  it("v1.6 journalRoot 下发：D 及其子树 T 均不入选项，仅真项目根为候选", async () => {
+    const { write, onLaunched } = setup(modelsSnap("ok", [], null, ROOTS_DUAL));
+    const select = screen.getByLabelText("项目目录") as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual(["/srv/proj-a"]); // T(/srv/sessions/pi)与 D(/srv/sessions) 双双排除
+    fillAndCreate();
+    await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+    expect(write.sent[0]!.cwd).toBe("/srv/proj-a");
+  });
+
   it("单根（仅会话记录树）：无选择器+降级提示；创建不携 cwd（服务端默认目录兜底）", async () => {
     const { write, onLaunched } = setup(
-      modelsSnap("ok", [], null, { status: "ok", items: ["/srv/sessions"], cause: null }),
+      modelsSnap("ok", [], null, { status: "ok", items: ["/srv/sessions"], journalRoot: null, cause: null }),
     );
     expect(screen.queryByLabelText("项目目录")).toBeNull();
     expect(screen.getByRole("status").textContent).toContain("默认目录");
