@@ -110,6 +110,16 @@ async function connect(): Promise<{ ws: WebSocket; frames: Frame[]; say: (f: Fra
   return { ws, frames, say };
 }
 
+// 独立性支持：单跑任意腿时自足发 prompt（P3-R2-01 修复：不再跨 it 依赖腿④副作用）
+async function ensurePrompt(): Promise<void> {
+  if (existsSync(rig!.cwdRecordFile) && existsSync(join(rig!.sessionDir, "smoke.jsonl"))) return;
+  const { ws, frames, say } = await connect();
+  try {
+    await say({ t: "prompt", requestId: "warm-" + Date.now(), file: "smoke.jsonl", text: "warmup", cwd: rig!.projRoot });
+    await until(() => frames.some((f) => f.t === "write-ack"), "warm write-ack");
+  } finally { ws.close(); }
+}
+
 describe("批A 生产烟测：真实 main.ts 入口→写面全链", () => {
   it("① main ready 审计行含 write=on+sessionDir", () => {
     const r = rig!;
@@ -138,6 +148,7 @@ describe("批A 生产烟测：真实 main.ts 入口→写面全链", () => {
 
   it("⑤ fake pi 子进程 cwd=项目根（per-session cwd 真达子进程）", async () => {
     const r = rig!;
+    await ensurePrompt();
     await until(() => existsSync(r.cwdRecordFile), "fake pi cwd 记录落盘");
     const raw = await readFile(r.cwdRecordFile, "utf8");
     const rec = JSON.parse(raw.trim().split("\n")[0]!) as { cwd: string; argv: string[] };
@@ -148,6 +159,7 @@ describe("批A 生产烟测：真实 main.ts 入口→写面全链", () => {
 
   it("⑥ pi argv --session 指向转录树 T（journal 双树分离机制面；真 pi 才写盘，fake 写最小 header）", async () => {
     const r = rig!;
+    await ensurePrompt();
     await until(() => existsSync(r.cwdRecordFile), "fake pi cwd 记录落盘");
     const raw = await readFile(r.cwdRecordFile, "utf8");
     const rec = JSON.parse(raw.trim().split("\n")[0]!) as { argv: string[] };
@@ -157,6 +169,7 @@ describe("批A 生产烟测：真实 main.ts 入口→写面全链", () => {
 
   it("⑦ 双树分离：journal 控制 D/smoke.jsonl 与 pi 转录 T/smoke.jsonl 两个文件（P1-A1 修复面）", async () => {
     const r = rig!;
+    await ensurePrompt();
     await until(() => existsSync(join(r.sessionDir, "smoke.jsonl")), "journal 控制文件落 D"); // RpcSession FileDurability 写 journalPath
     const jFirst = (await readFile(join(r.sessionDir, "smoke.jsonl"), "utf8")).trim().split("\n")[0]!;
     expect(jFirst).not.toContain('"type":"session"'); // 控制文件≠pi 转录格式（SDK open 会拒）
@@ -168,6 +181,7 @@ describe("批A 生产烟测：真实 main.ts 入口→写面全链", () => {
 
   it("⑧ list-sessions 能列新会话且 journal 不进列表（扫描树=T）", async () => {
     const r = rig!;
+    await ensurePrompt();
     const { ws, frames, say } = await connect();
     try {
       await say({ t: "list-sessions", requestId: "ls-1" });
@@ -178,6 +192,26 @@ describe("批A 生产烟测：真实 main.ts 入口→写面全链", () => {
       expect(files.every((f) => f !== "pi/smoke.jsonl")).toBe(true); // 无带前缀重复条目
     } finally { ws.close(); }
   }, 15_000);
+
+  it("⑨ P1-R2-01 杀例：合法名 ..audit.jsonl 双树分离不受 startsWith 误判（journal 落 D 首根）", async () => {
+    const r = rig!;
+    const { ws, frames, say } = await connect();
+    try {
+      await say({ t: "prompt", requestId: "p9", file: "..audit.jsonl", text: "杀例探针", cwd: r.projRoot });
+      await until(() => frames.some((f) => f.t === "write-ack"), "write-ack⑨");
+      const ack = frames.find((f) => f.t === "write-ack") as unknown as { outcome?: { kind?: string } };
+      expect(ack.outcome?.kind).toBe("launched");
+      // journal 控制文件必须落 D（sessionDir 直下）——旧 startsWith("..") 判据会误判根外错落 T/pi/
+      await until(() => existsSync(join(r.sessionDir, "..audit.jsonl")), "journal 落 D/..audit.jsonl");
+      const jFirst = (await readFile(join(r.sessionDir, "..audit.jsonl"), "utf8")).trim().split("\n")[0]!;
+      expect(jFirst).not.toContain('"type":"session"'); // 控制文件非 pi 转录格式
+      // T 树里 ..audit.jsonl 若存在必须是 fake pi 转录 header（旧 startsWith 判据会把 journal 错落到这里）
+      if (existsSync(join(r.sessionDir, "pi", "..audit.jsonl"))) {
+        const tFirst = (await readFile(join(r.sessionDir, "pi", "..audit.jsonl"), "utf8")).trim().split("\n")[0]!;
+        expect(tFirst).toContain('"type":"session"'); // 只允许 pi 转录，不允许 journal 控制行错落
+      }
+    } finally { ws.close(); }
+  }, 20_000);
 });
 
 // vitest 环境 require 兜底（保持 CommonJS require 引用不坠落）

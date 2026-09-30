@@ -79,9 +79,12 @@ export function NewSession({
   // 双树布局下 roots=[T(=D/pi),D,项目根…]，slice(1) 会把 D 留在候选里诱导误选；T 在 D 内也被
   // 一并排除——journal/转录两树都是服务内部结构，非 cwd 候选）；
   // 无 journalRoot（旧服务端/rig）=slice(1) 旧语义兼容。
-  const cwdOptions = roots.status !== "ok" ? [] : (roots.journalRoot ?? null) !== null
-    ? roots.items.filter((r) => r !== roots.journalRoot && !r.startsWith(roots.journalRoot + "/"))
-    : roots.items.slice(1);
+  // P3-R2-03：D="/" 根边缘——jr+"/" 会拼出 "//" 失效；D="/" 时一切绝对路径均在 D 内
+  // （前缀="/"）＝全排除，候选空→不携 cwd 降级（不携 cwd 即可，无需拒绝该布局）。
+  const jr = roots.journalRoot ?? null;
+  const cwdOptions = roots.status !== "ok" || jr === null
+    ? roots.status === "ok" ? roots.items.slice(1) : []
+    : roots.items.filter((r) => r !== jr && !r.startsWith(jr === "/" ? "/" : jr + "/"));
   const effectiveCwd =
     cwdOptions.length === 0 ? undefined : cwdChoice !== null && cwdOptions.includes(cwdChoice) ? cwdChoice : cwdOptions[0];
 

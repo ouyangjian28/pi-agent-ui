@@ -334,7 +334,9 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     const t = resolveWithinRoots(f, config.roots);
     if (t === null) return f;
     const rel = relative(layout.transcriptsRoot, t);
-    if (rel !== "" && !rel.startsWith("..") && !isAbsolute(rel)) return resolve(layout.journalRoot, rel);
+    // P1-R2-01：根外判据=路径段级（首段恰为 ".."）；`..audit.jsonl` 等合法名（filePattern 允许）
+    // 不得被字符串前缀误判为根外——否则控制 journal 错落 T。
+    if (rel !== "" && rel.split("/")[0] !== ".." && !isAbsolute(rel)) return resolve(layout.journalRoot, rel);
     return t;
   };
 
@@ -359,11 +361,15 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     ? [layout.journalRoot, ...config.roots.filter((r) => r !== layout.journalRoot)]
     : config.roots;
   const recoverySessionFor = layout !== undefined && config.sessionFor !== undefined
-    ? (file: string) => { const abs = config.sessionFor!(file); const rel = relative(layout.transcriptsRoot, abs); return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel) ? rel : abs; }
+    ? (file: string) => { const abs = config.sessionFor!(file); const rel = relative(layout.transcriptsRoot, abs); return rel !== "" && rel.split("/")[0] !== ".." && !isAbsolute(rel) ? rel : abs; }
     : config.sessionFor;
   const recoveryEvidence = createRecoveryEvidenceProvider({
     roots: recoveryRoots,
-    ...(config.sessionRoots !== undefined ? { sessionRoots: config.sessionRoots } : {}),
+    // P2-R2-01：双树布局下 session 域恒以 T 首根（provider 默认回落 roots 首根=D，
+    // 会把 D 重复计入合计预算而漏计 T）；用户显式配置优先。
+    ...(layout !== undefined && config.sessionRoots === undefined
+      ? { sessionRoots: [layout.transcriptsRoot, ...config.roots.filter((r) => r !== layout.transcriptsRoot && r !== layout.journalRoot)] }
+      : config.sessionRoots !== undefined ? { sessionRoots: config.sessionRoots } : {}),
     ...(recoverySessionFor !== undefined ? { sessionFor: recoverySessionFor } : {}),
     evidenceDir: recoveryEvidenceDir,
     ...(config.maxRecoveryCombinedBytes !== undefined ? { maxCombinedBytes: config.maxRecoveryCombinedBytes } : {}),

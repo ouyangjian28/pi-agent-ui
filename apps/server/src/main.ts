@@ -25,11 +25,11 @@ interface CliArgs {
 
 function usage(): string {
   return [
-    "用法：node --experimental-transform-types apps/server/src/main.ts --port <固定端口> --token-file <path> --root <abs> [--root <abs>…] [--scan-dir <abs>] [--static-dir <abs>] [--origin <url>…] [--host <ip>] [--pi-bin <path>] [--trusted-proxy <cidr>…] [--session-dir <abs>] [--read-only]",
+    "用法：node --experimental-transform-types apps/server/src/main.ts --port <固定端口> --token-file <path> --root <abs> [--root <abs>…] [--scan-dir <abs>] [--static-dir <abs>] [--origin <url>…] [--host <ip>] [--pi-bin <path>] [--trusted-proxy <精确IP>…] [--session-dir <abs>] [--read-only]",
     "  --port          固定端口（staticDir 模式必填：同源 origin 白名单需预知端口）",
     "  --token-file    token 文件（0600 {version:1,tokens:[…]}）",
     "  --root          授权根（可重复；绝对路径且存在）——读面文件域+写面 cwd 授权域+目录选择器选项",
-    "  --scan-dir      list-sessions 扫描目录（默认=第一个 root）",
+    "  --scan-dir      list-sessions 扫描目录（默认=转录树 T=<session-dir>/pi；未设 --session-dir 时=第一个 root）",
     "  --static-dir    web 构建产物目录（设为同端口静态托管）",
     "  --origin        Origin 白名单（默认=推导 http://127.0.0.1:<port> 与 http://localhost:<port>）",
     "  --host          监听地址（默认 127.0.0.1——loopback-only 是本工具的威胁模型边界）",
@@ -129,7 +129,8 @@ async function main(): Promise<void> {
       write: {
         sessionFor: (j: string) => { // 写面：journal 绝对→转录绝对（registry sessionFile=RpcSession --session 落点）
           const rel = relative(sessionDir, j);
-          return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel) ? resolve(transcriptsDir, rel) : j;
+          // P1-R2-01：路径段级根外判据（首段恰 ".."）；合法 `..foo.jsonl` 名不得误判。
+          return rel !== "" && rel.split("/")[0] !== ".." && !isAbsolute(rel) ? resolve(transcriptsDir, rel) : j;
         },
         piBin,
       },

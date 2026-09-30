@@ -24,6 +24,7 @@
     "@types/node": "^24.13.6",
     "@types/ws": "^8.18.1",
     "eslint": "^9.39.4",
+    "playwright": "^1.63.0",
     "prettier": "^3.9.9",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.70.1",
