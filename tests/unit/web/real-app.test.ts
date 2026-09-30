@@ -298,8 +298,11 @@ describe("连接状态条：断开可见+自动重连", () => {
       handshakeAll();
       expect(document.body.textContent).not.toContain("自动重连中");
       expect(screen.queryByRole("button", { name: "立即重连" })).toBeNull();
-      // 恢复后计时器归零（物理断言：无残留 timer）
-      expect(vi.getTimerCount()).toBe(0);
+      // 恢复归零杀点：二次断线→退避从「第 1 次/约 1 秒」重新起算（attempts 恢复归零）
+      act(() => FakeWebSocket.instances[5]!.serverClose(1006));
+      expect(document.body.textContent).toContain("第 1 次");
+      expect(document.body.textContent).toContain("约 1 秒后");
+      expect(document.body.textContent).not.toContain("第 2 次");
     } finally {
       vi.useRealTimers();
     }
