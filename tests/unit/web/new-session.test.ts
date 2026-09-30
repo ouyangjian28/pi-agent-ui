@@ -4,6 +4,7 @@
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach } from "vitest";
 import { NewSession, type ModelsSource, type RootsSource } from "../../../apps/web/src/components/new-session";
 import type { ModelsState, RootsState } from "../../../apps/web/src/ws/ws-client";
 import type { WriteClientSurface, WriteSnapshot } from "../../../apps/web/src/ws/write-client";
@@ -65,6 +66,10 @@ function fill(label: string, value: string): void {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
 }
 
+beforeEach(() => {
+  window.localStorage.clear(); // 批3 记住上次：防例间串扰（挂载恢复会读到前例写入）
+});
+
 describe("M-OPS NewSession", () => {
   it("挂载即 requestModels；清单 ok 渲染下拉项（provider/id+context）", () => {
     const models = modelsSnap("ok", [
@@ -78,29 +83,28 @@ describe("M-OPS NewSession", () => {
     expect(select.options[1]!.textContent).toContain("kimi-coding / k3（256k）");
   });
 
-  it("文件名非法/首消息空→创建钮禁用；合法输入→sendPrompt 三参（model=undefined 不携带）", async () => {
+  it("批3：无文件名输入框；首条消息空→创建钮禁用；创建→file=auto- 格式（model 不携带）", async () => {
     const { write, onLaunched } = setup();
+    expect(screen.queryByLabelText("会话文件名")).toBeNull(); // 用户拍板：文件名不显示给用户
     const btn = screen.getByRole("button", { name: "创建会话" }) as HTMLButtonElement;
-    fill("会话文件名", "bad name");
+    expect(btn.disabled).toBe(true); // 首条消息空→禁用
     fill("首条消息", "hi");
-    expect(btn.disabled).toBe(true);
-    fill("会话文件名", "plan.jsonl");
     expect(btn.disabled).toBe(false);
     fireEvent.click(btn);
-    await waitFor(() => expect(onLaunched).toHaveBeenCalledWith("plan.jsonl"));
-    expect(write.sent).toEqual([{ file: "plan.jsonl", text: "hi", model: undefined }]);
+    await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+    expect(onLaunched.mock.calls[0]![0]).toMatch(/^auto-\d{8}-\d{6}-[0-9a-f]{32}\.jsonl$/);
+    expect(write.sent[0]).toMatchObject({ text: "hi", model: undefined });
+    expect(write.sent[0]!.file).toMatch(/^auto-/); // 后台自动生成
   });
 
   it("free-text 优先生效（覆盖下拉）；modelPattern 非法→本地拒零帧", async () => {
     const { write, onLaunched } = setup();
-    fill("会话文件名", "a.jsonl");
     fill("首条消息", "hi");
     fill("模型 id 直达", "openai-codex/gpt-5.3");
     fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
     await waitFor(() => expect(onLaunched).toHaveBeenCalled());
     expect(write.sent[0]!.model).toBe("openai-codex/gpt-5.3");
     const btn = screen.getByRole("button", { name: "创建会话" }) as HTMLButtonElement;
-    fill("会话文件名", "b.jsonl");
     fill("模型 id 直达", "bad model!!");
     expect(btn.disabled).toBe(true); // modelPattern 非法→钮禁用（本地预校验零帧）
     fireEvent.click(btn);
@@ -120,7 +124,6 @@ describe("M-OPS NewSession", () => {
         onCancel: vi.fn(),
       }),
     );
-    fill("会话文件名", "a.jsonl");
     fill("首条消息", "hi");
     fill("模型 id 直达", "nope/bad");
     fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
@@ -129,7 +132,7 @@ describe("M-OPS NewSession", () => {
     expect(onLaunched).not.toHaveBeenCalled();
     write.resolveWith = LAUNCHED;
     fireEvent.click(screen.getByRole("button", { name: "重试" })); // 重试=重发同 prompt
-    await waitFor(() => expect(onLaunched).toHaveBeenCalledWith("a.jsonl"));
+    await waitFor(() => expect(onLaunched.mock.calls[0]![0]).toMatch(/^auto-/));
     expect(write.sent).toHaveLength(2);
   });
 
@@ -145,7 +148,6 @@ describe("M-OPS NewSession", () => {
         onCancel: vi.fn(),
       }),
     );
-    fill("会话文件名", "a.jsonl");
     fill("首条消息", "hi");
     fill("模型 id 直达", "nope/bad");
     fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
@@ -159,7 +161,6 @@ describe("M-OPS NewSession", () => {
   it("清单 failed→降级提示含 cause；free-text 仍可用", async () => {
     const { write, onLaunched } = setup(modelsSnap("failed", [], "pi 退出码 1"));
     expect(screen.getByRole("status").textContent).toContain("pi 退出码 1");
-    fill("会话文件名", "a.jsonl");
     fill("首条消息", "hi");
     fill("模型 id 直达", "kimi-coding/k3");
     fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
@@ -181,7 +182,6 @@ describe("M-OPS NewSession", () => {
         onCancel,
       }),
     );
-    fill("会话文件名", "a.jsonl");
     fill("首条消息", "hi");
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(onCancel).toHaveBeenCalledTimes(1); // P2-2 补真断言（原版零断言空转）
@@ -226,83 +226,106 @@ describe("M-OPS NewSession", () => {
 });
 
 // ---------------------------------------------------------------------------
-// v1.5（批A）目录选择器：roots 加载/禁载态/默认选中/选择透传 cwd/单根与失败降级。
-// UX 口径：首项=会话记录树（契约「非 cwd 候选」）不入选项；默认选中=候选首项（roots[1]）。
+// 批3（用户拍板减法）：新建页零目录元素、零文件名输入框。
+// roots 数据域仍拉取（requestRoots 保留供壳层 rootsHint），UI 恒不渲染选择器；
+// 创建恒不携 cwd（服务端默认目录兜底）——多根/失败/单根场景一致。
 // ---------------------------------------------------------------------------
 
-describe("v1.5 NewSession 目录选择器（批A roots）", () => {
+describe("批3 NewSession 目录减法", () => {
   const ROOTS3: RootsState = { status: "ok", items: ["/srv/sessions", "/srv/proj-a", "/home/yyj/ai"], journalRoot: null, cause: null };
-  // v1.6（批A-r2）双树布局：roots=[T(=D/pi),D,项目根]+journalRoot=D——两树均非 cwd 候选。
   const ROOTS_DUAL: RootsState = { status: "ok", items: ["/srv/sessions/pi", "/srv/sessions", "/srv/proj-a"], journalRoot: "/srv/sessions", cause: null };
 
   function fillAndCreate(): void {
-    fill("会话文件名", "a.jsonl");
     fill("首条消息", "hi");
     fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
   }
 
-  it("挂载即 requestRoots（与 requestModels 同补拉口径）", () => {
+  it("requestRoots 数据域保留（挂载即拉；与 requestModels 同补拉口径）", () => {
     const src = modelsSnap("ok", [], null, ROOTS3);
     setup(src);
     expect(src.requestRoots).toHaveBeenCalledTimes(1);
   });
 
-  it("禁载态：roots idle/loading→项目目录下拉禁用且仅占位项", () => {
-    setup(modelsSnap("ok", [], null, { status: "loading", items: [], cause: null }));
-    const select = screen.getByLabelText("项目目录") as HTMLSelectElement;
-    expect(select.disabled).toBe(true);
-    expect(select.querySelectorAll("option")).toHaveLength(1);
-    expect(select.options[0]!.textContent).toContain("加载中");
-  });
-
-  it("roots ok：首项（会话记录树）不入选项；默认选中=候选首项；创建携 cwd=roots[1]", async () => {
+  it("多根场景：无项目目录元素、无文件名输入框；创建不携 cwd（恒服务端默认）", async () => {
     const { write, onLaunched } = setup(modelsSnap("ok", [], null, ROOTS3));
-    const select = screen.getByLabelText("项目目录") as HTMLSelectElement;
-    expect(select.disabled).toBe(false);
-    const values = [...select.options].map((o) => o.value);
-    expect(values).toEqual(["/srv/proj-a", "/home/yyj/ai"]); // 首项 /srv/sessions 不在
-    expect(select.value).toBe("/srv/proj-a"); // 默认选中=非首项的第一个
-    fillAndCreate();
-    await waitFor(() => expect(onLaunched).toHaveBeenCalledWith("a.jsonl"));
-    expect(write.sent).toEqual([{ file: "a.jsonl", text: "hi", model: undefined, cwd: "/srv/proj-a" }]);
-  });
-
-  it("用户改选第三项→创建携 cwd=roots[2]", async () => {
-    const { write, onLaunched } = setup(modelsSnap("ok", [], null, ROOTS3));
-    fireEvent.change(screen.getByLabelText("项目目录"), { target: { value: "/home/yyj/ai" } });
-    fillAndCreate();
-    await waitFor(() => expect(onLaunched).toHaveBeenCalled());
-    expect(write.sent[0]!.cwd).toBe("/home/yyj/ai");
-  });
-
-  it("v1.6 journalRoot 下发：D 及其子树 T 均不入选项，仅真项目根为候选", async () => {
-    const { write, onLaunched } = setup(modelsSnap("ok", [], null, ROOTS_DUAL));
-    const select = screen.getByLabelText("项目目录") as HTMLSelectElement;
-    expect([...select.options].map((o) => o.value)).toEqual(["/srv/proj-a"]); // T(/srv/sessions/pi)与 D(/srv/sessions) 双双排除
-    fillAndCreate();
-    await waitFor(() => expect(onLaunched).toHaveBeenCalled());
-    expect(write.sent[0]!.cwd).toBe("/srv/proj-a");
-  });
-
-  it("单根（仅会话记录树）：无选择器+降级提示；创建不携 cwd（服务端默认目录兜底）", async () => {
-    const { write, onLaunched } = setup(
-      modelsSnap("ok", [], null, { status: "ok", items: ["/srv/sessions"], journalRoot: null, cause: null }),
-    );
     expect(screen.queryByLabelText("项目目录")).toBeNull();
-    expect(screen.getByRole("status").textContent).toContain("默认目录");
+    expect(screen.queryByLabelText("会话文件名")).toBeNull();
+    expect(screen.getByText("新会话将创建在：/srv/sessions")).toBeTruthy(); // rootsHint 一行提示保留
     fillAndCreate();
     await waitFor(() => expect(onLaunched).toHaveBeenCalled());
-    expect(write.sent).toEqual([{ file: "a.jsonl", text: "hi", model: undefined }]); // 无 cwd 键
+    expect(write.sent[0]).toEqual({ file: expect.stringMatching(/^auto-/), text: "hi", model: undefined }); // 无 cwd 键
   });
 
-  it("roots failed：降级提示含受控 cause；创建不携 cwd", async () => {
+  it("v1.6 双树/journalRoot 下发：同样零目录元素（不依赖清单形状）", async () => {
+    const { write, onLaunched } = setup(modelsSnap("ok", [], null, ROOTS_DUAL));
+    expect(screen.queryByLabelText("项目目录")).toBeNull();
+    fillAndCreate();
+    await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+    expect(write.sent[0]).toEqual({ file: expect.stringMatching(/^auto-/), text: "hi", model: undefined });
+  });
+
+  it("roots failed/loading：用户无感（无等待面无降级文案）；创建仍不携 cwd", async () => {
     const { write, onLaunched } = setup(
       modelsSnap("ok", [], null, { status: "failed", items: [], cause: "服务端错误（4402）" }),
     );
     expect(screen.queryByLabelText("项目目录")).toBeNull();
-    expect(screen.getByRole("status").textContent).toContain("服务端错误（4402）");
+    expect(screen.queryByText(/加载中|服务端错误/)).toBeNull(); // 目录域任何状态都不冒泡到 UI
     fillAndCreate();
     await waitFor(() => expect(onLaunched).toHaveBeenCalled());
-    expect(write.sent).toEqual([{ file: "a.jsonl", text: "hi", model: undefined }]);
+    expect(write.sent[0]).toEqual({ file: expect.stringMatching(/^auto-/), text: "hi", model: undefined });
+  });
+});
+
+describe("批3 模型记住上次（localStorage）", () => {
+  function lastModel(): string | null {
+    return window.localStorage.getItem("piagent-last-model");
+  }
+
+  it("创建成功发出即写入本次实际用的模型；下次挂载恢复选择", async () => {
+    window.localStorage.clear();
+    const { write } = setup(modelsSnap("ok", [{ provider: "kimi-coding", id: "k3", context: "256k" }]));
+    fireEvent.change(screen.getByLabelText("模型选择"), { target: { value: "kimi-coding/k3" } });
+    fill("首条消息", "hi");
+    fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
+    await waitFor(() => expect(write.sent).toHaveLength(1));
+    expect(lastModel()).toBe("kimi-coding/k3");
+  });
+
+  it("默认（不选）→写哨兵 __default__；挂载恢复默认态（不选中任何清单项）", async () => {
+    window.localStorage.clear();
+    const { write } = setup(modelsSnap("ok", [{ provider: "kimi-coding", id: "k3" }]));
+    fill("首条消息", "hi");
+    fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
+    await waitFor(() => expect(write.sent).toHaveLength(1));
+    expect(lastModel()).toBe("__default__");
+    // 卸载再挂载：恢复默认（select 显默认项）
+    cleanup();
+    setup(modelsSnap("ok", [{ provider: "kimi-coding", id: "k3" }]));
+    expect((screen.getByLabelText("模型选择") as HTMLSelectElement).value).toBe("__default__");
+  });
+
+  it("手打自定义 id 创建→写入该值；再挂载恢复（自定义 option 呈现）", async () => {
+    window.localStorage.clear();
+    const { write } = setup(modelsSnap("ok", []));
+    fill("模型 id 直达", "openai-codex/gpt-5.3");
+    fill("首条消息", "hi");
+    fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
+    await waitFor(() => expect(write.sent).toHaveLength(1));
+    expect(write.sent[0]!.model).toBe("openai-codex/gpt-5.3");
+    expect(lastModel()).toBe("openai-codex/gpt-5.3");
+    cleanup();
+    setup(modelsSnap("ok", []));
+    expect((screen.getByLabelText("模型选择") as HTMLSelectElement).value).toBe("openai-codex/gpt-5.3");
+  });
+
+  it("存储污染（非法值/异源键）→读取丢弃，恢复默认且不崩", () => {
+    window.localStorage.clear();
+    window.localStorage.setItem("piagent-last-model", "bad model!!");
+    setup(modelsSnap("ok", [{ provider: "kimi-coding", id: "k3" }]));
+    expect((screen.getByLabelText("模型选择") as HTMLSelectElement).value).toBe("__default__");
+    cleanup();
+    window.localStorage.setItem("piagent-last-model", "<script>alert(1)</script>");
+    setup(modelsSnap("ok", [{ provider: "kimi-coding", id: "k3" }]));
+    expect((screen.getByLabelText("模型选择") as HTMLSelectElement).value).toBe("__default__");
   });
 });

@@ -264,7 +264,7 @@ describe("M-UX 批1修复 P2-02：CSPRNG 来源约束+同 file 不换名", () =>
     spy.mockRestore();
   });
 
-  it("B2 组件级：固定 CSPRNG+冻结时钟→两次同名创建，结算后不换名不冲突（R2 改真：旧例 fixed 未用/未 await 结算/只一次创建，异步换名变异存活）", async () => {
+  it("B2 组件级（批3）：固定 CSPRNG+冻结时钟→自动名确定性；两次创建同名不换名（无文件名输入框）", async () => {
     const { render, screen, act } = await import("@testing-library/react");
     const React = (await import("react")).default;
     const { NewSession } = await import("../../../apps/web/src/components/new-session");
@@ -304,9 +304,8 @@ describe("M-UX 批1修复 P2-02：CSPRNG 来源约束+同 file 不换名", () =>
     });
     try {
       render(el);
-      const input = screen.getByLabelText("会话文件名") as HTMLInputElement;
-      const name1 = input.value;
-      expect(name1).toMatch(/^auto-\d{8}-\d{6}-(?:cd){16}\.jsonl$/); // 固定源确定性（hex 全 cd）
+      expect(screen.queryByLabelText("会话文件名")).toBeNull(); // 批3：文件名不显示给用户
+      const name1 = `auto-${"20260930"}-${"140504"}-${"cd".repeat(16)}.jsonl`; // 固定源确定性（hex 全 cd；冻结时钟 UTC 06:05:04=本地 14:05:04，autoFile 用本地时区）
       // 第一次创建：填首条→click→**await 结算**（sendPrompt promise→onLaunched/异步链 flush）
       const textInput = screen.getByLabelText("首条消息") as HTMLTextAreaElement;
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
@@ -317,10 +316,8 @@ describe("M-UX 批1修复 P2-02：CSPRNG 来源约束+同 file 不换名", () =>
         await Promise.resolve();
       });
       expect(prompts).toHaveLength(1);
-      expect(prompts[0]).toBe(name1); // 发送用预填名
+      expect(prompts[0]).toBe(name1); // 发送用自动名（固定源 cd+冻结时钟→确定性）
       expect(launchedCount).toBe(1);
-      // 结算后不换名（异步换名变异必红：若 launched.then 重掷 autoFile，此处已 flush）
-      expect((screen.getByLabelText("会话文件名") as HTMLInputElement).value).toBe(name1);
       // 第二次创建同 file：同名追加不冲突（服务端同名=追加语义，前端不换名不拒发）
       setter.call(textInput, "第二条消息");
       textInput.dispatchEvent(new Event("input", { bubbles: true }));
@@ -329,9 +326,8 @@ describe("M-UX 批1修复 P2-02：CSPRNG 来源约束+同 file 不换名", () =>
         await Promise.resolve();
       });
       expect(prompts).toHaveLength(2);
-      expect(prompts[1]).toBe(name1);
+      expect(prompts[1]).toBe(name1); // 两次后仍不换名（useRef 挂载一次；重掷变异=ce 名→红）
       expect(launchedCount).toBe(2);
-      expect((screen.getByLabelText("会话文件名") as HTMLInputElement).value).toBe(name1); // 两次后仍不换名
     } finally {
       spy.mockRestore();
       vi.useRealTimers();
@@ -362,8 +358,8 @@ describe("M-UX D02/D03 组件面：列表刷新钮+新建自动 file 预填", ()
     expect(requested).toBe(1);
   });
 
-  it("新建表单 file 预填 auto- 格式且可编辑", async () => {
-    const { render, screen } = await import("@testing-library/react");
+  it("批3 新建表单：无文件名输入框；创建 file=auto- 自动格式", async () => {
+    const { render, screen, act } = await import("@testing-library/react");
     const React = (await import("react")).default;
     const { NewSession } = await import("../../../apps/web/src/components/new-session");
     const listeners = new Set<() => void>();
@@ -382,17 +378,24 @@ describe("M-UX D02/D03 组件面：列表刷新钮+新建自动 file 预填", ()
     };
     const writeSnap = { connState: "ready" };
     const writeStub = {
-      sendPrompt: () => {},
+      sendPrompt: (file: string) => { sent.push(file); return Promise.resolve({ kind: "launched" }); },
       getNotReady: () => null,
       subscribe: snap.subscribe as () => () => void,
       getSnapshot: () => writeSnap,
     };
+    const sent: string[] = [];
+    writeStub.sendPrompt = (file: string) => { sent.push(file); return Promise.resolve({ kind: "launched" }); };
     render(React.createElement(NewSession, { wsClient: source as never, writeClient: writeStub as never, rootsHint: "服务端配置的会话目录", onLaunched: () => {}, onCancel: () => {} }));
-    const input = screen.getByLabelText("会话文件名") as HTMLInputElement;
-    expect(input.value).toMatch(/^auto-\d{8}-\d{6}-[0-9a-f]{32}\.jsonl$/);
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-    setter.call(input, "my-custom.jsonl");
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    expect((screen.getByLabelText("会话文件名") as HTMLInputElement).value).toBe("my-custom.jsonl");
+    expect(screen.queryByLabelText("会话文件名")).toBeNull(); // 批3：文件名不显示给用户
+    // 创建后 file=auto- 自动格式（真实 CSPRNG+真实时钟→正则形态断言）
+    const textInput = screen.getByLabelText("首条消息") as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+    setter.call(textInput, "hi");
+    textInput.dispatchEvent(new Event("input", { bubbles: true }));
+    await act(async () => {
+      screen.getByRole("button", { name: "创建会话" }).click();
+      await Promise.resolve();
+    });
+    expect(sent[0]).toMatch(/^auto-\d{8}-\d{6}-[0-9a-f]{32}\.jsonl$/);
   });
 });

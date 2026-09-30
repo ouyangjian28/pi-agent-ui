@@ -1,9 +1,13 @@
-// M-OPS（v1.4）新建会话视图：文件名+模型选择+首 prompt 三输入一步建会。
+// 新建会话视图（批3 用户拍板减法）：**用户只见 模型+首条消息**——
+// 文件名后台自动生成（autoFile，用户不可见不可改）；工作目录恒服务端默认（不渲染选择器、
+// 不拉取等待面——requestRoots 数据域调用保留供壳层 rootsHint，UI 零目录元素）。
 // 首 prompt 成功（write-ack launched）→onLaunched(file) 由壳切正常 SessionDetail；
 // 启动失败（not-ready）→响亮红条（重试=重发同 prompt；换模型=清模型选择重选）。
 // 模型选择双通道：下拉（get-models 清单；loading/failed 均降级）+free-text 输入（优先生效——
 // 清单失败/新模型未入清单仍可手打 id；modelPattern 本地预校验零帧成本）。
-import React, { useEffect, useState, useSyncExternalStore } from "react";
+// 模型记住上次：create 成功发出即写 localStorage（仅 __default__ 或过 modelPattern 的值）；
+// 挂载恢复（坏值丢弃防御）。
+import React, { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { LIMITS } from "@pi-agent-ui/protocol/src/contracts";
 import { NotReadyBanner } from "./not-ready-banner";
 import type { NotReadyInfo } from "../ws/use-write";
@@ -52,6 +56,30 @@ export function autoFile(
   return `auto-${ts}-${hex}.jsonl`;
 }
 
+const LAST_MODEL_KEY = "piagent-last-model";
+
+/** 批3 模型记住上次：读取（仅接受哨兵或过完整 modelPattern 的值——坏值/异源污染丢弃）。 */
+export function readLastModel(): string | null {
+  try {
+    const v = window.localStorage.getItem(LAST_MODEL_KEY);
+    if (v === null) return null;
+    if (v === "__default__") return v;
+    return LIMITS.modelPattern.test(v) ? v : null;
+  } catch {
+    return null; // 无痕模式/禁用存储：静默降级为不记忆
+  }
+}
+
+/** 批3 模型记住上次：写入（与读取同过滤口径——非法值零写入）。 */
+export function writeLastModel(v: string): void {
+  try {
+    if (v !== "__default__" && !LIMITS.modelPattern.test(v)) return;
+    window.localStorage.setItem(LAST_MODEL_KEY, v);
+  } catch {
+    // 存储不可用：静默（记忆是增强非依赖）
+  }
+}
+
 function defaultRandomBytes(n: number): Uint8Array {
   const b = new Uint8Array(n);
   crypto.getRandomValues(b);
@@ -84,9 +112,13 @@ export function NewSession({
   const [freeText, setFreeText] = useState(""); // 直达草稿（非空=custom 态，优先生效；清空=只清草稿不动 choice）
   const [userTouchedModel, setUserTouchedModel] = useState(false); // 意图门：任何编辑（含非法输入/清空）即置 true
   const [lastNonCustom, setLastNonCustom] = useState<string | null>(null); // 非 custom→custom 转移瞬间锚（custom 内编辑不覆盖）
-  // M-UX D03：自动 file 名（预填可改）——auto-YYYYMMDD-HHmmss-<hex32>.jsonl，
-  // 尾缀=16 字节 CSPRNG（128 位；碰撞概率非零且极低，服务端同名=追加语义，前端不假造冲突）。
-  const [file, setFile] = useState(() => autoFile());
+  // 批3 模型记住上次：挂载恢复（仅过 modelPattern 的合法值或哨兵；坏值丢弃防御）。
+  useEffect(() => {
+    const saved = readLastModel();
+    if (saved === MODEL_DEFAULT) return; // 上次用默认→恢复默认（modelChoice 已是 null）
+    if (saved !== null) setModelChoice(saved);
+  }, []);
+
   useEffect(() => {
     wsClient.requestModels();
     wsClient.requestRoots(); // v1.5（批A）：目录选择器数据源（同 models 补拉口径；幂等）
@@ -95,43 +127,16 @@ export function NewSession({
   const [notReady, setNotReady] = useState<NotReadyInfo | null>(null);
   const [sending, setSending] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
-  const [cwdChoice, setCwdChoice] = useState<string | null>(null); // v1.5：null=未显式选择（用默认项）
-  // M-UX 批2 D05：挂载级总截止（页面等待域）——10s 到点 roots 仍非 ok/failed→本地 failed 出口
-  //（默认目录常驻可创建；覆盖从未发请求的 idle/无 welcome 场景）。
-  // 分域：数据域=WsClient roots 快照（迟到回包照常入账）；页面等待域=本 timer，
-  // fire 时核验当前快照 status——已 ok/failed 则零动作（请求成功不被剩余总 timer 打回 failed）。
-  const [rootsDeadline, setRootsDeadline] = useState(false);
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setRootsDeadline((prev) => (prev ? prev : true));
-    }, 10_000);
-    return () => clearTimeout(t);
-  }, []);
-  // 页面等待域派生（纯读快照）：到点仍 loading/idle→超时出口；ok/failed 终态优先（成功不被打回）。
-  const rootsTimedOut = rootsDeadline && (roots.status === "loading" || roots.status === "idle");
-  const rootsCauseText = roots.status === "failed" ? (roots.cause ?? "原因未知") : "拉取超时（10s）";
+  // 批3：文件名后台自动（用户不可见）——挂载一次性生成，创建全程稳定。
+  const fileRef = useRef<string>(autoFile());
+  const file = fileRef.current;
 
   // D04：草稿优先（custom 态）；空=用已确认选择；均无=默认（不携带 model 域）
   const draftTrim = freeText.trim();
   const inCustom = draftTrim !== "";
   const effectiveModel = inCustom ? draftTrim : modelChoice ?? undefined;
 
-  // v1.5（批A）目录选择器：首项=会话记录树（契约定性「非 cwd 候选」）不入选项；
-  // 默认选中=候选首项（即 roots 第二项）；无候选→不渲染选择器、不携 cwd（服务端默认目录兜底）。
-  // v1.6（批A-r2）：服务端下发 journalRoot 时改用它过滤（精确排除 journal 控制树 D **及其子树**——
-  // 双树布局下 roots=[T(=D/pi),D,项目根…]，slice(1) 会把 D 留在候选里诱导误选；T 在 D 内也被
-  // 一并排除——journal/转录两树都是服务内部结构，非 cwd 候选）；
-  // 无 journalRoot（旧服务端/rig）=slice(1) 旧语义兼容。
-  // P3-R2-03：D="/" 根边缘——jr+"/" 会拼出 "//" 失效；D="/" 时一切绝对路径均在 D 内
-  // （前缀="/"）＝全排除，候选空→不携 cwd 降级（不携 cwd 即可，无需拒绝该布局）。
-  const jr = roots.journalRoot ?? null;
-  const cwdOptions = roots.status !== "ok" || jr === null
-    ? roots.status === "ok" ? roots.items.slice(1) : []
-    : roots.items.filter((r) => r !== jr && !r.startsWith(jr === "/" ? "/" : jr + "/"));
-  const effectiveCwd =
-    cwdOptions.length === 0 ? undefined : cwdChoice !== null && cwdOptions.includes(cwdChoice) ? cwdChoice : cwdOptions[0];
-
-  const fileValid = LIMITS.filePattern.test(file);
+  const fileValid = LIMITS.filePattern.test(file); // autoFile 恒合法（防御：万一非法创建门拦）
   const textValid = text.trim().length > 0;
   const modelValid = effectiveModel === undefined || LIMITS.modelPattern.test(effectiveModel);
   const writeReady = writeClient.getSnapshot().connState === "ready";
@@ -148,8 +153,9 @@ export function NewSession({
     }
     setSending(true);
     setNotReady(null);
+    writeLastModel(inCustom ? draftTrim : modelChoice === null ? MODEL_DEFAULT : modelChoice); // 批3：记住本次实际用的模型
     writeClient
-      .sendPrompt(file, text, effectiveModel, effectiveCwd)
+      .sendPrompt(file, text, effectiveModel, undefined) // 批3：恒服务端默认目录（用户拍板砍选择器）
       .then((outcome) => {
         setSending(false);
         if (outcome.kind === "not-ready") {
@@ -196,58 +202,6 @@ export function NewSession({
     <section className="new-session" aria-label="新建会话">
       <h2>新建会话</h2>
       <p className="roots-hint">新会话将创建在：{rootsHint}</p>
-      {(roots.status === "loading" || roots.status === "idle") && !rootsTimedOut ? (
-        <label>
-          项目目录（pi 进程工作目录）
-          <select disabled aria-label="项目目录" value="">
-            <option value="">项目目录清单加载中…</option>
-          </select>
-          <small>加载完成后可选择；直接创建则使用服务端默认目录</small>
-        </label>
-      ) : null}
-      {rootsTimedOut ? (
-        <p className="cwd-status" role="status">
-          项目目录清单拉取超时（10s）——将使用服务端默认目录，可直接创建
-        </p>
-      ) : null}
-      {roots.status === "ok" && cwdOptions.length > 0 ? (
-        <label>
-          项目目录（pi 进程工作目录）
-          <select
-            value={effectiveCwd}
-            onChange={(e) => setCwdChoice(e.target.value)}
-            aria-label="项目目录"
-          >
-            {cwdOptions.map((root) => (
-              <option key={root} value={root}>
-                {root}
-              </option>
-            ))}
-          </select>
-          <small>会话记录树不参与选择；仅首次创建生效，会话寿命内固定</small>
-        </label>
-      ) : null}
-      {roots.status === "failed" ? (
-        <p className="cwd-status" role="status">
-          项目目录清单拉取失败（{rootsCauseText.slice(0, 200)}）——将使用服务端默认目录
-        </p>
-      ) : null}
-      {roots.status === "ok" && cwdOptions.length === 0 ? (
-        <p className="cwd-status" role="status">
-          服务端仅配置了会话记录树——pi 将在默认目录运行
-        </p>
-      ) : null}
-      <label>
-        会话文件名
-        <input
-          type="text"
-          value={file}
-          onChange={(e) => setFile(e.target.value)}
-          placeholder="如 plan-daily.jsonl"
-          aria-label="会话文件名"
-        />
-        <small>{fileValid || file === "" ? "" : "需形如 xxx.jsonl"}</small>
-      </label>
       <label>
         模型（可手打 id；留空=pi 默认）
         <select

@@ -204,7 +204,7 @@ describe("真模式 smoke：token 门→列表→详情→写面", () => {
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
     const promptFrame = FakeWebSocket.instances[2]!.sentFrames().find((f) => f.t === "prompt");
     expect(promptFrame).toBeDefined();
-    expect(promptFrame!.file).toBe("a.jsonl");
+    expect(promptFrame!.file).toBe("a.jsonl"); // 已有会话写面：file=订阅目标（非新建 auto- 名）
     act(() => {
       FakeWebSocket.instances[2]!.receive({
         t: "write-ack",
@@ -227,10 +227,9 @@ describe("真模式 smoke：token 门→列表→详情→写面", () => {
         hasMore: false, listVersion: 1, listReliability: "full",
       });
     });
-    // 打开新建表单→预填 auto- 名→填首条消息→创建
+    // 打开新建表单（批3：无文件名输入框）→填首条消息→创建（file=auto- 自动生成）
     fireEvent.click(screen.getByRole("button", { name: "＋新建" }));
-    const fileInput = screen.getByLabelText("会话文件名") as HTMLInputElement;
-    expect(fileInput.value).toMatch(/^auto-\d{8}-\d{6}-[0-9a-f]{32}\.jsonl$/);
+    expect(screen.queryByLabelText("会话文件名")).toBeNull();
     fireEvent.change(screen.getByLabelText("首条消息"), { target: { value: "新会话第一条" } });
     fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
     const promptFrame = FakeWebSocket.instances[2]!.sentFrames().find((f) => f.t === "prompt");

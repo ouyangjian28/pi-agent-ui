@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // M-UX 批2 D05（设计 v7）：get-roots 请求身份三件（递增 requestId+10s timer 捕获身份+force 替换）
-// +挂载级总截止（页面等待域）+分域守卫（数据域 vs 页面等待域）。
-// B4 断言五条（设计 v7 D09 表）：无 welcome 无 pending→t=10 仍 failed 可创建；成功不被剩余总
+// 批3 减法后：目录选择器/等待面整体退役（requestRoots 数据域保留）。
+// B4 改批3 断言：零目录元素+零等待面+零超时出口；创建永不因 roots 阻塞。
 // timer 打回；M1 卸载后 R2 迟到回包入缓存；超时/force 后旧 R1 零覆盖；既有 t=10/t=11 断言保留
 //（ws-client.test.ts v1.5 节五例不回归）。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -141,15 +141,15 @@ describe("M-UX 批2 D05 数据域：M1 卸载后迟到回包照常入缓存", ()
   });
 });
 
-describe("M-UX 批2 D05 页面等待域：挂载总截止（B4）", () => {
-  it("无 welcome 从未有 pending→t=10 仍超时出口（默认目录可创建）", async () => {
+describe("批3 D05 页面等待域退役：目录减法（B4 改造）", () => {
+  it("roots 永不回包：页面无任何等待面/超时出口——用户无感，直接可创建（默认目录）", async () => {
     vi.useFakeTimers();
     const { render, screen, act } = await import("@testing-library/react");
     const React = (await import("react")).default;
     const { NewSession } = await import("../../../apps/web/src/components/new-session");
     const listeners = new Set<() => void>();
     const snap: Record<string, unknown> = {
-      state: "authenticating", // 无 welcome——请求从未发出
+      state: "authenticating", // 无 welcome——请求从未发出（旧 B4 场景：曾挂 10s 总截止+超时出口）
       models: { status: "idle", items: [], cause: null },
       roots: { status: "idle", items: [], journalRoot: null, cause: null },
     };
@@ -169,23 +169,23 @@ describe("M-UX 批2 D05 页面等待域：挂载总截止（B4）", () => {
       onCancel: () => {},
     });
     render(el);
-    expect(screen.getByText(/项目目录清单加载中/)).toBeTruthy(); // t<10 等待
-    await act(async () => { vi.advanceTimersByTime(10_000); });
-    expect(screen.getByText(/拉取超时（10s）/)).toBeTruthy(); // t=10 超时出口
-    expect(screen.queryByText(/项目目录清单加载中/)).toBeNull(); // 等待视图被替换
-    // 默认目录常驻可创建：填首条消息后创建钮可点（roots 超时不阻塞创建）
+    expect(screen.queryByLabelText("项目目录")).toBeNull(); // 零目录元素（批3）
+    expect(screen.queryByText(/项目目录清单加载中|拉取超时/)).toBeNull(); // 无等待面无超时出口
+    await act(async () => { vi.advanceTimersByTime(60_000); }); // 任意久：永不出现目录等待/超时
+    expect(screen.queryByLabelText("项目目录")).toBeNull();
+    expect(screen.queryByText(/拉取超时/)).toBeNull();
+    // 直接可创建：填首条消息→钮可点（roots 状态完全不阻塞）
     fireEvent.change(screen.getByRole("textbox", { name: "首条消息" }), { target: { value: "hi" } });
     const btn = screen.getByRole("button", { name: "创建会话" });
     expect((btn as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("请求成功不被剩余总 timer 打回：ok 到达→t=10 fire→仍 ok 视图（零动作）", async () => {
+  it("roots 中途 ok/failed 到达：页面零反应（目录域状态不冒泡到 UI）；requestRoots 数据域保留", async () => {
     vi.useFakeTimers();
     const { render, screen, act } = await import("@testing-library/react");
     const React = (await import("react")).default;
     const { NewSession } = await import("../../../apps/web/src/components/new-session");
     const listeners = new Set<() => void>();
-    // 稳定引用快照：useSyncExternalStore 按引用比变化——更新时整体换对象，绝不每次 getSnapshot 造新对象
     let snapNow: Record<string, unknown> = {
       state: "ready",
       models: { status: "ok", items: [], cause: null },
@@ -194,6 +194,7 @@ describe("M-UX 批2 D05 页面等待域：挂载总截止（B4）", () => {
     const snap: Record<string, unknown> = {};
     snap.getSnapshot = () => snapNow as never;
     snap.subscribe = (cb: () => void) => { listeners.add(cb); return () => { listeners.delete(cb); }; };
+    let rootsCalls = 0;
     const writeStub = {
       sendPrompt: () => Promise.resolve({ kind: "launched" }),
       getNotReady: () => null,
@@ -201,23 +202,22 @@ describe("M-UX 批2 D05 页面等待域：挂载总截止（B4）", () => {
       getSnapshot: () => ({ connState: "ready" }),
     };
     const el = React.createElement(NewSession, {
-      wsClient: { requestModels: () => {}, requestRoots: () => {}, subscribe: snap.subscribe as never, getSnapshot: snap.getSnapshot as never },
+      wsClient: { requestModels: () => {}, requestRoots: () => { rootsCalls++; }, subscribe: snap.subscribe as never, getSnapshot: snap.getSnapshot as never },
       writeClient: writeStub as never,
       rootsHint: "x",
       onLaunched: () => {},
       onCancel: () => {},
     });
     render(el);
-    // 8s 时请求成功（ok）——总 timer 还剩 2s
+    expect(rootsCalls).toBeGreaterThanOrEqual(1); // 数据域保留（壳层 rootsHint 供源）
     await act(async () => {
       vi.advanceTimersByTime(8_000);
       snapNow = { ...snapNow, roots: { status: "ok", items: ["/journal", "/home/yyj/ai"], journalRoot: "/journal", cause: null } };
       listeners.forEach((cb) => cb());
     });
-    expect(screen.getByRole("combobox", { name: "项目目录" })).toBeTruthy(); // 选择器出现
-    // 剩余总 timer fire：零动作——ok 不被打回
+    expect(screen.queryByLabelText("项目目录")).toBeNull(); // ok 到达：不出现选择器（批3 砍渲染）
     await act(async () => { vi.advanceTimersByTime(2_000); });
-    expect(screen.getByRole("combobox", { name: "项目目录" })).toBeTruthy();
+    expect(screen.queryByLabelText("项目目录")).toBeNull();
     expect(screen.queryByText(/拉取超时/)).toBeNull();
   });
 });
