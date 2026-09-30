@@ -156,8 +156,15 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
       }
     },
     async stop(file: string): Promise<WriteStopOutcomeDTO> {
+      // v1.6（批A-r2，GPT P2-A2）：stop 零建会话——settled 命中→正常停；pending 在途→等它（首建意图在先，停晚了不假报）；
+      // 全 miss→no-process（旧实现 sessionOf 会凭空拉起会话只为发现没进程可停，且把 undefined cwd 铁定进首建缓存）。
+      const existing = settled.get(file) ?? pending.get(file);
+      if (existing === undefined) {
+        auditSafe(() => `write-host op=stop file=${file} outcome=no-process cause=never-created`);
+        return { kind: "no-process" };
+      }
       try {
-        return encodeStopOutcome(await (await sessionOf(file)).stop());
+        return encodeStopOutcome(await (await existing).stop());
       } catch (e: unknown) {
         auditSafe(() => `write-host-error op=stop file=${file} ${errText(e)}`);
         throw stripped("stop");

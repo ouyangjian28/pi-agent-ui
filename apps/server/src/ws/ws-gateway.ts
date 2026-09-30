@@ -18,7 +18,7 @@
 // 3a=受控端口注入（无真网络）；3b 换 ws 库适配同一端口面（真网络分片）。
 // 传输级说明：本层只处理**应用帧**；传输级 ping/pong/close 由端口透传（onPong→心跳记账）。
 import { createHash } from "node:crypto";
-import { existsSync, statSync } from "node:fs";
+import { statSync, realpathSync } from "node:fs";
 import type {
   ClientFrame, LiveEvent, RecoveryBlockReason, SanitizedText, ServerFrame, SessionStatus,
 } from "@pi-agent-ui/protocol";
@@ -97,6 +97,13 @@ export interface WsGatewayOpts {
   readonly tokens: TokenAuthority;
   /** 授权双根（会话 file 域；resolveWithinRoots 同源口径）。 */
   readonly roots: readonly string[];
+  /** v1.6（批A-r2）：写面 journal 键映射（逻辑 file→journal 绝对）。
+   * 缺省=resolveWithinRoots(file,roots) 首根命中（旧 rig 语义：journal=首根）。
+   * 生产布局（main.ts）：转录树 T=首根，journal 树 D=旁树——写帧键须落 D（控制文件与 pi 转录双文件分离，
+   * GPT 批A审 P1-A1）。 */
+  readonly writeJournalFor?: (file: string) => string;
+  /** v1.6（批A-r2）：journal 树绝对路径（roots-list 下发 journalRoot 字段；前端 cwd 选择器过滤/标注用）。 */
+  readonly journalRoot?: string;
   /** list-sessions 扫描目录（宿主配置；应与 roots 同域）。 */
   readonly scanDir: string;
   /** 精确 Origin 白名单（全等匹配，禁子串）。 */
@@ -423,7 +430,7 @@ export class WsGateway {
       case "get-roots": { // v1.5（批A）：授权根下发（同步面；roots 为网关常量）
         try {
           this.audit(`get-roots conn=${st.id} count=${this.opts.roots.length}`);
-          this.enqueue(st, { t: "roots-list", requestId: frame.requestId, roots: [...this.opts.roots] });
+          this.enqueue(st, { t: "roots-list", requestId: frame.requestId, roots: [...this.opts.roots], ...(this.opts.journalRoot !== undefined ? { journalRoot: this.opts.journalRoot } : {}) });
         } finally {
           st.inflight.delete(frame.requestId);
         }
@@ -449,16 +456,24 @@ export class WsGateway {
     const rid = frame.requestId;
     const file = frame.file;
     try {
-      const abs = resolveWithinRoots(file, this.opts.roots);
-      if (abs === null) { this.errFrame(st, 4404, "file 越界", rid); return; }
+      const abs = this.opts.writeJournalFor !== undefined ? this.opts.writeJournalFor(file) : (resolveWithinRoots(file, this.opts.roots) ?? file);
+      if (resolveWithinRoots(file, this.opts.roots) === null) { this.errFrame(st, 4404, "file 越界", rid); return; }
       // v1.5（批A）：可选 cwd（项目目录）——授权域校验：必须在 roots 内（与 file 同一门），否则拒。
+      // v1.6（批A-r2，GPT P2-A3）：词法校验后 realpath 复核——根内 symlink 指根外=拒（真实目录身份边界；
+      // 检查后替换窗口=部署信任前提，与读面 O_NOFOLLOW 同强度级声明）。
       // 仅冷启动建会话时生效（ RpcWriteHost→SessionRegistry 首建采纳；会话寿命内 cwd 固定，后续帧携带不同 cwd 被忽略）。
+      let cwdKey: string | undefined;
       if (frame.cwd !== undefined) {
         const cwdAbs = resolveWithinRoots(frame.cwd, this.opts.roots);
         if (cwdAbs === null) { this.errFrame(st, 4404, "cwd 越界", rid); return; }
-        if (!existsSync(cwdAbs) || !statSync(cwdAbs).isDirectory()) { this.errFrame(st, 4404, "cwd 目录不存在", rid); return; }
+        try {
+          const rp = realpathSync(cwdAbs);
+          if (resolveWithinRoots(rp, this.opts.roots) === null) { this.errFrame(st, 4404, "cwd 越界（符号链接指向授权域外）", rid); return; }
+          if (!statSync(rp).isDirectory()) { this.errFrame(st, 4404, "cwd 目录不存在", rid); return; }
+          cwdKey = rp;
+        } catch { this.errFrame(st, 4404, "cwd 目录不存在", rid); return; }
       }
-      const outcome = await this.opts.writeHost!.sendPrompt(abs, frame.text, frame.generation, frame.model, frame.cwd); // v1.1：可选代次透传身份门；v1.4（M-OPS）：model 会话级模型；v1.5（批A）：cwd 首建项目目录
+      const outcome = await this.opts.writeHost!.sendPrompt(abs, frame.text, frame.generation, frame.model, cwdKey); // v1.1：可选代次透传身份门；v1.4（M-OPS）：model 会话级模型；v1.5（批A）：cwd 首建项目目录（v1.6：传 realpath 身份）
       this.audit(`write-frame conn=${st.id} t=prompt file=${file} outcome=${outcome.kind}`);
       this.enqueue(st, { t: "write-ack", requestId: rid, file, outcome });
     } catch (e: unknown) {
@@ -474,8 +489,8 @@ export class WsGateway {
     const rid = frame.requestId;
     const file = frame.file;
     try {
-      const abs = resolveWithinRoots(file, this.opts.roots);
-      if (abs === null) { this.errFrame(st, 4404, "file 越界", rid); return; }
+      if (resolveWithinRoots(file, this.opts.roots) === null) { this.errFrame(st, 4404, "file 越界", rid); return; }
+      const abs = this.opts.writeJournalFor !== undefined ? this.opts.writeJournalFor(file) : (resolveWithinRoots(file, this.opts.roots) ?? file);
       const outcome = await this.opts.writeHost!.resume(abs, frame.intentId, frame.generation, st.abortCtl.signal); // r3c：连接级取消信号透传（断连→读链停）
       this.audit(`write-frame conn=${st.id} t=resume file=${file} intentId=${frame.intentId} outcome=${outcome.kind}${outcome.kind === "identity-rejected" ? ` cause=${outcome.cause}` : ""}`);
       this.enqueue(st, { t: "write-resume-ack", requestId: rid, file, outcome });
@@ -497,8 +512,8 @@ export class WsGateway {
     const rid = frame.requestId;
     const file = frame.file;
     try {
-      const abs = resolveWithinRoots(file, this.opts.roots);
-      if (abs === null) { this.errFrame(st, 4404, "file 越界", rid); return; }
+      if (resolveWithinRoots(file, this.opts.roots) === null) { this.errFrame(st, 4404, "file 越界", rid); return; }
+      const abs = this.opts.writeJournalFor !== undefined ? this.opts.writeJournalFor(file) : (resolveWithinRoots(file, this.opts.roots) ?? file);
       const outcome = await this.opts.writeHost!.stop(abs);
       this.audit(`write-frame conn=${st.id} t=stop file=${file} outcome=${outcome.kind}`);
       this.enqueue(st, { t: "write-stop-ack", requestId: rid, file, outcome });

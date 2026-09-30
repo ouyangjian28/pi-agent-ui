@@ -41,6 +41,13 @@ if (mode === "exit") {
 
 if (mode === "cwd" && process.env.FAKE_PI_CWD_FILE) {
   appendFileSync(process.env.FAKE_PI_CWD_FILE, JSON.stringify({ cwd: process.cwd(), argv: args, pid: process.pid }) + "\n");
+  // 批A-r2：--session 路径上装载最小合法 pi 转录 header（v3 形状——真 SDK SessionManager.open 兼容；
+  // GPT P1-A1 建议替身至少装载真转录，烟测腿⑦ 断言面）。
+  const sIdx = args.indexOf("--session");
+  if (sIdx >= 0 && args[sIdx + 1]) {
+    const header = { type: "session", version: 3, id: "00000000-0000-4000-8000-000000000001", timestamp: new Date().toISOString(), cwd: process.cwd() };
+    appendFileSync(args[sIdx + 1], JSON.stringify(header) + "\n");
+  }
 }
 
 if (mode === "timeout") {

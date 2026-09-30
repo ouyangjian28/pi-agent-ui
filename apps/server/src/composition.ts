@@ -33,7 +33,7 @@ import { createStaticHandler } from "./ws/static-serve.ts";
 import { createLoginRoute, newSessionSecret } from "./http/login-route.ts";
 import { createServer, type Server as HttpServer } from "node:http";
 import { ModelsListingService } from "./ws/model-listing.ts";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 
 export interface ServerConfig {
   /** token 文件（0600 {version:1,tokens:[...]}；缺失/非法/空→拒绝启动）。 */
@@ -46,6 +46,11 @@ export interface ServerConfig {
   readonly sessionRoots?: readonly string[];
   /** 逻辑 file→session 路径映射（宿主策略；未提供=journal-only 降级）。 */
   readonly sessionFor?: (file: string) => string;
+  /** v1.6（批A-r2，GPT P1-A1）：生产双树布局——journal 控制树与 pi 转录树分离。
+   * transcriptsRoot（T）=读面首根（scanDir 默认+entry/直播/会话扫描）；journalRoot（D）=写面
+   * 控制文件树（写帧键/statusFor/UI 归因/recovery journal 解析全落 D）。两树同名同构
+   * （D/<name>.jsonl ↔ T/<name>.jsonl）。未提供=旧单树语义（rig 兼容：journal=首根命中）。 */
+  readonly journalLayout?: { readonly transcriptsRoot: string; readonly journalRoot: string };
   /** list-sessions 扫描目录。 */
   readonly scanDir: string;
   /** 监听（默认 127.0.0.1:0 随机端口——生产传显式值）。 */
@@ -313,10 +318,31 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
   // token fail-closed：缺失/不可读/非法/空集合→fromFile 抛错
   const tokens = await TokenAuthority.fromFile(config.tokenFile, {}, audit);
 
+  // v1.6（批A-r2）：双树布局派生映射——逻辑 file（T/D 相对名或任一树内绝对）→journal 绝对。
+  // T 内→D 同名；D 内/其他根→原样；越界→原样（各面自有门）。无 layout=恒等（旧单树）。
+  const layout = config.journalLayout;
+  if (layout !== undefined) {
+    if (!isAbsolute(layout.transcriptsRoot) || !isAbsolute(layout.journalRoot)) {
+      throw new Error("journalLayout 非法（两根均须绝对路径）：拒绝启动");
+    }
+    if (layout.transcriptsRoot === layout.journalRoot) {
+      throw new Error("journalLayout 非法（transcriptsRoot 与 journalRoot 不得同树）：拒绝启动");
+    }
+  }
+  const journalOf = (f: string): string => {
+    if (layout === undefined) return f;
+    const t = resolveWithinRoots(f, config.roots);
+    if (t === null) return f;
+    const rel = relative(layout.transcriptsRoot, t);
+    if (rel !== "" && !rel.startsWith("..") && !isAbsolute(rel)) return resolve(layout.journalRoot, rel);
+    return t;
+  };
+
   const history = new DualHistorySource({
     roots: config.roots,
     ...(config.sessionRoots !== undefined ? { sessionRoots: config.sessionRoots } : {}),
     ...(config.sessionFor !== undefined ? { sessionFor: config.sessionFor } : {}),
+    ...(layout !== undefined ? { journalFor: journalOf } : {}), // v1.6：journal 子源读 D（T 首根会错拿转录文件）
     ...(config.maxScanBytes !== undefined ? { maxScanBytes: config.maxScanBytes } : {}),
     ...(config.thinkingVisible === true ? { thinkingVisible: true } : {}),
     audit,
@@ -327,10 +353,18 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
   // B11-2：证据链锚点目录（默认 scanDir/recovery-evidence；已见证据只许纯追加扩展，改写→concurrent-modification）。
   const recoveryEvidenceDir = config.recoveryEvidenceDir ?? join(config.scanDir, "recovery-evidence");
   if (!isAbsolute(recoveryEvidenceDir)) throw new Error("recoveryEvidenceDir 非法（须绝对路径）：拒绝启动");
+  // v1.6（批A-r2）：双树布局下 recovery 的 journal 域=D 首根（T 首根会错拿转录文件当 journal）；
+  // session 映射配 config.sessionFor 时须相对名（recovery 契约拒绝对）——布局下恒等于逻辑名本身。
+  const recoveryRoots = layout !== undefined
+    ? [layout.journalRoot, ...config.roots.filter((r) => r !== layout.journalRoot)]
+    : config.roots;
+  const recoverySessionFor = layout !== undefined && config.sessionFor !== undefined
+    ? (file: string) => { const abs = config.sessionFor!(file); const rel = relative(layout.transcriptsRoot, abs); return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel) ? rel : abs; }
+    : config.sessionFor;
   const recoveryEvidence = createRecoveryEvidenceProvider({
-    roots: config.roots,
+    roots: recoveryRoots,
     ...(config.sessionRoots !== undefined ? { sessionRoots: config.sessionRoots } : {}),
-    ...(config.sessionFor !== undefined ? { sessionFor: config.sessionFor } : {}),
+    ...(recoverySessionFor !== undefined ? { sessionFor: recoverySessionFor } : {}),
     evidenceDir: recoveryEvidenceDir,
     ...(config.maxRecoveryCombinedBytes !== undefined ? { maxCombinedBytes: config.maxRecoveryCombinedBytes } : {}),
     ...(config.trustFirstRecoveryCapture === true ? { trustFirstCapture: () => true } : {}),
@@ -340,12 +374,13 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     tokens,
     roots: config.roots,
     scanDir: config.scanDir,
+    ...(layout !== undefined ? { writeJournalFor: journalOf, journalRoot: layout.journalRoot } : {}),
     allowedOrigins: config.allowedOrigins,
     ...(config.requireTlsOffLoopback !== undefined ? { requireTlsOffLoopback: config.requireTlsOffLoopback } : {}),
     semaphore,
     historySource: history,
     recoveryEvidence,
-    ...(registry !== null ? { statusFor: (file: string) => registry!.statusFor(resolveWithinRoots(file, config.roots) ?? file) } : {}),
+    ...(registry !== null ? { statusFor: (file: string) => registry!.statusFor(journalOf(resolveWithinRoots(file, config.roots) ?? file)) } : {}),
     ...(config.writeHost !== undefined ? { writeHost: config.writeHost } : {}),
     // P0-2 r3a：帧身份权威源——报告=恢复证据链（与 get-recovery 同源同适配）；代次=registry 真源。
     ...(registry !== null ? {
@@ -358,7 +393,7 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
       // （broadcastUiRequest 归一后写入），registry 键=journal 绝对路径——resolveWithinRoots 反映射（同 statusFor 口径）。
       uiHost: {
         answer: (file: string, requestId: string, payload: { value: string } | { confirmed: boolean } | { cancelled: true }) =>
-          registry!.sessionFor(resolveWithinRoots(file, config.roots) ?? file).answerUi(requestId, payload),
+          registry!.sessionFor(journalOf(resolveWithinRoots(file, config.roots) ?? file)).answerUi(requestId, payload),
       },
     } : {}),
     // D4 批②：entry-get 读面端口。映射同扫描面口径（DualHistorySource session 子源同源 sessionFor：

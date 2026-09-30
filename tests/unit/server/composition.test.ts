@@ -106,6 +106,18 @@ describe("3b-3① composition", () => {
         await expect(startServer(cfg)).rejects.toThrow("allowedOrigins 含非法来源");
       }
     });
+    it("journalLayout（v1.6 批A-r2）：相对路径/同树 → 拒绝启动；合法双树 → 接受", async () => {
+      const t = await mkdtemp(join(tmpdir(), "jl-t-"));
+      const d = await mkdtemp(join(tmpdir(), "jl-d-"));
+      try {
+        const a = await mkCfg({ journalLayout: { transcriptsRoot: "rel", journalRoot: d } });
+        await expect(startServer(a.cfg)).rejects.toThrow("journalLayout 非法");
+        const b = await mkCfg({ journalLayout: { transcriptsRoot: d, journalRoot: d } }); // 同树（T===D）
+        await expect(startServer(b.cfg)).rejects.toThrow("journalLayout 非法");
+        const good = await mkCfg({ journalLayout: { transcriptsRoot: t, journalRoot: d } });
+        const sv = await start(good.cfg); await sv.dispose();
+      } finally { await rm(t, { recursive: true, force: true }); await rm(d, { recursive: true, force: true }); }
+    });
   });
 
   it("空 allowedOrigins/空 roots → 拒绝启动（配置门）", async () => {

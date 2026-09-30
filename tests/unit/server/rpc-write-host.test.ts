@@ -69,11 +69,20 @@ describe("3c-2 宿主适配：createRpcWriteHost", () => {
     expect(await host.sendPrompt("/abs/s.jsonl", "你好")).toEqual({ kind: "launched", intentId: "i-7", commandId: 42 });
     expect(s.sent).toEqual(["你好"]);
   });
-  it("H2 stop：RetireOutcome 同构回传", async () => {
+  it("H2 stop：RetireOutcome 同构回传（v1.6 批A-r2：先建会话再停——stop 零建会话）", async () => {
     const s = mkSession(undefined, { kind: "deadline-exceeded" });
     const host = createRpcWriteHost({ sessionFor: () => s });
+    await host.sendPrompt("/abs/s.jsonl", "a");
     expect(await host.stop("/abs/s.jsonl")).toEqual({ kind: "deadline-exceeded" });
     expect(s.stopped).toBe(1);
+  });
+  it("H2b stop 零建会话（v1.6 批A-r2 P2-A2）：从未建会话→no-process+工厂零调用+审计", async () => {
+    const audits: string[] = [];
+    let calls = 0;
+    const host = createRpcWriteHost({ sessionFor: () => { calls += 1; return mkSession(); }, audit: (l) => audits.push(l) });
+    expect(await host.stop("/abs/s.jsonl")).toEqual({ kind: "no-process" });
+    expect(calls).toBe(0); // 不凭空拉会话（旧实现会拉起只为发现没进程可停，且锁死 undefined cwd 首建）
+    expect(audits.some((l) => l.includes("op=stop") && l.includes("never-created"))).toBe(true);
   });
   it("H3 注册表缓存：同 file 工厂只调一次（send+stop 共享实例）", async () => {
     let calls = 0;
@@ -95,7 +104,11 @@ describe("3c-2 宿主适配：createRpcWriteHost", () => {
     const audits: string[] = [];
     const host = createRpcWriteHost({ sessionFor: () => { throw new Error("SEKRET /root/path"); }, audit: (l) => audits.push(l) });
     await expect(host.sendPrompt("/abs/s.jsonl", "x")).rejects.toThrow("write-host-internal: prompt");
-    await expect(host.stop("/abs/s.jsonl")).rejects.toThrow("write-host-internal: stop");
+    // v1.6 批A-r2：stop 零建会话——工厂抛错面经 pending 在途窗口验（sendPrompt 未决时 stop 等它）
+    const p = host.sendPrompt("/abs/s.jsonl", "y");
+    const q = host.stop("/abs/s.jsonl");
+    await expect(p).rejects.toThrow("write-host-internal: prompt");
+    await expect(q).rejects.toThrow("write-host-internal: stop");
     expect(audits.some((l) => l.includes("write-host-error") && l.includes("op=prompt") && l.includes("SEKRET"))).toBe(true);
     expect(audits.some((l) => l.includes("write-host-error") && l.includes("op=stop"))).toBe(true);
   });
@@ -112,6 +125,7 @@ describe("3c-2 宿主适配：createRpcWriteHost", () => {
   });
   it("H8 异步工厂（Promise 返回）可用", async () => {
     const host = createRpcWriteHost({ sessionFor: async (_f) => mkSession() });
+    await host.sendPrompt("/abs/s.jsonl", "a"); // v1.6 批A-r2：先建会话（stop 零建会话语义）
     expect(await host.stop("/abs/s.jsonl")).toEqual({ kind: "confirmed", exit: { code: 0, signal: null } });
   });
 
@@ -182,7 +196,11 @@ describe("3c-2 宿主适配：createRpcWriteHost", () => {
     expect(e1).toBeInstanceOf(Error);
     expect(e1!.message).toBe("write-host-internal: prompt");
     expect(e1!.message).not.toContain("BOOM");
-    const e2 = await host.stop("/abs/s.jsonl").then(() => null, (e: unknown) => e as Error);
+    // v1.6 批A-r2：stop 面经 pending 窗口（工厂同步抛→pending 拒绝→stop 剥离重抛）
+    const p2 = host.sendPrompt("/abs/s.jsonl", "z");
+    const e2q = host.stop("/abs/s.jsonl").then(() => null, (e: unknown) => e as Error);
+    await p2.catch(() => {});
+    const e2 = await e2q;
     expect(e2!.message).toBe("write-host-internal: stop");
     let getterReads = 0;
     const hostileErr2 = Object.defineProperty(new Error("x"), "message", {
@@ -206,6 +224,7 @@ describe("3c-2 宿主适配：createRpcWriteHost", () => {
     const audits: string[] = [];
     const bad = { ...mkSession(), stop: async () => { throw new Error("stop-boom"); } } as RpcLikeSession;
     const host = createRpcWriteHost({ sessionFor: () => bad, audit: (l) => audits.push(l) });
+    await host.sendPrompt("/abs/s.jsonl", "a"); // v1.6 批A-r2：先建会话（stop 零建会话语义）
     await expect(host.stop("/abs/s.jsonl")).rejects.toThrow("write-host-internal: stop");
     expect(audits.some((l) => l.includes("stop-boom") && l.includes("op=stop"))).toBe(true);
   });
