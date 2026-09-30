@@ -221,3 +221,130 @@ describe("M-UX 批2 D05 页面等待域：挂载总截止（B4）", () => {
     expect(screen.queryByText(/拉取超时/)).toBeNull();
   });
 });
+
+// ---------- M-UX 批2b D04：模型选择域守卫（B3 五断言，设计 v4 D04 定案） ----------
+// 域分离：modelChoice(已确认选择)+freeText(草稿)+意图门 userTouchedModel+转移锚 lastNonCustom。
+// 持久化过滤：select 只写 __default__ 或过完整 modelPattern 的拼合值；清单项校验=完整正则禁选。
+async function renderNewSession(
+  listeners: Set<() => void>,
+  getSnap: () => unknown,
+  sendPromptImpl: (f: string, t: string, model: string | undefined) => Promise<{ kind: string; cause?: string; detail?: string }> = () => Promise.resolve({ kind: "launched" }),
+): Promise<{ fireEvent: typeof import("@testing-library/react").fireEvent; screen: typeof import("@testing-library/react").screen; unmount: () => void }> {
+  const React = (await import("react")).default;
+  const rtl = await import("@testing-library/react");
+  const { NewSession } = await import("../../../apps/web/src/components/new-session");
+  const writeStub = {
+    sendPrompt: sendPromptImpl,
+    getNotReady: () => null,
+    subscribe: (cb: () => void) => { listeners.add(cb); return () => { listeners.delete(cb); }; },
+    getSnapshot: () => ({ connState: "ready" }),
+  };
+  const wsStub = {
+    requestModels: () => {},
+    requestRoots: () => {},
+    subscribe: (cb: () => void) => { listeners.add(cb); return () => { listeners.delete(cb); }; },
+    getSnapshot: getSnap,
+  };
+  const el = React.createElement(NewSession, {
+    wsClient: wsStub as never,
+    writeClient: writeStub as never,
+    rootsHint: "x",
+    onLaunched: () => {},
+    onCancel: () => {},
+  });
+  const r = rtl.render(el);
+  return { fireEvent: rtl.fireEvent, screen: rtl.screen, unmount: r.unmount };
+}
+
+describe("M-UX 批2b D04 模型选择域守卫（B3）", () => {
+  it("B3-1 初次非法编辑意图冻结：草稿保留+非法提示+清单到达不清草稿", async () => {
+    const listeners = new Set<() => void>();
+    let modelsNow: Record<string, unknown> = { status: "idle", items: [], cause: null };
+    let snapNow: Record<string, unknown> = { state: "ready", models: modelsNow, roots: { status: "ok", items: ["/r", "/home/yyj/ai"], journalRoot: null, cause: null } };
+    const { fireEvent, screen } = await renderNewSession(listeners, () => snapNow);
+    fireEvent.change(screen.getByRole("textbox", { name: "模型 id 直达" }), { target: { value: "!!!非法!!!" } });
+    expect(screen.getByText("模型标识非法")).toBeTruthy(); // 非法即时提示
+    expect(screen.getByText(/自定义：!!!非法!!!/)).toBeTruthy(); // 意图冻结：草稿不被冲掉
+    // 清单到达（ok）：用户草稿仍保留（意图门）
+    modelsNow = { status: "ok", items: [{ provider: "p", id: "m1", context: "8k" }], cause: null };
+    snapNow = { ...snapNow, models: modelsNow };
+    listeners.forEach((cb) => cb());
+    expect(screen.getByText(/自定义：!!!非法!!!/)).toBeTruthy();
+    // 清空草稿：回已确认选择（默认），非 custom 态清空不动 activeSelection
+    fireEvent.change(screen.getByRole("textbox", { name: "模型 id 直达" }), { target: { value: "" } });
+    expect(screen.queryByText(/自定义/)).toBeNull();
+    expect((screen.getByRole("combobox", { name: "模型选择" }) as HTMLSelectElement).value).toBe("__default__");
+  });
+
+  it("B3-2 custom 内编辑不覆盖锚：X→Y→清空回转移前选择（非 X 非 Y）", async () => {
+    const listeners = new Set<() => void>();
+    const models: Record<string, unknown> = { status: "ok", items: [{ provider: "p", id: "B" }], cause: null };
+    let snapNow: Record<string, unknown> = { state: "ready", models, roots: { status: "ok", items: ["/r", "/home/yyj/ai"], journalRoot: null, cause: null } };
+    const { fireEvent, screen } = await renderNewSession(listeners, () => snapNow);
+    // 先 select B（已确认选择）
+    fireEvent.change(screen.getByRole("combobox", { name: "模型选择" }), { target: { value: "p/B" } });
+    expect((screen.getByRole("combobox", { name: "模型选择" }) as HTMLSelectElement).value).toBe("p/B");
+    // 进 custom（转移锚=B）→编辑 X→Y
+    const ta = screen.getByRole("textbox", { name: "模型 id 直达" });
+    fireEvent.change(ta, { target: { value: "x/y" } });
+    fireEvent.change(ta, { target: { value: "x/yy" } });
+    expect(screen.getByText(/自定义：x\/yy/)).toBeTruthy();
+    // 清空：回转移前选择 B（非 X 非 Y）
+    fireEvent.change(ta, { target: { value: "" } });
+    expect((screen.getByRole("combobox", { name: "模型选择" }) as HTMLSelectElement).value).toBe("p/B");
+  });
+
+  it("B3-3 custom→B→清空仍 B：已确认选择不被草稿生命周期扰动", async () => {
+    const listeners = new Set<() => void>();
+    const models: Record<string, unknown> = { status: "ok", items: [{ provider: "p", id: "B" }], cause: null };
+    let snapNow: Record<string, unknown> = { state: "ready", models, roots: { status: "ok", items: ["/r", "/home/yyj/ai"], journalRoot: null, cause: null } };
+    const { fireEvent, screen } = await renderNewSession(listeners, () => snapNow);
+    const ta = screen.getByRole("textbox", { name: "模型 id 直达" });
+    fireEvent.change(ta, { target: { value: "c/d" } }); // custom
+    fireEvent.change(screen.getByRole("combobox", { name: "模型选择" }), { target: { value: "p/B" } }); // 显式切回 B
+    fireEvent.change(ta, { target: { value: "" } }); // 清空（本已空）→无操作
+    expect((screen.getByRole("combobox", { name: "模型选择" }) as HTMLSelectElement).value).toBe("p/B");
+  });
+
+  it("B3-4 modelPattern 全正则禁选：拼合值不过正则的清单项 disabled+标不可用", async () => {
+    const listeners = new Set<() => void>();
+    // provider 含空格+感叹号→拼合值 "Bad Prov!/m1" 不过 ^[\w./:-]{1,128}$
+    const models: Record<string, unknown> = { status: "ok", items: [{ provider: "Bad Prov!", id: "m1" }, { provider: "p", id: "ok1" }], cause: null };
+    let snapNow: Record<string, unknown> = { state: "ready", models, roots: { status: "ok", items: ["/r", "/home/yyj/ai"], journalRoot: null, cause: null } };
+    const { screen } = await renderNewSession(listeners, () => snapNow);
+    const sel = screen.getByRole("combobox", { name: "模型选择" }) as HTMLSelectElement;
+    const optBad = Array.from(sel.options).find((o) => o.value === "Bad Prov!/m1");
+    const optOk = Array.from(sel.options).find((o) => o.value === "p/ok1");
+    expect(optBad?.disabled).toBe(true);
+    expect(optBad?.textContent).toContain("不可用");
+    expect(optOk?.disabled).toBe(false);
+    expect(optOk?.textContent).not.toContain("不可用");
+  });
+
+  it("B3-5 默认重试不声称显示实际模型：not-ready 默认态说明文案", async () => {
+    const listeners = new Set<() => void>();
+    const models: Record<string, unknown> = { status: "ok", items: [{ provider: "p", id: "ok1" }], cause: null };
+    const snapNow: Record<string, unknown> = { state: "ready", models, roots: { status: "ok", items: ["/r", "/home/yyj/ai"], journalRoot: null, cause: null } };
+    let sentModel: string | undefined = "__unset__";
+    const act = (await import("@testing-library/react")).act;
+    const { fireEvent, screen } = await renderNewSession(listeners, () => snapNow, (_f, _t, model) => {
+      sentModel = model;
+      return Promise.resolve({ kind: "not-ready", cause: "spawn", detail: "boom" });
+    });
+    // 默认态（不选模型）填首条消息→创建→not-ready
+    fireEvent.change(screen.getByRole("textbox", { name: "首条消息" }), { target: { value: "hi" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(sentModel).toBeUndefined(); // 发送未指定模型
+    const note = screen.getByRole("note");
+    expect(note.textContent).toContain("不指定模型");
+    expect(note.textContent).toContain("不会被重置");
+    // 选模型后重试 not-ready：默认说明不出现（不声称实际模型）
+    fireEvent.change(screen.getByRole("combobox", { name: "模型选择" }), { target: { value: "p/ok1" } });
+    sentModel = "__unset__";
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(sentModel).toBe("p/ok1");
+    expect(screen.queryByRole("note")).toBeNull();
+  });
+});

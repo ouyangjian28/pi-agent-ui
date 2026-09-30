@@ -78,7 +78,12 @@ export function NewSession({
   const models = snap.models;
   const roots = snap.roots;
   const wsState = snap.state;
-  const [freeText, setFreeText] = useState("");
+  // M-UX D04（v4 定案）模型选择域分离：activeSelection(modelChoice) 与草稿(freeText) 分立。
+  // null=默认（帧不携 model 域）；值=过 LIMITS.modelPattern 完整正则的 id（清单拼合值或合法自定义）。
+  const [modelChoice, setModelChoice] = useState<string | null>(null);
+  const [freeText, setFreeText] = useState(""); // 直达草稿（非空=custom 态，优先生效；清空=只清草稿不动 choice）
+  const [userTouchedModel, setUserTouchedModel] = useState(false); // 意图门：任何编辑（含非法输入/清空）即置 true
+  const [lastNonCustom, setLastNonCustom] = useState<string | null>(null); // 非 custom→custom 转移瞬间锚（custom 内编辑不覆盖）
   // M-UX D03：自动 file 名（预填可改）——auto-YYYYMMDD-HHmmss-<hex32>.jsonl，
   // 尾缀=16 字节 CSPRNG（128 位；碰撞概率非零且极低，服务端同名=追加语义，前端不假造冲突）。
   const [file, setFile] = useState(() => autoFile());
@@ -91,10 +96,25 @@ export function NewSession({
   const [sending, setSending] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [cwdChoice, setCwdChoice] = useState<string | null>(null); // v1.5：null=未显式选择（用默认项）
+  // M-UX 批2 D05：挂载级总截止（页面等待域）——10s 到点 roots 仍非 ok/failed→本地 failed 出口
+  //（默认目录常驻可创建；覆盖从未发请求的 idle/无 welcome 场景）。
+  // 分域：数据域=WsClient roots 快照（迟到回包照常入账）；页面等待域=本 timer，
+  // fire 时核验当前快照 status——已 ok/failed 则零动作（请求成功不被剩余总 timer 打回 failed）。
+  const [rootsDeadline, setRootsDeadline] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setRootsDeadline((prev) => (prev ? prev : true));
+    }, 10_000);
+    return () => clearTimeout(t);
+  }, []);
+  // 页面等待域派生（纯读快照）：到点仍 loading/idle→超时出口；ok/failed 终态优先（成功不被打回）。
+  const rootsTimedOut = rootsDeadline && (roots.status === "loading" || roots.status === "idle");
+  const rootsCauseText = roots.status === "failed" ? (roots.cause ?? "原因未知") : "拉取超时（10s）";
 
-  // free-text 优先（精确 id 直达）；空=用下拉值；下拉默认=不携带 model 域
-  const selected = freeText.trim() !== "" ? freeText.trim() : null;
-  const effectiveModel = selected !== null && selected !== MODEL_DEFAULT ? selected : undefined;
+  // D04：草稿优先（custom 态）；空=用已确认选择；均无=默认（不携带 model 域）
+  const draftTrim = freeText.trim();
+  const inCustom = draftTrim !== "";
+  const effectiveModel = inCustom ? draftTrim : modelChoice ?? undefined;
 
   // v1.5（批A）目录选择器：首项=会话记录树（契约定性「非 cwd 候选」）不入选项；
   // 默认选中=候选首项（即 roots 第二项）；无候选→不渲染选择器、不携 cwd（服务端默认目录兜底）。
@@ -152,17 +172,31 @@ export function NewSession({
     setNotReady(null);
     create();
   };
+  // D04 select 写入门（持久化过滤）：只接受 __default__ 哨兵或过完整 modelPattern 的值；
+  // 显式 select=放弃草稿并确认选择（非 custom 态→更新锚）。
+  const selectModel = (v: string): void => {
+    setUserTouchedModel(true);
+    if (v !== MODEL_DEFAULT && !LIMITS.modelPattern.test(v)) return; // 纵深防御：畸形值零写入
+    setFreeText("");
+    setModelChoice(v === MODEL_DEFAULT ? null : v);
+    setLastNonCustom(v === MODEL_DEFAULT ? null : v);
+  };
+  // D04 free-text 编辑：意图门含非法输入与清空；非 custom→custom 转移瞬间锚定当前 choice（后续编辑不覆盖）。
+  const editFreeText = (v: string): void => {
+    setUserTouchedModel(true);
+    if (v.trim() !== "" && freeText.trim() === "") setLastNonCustom(modelChoice);
+    setFreeText(v);
+  };
   const switchModel = (): void => {
     setNotReady(null);
-    setFreeText("");
-    // 下拉重置由 key 语义承担（重新选择即可）；焦点回 free-text
+    setFreeText(""); // 只清草稿：已确认选择保留（D04 非 custom 态清空=不动 activeSelection）
   };
 
   return (
     <section className="new-session" aria-label="新建会话">
       <h2>新建会话</h2>
       <p className="roots-hint">新会话将创建在：{rootsHint}</p>
-      {roots.status === "loading" || roots.status === "idle" ? (
+      {(roots.status === "loading" || roots.status === "idle") && !rootsTimedOut ? (
         <label>
           项目目录（pi 进程工作目录）
           <select disabled aria-label="项目目录" value="">
@@ -170,6 +204,11 @@ export function NewSession({
           </select>
           <small>加载完成后可选择；直接创建则使用服务端默认目录</small>
         </label>
+      ) : null}
+      {rootsTimedOut ? (
+        <p className="cwd-status" role="status">
+          项目目录清单拉取超时（10s）——将使用服务端默认目录，可直接创建
+        </p>
       ) : null}
       {roots.status === "ok" && cwdOptions.length > 0 ? (
         <label>
@@ -190,7 +229,7 @@ export function NewSession({
       ) : null}
       {roots.status === "failed" ? (
         <p className="cwd-status" role="status">
-          项目目录清单拉取失败（{(roots.cause ?? "原因未知").slice(0, 200)}）——将使用服务端默认目录
+          项目目录清单拉取失败（{rootsCauseText.slice(0, 200)}）——将使用服务端默认目录
         </p>
       ) : null}
       {roots.status === "ok" && cwdOptions.length === 0 ? (
@@ -212,24 +251,31 @@ export function NewSession({
       <label>
         模型（可手打 id；留空=pi 默认）
         <select
-          value={effectiveModel ?? MODEL_DEFAULT}
-          onChange={(e) => {
-            setFreeText(e.target.value === MODEL_DEFAULT ? "" : e.target.value);
-          }}
+          value={inCustom ? draftTrim : (modelChoice ?? MODEL_DEFAULT)}
+          onChange={(e) => selectModel(e.target.value)}
           disabled={models.status === "loading"}
           aria-label="模型选择"
         >
           <option value={MODEL_DEFAULT}>默认（pi 配置）</option>
-          {effectiveModel !== undefined && models.status !== "ok" ? (
-            <option value={effectiveModel}>自定义：{effectiveModel}</option>
+          {inCustom ? (
+            <option value={draftTrim}>自定义：{draftTrim}</option>
+          ) : null}
+          {modelChoice !== null && !inCustom && (models.status !== "ok" || !models.items.some((m: ModelInfoDTO) => `${m.provider}/${m.id}` === modelChoice)) ? (
+            <option value={modelChoice}>自定义：{modelChoice}</option>
           ) : null}
           {models.status === "ok" &&
-            models.items.map((m: ModelInfoDTO) => (
-              <option key={`${m.provider}/${m.id}`} value={m.id}>
-                {m.provider} / {m.id}
-                {m.context !== undefined ? `（${m.context}）` : ""}
-              </option>
-            ))}
+            models.items.map((m: ModelInfoDTO) => {
+              const full = `${m.provider}/${m.id}`;
+              // D04：清单项校验=完整 modelPattern 正则（非仅长度）；不过→禁选+标不可用
+              const usable = LIMITS.modelPattern.test(full);
+              return (
+                <option key={full} value={full} disabled={!usable}>
+                  {m.provider} / {m.id}
+                  {m.context !== undefined ? `（${m.context}）` : ""}
+                  {usable ? "" : "（不可用）"}
+                </option>
+              );
+            })}
         </select>
       </label>
       <label>
@@ -237,7 +283,7 @@ export function NewSession({
         <input
           type="text"
           value={freeText}
-          onChange={(e) => setFreeText(e.target.value)}
+          onChange={(e) => editFreeText(e.target.value)}
           placeholder="如 openai-codex/gpt-5.3"
           aria-label="模型 id 直达"
         />
@@ -264,7 +310,14 @@ export function NewSession({
         </p>
       ) : null}
       {notReady !== null ? (
-        <NotReadyBanner info={notReady} onRetry={retry} onSwitchModel={switchModel} />
+        <>
+          <NotReadyBanner info={notReady} onRetry={retry} onSwitchModel={switchModel} />
+          {effectiveModel === undefined ? (
+            <p className="models-note" role="note">
+              重试将不指定模型；本会话此前绑定的模型设置不会被重置，以服务端实际为准
+            </p>
+          ) : null}
+        </>
       ) : null}
       <div className="new-session-actions">
         <button type="button" onClick={create} disabled={!fileValid || !textValid || !modelValid || !writeReady || sending}>
