@@ -58,6 +58,9 @@ export interface ServerConfig {
   readonly port?: number;
   /** 可信代理精确来源（默认 []=不采信任何转发头）。 */
   readonly trustedProxies?: readonly string[];
+  /** 服务准入（W1-02）：60s 握手滑窗上限（默认 10）。本地 rig/多标签页场景可提额（每页面
+   *  三面各一连接=3 握手，4 页即耗尽默认窗——ui-flows 发现 2026-09-30）；生产默认不变。 */
+  readonly handshakePerMinute?: number;
   /** 非 loopback 强制 TLS（默认 true）。 */
   readonly requireTlsOffLoopback?: boolean;
   /** 单文件扫描预算（默认 8MiB，DEFAULT_MAX_SCAN_BYTES）。 */
@@ -380,6 +383,7 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     tokens,
     roots: config.roots,
     scanDir: config.scanDir,
+    ...(config.handshakePerMinute !== undefined ? { handshakePerMinute: config.handshakePerMinute } : {}),
     ...(layout !== undefined ? { writeJournalFor: journalOf, journalRoot: layout.journalRoot } : {}),
     allowedOrigins: config.allowedOrigins,
     ...(config.requireTlsOffLoopback !== undefined ? { requireTlsOffLoopback: config.requireTlsOffLoopback } : {}),

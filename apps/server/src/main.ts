@@ -19,13 +19,14 @@ interface CliArgs {
   origins: string[];
   piBin?: string;
   trustedProxies: string[];
+  handshakePerMinute?: number;
   sessionDir?: string;
   readOnly?: boolean;
 }
 
 function usage(): string {
   return [
-    "用法：node --experimental-transform-types apps/server/src/main.ts --port <固定端口> --token-file <path> --root <abs> [--root <abs>…] [--scan-dir <abs>] [--static-dir <abs>] [--origin <url>…] [--host <ip>] [--pi-bin <path>] [--trusted-proxy <精确IP>…] [--session-dir <abs>] [--read-only]",
+    "用法：node --experimental-transform-types apps/server/src/main.ts --port <固定端口> --token-file <path> --root <abs> [--root <abs>…] [--scan-dir <abs>] [--static-dir <abs>] [--origin <url>…] [--host <ip>] [--pi-bin <path>] [--trusted-proxy <精确IP>…] [--session-dir <abs>] [--read-only] [--handshake-per-minute <n>]",
     "  --port          固定端口（staticDir 模式必填：同源 origin 白名单需预知端口）",
     "  --token-file    token 文件（0600 {version:1,tokens:[…]}）",
     "  --root          授权根（可重复；绝对路径且存在）——读面文件域+写面 cwd 授权域+目录选择器选项",
@@ -37,6 +38,7 @@ function usage(): string {
     "  --trusted-proxy 可信代理精确 IP（可重复；反向代理回程——启用后 X-Forwarded-* 才被采信；不支持 CIDR）",
     "  --session-dir   journal 控制树 D（默认=第一个 root）；pi 转录树 T=<D>/pi 自动创建，读面首根=T",
     "  --read-only     关闭写面（只读部署逃生门；默认写面开——--root 即授权写入 journal 域）",
+    "  --handshake-per-minute  60s 握手滑窗上限（默认 10；每页面三面 3 握手——本地 rig/多标签页场景需提额）",
   ].join("\n");
 }
 
@@ -60,6 +62,11 @@ function parseArgs(argv: readonly string[]): CliArgs {
       case "--origin": args.origins.push(next()); break;
       case "--pi-bin": args.piBin = next(); break;
       case "--trusted-proxy": args.trustedProxies.push(next()); break;
+      case "--handshake-per-minute": {
+        const v = Number(next());
+        if (!Number.isInteger(v) || v < 1 || v > 10_000) throw new Error("--handshake-per-minute 须 1-10000 整数（默认 10；本地 rig/多标签页可提额）");
+        args.handshakePerMinute = v; break;
+      }
       case "--session-dir": args.sessionDir = next(); break;
       case "--read-only": args.readOnly = true; break;
       case "--help": case "-h": console.log(usage()); process.exit(0); break;
@@ -131,6 +138,7 @@ async function main(): Promise<void> {
       },
     } : {}),
     ...(args.trustedProxies.length > 0 ? { trustedProxies: args.trustedProxies } : {}),
+    ...(args.handshakePerMinute !== undefined ? { handshakePerMinute: args.handshakePerMinute } : {}),
     port: args.port,
     host,
     registerSighup: true,
