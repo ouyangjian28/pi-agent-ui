@@ -40,6 +40,16 @@ describe("v6 每个 final 独立、不因历史增量或文本配对删除", () 
     r.rerender(React.createElement(LiveStreamView, props(live, [history(1, "首页旧回复"), history(2, "下一页旧回复")]))); await flush();
     expect(frozenTexts()).toEqual(["本轮未证实入档"]); expect(screen.getByText(/未确认入档/)).toBeTruthy();
   });
+  it("读屏不逐 token：正文 live=off，状态只在生成开始或 final 计数变化播报", async () => {
+    const live = [delta("token一")]; const r = render(React.createElement(LiveStreamView, props(live))); await flush();
+    expect(screen.getByLabelText("直播正文").getAttribute("aria-live")).toBe("off");
+    const status = screen.getByRole("status"); expect(status.textContent).toBe("正在生成回复。");
+    const changes: MutationRecord[] = []; const observer = new MutationObserver((records) => changes.push(...records)); observer.observe(status, { childList: true, characterData: true, subtree: true });
+    r.rerender(React.createElement(LiveStreamView, props([...live, delta("token二")]))); await flush();
+    expect(status.textContent).toBe("正在生成回复。"); expect(changes).toHaveLength(0);
+    r.rerender(React.createElement(LiveStreamView, props([...live, delta("token二"), final("完整回复")]))); await flush();
+    expect(status.textContent).toContain("已生成 1 条回复"); expect(status.textContent).not.toContain("完整回复"); expect(changes.length).toBeGreaterThan(0); observer.disconnect();
+  });
   it("相位门丢 final：未见的新轮只出现在历史，H/F 数量相等不授权删上一条定格", async () => {
     const live = [final("已收到 F1")]; const r = render(React.createElement(LiveStreamView, props(live))); await flush();
     r.rerender(React.createElement(LiveStreamView, props(live, [history(1, "相位门未广播 F2")]))); await flush(); expect(frozenTexts()).toEqual(["已收到 F1"]);

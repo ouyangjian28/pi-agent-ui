@@ -37,7 +37,8 @@ export function LiveStreamView({ liveEvents, historyEvents: _historyEvents, gene
   }, [liveEvents, generationKey]); // 历史数组/计数/正文相同均不是清理或配对依据
   useEffect(() => () => { if (frame.current !== null) cancel(frame.current); }, []);
   if (display.text === "" && display.thinking === "" && display.replies.length === 0) return null;
-  return <div className="live-stream" aria-live="polite" aria-label="直播正文">
+  return <div className="live-stream" aria-live="off" aria-label="直播正文">
+    <p className="sr-only" role="status" aria-live="polite">{display.text !== "" || display.thinking !== "" ? "正在生成回复。" : ""}{display.replies.length > 0 ? `已生成 ${display.replies.length} 条回复，归档状态待核对。` : ""}</p>
     {display.replies.map((reply) => {
       const expanded = !reply.collapsed || opened.has(reply.id);
       return <article className="live-final chat-message chat-assistant" key={reply.id}>

@@ -55,6 +55,9 @@ cases = [
     ("M21-more-button-no-frame", [("apps/web/src/components/session-list.tsx", 'onClick={() => client.requestMoreSessions?.()}', 'onClick={() => {}}')], "r1-real-app.test.ts", None),
     ("M22-message-activity-mixed", [("apps/web/src/components/session-detail.tsx", 'view.events.filter((event) => event.kind === "message" && (event.role === "user" || event.role === "assistant"))', 'view.events.filter(() => true)')], "r1-real-app.test.ts", None),
     ("M23-scroll-always-bottom", [(R, 'if (nearBottom.current) element.scrollTop = element.scrollHeight;', 'if (true) element.scrollTop = element.scrollHeight;')], "browser", None),
+    ("M24-Strict-destroys-owner", [("apps/web/src/ws/use-conversation-lifetime.ts", 'const lease = ++epoch.current;', 'epoch.current += 1;'), ("apps/web/src/ws/use-conversation-lifetime.ts", 'return () => queueMicrotask(() => {\n      if (epoch.current === lease) owner.dispose();\n    });', 'return () => owner.dispose();')], "r1-real-app.test.ts", None),
+    ("M25-unmount-leaks-wait-timer", [("apps/web/src/ws/use-conversation-lifetime.ts", 'if (epoch.current === lease) owner.dispose();', 'if (epoch.current === lease) { /* no cleanup */ }')], "r1-lifetime.test.ts", None),
+    ("M26-screenreader-every-token", [(L, 'className="live-stream" aria-live="off"', 'className="live-stream" aria-live="polite"')], "r1-live-handoff.test.ts", None),
 ]
 results = []
 for name, edits, test, timezone in cases:
