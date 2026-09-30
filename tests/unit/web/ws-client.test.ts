@@ -4,7 +4,8 @@
 // sessions 列表更新/连接关闭终态/未知帧与非 JSON 外壳畸形安全忽略（已知帧的结构化畸形由 R1 各测覆盖）/
 // R1 消费帧运行时校验（审报 §2-R1 全部反例）/R2 错误文案受控（token 不进快照）/
 // R3 关闭=不可逆停止屏障（审报 §5-3 五时序）/C1 握手期非认证失败受控反馈。
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { act } from "@testing-library/react";
 import { WsClient, type WebSocketLike } from "../../../apps/web/src/ws/ws-client";
 
 class FakeWebSocket implements WebSocketLike {
@@ -545,6 +546,46 @@ describe("v1.5 授权根面（get-roots/roots-list，批A）", () => {
     const sentAfter = ws.sent.length;
     client.requestRoots(); // ok 后幂等：不重发
     expect(ws.sent).toHaveLength(sentAfter);
+  });
+
+  it("P1-05（GPT 批2审）：roots 在途时远端 close→在途清位+timer 撤销，10s 后旧 timer 零副作用（不改终态快照/不通知）", async () => {
+    vi.useFakeTimers();
+    try {
+      const { client, ws } = setup();
+      handshake(ws);
+      client.requestRoots();
+      expect(client.getSnapshot().roots.status).toBe("loading");
+      ws.serverClose(1000); // 远端正常关闭（非 close() 主动；此 transition 自身通知不算）
+      expect(client.getSnapshot().state).toBe("closed");
+      let notified = 0;
+      client.subscribe(() => notified++);
+      await act(async () => { vi.advanceTimersByTime(10_000); }); // 旧 timer 到点
+      expect(client.getSnapshot().roots.status).toBe("loading"); // 定格不清空（同 models 口径）；绝不被旧 timer 改 failed
+      expect(notified).toBe(0); // 终态后零通知（timer 撤销，非 pending 门拦截）
+      // 重挂语义：closed 后不再发新请求（connect 拒绝面另测）；迟到回包零副作用
+      ws.receive({ t: "roots-list", requestId: "get-roots-1", roots: ROOTS });
+      expect(client.getSnapshot().roots.status).toBe("loading");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("P2-02（GPT 批2审）：sendFrame 同步 throw→pending 回滚，下一 requestRoots 可重发（不悬挂）", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    client.requestRoots(); // 首次成功发出（get-roots-1 在途）
+    const rid1 = (ws.sentFrames().at(-1) as { requestId: string }).requestId;
+    // 结算首请求（failed）→腾出 pending 位，再让 send 同步 throw
+    ws.receive({ t: "error", code: 4402, requestId: rid1, message: "拒绝", retryable: true });
+    expect(client.getSnapshot().roots.status).toBe("failed");
+    const origSend = ws.send.bind(ws);
+    ws.send = () => { throw new Error("boom"); }; // socket.send 同步抛
+    client.requestRoots(); // failed 可重发路径：send throw
+    expect(client.getSnapshot().roots.status).toBe("failed"); // 不悬挂 loading
+    ws.send = origSend;
+    client.requestRoots(); // 回滚后可重发（不悬挂证明）
+    expect(client.getSnapshot().roots.status).toBe("loading");
+    expect(ws.sentFrames().filter((f) => f.t === "get-roots").length).toBeGreaterThanOrEqual(2);
   });
 
   it("R1 形状拒：roots 含非 string 整帧拒绝、在途保持、后续合法帧成功", () => {

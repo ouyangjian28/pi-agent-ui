@@ -63,17 +63,25 @@ export function readLastModel(): string | null {
   try {
     const v = window.localStorage.getItem(LAST_MODEL_KEY);
     if (v === null) return null;
-    if (v === "__default__") return v;
-    return LIMITS.modelPattern.test(v) ? v : null;
+    if (isPersistableModel(v)) return v;
+    return null; // 坏值/哨兵样式保留值（__custom__ 等过正则但非用户模型 id）丢弃
   } catch {
     return null; // 无痕模式/禁用存储：静默降级为不记忆
   }
 }
 
+/** 批3 模型记忆可持久化口径（P1-03 GPT 批2审）：仅 __default__ 哨兵或「非 __ 前缀且过完整
+ * modelPattern」的值——__ 前缀属哨兵样式保留域（未来新哨兵不得经存储面漏入 model 域）。 */
+function isPersistableModel(v: string): boolean {
+  if (v === MODEL_DEFAULT) return true;
+  if (v.startsWith("__")) return false; // 保留样式（如 __custom__）：合法正则也不收
+  return LIMITS.modelPattern.test(v);
+}
+
 /** 批3 模型记住上次：写入（与读取同过滤口径——非法值零写入）。 */
 export function writeLastModel(v: string): void {
   try {
-    if (v !== "__default__" && !LIMITS.modelPattern.test(v)) return;
+    if (!isPersistableModel(v)) return; // 非法值/哨兵样式保留值零写入
     window.localStorage.setItem(LAST_MODEL_KEY, v);
   } catch {
     // 存储不可用：静默（记忆是增强非依赖）
@@ -110,8 +118,6 @@ export function NewSession({
   // null=默认（帧不携 model 域）；值=过 LIMITS.modelPattern 完整正则的 id（清单拼合值或合法自定义）。
   const [modelChoice, setModelChoice] = useState<string | null>(null);
   const [freeText, setFreeText] = useState(""); // 直达草稿（非空=custom 态，优先生效；清空=只清草稿不动 choice）
-  const [userTouchedModel, setUserTouchedModel] = useState(false); // 意图门：任何编辑（含非法输入/清空）即置 true
-  const [lastNonCustom, setLastNonCustom] = useState<string | null>(null); // 非 custom→custom 转移瞬间锚（custom 内编辑不覆盖）
   // 批3 模型记住上次：挂载恢复（仅过 modelPattern 的合法值或哨兵；坏值丢弃防御）。
   useEffect(() => {
     const saved = readLastModel();
@@ -181,16 +187,12 @@ export function NewSession({
   // D04 select 写入门（持久化过滤）：只接受 __default__ 哨兵或过完整 modelPattern 的值；
   // 显式 select=放弃草稿并确认选择（非 custom 态→更新锚）。
   const selectModel = (v: string): void => {
-    setUserTouchedModel(true);
     if (v !== MODEL_DEFAULT && !LIMITS.modelPattern.test(v)) return; // 纵深防御：畸形值零写入
     setFreeText("");
     setModelChoice(v === MODEL_DEFAULT ? null : v);
-    setLastNonCustom(v === MODEL_DEFAULT ? null : v);
   };
   // D04 free-text 编辑：意图门含非法输入与清空；非 custom→custom 转移瞬间锚定当前 choice（后续编辑不覆盖）。
   const editFreeText = (v: string): void => {
-    setUserTouchedModel(true);
-    if (v.trim() !== "" && freeText.trim() === "") setLastNonCustom(modelChoice);
     setFreeText(v);
   };
   const switchModel = (): void => {

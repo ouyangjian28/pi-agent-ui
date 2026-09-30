@@ -229,7 +229,7 @@ async function renderNewSession(
   listeners: Set<() => void>,
   getSnap: () => unknown,
   sendPromptImpl: (f: string, t: string, model: string | undefined) => Promise<{ kind: string; cause?: string; detail?: string }> = () => Promise.resolve({ kind: "launched" }),
-): Promise<{ fireEvent: typeof import("@testing-library/react").fireEvent; screen: typeof import("@testing-library/react").screen; unmount: () => void }> {
+): Promise<{ fireEvent: typeof import("@testing-library/react").fireEvent; screen: typeof import("@testing-library/react").screen; act: typeof import("@testing-library/react").act; unmount: () => void }> {
   const React = (await import("react")).default;
   const rtl = await import("@testing-library/react");
   const { NewSession } = await import("../../../apps/web/src/components/new-session");
@@ -253,7 +253,7 @@ async function renderNewSession(
     onCancel: () => {},
   });
   const r = rtl.render(el);
-  return { fireEvent: rtl.fireEvent, screen: rtl.screen, unmount: r.unmount };
+  return { fireEvent: rtl.fireEvent, screen: rtl.screen, act: rtl.act, unmount: r.unmount };
 }
 
 describe("M-UX 批2b D04 模型选择域守卫（B3）", () => {
@@ -261,14 +261,20 @@ describe("M-UX 批2b D04 模型选择域守卫（B3）", () => {
     const listeners = new Set<() => void>();
     let modelsNow: Record<string, unknown> = { status: "idle", items: [], cause: null };
     let snapNow: Record<string, unknown> = { state: "ready", models: modelsNow, roots: { status: "ok", items: ["/r", "/home/yyj/ai"], journalRoot: null, cause: null } };
-    const { fireEvent, screen } = await renderNewSession(listeners, () => snapNow);
+    const { fireEvent, screen, act } = await renderNewSession(listeners, () => snapNow);
     fireEvent.change(screen.getByRole("textbox", { name: "模型 id 直达" }), { target: { value: "!!!非法!!!" } });
     expect(screen.getByText("模型标识非法")).toBeTruthy(); // 非法即时提示
     expect(screen.getByText(/自定义：!!!非法!!!/)).toBeTruthy(); // 意图冻结：草稿不被冲掉
     // 清单到达（ok）：用户草稿仍保留（意图门）
     modelsNow = { status: "ok", items: [{ provider: "p", id: "m1", context: "8k" }], cause: null };
     snapNow = { ...snapNow, models: modelsNow };
-    listeners.forEach((cb) => cb());
+    await act(async () => {
+      listeners.forEach((cb) => cb());
+      await Promise.resolve();
+    });
+    // P2-03（GPT 批2审）：先证新清单确已渲染（p / m1 option 在视图），再核草稿冻结——
+    // 无 act 的同步断言可能只断到更新前 DOM，证明不了「清单到达后」语义。
+    expect(screen.getByText(/p \/ m1/)).toBeTruthy();
     expect(screen.getByText(/自定义：!!!非法!!!/)).toBeTruthy();
     // 清空草稿：回已确认选择（默认），非 custom 态清空不动 activeSelection
     fireEvent.change(screen.getByRole("textbox", { name: "模型 id 直达" }), { target: { value: "" } });

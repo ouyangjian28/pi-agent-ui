@@ -362,12 +362,17 @@ export class WsClient {
     this.rootsRequestPending = true;
     const reqId = `${ROOTS_REQUEST_BASE}-${++this.rootsSeq}`;
     if (this.rootsTimer !== null) { clearTimeout(this.rootsTimer); this.rootsTimer = null; }
-    if (this.snapshot.roots.status !== "loading") this.transition({ roots: { status: "loading", items: [], journalRoot: null, cause: null } });
-    const sent = this.sendFrame({ t: "get-roots", requestId: reqId });
-    if (!sent) {
-      this.rootsRequestPending = false; // 非 OPEN 静默未发：不算在途（同 list-sessions 回滚口径）
-      return;
+    let sent = false;
+    try {
+      sent = this.sendFrame({ t: "get-roots", requestId: reqId });
+    } catch {
+      sent = false; // P2-02（GPT 批2审）：socket.send 同步 throw 同回滚口径——不得悬挂在途位
     }
+    if (!sent) {
+      this.rootsRequestPending = false; // 非 OPEN 静默未发/发送异常：不算在途（同 list-sessions 回滚口径）
+      return; // 状态面不动：请求未上线不产生 loading 迁移（failed 等终态保留）
+    }
+    if (this.snapshot.roots.status !== "loading") this.transition({ roots: { status: "loading", items: [], journalRoot: null, cause: null } }); // 发出成功才示 loading
     // 请求截止域：timer 捕获所属身份；fire 时身份失配（已被 force 替代/已结算）零副作用。
     const firedSeq = this.rootsSeq;
     this.rootsTimer = setTimeout(() => {
@@ -504,6 +509,9 @@ export class WsClient {
     }
     this.listRequestPending = false; // P2-01（GPT 审）：server 侧关闭同口径清位（迟到回包零副作用）
     this.listDirty = false;
+    this.modelsRequestPending = false; // P1-05（GPT 批2审）：清单在途同口径清位
+    this.rootsRequestPending = false; // P1-05：根面在途同口径清位（状态面定格不清空；重挂可重发）
+    if (this.rootsTimer !== null) { clearTimeout(this.rootsTimer); this.rootsTimer = null; } // 关闭后旧 timer 不得再改终态快照
     this.transition({ state: "closed" }); // 终态；无自动重连（后续迭代）
   }
 
@@ -513,6 +521,7 @@ export class WsClient {
     this.listDirty = false; // M-UX D02：错误面在途与待补拉一并清位（迟到回包不再变更 error 快照）
     this.modelsRequestPending = false; // P3-5（DS 审）：与 close() 同口径——error 面在途清位（状态面定格不清空）
     this.rootsRequestPending = false; // v1.5（批A）：根面同口径
+    if (this.rootsTimer !== null) { clearTimeout(this.rootsTimer); this.rootsTimer = null; } // P1-05：error 面同口径清 timer
     this.transition({ state: "error", errorKind, errorMessage });
   }
 

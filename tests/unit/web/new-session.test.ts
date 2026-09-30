@@ -5,7 +5,7 @@ import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach } from "vitest";
-import { NewSession, type ModelsSource, type RootsSource } from "../../../apps/web/src/components/new-session";
+import { NewSession, writeLastModel, type ModelsSource, type RootsSource } from "../../../apps/web/src/components/new-session";
 import type { ModelsState, RootsState } from "../../../apps/web/src/ws/ws-client";
 import type { WriteClientSurface, WriteSnapshot } from "../../../apps/web/src/ws/write-client";
 
@@ -316,6 +316,21 @@ describe("批3 模型记住上次（localStorage）", () => {
     cleanup();
     setup(modelsSnap("ok", []));
     expect((screen.getByLabelText("模型选择") as HTMLSelectElement).value).toBe("openai-codex/gpt-5.3");
+  });
+
+  it("哨兵样式保留值（__custom__ 等）→读写双拒（P1-03 GPT 批2审：不得经存储面漏入 model 域）", () => {
+    window.localStorage.clear();
+    window.localStorage.setItem("piagent-last-model", "__custom__"); // 过 modelPattern 但属保留样式
+    setup(modelsSnap("ok", [{ provider: "kimi-coding", id: "k3" }]));
+    expect((screen.getByLabelText("模型选择") as HTMLSelectElement).value).toBe("__default__"); // 读取丢弃
+    cleanup();
+    window.localStorage.removeItem("piagent-last-model"); // 与写面验证隔离：拒写≠清污染，先移除手动 set 的值
+    writeLastModel("__custom__");
+    expect(window.localStorage.getItem("piagent-last-model")).toBe(null); // 零写入
+    cleanup();
+    writeLastModel("kimi-coding/k3");
+    writeLastModel("__custom__"); // 已有合法值时哨兵也不得覆盖
+    expect(window.localStorage.getItem("piagent-last-model")).toBe("kimi-coding/k3");
   });
 
   it("存储污染（非法值/异源键）→读取丢弃，恢复默认且不崩", () => {
