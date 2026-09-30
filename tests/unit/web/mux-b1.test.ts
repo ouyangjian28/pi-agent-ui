@@ -188,7 +188,7 @@ describe("M-UX 批1修复 P2-01：同步重入原子化", () => {
     expect(ws.sent).toHaveLength(after); // 不补拉（dirty 已清；且终态拒帧）
   });
 
-  it("sendFrame 同步 throw 不悬挂在途：后续刷新可重试", () => {
+  it("sendFrame 同步 throw 不悬挂在途：先结算首拉→真占位失败→回滚可重试（R2 改真：旧例未结算首拉，requestSessions 走 dirty 分支未过 send，摘除回滚仍绿）", () => {
     const ws = new FakeWebSocket("ws://x");
     const orig = ws.send.bind(ws);
     let broken = false;
@@ -200,11 +200,38 @@ describe("M-UX 批1修复 P2-01：同步重入原子化", () => {
     client.connect();
     ws.open();
     ws.receive(WELCOME);
+    // 首拉已发出（welcome 自动拉）——必须先结算，否则后续 requestSessions 只记 dirty 不走 send
+    ws.receive({
+      t: "sessions", requestId: "list-sessions-1", sessions: [], total: 0, offset: 0,
+      hasMore: false, listVersion: 1, listReliability: "full",
+    });
+    expect(ws.sentFrames().filter((f) => f.t === "list-sessions")).toHaveLength(1);
     broken = true;
     expect(() => client.requestSessions()).not.toThrow(); // 占位失败受控回滚
+    expect(ws.sentFrames().filter((f) => f.t === "list-sessions")).toHaveLength(1); // 零新增帧
     broken = false;
-    client.requestSessions(); // 不悬挂：pending 已回滚→可重试发帧
+    client.requestSessions(); // 不悬挂：pending 已回滚→可重试真发新帧（悬挂时 dirty 合并会吃掉本次）
+    expect(ws.sentFrames().filter((f) => f.t === "list-sessions")).toHaveLength(2);
     expect(ws.sentFrames().at(-1)).toMatchObject({ t: "list-sessions" });
+  });
+
+  it("非 OPEN 静默未发不悬挂在途：readyState=2→refresh 零新帧+回滚；恢复 OPEN→refresh 真发新帧（R2：静默出口同 throw 口径）", () => {
+    const ws = new FakeWebSocket("ws://x");
+    const client = new WsClient("ws://x", "tok", () => ws);
+    client.connect();
+    ws.open();
+    ws.receive(WELCOME);
+    ws.receive({
+      t: "sessions", requestId: "list-sessions-1", sessions: [], total: 0, offset: 0,
+      hasMore: false, listVersion: 1, listReliability: "full",
+    });
+    expect(ws.sentFrames().filter((f) => f.t === "list-sessions")).toHaveLength(1);
+    ws.readyState = 2; // CLOSING：sendFrame 静默未发（不 throw）——旧实现 pending 悬挂
+    client.requestSessions();
+    expect(ws.sentFrames().filter((f) => f.t === "list-sessions")).toHaveLength(1); // 零新增帧
+    ws.readyState = 1; // 恢复 OPEN（可观察性探针；真实 onclose 收口后状态面另行处理）
+    client.requestSessions(); // 不悬挂：pending 已回滚→真发新帧（悬挂时 dirty 合并会吃掉本次）
+    expect(ws.sentFrames().filter((f) => f.t === "list-sessions")).toHaveLength(2);
   });
 });
 
