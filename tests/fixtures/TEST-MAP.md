@@ -1352,3 +1352,16 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
   - P3-5 CW3 flake 观察项（/bin/cat 真链 300ms readiness 窗负载敏感，首跑红单跑绿，pre-existing；再犯则放宽窗口或加重试）。
   - 另注 process-host 出口去重注释勘正（「只进 stderr 记录」→「直接丢弃」）。
   - 修复批变异 Mu-e5（基线 4be3064 先 commit）：B2c 终窗 exitOf 死→S4-B2c 红；还原后 39 绿复跑。
+
+### 批A-r2：journal/转录双树布局+stop 零建会话（GPT 批A审 NO-GO 68 处置；2026-09-30/10-10，GLM 写·Kimi 前端交叉）
+
+- GPT 审报（NO-GO 68：P1-A1 journal/转录混同+P2-A2 stop 凭空建会话锁死 cwd+P2-A3 symlink 逃逸+P2-A4 CIDR 假支持+P3-A1/A2）=~/ai projects/pi-agent-ui/audits/gpt-p1a-review-2026-10-10.md。
+- **双树布局（P1-A1 修复）**：D=--session-dir（journal 控制树）；T=D/pi（pi 转录树，自动建）。effectiveRoots=[T,D,...roots]（T 首根=读面）。composition `journalOf` 统一映射（逻辑名/T 内绝对→D 同名绝对）注入五面：gateway writeJournalFor（prompt/resume/stop 三帧键）/dual journalFor（journal 子源读 D——**T 首根会错拿转录文件，此为 P1-A1 根因**）/recovery roots D 首根+sessionFor 相对名适配/gateway statusFor/uiHost.answer。main：write.sessionFor=D 绝对→T 同名（registry sessionFile=--session 落点）；config.sessionFor=resolve(T,name)。registry 双文件机制原生在（journalPath/sessionFile 两键）——批A-r1 只是把两路径设同了。
+- 契约 v1.6：RootsListFrame.journalRoot?（前端目录选择器过滤基准）。
+- stop 零建会话（P2-A2）：settled/pending 全 miss→no-process+never-created 审计；pending 在途→等它（首建意图在先）。杀例 H2b（calls===0）。
+- cwd realpath 门（P2-A3）：词法校验后 realpathSync 复核+传 realpath 身份（根内 symlink 指根外=4404）。杀例 W22。
+- --trusted-proxy 含 / 拒启（P2-A4：ws-transport 仅精确 IP，CIDR 假支持入口拒）。
+- fake pi cwd 模式：--session 路径装载最小合法 pi 转录 header（type=session/version=3）。
+- 烟测腿⑥改 T 落点+新腿⑦双文件分离（journal 首行≠session 格式+转录 header 形状）+腿⑧list-sessions 扫 T（sessions 字段非 files——踩坑）journal 不进列表。
+- Kimi 前端（wt/kimi-web-4：7131df6+GLM 修复 c9742c7，主树 c9742c7）：ws-client RootsState（幂等位+asRootsListFrame 形状门+error 不连坐）/sendPrompt cwd 本地预校验/new-session 目录选择器（journalRoot 下发时排 D 及子树 T；未下发=slice(1) 兼容——**跨批时序缺口 GLM 补：Kimi 基于 201d29f 无从知 v1.6**）。
+- 变异 3/3（基线 9c7eb7b/c9742c7 先 commit——M-245 铁律）：Mu-r2a-1 prompt 面 writeJournalFor 摘除→W21 红/Mu-r2a-2 stop peek 摘除→H2b 红/Mu-r2a-3 journalRoot filter 摘除→ROOTS_DUAL 例红。全仓 1766 绿+tsc 两包 0。
