@@ -1365,3 +1365,19 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - 烟测腿⑥改 T 落点+新腿⑦双文件分离（journal 首行≠session 格式+转录 header 形状）+腿⑧list-sessions 扫 T（sessions 字段非 files——踩坑）journal 不进列表。
 - Kimi 前端（wt/kimi-web-4：7131df6+GLM 修复 c9742c7，主树 c9742c7）：ws-client RootsState（幂等位+asRootsListFrame 形状门+error 不连坐）/sendPrompt cwd 本地预校验/new-session 目录选择器（journalRoot 下发时排 D 及子树 T；未下发=slice(1) 兼容——**跨批时序缺口 GLM 补：Kimi 基于 201d29f 无从知 v1.6**）。
 - 变异 3/3（基线 9c7eb7b/c9742c7 先 commit——M-245 铁律）：Mu-r2a-1 prompt 面 writeJournalFor 摘除→W21 红/Mu-r2a-2 stop peek 摘除→H2b 红/Mu-r2a-3 journalRoot filter 摘除→ROOTS_DUAL 例红。全仓 1766 绿+tsc 两包 0。
+
+### 批A-r2-fix/r2-fix2：GPT 复审残余处置（GO 92/100 收口；2026-09-30，GLM 写·GPT 独立复审）
+
+- GPT 复审报（NO-GO 82→修复→**GO 92**）=~/ai projects/pi-agent-ui/audits/gpt-batcha-r2-review-2026-10-10.md + gpt-r2fix-review-2026-09-30.md。
+- **P1-R2-01 修复**：journalOf/recoverySessionFor/main sessionFor 三处根外判据改路径段级 `rel.split("/")[0]!==".."`（`..audit.jsonl` 合法名不得被 startsWith 前缀误判）——composition.ts:339/364+main.ts:133。杀例=烟测腿⑨（变异 Mu-r2f-1 回 startsWith→⑨红 not-ready≠launched）。
+- **P2-R2-01 修复**：createRecoveryEvidenceProvider 在 layout 且用户未配时注入 `sessionRoots=[T,...roots去T/D]`（composition.ts:370-372；旧默认回落 recoveryRoots 首根 D→"q.jsonl" 命中 D 的 journal=D+D 双计漏 T）。杀例=recovery-real I8（layout rig：D=5000B/T=5100B/max=10000→T 计入 10100>10000 oversized；Mu-r2f-2 摘注入→I8 红）。
+- **P3 三处**：烟测 ensurePrompt() 自足热身（⑤⑥⑦⑧单跑独立，P3-R2-01）/scanDir 文案+旧注释（P3-R2-02）/new-session.tsx cwdOptions jr==="/" 前缀边界（P3-R2-03）。
+- r2fix 尾巴（GPT GO 92 后小修 74dc9ca）：main.ts scanDir 帮助改「默认=转录树 T；D=--session-dir 或第一个 root」+旧首根注释删+腿⑨转录无条件正向断言（P3-R2F-01：条件 if(exists) 会放过同名转录映射回归）。
+- 全仓 1768 绿；commit b00b22d/afa9352/74dc9ca。
+
+### M-UX 批：UI 重做（进行中；设计门制首用）
+
+- GPT UI 视觉+代码审（playwright 截图包+真 Chromium 量测；**48 NO-GO**：P1-01 新建表单裁切[创建钮 y≈984-1028 视口外 184px，.app overflow:hidden+右栏无滚动]/P1-02 详情长会话裁输入框/P2×6/P3×3+概念暴露十类清单）=~/ai projects/pi-agent-ui/audits/gpt-ui-review-2026-09-30.md。
+- 截图基建=scripts/ui-shots.mjs（playwright+chromium 装仓 devDep；起真 main.ts 六视图 PC 1280×800；**必传 --static-dir 否则纯 WS 模式 404**）。
+- 设计 v1→GPT 设计门审 **REVISE 68**（D01-D09 九必改：DOM 尺寸链到组件根/标题跨端真源/防碰撞/模型状态机/目录意图/概念全映射/P2-06 导航/状态映射/验收硬门）=audits/gpt-uxdesign-review-2026-09-30.md。
+- 设计 v2（designs/m-ux-v2.md，闭合 D01-D09）已送设计门复审。
