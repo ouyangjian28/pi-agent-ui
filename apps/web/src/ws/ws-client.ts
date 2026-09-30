@@ -251,6 +251,8 @@ export class WsClient {
   private snapshot: SessionsSnapshot = INITIAL;
   private readonly listeners = new Set<() => void>();
   private listRequestPending = false;
+  /** M-UX D02：刷新合并位——在途中再 requestSessions 记 dirty，结算后自动补拉（不静默丢刷新）。 */
+  private listDirty = false;
   /** M-OPS（v1.4）：get-models 在途位（同 listRequestPending 语义；回帧/迟到零副作用）。 */
   private modelsRequestPending = false;
   /** v1.5（批A）：get-roots 在途位（同 listRequestPending 语义）。 */
@@ -299,12 +301,30 @@ export class WsClient {
     if (this.stopped) return;
     this.stopped = true;
     this.listRequestPending = false;
+    this.listDirty = false; // M-UX D02：停止面同口径清位
     this.modelsRequestPending = false; // M-OPS（v1.4）：清单在途随连接天折（状态面定格不清空）
     this.rootsRequestPending = false; // v1.5（批A）：根面同口径
     if (this.snapshot.state !== "closed" && this.snapshot.state !== "error") {
       this.transition({ state: "closed" });
     }
     this.socket?.close();
+  }
+
+  /** M-UX D02：显式刷新会话列表（刷新钮/launched 后自动补发）。在途时记 dirty 结算后补拉；
+   *  非 ready（welcome 前）安全忽略（发非 hello 帧会被 4401）。幂等：连续调用只产生一个在途+至多一次补拉。 */
+  requestSessions(): void {
+    if (this.stopped) return;
+    if (this.snapshot.state !== "ready") return;
+    if (this.listRequestPending) {
+      this.listDirty = true;
+      return;
+    }
+    this.requestSessionsInternal();
+  }
+
+  private requestSessionsInternal(): void {
+    this.listRequestPending = true;
+    this.sendFrame({ t: "list-sessions", requestId: LIST_REQUEST_ID });
   }
 
   /** M-OPS（v1.4）：请求模型清单（幂等：在途/已 ok 不重发；failed 可重发=用户新显式动作）。
@@ -361,8 +381,7 @@ export class WsClient {
         if (asWelcomeFrame(parsed) === null) return; // R1：缺字段/版本不符=未知帧，不得算握手成功
         this.transition({ state: "ready" });
         // 握手成功才发 list-sessions（§5.1 帧协议；welcome 前发任何非 hello 帧会被 4401）
-        this.listRequestPending = true;
-        this.sendFrame({ t: "list-sessions", requestId: LIST_REQUEST_ID });
+        this.requestSessionsInternal();
         return;
       }
       case "sessions": {
@@ -372,6 +391,11 @@ export class WsClient {
         if (frame === null || frame.requestId !== LIST_REQUEST_ID) return;
         this.listRequestPending = false;
         this.transition({ sessions: frame.sessions, total: frame.total, listVersion: frame.listVersion });
+        // M-UX D02 dirty 合并：在途期间的刷新请求不丢——结算后自动补拉一次
+        if (this.listDirty) {
+          this.listDirty = false;
+          this.requestSessionsInternal();
+        }
         return;
       }
       case "models-list": {
@@ -443,6 +467,7 @@ export class WsClient {
   /** 统一错误出口：清在途请求（迟到回包不再变更 error 快照）+受控文案进快照。 */
   private fail(errorKind: WsClientErrorKind, errorMessage: string): void {
     this.listRequestPending = false;
+    this.listDirty = false; // M-UX D02：错误面在途与待补拉一并清位（迟到回包不再变更 error 快照）
     this.modelsRequestPending = false; // P3-5（DS 审）：与 close() 同口径——error 面在途清位（状态面定格不清空）
     this.rootsRequestPending = false; // v1.5（批A）：根面同口径
     this.transition({ state: "error", errorKind, errorMessage });

@@ -38,6 +38,27 @@ export interface NewSessionSource {
 /** 下拉特殊值：不携带 model 域（帧不携键=v1 四字段严格形兼容；pi 用自身默认模型）。 */
 const MODEL_DEFAULT = "__default__";
 
+/** M-UX D03：自动 file 名（预填可改）。随机源可注入（测试固定随机源杀例）；默认 CSPRNG 16 字节=hex32（128 位；碰撞概率非零且极低，服务端同名=追加语义，前端不假造冲突不自动换名）。 */
+export function autoFile(
+  now: () => Date = () => new Date(),
+  random: (n: number) => Uint8Array = defaultRandomBytes,
+): string {
+  const d = now();
+  const p2 = (n: number): string => String(n).padStart(2, "0");
+  const ts = `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
+  const bytes = random(16);
+  let hex = "";
+  for (let i = 0; i < bytes.length; i++) hex += bytes[i]!.toString(16).padStart(2, "0");
+  return `auto-${ts}-${hex}.jsonl`;
+}
+
+function defaultRandomBytes(n: number): Uint8Array {
+  const b = new Uint8Array(n);
+  crypto.getRandomValues(b);
+  return b;
+}
+
+
 export function NewSession({
   wsClient,
   writeClient,
@@ -58,11 +79,13 @@ export function NewSession({
   const roots = snap.roots;
   const wsState = snap.state;
   const [freeText, setFreeText] = useState("");
+  // M-UX D03：自动 file 名（预填可改）——auto-YYYYMMDD-HHmmss-<hex32>.jsonl，
+  // 尾缀=16 字节 CSPRNG（128 位；碰撞概率非零且极低，服务端同名=追加语义，前端不假造冲突）。
+  const [file, setFile] = useState(() => autoFile());
   useEffect(() => {
     wsClient.requestModels();
     wsClient.requestRoots(); // v1.5（批A）：目录选择器数据源（同 models 补拉口径；幂等）
   }, [wsClient, wsState]);
-  const [file, setFile] = useState("");
   const [text, setText] = useState("");
   const [notReady, setNotReady] = useState<NotReadyInfo | null>(null);
   const [sending, setSending] = useState(false);

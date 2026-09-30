@@ -231,6 +231,7 @@ function ConnectedApp({
               onLaunched={(f) => {
                 setNewSession(false);
                 onSelectFile(f);
+                clients.wsClient.requestSessions(); // M-UX D02：launched 后自动补拉列表（首 user 可能晚落盘；dirty 合并在途不丢）
               }}
               onCancel={() => setNewSession(false)}
             />

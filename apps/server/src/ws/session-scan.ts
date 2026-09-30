@@ -15,7 +15,7 @@ export const SCAN_LIMITS = {
   maxFiles: 1000, // 目录枚举上限（§5.7）
   visitCapFactor: 4, // 访问上限系数：visitedCap=maxFiles*4（非匹配名也计入单轮工作量上限）
   perFileBudget: 512 * 1024, // 单文件读取预算（截断=条目级 partial；标题/身份在前部通常可得）
-  titleLimit: 80,
+  titleLimit: 20,
 } as const;
 
 export interface ScannedSession {
@@ -150,6 +150,7 @@ export function parseSessionBuffer(buf: Buffer, name: string, sizeBytes: number,
   const lines = text.split("\n");
   let sessionId: string | null = null;
   let rawTitle: string | null = null;
+  let foundFirstUser = false;
   let lastActiveMs: number | null = null;
   let entries = 0;
   for (let i = 0; i < lines.length; i++) {
@@ -173,13 +174,24 @@ export function parseSessionBuffer(buf: Buffer, name: string, sizeBytes: number,
     entries++;
     const t = tsOf(o.timestamp);
     if (t !== null) lastActiveMs = t;
-    if (rawTitle === null) {
+    // M-UX D02：标题=首条 role=user 消息的拼合全文（foundFirstUser 锁定后只从它提取，
+    // 纯附件/全空白→无标题，不跳第二条 user；多 text 块非空块以 \n 连接后整体过产线
+    // ——完整形态识别先于 limit20 截断，敏感单元不透片段）。
+    if (!foundFirstUser) {
       const m = o.message as Record<string, unknown> | undefined;
-      const c = m?.content;
-      if (typeof c === "string" && c.length > 0) rawTitle = c;
-      else if (Array.isArray(c)) {
-        const seg = c.find((b): b is { type: string; text: string } => typeof b === "object" && b !== null && (b as { type?: unknown }).type === "text" && typeof (b as { text?: unknown }).text === "string");
-        if (seg && seg.text.length > 0) rawTitle = seg.text;
+      if (m !== undefined && m.role === "user") {
+        foundFirstUser = true;
+        const c = m.content;
+        if (typeof c === "string" && c.trim() !== "") rawTitle = c;
+        else if (Array.isArray(c)) {
+          const parts = c
+            .filter(
+              (b): b is { type: string; text: string } =>
+                typeof b === "object" && b !== null && (b as { type?: unknown }).type === "text" && typeof (b as { text?: unknown }).text === "string" && ((b as { text?: unknown }).text as string).trim() !== "",
+            )
+            .map((b) => b.text);
+          if (parts.length > 0) rawTitle = parts.join("\n");
+        }
       }
     }
   }

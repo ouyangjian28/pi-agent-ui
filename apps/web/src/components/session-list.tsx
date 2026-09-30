@@ -4,6 +4,7 @@
 
 import React from "react";
 import { useSessions } from "../ws/use-sessions";
+import { resolveTitle } from "../ws/resolve-title";
 import type { WsClient } from "../ws/ws-client";
 
 export function SessionList({
@@ -11,12 +12,58 @@ export function SessionList({
   selectedFile = null,
   onSelect,
 }: {
-  client: Pick<WsClient, "subscribe" | "getSnapshot">;
+  client: Pick<WsClient, "subscribe" | "getSnapshot" | "requestSessions">;
   /** A1d 组合根选择面：提供 onSelect 即把条目渲染为按钮（aria-current 标记选中）；缺省=纯展示（既有行为零改动）。 */
   selectedFile?: string | null;
   onSelect?: (file: string) => void;
 }) {
   const view = useSessions(client);
+  if (view.status === "ready") {
+    return (
+      <section aria-label="会话列表区">
+        <div className="list-header">
+          <h2>会话</h2>
+          <button type="button" className="refresh" onClick={() => client.requestSessions()}>
+            刷新
+          </button>
+        </div>
+        {view.sessions.length === 0 ? (
+          <div className="empty">
+            <h2>还没有会话</h2>
+            <p>服务端会话目录为空。</p>
+          </div>
+        ) : (
+          <ul className="session-list" aria-label="会话列表">
+            {view.sessions.map((session) => {
+              const title = (
+                <>
+                  <span className="row-title">{resolveTitle(session)}</span>
+                  <small>
+                    {session.file} · {session.entryCount} 条
+                  </small>
+                </>
+              );
+              return (
+                <li key={session.file}>
+                  {onSelect ? (
+                    <button
+                      type="button"
+                      aria-current={selectedFile === session.file ? "page" : undefined}
+                      onClick={() => onSelect(session.file)}
+                    >
+                      {title}
+                    </button>
+                  ) : (
+                    title
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+    );
+  }
   if (view.status === "loading") {
     return (
       <div className="empty" role="status" aria-busy="true">
@@ -49,44 +96,6 @@ export function SessionList({
       </div>
     );
   }
-  if (view.sessions.length === 0) {
-    return (
-      <div className="empty">
-        <h2>还没有会话</h2>
-        <p>服务端会话目录为空。</p>
-      </div>
-    );
-  }
-  return (
-    <ul className="session-list" aria-label="会话列表">
-      {view.sessions.map((session) => {
-        const title = (
-          <>
-            <span className="row-title">
-              {session.title.text}
-              {session.title.truncated ? "…" : ""}
-            </span>
-            <small>
-              {session.file} · {session.entryCount} 条
-            </small>
-          </>
-        );
-        return (
-          <li key={session.file}>
-            {onSelect ? (
-              <button
-                type="button"
-                aria-current={selectedFile === session.file ? "page" : undefined}
-                onClick={() => onSelect(session.file)}
-              >
-                {title}
-              </button>
-            ) : (
-              title
-            )}
-          </li>
-        );
-      })}
-    </ul>
-  );
+  // view.status === "ready" 已在上分支返回；此处不可达（穷尽）
+  return null;
 }

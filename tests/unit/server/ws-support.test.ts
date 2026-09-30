@@ -394,11 +394,72 @@ describe("session-scan（D21）", () => {
       const r = await scanSessions(d);
       const t = r.sessions[0]!.title;
       expect(t.truncated).toBe(true);
-      expect(t.text.length).toBeLessThanOrEqual(80 + 20); // 截断标记余量
+      expect(t.text.length).toBeLessThanOrEqual(20); // M-UX D02：limit20（截断在产线内安全完成，无额外余量）
       expect(t.text).toContain("很长的标题");
     } finally {
       await rm(d, { recursive: true, force: true });
     }
+  });
+
+  it("M-UX D02 B1-1：首 user 多 text 块拼合过产线——env 完整单元识别不透片段", async () => {
+    const d = await tmp();
+    try {
+      await writeFile(join(d, "m1.jsonl"), JSON.stringify({ type: "session", id: "s", timestamp: 1 }) + "\n" +
+        JSON.stringify({ type: "message", timestamp: 2, message: { role: "user", content: [
+          { type: "text", text: "帮我配置" },
+          { type: "text", text: "API_KEY=\"abcdefgh1234\"" },
+        ] } }) + "\n");
+      const r = await scanSessions(d);
+      const t = r.sessions[0]!.title;
+      expect(t.text).toContain("帮我配置");
+      expect(t.text).toContain("[env]");
+      expect(t.text).not.toContain("abcdefgh1234"); // 完整单元遮蔽，不透片段
+    } finally { await rm(d, { recursive: true, force: true }); }
+  });
+
+  it("M-UX D02 B1-2：19ASCII+非 BMP 截断不产生孤立代理项", async () => {
+    const d = await tmp();
+    try {
+      const text = "a".repeat(19) + "\u{1F600}"; // 19+2 码元=21；limit20 截断须代理对保护
+      await writeFile(join(d, "m2.jsonl"), JSON.stringify({ type: "session", id: "s", timestamp: 1 }) + "\n" +
+        JSON.stringify({ type: "message", timestamp: 2, message: { role: "user", content: text } }) + "\n");
+      const r = await scanSessions(d);
+      const t = r.sessions[0]!.title;
+      expect(t.truncated).toBe(true);
+      expect(/\uD800[\uDC00-\uDFFF]|[\uDC00-\uDFFF](?![\uD800-\uDFFF])|^[\uD800-\uDFFF](?![\uDC00-\uDFFF])/u.test(t.text)).toBe(false); // 无孤立代理项
+    } finally { await rm(d, { recursive: true, force: true }); }
+  });
+
+  it("M-UX D02 B1-3：首 user 纯附件/全空白→无标题，不跳第二条 user；assistant 先行不取", async () => {
+    const d = await tmp();
+    try {
+      await writeFile(join(d, "m3.jsonl"), JSON.stringify({ type: "session", id: "s", timestamp: 1 }) + "\n" +
+        JSON.stringify({ type: "message", timestamp: 2, message: { role: "assistant", content: "助手先行不该当标题" } }) + "\n" +
+        JSON.stringify({ type: "message", timestamp: 3, message: { role: "user", content: [{ type: "image", data: "xx" }] } }) + "\n" +
+        JSON.stringify({ type: "message", timestamp: 4, message: { role: "user", content: "第二 user 不该被拿" } }) + "\n");
+      const r = await scanSessions(d);
+      const s = r.sessions[0]!;
+      expect(s.title.text).toBe(""); // 首 user=纯附件→无标题，不跳第二条
+      expect(s.entryCount).toBe(3);
+    } finally { await rm(d, { recursive: true, force: true }); }
+  });
+
+  it("M-UX D02 B1-4：全空白 text 块跳过，拼合非空→有标题；全空白串→无标题", async () => {
+    const d = await tmp();
+    try {
+      await writeFile(join(d, "m4a.jsonl"), JSON.stringify({ type: "session", id: "s", timestamp: 1 }) + "\n" +
+        JSON.stringify({ type: "message", timestamp: 2, message: { role: "user", content: [
+          { type: "text", text: "   " },
+          { type: "text", text: "实际内容" },
+        ] } }) + "\n");
+      await writeFile(join(d, "m4b.jsonl"), JSON.stringify({ type: "session", id: "s2", timestamp: 1 }) + "\n" +
+        JSON.stringify({ type: "message", timestamp: 2, message: { role: "user", content: "   \t  " } }) + "\n");
+      const r = await scanSessions(d);
+      const a = r.sessions.find((s) => s.file === "m4a.jsonl")!;
+      const b = r.sessions.find((s) => s.file === "m4b.jsonl")!;
+      expect(a.title.text).toContain("实际内容"); // 空白块跳过后拼合非空块
+      expect(b.title.text).toBe(""); // 全空白串→无标题
+    } finally { await rm(d, { recursive: true, force: true }); }
   });
 
   it("坏文件（symlink）→条目占位 partial 不吞文件", async () => {
