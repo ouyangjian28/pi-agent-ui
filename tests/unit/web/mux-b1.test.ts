@@ -286,8 +286,12 @@ describe("M-UX 批1修复 P2-02：CSPRNG 来源约束+同 file 不换名", () =>
       getSnapshot: () => writeSnap,
     };
     // 固定源：CSPRNG 全 cd 字节（无需产品注入接口）+冻结时钟→预填名确定性
+    // 每次调用字节递增（首调 0xcd，再调 0xce…）：正常流只调一次=cd 名；
+    // 若 launched.then 重掷 autoFile→第二次调用=ce 名→「仍 name1」断言必红（换名变异可见）。
+    let cryptoCalls = 0;
     const spy = vi.spyOn(crypto, "getRandomValues").mockImplementation((arr: Uint8Array) => {
-      for (let i = 0; i < arr.length; i++) arr[i] = 0xcd;
+      const b = 0xcd + cryptoCalls++;
+      for (let i = 0; i < arr.length; i++) arr[i] = b;
       return arr;
     });
     vi.useFakeTimers({ now: Date.UTC(2026, 8, 30, 6, 5, 4) });
