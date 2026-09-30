@@ -1428,3 +1428,21 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - not-ready 默认态说明（B3-5）：effectiveModel===undefined 时 NotReadyBanner 下 role=note「重试将不指定模型；本会话此前绑定的模型设置不会被重置，以服务端实际为准」——默认重试不声称显示实际模型；选了模型则不显示。
 - mux-b2 追加 B3 五例（12 例全绿）：B3-1 非法编辑意图冻结（草稿保留+清单到达不清）/B3-2 custom 内编辑不覆盖恢复目标（X→Y→清空回转移前选择）/B3-3 custom→B→清空仍 B/B3-4 拼合值不过正则禁选+不可用/B3-5 默认重试说明+选模型后不显示。全仓 1809 绿+tsc 0。commit bf1ce14。
 - 变异 4/4 真杀（基线 bf1ce14 先 commit）：Mu-b2a-1 roots-list 身份核验拆→force 后旧 R1 例红/Mu-b2a-2 结算不清 timer→清 timer 例红/Mu-b2b-3 总截止 useEffect 拆→无 welcome 超时例红/Mu-b2b-4 清单禁选拆→B3-4 红。**教训再现：变异脚本 assert 失败路径未还原工作树（残留静默变异直到 git diff 才发现）——变异脚本必须 try/finally 还原+收尾 git diff 复核。**
+
+### M-UX 批3：新建页减法（用户拍板；2026-10-10，GLM 写·线上 16:18 面）
+
+- 用户反馈（m20896 语音）：会话文件名不该显示给用户、项目目录一直加载不出来。拍板减法三条：①新建页无文件名输入框（file=useRef\<autoFile()\> 挂载一次生成，filePattern 服务端口径不变）②目录选择器整面退役（requestRoots 数据域保留幂等拉取；sendPrompt 恒不携 cwd 键=服务端默认）③模型记住上次选择（LAST_MODEL_KEY=piagent-last-model；挂载恢复 readLastModel+create 发出前 writeLastModel；MODEL_DEFAULT=__default__ 哨兵=默认）。
+- 减法消解面：D05 的页面等待域/超时出口/多根选择 UI 全退役（数据域 WsClient 快照照常维护）；D04 的 userTouchedModel/lastNonCustom 死状态随 r2 删除。
+- 测试重写：new-session.test 17 例（目录组改「批3 减法」4 例：requestRoots 保留/多根无目录元素+创建无 cwd 键/v1.6 双树同/failed 无感；「记住上次」4 例）；mux-b1 22 例（B2 autoFile 本地时区预计算）；mux-b2 12 例（B4 等待域两例退役→「D05 UI 退役」2 例）；real-app 6 例。全仓 1810 绿。commit 30ebbcb。变异 3/3（Mu-b3-1 恢复 useEffect 拆/Mu-b3-2 writeLastModel 拆/Mu-b3-3 useRef→每渲染重掷）。
+- 脚本教训：tail -3 抓不到 vitest Tests 行（后面还有 Start at/Duration），判绿改 grep -E '^ *Tests '。
+
+### M-UX 批2 修复批 r2：GPT 审 NO-GO 60 对账处置（2026-10-10，GLM 修·待复审）
+
+- 审报=~/ai projects/pi-agent-ui/audits/gpt-muxb2-review-2026-09-30.md（P1×6+P2×3+P3×1+独立探针 6/7 失+窄变异 3 存活）。
+- 对账拍板：批3 减法已消解 P1-01（截止后缓存改 effectiveCwd）/P1-02（force/retry 预算——目录 UI 无消费面）/P1-04（confirmed 目录锁）；P1-03 持久化批3 已实现，残余（死状态+哨兵防御）本批修。**设计面变更（D05 UI 退役）系用户拍板减法，超越设计门 v7 原案，记档于此。**
+- ws-client.ts 真修复两处：①P1-05 远端 close（onClose）/fail() 终局清 rootsRequestPending+modelsRequestPending+rootsTimer（roots 快照定格 loading 不清空——同 models 口径，重挂可重发）；②P2-02 requestRoots sendFrame 同步 throw→pending 回滚+**loading 迁移后移到发出成功后**（未上线的请求不产生状态迁移）。
+- new-session.tsx：删 userTouchedModel/lastNonCustom 死状态（GPT 证 write-only）；isPersistableModel(v)=v===MODEL_DEFAULT‖(非 __ 前缀∧过 modelPattern)——read/writeLastModel 统一走它（拒 __custom__ 等哨兵样式值经存储面漏入 model 域）。
+- mux-b2 B3-1 act 包裹（P2-03）+先证清单渲染再断草稿冻结。
+- 杀点例三枚（变异 3/3 真杀，基线 d17014d）：P1-05 例=serverClose→**vi.getTimerCount()===0 物理撤销断言**（GPT P1-06 口径：pending 门拦截≠timer 清理，首版例存活实证）+advance 10s 零通知+迟到回包零副作用；P2-02 例=error 4402（retryable:true 必带）结算 failed→send throw 不悬挂可重发（get-roots 帧≥2）；哨兵例=读丢弃+写零写入（先 removeItem 隔离：拒写≠清污染）+合法值不覆盖。
+- commit d17014d+ab4d644（timer 计数断言补强）。全仓 1813 绿+tsc 两包 0。
+- 尾债：models 请求 send-throw 悬挂同型弱点未修（本批范围外，GPT 未点名；M-DEPLOY 后统一处置）。
