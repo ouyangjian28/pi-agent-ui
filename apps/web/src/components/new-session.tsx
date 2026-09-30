@@ -1,11 +1,11 @@
 // 新建会话视图（批3 用户拍板减法）：**用户只见 模型+首条消息**——
 // 文件名后台自动生成（autoFile，用户不可见不可改）；工作目录恒服务端默认（不渲染选择器、
-// 不拉取等待面——requestRoots 数据域调用保留供壳层 rootsHint，UI 零目录元素）。
+// 不拉取等待面——requestRoots 数据域调用保留属兼容选择：壳层 rootsHint 为固定串，不消费快照）。
 // 首 prompt 成功（write-ack launched）→onLaunched(file) 由壳切正常 SessionDetail；
 // 启动失败（not-ready）→响亮红条（重试=重发同 prompt；换模型=清模型选择重选）。
 // 模型选择双通道：下拉（get-models 清单；loading/failed 均降级）+free-text 输入（优先生效——
 // 清单失败/新模型未入清单仍可手打 id；modelPattern 本地预校验零帧成本）。
-// 模型记住上次：create 成功发出即写 localStorage（仅 __default__ 或过 modelPattern 的值）；
+// 模型记住上次：sendPrompt 发出前即写偏好（仅 __default__ 或过 modelPattern 的值；写端本地拒绝也已写）；
 // 挂载恢复（坏值丢弃防御）。
 import React, { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { LIMITS } from "@pi-agent-ui/protocol/src/contracts";
@@ -42,7 +42,7 @@ export interface NewSessionSource {
 /** 下拉特殊值：不携带 model 域（帧不携键=v1 四字段严格形兼容；pi 用自身默认模型）。 */
 const MODEL_DEFAULT = "__default__";
 
-/** M-UX D03：自动 file 名（预填可改）。随机源可注入（测试固定随机源杀例）；默认 CSPRNG 16 字节=hex32（128 位；碰撞概率非零且极低，服务端同名=追加语义，前端不假造冲突不自动换名）。 */
+/** M-UX D03：自动 file 名（批3 起后台生成：用户不可见不可改）。随机源可注入（测试固定随机源杀例）；默认 CSPRNG 16 字节=hex32（128 位；碰撞概率非零且极低，服务端同名=追加语义，前端不假造冲突不自动换名）。 */
 export function autoFile(
   now: () => Date = () => new Date(),
   random: (n: number) => Uint8Array = defaultRandomBytes,
@@ -127,13 +127,13 @@ export function NewSession({
 
   useEffect(() => {
     wsClient.requestModels();
-    wsClient.requestRoots(); // v1.5（批A）：目录选择器数据源（同 models 补拉口径；幂等）
+    wsClient.requestRoots(); // v1.5（批A）遗留数据域调用（幂等；批3 后 UI 零目录消费面，兼容保留）
   }, [wsClient, wsState]);
   const [text, setText] = useState("");
   const [notReady, setNotReady] = useState<NotReadyInfo | null>(null);
   const [sending, setSending] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
-  // 批3：文件名后台自动（用户不可见）——首次渲染惰性生成一次，此后保留（候选值丢弃），创建全程稳定。
+  // 批3：文件名后台自动（用户不可见）——首次渲染惰性生成一次（autoFile 全局只调用一次），此后保留，创建全程稳定。
   const fileRef = useRef<string | null>(null);
   if (fileRef.current === null) fileRef.current = autoFile();
   const file = fileRef.current;
@@ -224,7 +224,7 @@ export function NewSession({
             models.items.map((m: ModelInfoDTO) => {
               const full = `${m.provider}/${m.id}`;
               // D04：清单项校验=完整 modelPattern 正则（非仅长度）；不过→禁选+标不可用
-              const usable = LIMITS.modelPattern.test(full);
+              const usable = !full.startsWith("__") && LIMITS.modelPattern.test(full); // __ 前缀=保留域（与 selectModel/持久化同口径；渲染面同步表现拒绝）
               return (
                 <option key={full} value={full} disabled={!usable}>
                   {m.provider} / {m.id}

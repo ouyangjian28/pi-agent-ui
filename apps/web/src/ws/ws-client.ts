@@ -305,7 +305,7 @@ export class WsClient {
     this.listRequestPending = false;
     this.listDirty = false; // M-UX D02：停止面同口径清位
     this.modelsRequestPending = false; // M-OPS（v1.4）：清单在途随连接天折（状态面定格不清空）
-    this.rootsRequestPending = false; // v1.5（批A）：根面同口径
+    this.rootsRequestPending = false; // v1.5（批A）：根面同口径（closed 后同 client 无重连，重新请求=重建 client）
     if (this.rootsTimer !== null) { clearTimeout(this.rootsTimer); this.rootsTimer = null; } // M-UX 批2 D05：换代清旧 timer
     if (this.snapshot.state !== "closed" && this.snapshot.state !== "error") {
       this.transition({ state: "closed" });
@@ -350,7 +350,7 @@ export class WsClient {
 
   /** M-UX 批2 D05：roots 请求身份三件——seq 递增 requestId+在途身份+10s timer（捕获所属身份）。
    * 分域守卫（设计 v7 D05 表）：请求域=client epoch（实例）+requestId 双核验；
-   * force（重试/用户新动作）=旧请求立即失效（新身份生效），旧回包/旧 timer 零覆盖。 */
+   * 重试（failed 后重发）=旧请求立即失效（新身份生效），旧回包/旧 timer 零覆盖。public 无 force 参数。 */
   private rootsSeq = 0;
   private rootsTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -462,7 +462,7 @@ export class WsClient {
         // 服务缓存写入域：不要求原挂载仍活（组件卸载后迟到回包照常入快照，供列表页/下次挂载用）。
         const frame = asRootsListFrame(parsed);
         if (frame === null || frame.requestId !== `${ROOTS_REQUEST_BASE}-${this.rootsSeq}`) return;
-        if (!this.rootsRequestPending) return; // 未请求/已 force 替代/已超时结算=零副作用
+        if (!this.rootsRequestPending) return; // 未请求/已被新请求替代/已超时结算=零副作用
         this.rootsRequestPending = false;
         if (this.rootsTimer !== null) { clearTimeout(this.rootsTimer); this.rootsTimer = null; } // 成功取消所属 timer
         this.transition({ roots: { status: "ok", items: frame.roots, journalRoot: frame.journalRoot ?? null, cause: null } });
@@ -512,7 +512,7 @@ export class WsClient {
     this.listRequestPending = false; // P2-01（GPT 审）：server 侧关闭同口径清位（迟到回包零副作用）
     this.listDirty = false;
     this.modelsRequestPending = false; // P1-05（GPT 批2审）：清单在途同口径清位
-    this.rootsRequestPending = false; // P1-05：根面在途同口径清位（状态面定格不清空；重挂可重发）
+    this.rootsRequestPending = false; // P1-05：根面在途同口径清位（状态面定格不清空；重新请求=重建 client——同 client 无重连）
     if (this.rootsTimer !== null) { clearTimeout(this.rootsTimer); this.rootsTimer = null; } // 关闭后旧 timer 不得再改终态快照
     this.transition({ state: "closed" }); // 终态；无自动重连（后续迭代）
   }
@@ -522,7 +522,7 @@ export class WsClient {
     this.listRequestPending = false;
     this.listDirty = false; // M-UX D02：错误面在途与待补拉一并清位（迟到回包不再变更 error 快照）
     this.modelsRequestPending = false; // P3-5（DS 审）：与 close() 同口径——error 面在途清位（状态面定格不清空）
-    this.rootsRequestPending = false; // v1.5（批A）：根面同口径
+    this.rootsRequestPending = false; // v1.5（批A）：根面同口径（closed 后同 client 无重连，重新请求=重建 client）
     if (this.rootsTimer !== null) { clearTimeout(this.rootsTimer); this.rootsTimer = null; } // P1-05：error 面同口径清 timer
     this.transition({ state: "error", errorKind, errorMessage });
   }

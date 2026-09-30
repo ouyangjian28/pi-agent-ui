@@ -360,6 +360,50 @@ describe("批3 模型记住上次（localStorage）", () => {
     expect(w3.write.sent).toHaveLength(0);
   });
 
+  it("杀点A（GPT 三审 Mu-r3-3 裁决）：selectModel 哨兵拒收→零状态迁移（草稿不清/锚不变），非行为等价死层", async () => {
+    // 独立行为出口=状态迁移面：拒收既不清草稿也不改 choice（旧守卫裸 pattern 会对 __custom__ 误迁移：清草稿+锚定哨兵）
+    window.localStorage.setItem("piagent-last-model", "gone/old");
+    setup(modelsSnap("loading")); // 恢复合法旧 id+清单挂起
+    const sel = screen.getByLabelText("模型选择") as HTMLSelectElement;
+    expect(sel.value).toBe("gone/old");
+    fill("首条消息", "hi");
+    const input = screen.getByLabelText("模型 id 直达") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "__custom__" } }); // 草稿哨兵：modelValid 禁创建
+    expect((screen.getByRole("button", { name: "创建会话" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(sel, { target: { value: "__custom__" } }); // 受控 handler 输入（同值 option 路径入口）
+    expect(input.value).toBe("__custom__"); // 杀点：拒收未清草稿（旧守卫此处得空串）
+    fireEvent.change(input, { target: { value: "" } }); // 手动清空草稿→回退锚
+    expect(sel.value).toBe("gone/old"); // 锚未被哨兵覆盖（旧守卫此处得 __custom__）
+    expect((screen.getByRole("button", { name: "创建会话" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("杀点B+R3-P3-01（GPT 三审）：__ 前缀清单项渲染同步拒绝（disabled+标不可用）；handler 拒收值不变", () => {
+    // DTO 形状校验允许 {provider:"__reserved"} 入清单；渲染面与选择守卫同口径同步表现拒绝
+    window.localStorage.clear();
+    setup(modelsSnap("ok", [
+      { provider: "__reserved", id: "m", context: "8k" },
+      { provider: "kimi-coding", id: "k3" },
+    ]));
+    const sel = screen.getByLabelText("模型选择") as HTMLSelectElement;
+    const opt = screen.getByRole("option", { name: /__reserved \/ m/ }) as HTMLOptionElement;
+    expect(opt.disabled).toBe(true); // 渲染同步拒绝：不可选
+    expect(opt.textContent).toContain("（不可用）"); // 显式标不可用（非静默）
+    fireEvent.change(sel, { target: { value: "__reserved/m" } }); // 受控 handler：值被拒
+    expect(sel.value).toBe("__default__"); // 杀点：选择零迁移（退回旧守卫此处得 __reserved/m）
+    const ok = screen.getByRole("option", { name: /kimi-coding \/ k3/ }) as HTMLOptionElement;
+    expect(ok.disabled).toBe(false); // 正常项不受连坐
+  });
+
+  it("autoFile 单次调用（GPT 三审 R2-P3-01 补证入仓）：挂载惰性生成一次，编辑/重试/再交互零重调", async () => {
+    window.localStorage.clear();
+    const spy = vi.spyOn(crypto, "getRandomValues");
+    const { write } = setup(modelsSnap("ok", []));
+    fill("首条消息", "hi");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "创建会话" })); });
+    await waitFor(() => expect(write.sent).toHaveLength(1));
+    expect(spy).toHaveBeenCalledTimes(1); // 全生命周期恰一次（退回 useRef(autoFile()) 每次 render 求值则 >1）
+  });
+
   it("哨兵样式保留值（__custom__ 等）→读写双拒（P1-03 GPT 批2审：不得经存储面漏入 model 域）", () => {
     window.localStorage.clear();
     window.localStorage.setItem("piagent-last-model", "__custom__"); // 过 modelPattern 但属保留样式
