@@ -2,6 +2,7 @@
 // RealApp 不再渲染本适配器。autoFile/偏好/守卫只有 ws/draft-model 一份实现。
 import React, { useEffect, useRef, useSyncExternalStore } from "react";
 import { ConversationState } from "../ws/conversation-state";
+import { useConversationLifetime } from "../ws/use-conversation-lifetime";
 import { autoFile, readLastModel, writeLastModel, effectiveModel, MODEL_DEFAULT } from "../ws/draft-model";
 import { WriteComposer } from "./write-composer";
 import type { ModelSource } from "./model-picker";
@@ -22,7 +23,7 @@ export function NewSession({ wsClient, writeClient, onLaunched, onCancel }: { ws
   const owner = ownerRef.current; const snapshot = useSyncExternalStore(owner.subscribe, owner.getSnapshot);
   const id = idRef.current!; const slot = snapshot.drafts.get(id)!;
   useEffect(() => { owner.setClient(writeClient); }, [owner, writeClient]);
-  useEffect(() => () => owner.dispose(), [owner]);
+  useConversationLifetime(owner);
   return <WriteComposer client={writeClient} file={slot.file} editor={{
     slot, source: wsClient, isNew: true,
     onEdit: (text) => owner.edit(id, text), onConfigure: (choice, text) => owner.configure(id, choice, text),

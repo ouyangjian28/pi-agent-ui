@@ -61,6 +61,15 @@ describe("R1 真 AppRoot+三客户端首链", () => {
     fireEvent.change(textarea, { target: { value: "第二句话" } }); fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
     expect(Socket.all[2]!.sent.filter((f) => f.t === "prompt")).toHaveLength(2); expect(Socket.all[2]!.sent.at(-1)).toMatchObject({ file: frame.file, text: "第二句话" });
   });
+  it("真实 main 的 StrictMode 重挂探测不销毁状态 owner，首字与首帧保持", () => {
+    render(React.createElement(React.StrictMode, null, React.createElement(AppRoot, { createSocket: factory })));
+    act(() => Socket.all.slice(-3).forEach((socket) => socket.open()));
+    const textarea = screen.getByLabelText("首条消息") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "Strict 首字" } });
+    expect(textarea.value).toBe("Strict 首字"); expect(screen.getByLabelText("首条消息")).toBe(textarea);
+    fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" }));
+    expect(Socket.all.flatMap((socket) => socket.sent).filter((frame) => frame.t === "prompt")).toEqual([expect.objectContaining({ text: "Strict 首字", file: expect.stringMatching(/^auto-/) })]);
+  });
   it("列表第51条真实可见、点选正确 file；partial 与累计数量可发现", () => {
     start(); fireEvent.click(screen.getByRole("button", { name: "刷新" })); list(Array.from({ length: 50 }, (_, index) => dto(`p${index + 1}.jsonl`, `第${index + 1}条对话`)), 51, 0, true);
     expect(screen.getByText("已载 50 / 共 51")).toBeTruthy(); fireEvent.click(screen.getByRole("button", { name: "加载更多" }));

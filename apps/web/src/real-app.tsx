@@ -10,6 +10,7 @@ import { ConversationHeader } from "./components/conversation-header";
 import { ConversationState } from "./ws/conversation-state";
 import { autoFile, readLastModel, writeLastModel, MODEL_DEFAULT, effectiveModel, isPersistableModel } from "./ws/draft-model";
 import { useSessionDetail } from "./ws/use-session-detail";
+import { useConversationLifetime } from "./ws/use-conversation-lifetime";
 import { SessionDetail } from "./components/session-detail";
 import { SessionList } from "./components/session-list";
 import { ThemeToggle } from "./components/theme-toggle";
@@ -49,7 +50,7 @@ export function RealApp({ createSocket }: RealAppProps) {
   const [reconnectUi, setReconnectUi] = useState<{ attempts: number; nextInMs: number } | null>(null);
   const clientsRef = React.useRef<AppClients | null>(null);
   const [owner] = useState(() => new ConversationState(() => clientsRef.current?.wsClient.requestSessions()));
-  useEffect(() => () => owner.dispose(), [owner]);
+  useConversationLifetime(owner);
   // B1：当前连接目标为跨源（dev 覆盖）时为真——拒绝面接管（不拨线+明白提示）
   const [untrustedTarget, setUntrustedTarget] = useState(false);
   const [untrustedUrl, setUntrustedUrl] = useState<string | null>(null);
