@@ -557,6 +557,7 @@ describe("v1.5 授权根面（get-roots/roots-list，批A）", () => {
       expect(client.getSnapshot().roots.status).toBe("loading");
       ws.serverClose(1000); // 远端正常关闭（非 close() 主动；此 transition 自身通知不算）
       expect(client.getSnapshot().state).toBe("closed");
+      expect(vi.getTimerCount()).toBe(0); // 物理撤销（非 pending 门兜底——GPT P1-06 口径：pending 门拦截≠timer 清理）
       let notified = 0;
       client.subscribe(() => notified++);
       await act(async () => { vi.advanceTimersByTime(10_000); }); // 旧 timer 到点
