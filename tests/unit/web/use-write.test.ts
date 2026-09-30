@@ -91,8 +91,9 @@ class StubWriteClient {
     };
   };
   readonly getSnapshot = (): WriteSnapshot => this.snap;
-  sendPrompt(file: string, text: string, model?: string): Promise<unknown> {
-    this.calls.push(`prompt:${file}:${text}:${model ?? "∅"}`);
+  sendPrompt(file: string, text: string, model?: string, cwd?: string): Promise<unknown> {
+    // v1.5（批A）：cwd 仅在提供时追加第四段（缺省面断言格式不变）
+    this.calls.push(`prompt:${file}:${text}:${model ?? "∅"}${cwd === undefined ? "" : `:${cwd}`}`);
     return this.rejectWith === null ? Promise.resolve(this.resolveWith) : Promise.reject(this.rejectWith);
   }
   sendStop(file: string): Promise<unknown> {
@@ -244,7 +245,7 @@ describe("writeViewOf 派生（纯函数）", () => {
 
 describe("useWrite hook", () => {
   /** 渲染探针：把最近一次视图+动作暴露到模块级变量（每次渲染刷新）。 */
-  let probe: { view: WriteView; send: (text: string, model?: string) => Promise<boolean>; stop: () => Promise<boolean> } | null = null;
+  let probe: { view: WriteView; send: (text: string, model?: string, cwd?: string) => Promise<boolean>; stop: () => Promise<boolean> } | null = null;
   function Probe({ client, file }: { client: StubWriteClient; file: string | null }): React.ReactElement {
     const { view, send, stop } = useWrite(client, file);
     probe = { view, send, stop };
@@ -292,6 +293,19 @@ describe("useWrite hook", () => {
       expect(await probe!.send("again")).toBe(true);
     });
     expect(client.calls).toEqual(["prompt:a.jsonl:hi:openai/gpt-5.3", "prompt:a.jsonl:again:∅"]);
+  });
+
+  it("v1.5（批A）：send 透传可选 cwd（带路径→四参齐；缺省→不带目录）", async () => {
+    const client = new StubWriteClient();
+    render(React.createElement(Probe, { client, file: "a.jsonl" }));
+    await act(async () => {
+      expect(await probe!.send("hi", undefined, "/srv/proj-a")).toBe(true);
+    });
+    expect(client.calls).toEqual(["prompt:a.jsonl:hi:∅:/srv/proj-a"]);
+    await act(async () => {
+      expect(await probe!.send("again")).toBe(true);
+    });
+    expect(client.calls).toEqual(["prompt:a.jsonl:hi:∅:/srv/proj-a", "prompt:a.jsonl:again:∅"]);
   });
 
   it("M-OPS not-ready：ack 到达但启动失败→view.notReady 落账（cause+detail）；resolve 仍 true；新尝试清除", async () => {

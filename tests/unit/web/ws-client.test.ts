@@ -518,3 +518,73 @@ describe("M-OPS 模型清单面（get-models/models-list）", () => {
     expect(ws.sentFrames().filter((f) => (f as { t: string }).t === "get-models")).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// v1.5（批A）授权根面：get-roots 发送器+roots-list 载入+幂等+零副作用门（挂 list 连接）。
+// ---------------------------------------------------------------------------
+
+describe("v1.5 授权根面（get-roots/roots-list，批A）", () => {
+  const ROOTS = ["/srv/sessions", "/srv/proj-a", "/home/yyj/ai"];
+
+  it("ready 后 requestRoots 发 get-roots；回帧 ok→快照 items 原序；在途/ok 幂等不重发", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    const before = ws.sent.length;
+    client.requestRoots();
+    const frame = ws.sentFrames()[before] as { t: string; requestId: string };
+    expect(frame.t).toBe("get-roots");
+    expect(frame.requestId).toMatch(/^[\w-]{1,64}$/);
+    expect(client.getSnapshot().roots.status).toBe("loading");
+    client.requestRoots(); // 在途幂等：不重发
+    expect(ws.sent).toHaveLength(before + 1);
+    ws.receive({ t: "roots-list", requestId: frame.requestId, roots: ROOTS });
+    const r = client.getSnapshot().roots;
+    expect(r.status).toBe("ok");
+    expect(r.items).toEqual(ROOTS); // 服务端原序保留（首项=会话记录树，由 UI 层解释）
+    expect(r.cause).toBeNull();
+    const sentAfter = ws.sent.length;
+    client.requestRoots(); // ok 后幂等：不重发
+    expect(ws.sent).toHaveLength(sentAfter);
+  });
+
+  it("R1 形状拒：roots 含非 string 整帧拒绝、在途保持、后续合法帧成功", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    client.requestRoots();
+    const rid = (ws.sentFrames().at(-1) as { requestId: string }).requestId;
+    expect(client.getSnapshot().roots.status).toBe("loading");
+    ws.receive({ t: "roots-list", requestId: rid, roots: ["/ok", 42] }); // 畸形条目
+    expect(client.getSnapshot().roots.status).toBe("loading"); // 在途未消耗
+    ws.receive({ t: "roots-list", requestId: rid, roots: ROOTS }); // 坏帧后合法仍成功
+    expect(client.getSnapshot().roots.status).toBe("ok");
+    expect(client.getSnapshot().roots.items).toEqual(ROOTS);
+  });
+
+  it("error 帧 requestId 匹配→failed+受控文案（不回显远端 message），不连坐主连接；failed 后可重发", () => {
+    const { client, ws } = setup();
+    handshake(ws);
+    client.requestRoots();
+    const rid = (ws.sentFrames().at(-1) as { requestId: string }).requestId;
+    ws.receive({ t: "error", code: 4402, message: "secret /srv/sessions leak", retryable: false, requestId: rid });
+    const r = client.getSnapshot().roots;
+    expect(r.status).toBe("failed");
+    expect(r.cause).toBe("会话不存在或不可读（4402）"); // 受控文案，远端 message 不进快照
+    expect(client.getSnapshot().state).toBe("ready"); // 不连坐主连接状态
+    client.requestRoots(); // failed 可重发（新显式动作）
+    expect(client.getSnapshot().roots.status).toBe("loading");
+    expect(ws.sentFrames().filter((f) => (f as { t: string }).t === "get-roots")).toHaveLength(2);
+  });
+
+  it("零副作用门：未请求的 roots-list 忽略；握手前/close 后 requestRoots 静默不发", () => {
+    const { client, ws } = setup();
+    ws.open(); // authenticating 期
+    client.requestRoots();
+    expect(ws.sentFrames().filter((f) => (f as { t: string }).t === "get-roots")).toHaveLength(0);
+    handshake(ws);
+    ws.receive({ t: "roots-list", requestId: "get-roots-1", roots: ROOTS }); // 未请求
+    expect(client.getSnapshot().roots.status).toBe("idle");
+    client.close();
+    expect(() => client.requestRoots()).not.toThrow();
+    expect(ws.sentFrames().filter((f) => (f as { t: string }).t === "get-roots")).toHaveLength(0);
+  });
+});

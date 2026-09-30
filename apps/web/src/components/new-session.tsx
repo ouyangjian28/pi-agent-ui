@@ -9,7 +9,7 @@ import { NotReadyBanner } from "./not-ready-banner";
 import type { NotReadyInfo } from "../ws/use-write";
 import type { ModelInfoDTO } from "@pi-agent-ui/protocol/src/contracts";
 import type { WriteClientSurface } from "../ws/write-client";
-import type { ModelsState } from "../ws/ws-client";
+import type { ModelsState, RootsState } from "../ws/ws-client";
 
 /** 新建视图消费的清单面（最小接口：真 WsClient 满足；测试可注入 stub）。 */
 export interface ModelsSource {
@@ -17,6 +17,22 @@ export interface ModelsSource {
   /** P2-3/P3-1（DS 审）：响应式订阅——ws 状态到 ready 后补拉（connecting 期挂载的一次拉会被 ready 态门静默丢弃，不补拉则清单永久 idle 停滞）；同时消除直读快照的 tearing 风险。 */
   readonly subscribe: (cb: () => void) => () => void;
   readonly getSnapshot: () => { readonly models: ModelsState; readonly state: unknown };
+}
+
+/** v1.5（批A）：新建视图消费的授权根面（get-roots 挂 list 连接；真 WsClient 满足；测试可注入 stub）。 */
+export interface RootsSource {
+  readonly requestRoots: () => void;
+  readonly subscribe: (cb: () => void) => () => void;
+  readonly getSnapshot: () => { readonly roots: RootsState };
+}
+
+/** 新建视图消费的清单组合面（模型+授权根；单一 getSnapshot 返回完整面——交叉接口会让
+ * useSyncExternalStore 只解析到最后一重签名）。 */
+export interface NewSessionSource {
+  readonly requestModels: () => void;
+  readonly requestRoots: () => void;
+  readonly subscribe: (cb: () => void) => () => void;
+  readonly getSnapshot: () => { readonly models: ModelsState; readonly roots: RootsState; readonly state: unknown };
 }
 
 /** 下拉特殊值：不携带 model 域（帧不携键=v1 四字段严格形兼容；pi 用自身默认模型）。 */
@@ -29,7 +45,7 @@ export function NewSession({
   onLaunched,
   onCancel,
 }: {
-  wsClient: ModelsSource;
+  wsClient: NewSessionSource;
   writeClient: WriteClientSurface;
   /** 服务端会话目录提示（真壳传「服务端配置目录」类文案；演示位可自定义）。 */
   rootsHint: string;
@@ -39,20 +55,29 @@ export function NewSession({
   // 模型面（P3-1 响应式订阅）：挂载即拉+ws 状态到 ready 时补拉（幂等，ok 后不重发）
   const snap = useSyncExternalStore(wsClient.subscribe, wsClient.getSnapshot);
   const models = snap.models;
+  const roots = snap.roots;
   const wsState = snap.state;
   const [freeText, setFreeText] = useState("");
   useEffect(() => {
     wsClient.requestModels();
+    wsClient.requestRoots(); // v1.5（批A）：目录选择器数据源（同 models 补拉口径；幂等）
   }, [wsClient, wsState]);
   const [file, setFile] = useState("");
   const [text, setText] = useState("");
   const [notReady, setNotReady] = useState<NotReadyInfo | null>(null);
   const [sending, setSending] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [cwdChoice, setCwdChoice] = useState<string | null>(null); // v1.5：null=未显式选择（用默认项）
 
   // free-text 优先（精确 id 直达）；空=用下拉值；下拉默认=不携带 model 域
   const selected = freeText.trim() !== "" ? freeText.trim() : null;
   const effectiveModel = selected !== null && selected !== MODEL_DEFAULT ? selected : undefined;
+
+  // v1.5（批A）目录选择器：首项=会话记录树（契约定性「非 cwd 候选」）不入选项；
+  // 默认选中=候选首项（即 roots 第二项）；无候选→不渲染选择器、不携 cwd（服务端默认目录兜底）。
+  const cwdOptions = roots.status === "ok" ? roots.items.slice(1) : [];
+  const effectiveCwd =
+    cwdOptions.length === 0 ? undefined : cwdChoice !== null && cwdOptions.includes(cwdChoice) ? cwdChoice : cwdOptions[0];
 
   const fileValid = LIMITS.filePattern.test(file);
   const textValid = text.trim().length > 0;
@@ -72,7 +97,7 @@ export function NewSession({
     setSending(true);
     setNotReady(null);
     writeClient
-      .sendPrompt(file, text, effectiveModel)
+      .sendPrompt(file, text, effectiveModel, effectiveCwd)
       .then((outcome) => {
         setSending(false);
         if (outcome.kind === "not-ready") {
@@ -105,6 +130,42 @@ export function NewSession({
     <section className="new-session" aria-label="新建会话">
       <h2>新建会话</h2>
       <p className="roots-hint">新会话将创建在：{rootsHint}</p>
+      {roots.status === "loading" || roots.status === "idle" ? (
+        <label>
+          项目目录（pi 进程工作目录）
+          <select disabled aria-label="项目目录" value="">
+            <option value="">项目目录清单加载中…</option>
+          </select>
+          <small>加载完成后可选择；直接创建则使用服务端默认目录</small>
+        </label>
+      ) : null}
+      {roots.status === "ok" && cwdOptions.length > 0 ? (
+        <label>
+          项目目录（pi 进程工作目录）
+          <select
+            value={effectiveCwd}
+            onChange={(e) => setCwdChoice(e.target.value)}
+            aria-label="项目目录"
+          >
+            {cwdOptions.map((root) => (
+              <option key={root} value={root}>
+                {root}
+              </option>
+            ))}
+          </select>
+          <small>会话记录树不参与选择；仅首次创建生效，会话寿命内固定</small>
+        </label>
+      ) : null}
+      {roots.status === "failed" ? (
+        <p className="cwd-status" role="status">
+          项目目录清单拉取失败（{(roots.cause ?? "原因未知").slice(0, 200)}）——将使用服务端默认目录
+        </p>
+      ) : null}
+      {roots.status === "ok" && cwdOptions.length === 0 ? (
+        <p className="cwd-status" role="status">
+          服务端仅配置了会话记录树——pi 将在默认目录运行
+        </p>
+      ) : null}
       <label>
         会话文件名
         <input

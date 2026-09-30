@@ -342,15 +342,18 @@ export class WriteClient {
   }
 
   /**
-   * 发送 prompt（§B16：prompt{requestId,file,text}→write-ack{outcome}；v1.4 M-OPS 可选 model 域）。
+   * 发送 prompt（§B16：prompt{requestId,file,text}→write-ack{outcome}；v1.4 M-OPS 可选 model 域；
+   * v1.5 批A 可选 cwd 域）。
    * 本地预校验（不满足即本地拒、零帧成本）：连接 ready；file 过 filePattern（服务端同判 4404）；
    * text 非空且 UTF-8 ≤ WRITE_TEXT_MAX_BYTES（服务端同判 4404）；同 file 无在途 prompt；
    * model（提供时）过 LIMITS.modelPattern（^[\w./:-]{1,128}$ 精确 id 非 glob，服务端同判 4404）——
    *   undefined=不改会话模型（帧不携 model 键，v1 帧形兼容）。
+   * cwd（v1.5，提供时）须为非空绝对路径（/ 开头；服务端同判 roots 域内+目录存在，越界 4404）——
+   *   仅会话首次 prompt 采纳（会话寿命内 cwd 固定，后续携带被服务端忽略）；undefined=帧不携 cwd 键。
    * 不排队：未就绪/预校验失败即受控拒绝，由用户显式重发（无自动重发）。
    */
-  sendPrompt(file: string, text: string, model?: string): Promise<WriteSendOutcomeDTO> {
-    return this.launch("prompt", file, text, model) as Promise<WriteSendOutcomeDTO>;
+  sendPrompt(file: string, text: string, model?: string, cwd?: string): Promise<WriteSendOutcomeDTO> {
+    return this.launch("prompt", file, text, model, cwd) as Promise<WriteSendOutcomeDTO>;
   }
 
   /** 发送 stop（§B16：stop{requestId,file}→write-stop-ack{outcome}）。与同 file 在途 prompt 可并行。 */
@@ -454,7 +457,7 @@ export class WriteClient {
   }
 
   /** prompt/stop 共用派发：本地预校验（锚点④）→占位→发帧；resolve/reject 经在途表按 requestId 结算。 */
-  private launch(kind: "prompt" | "stop", file: string, text?: string, model?: string): Promise<unknown> {
+  private launch(kind: "prompt" | "stop", file: string, text?: string, model?: string, cwd?: string): Promise<unknown> {
     if (this.stopped) {
       return Promise.reject(new WriteSendError("closed", "写连接已关闭，请求未完成"));
     }
@@ -476,6 +479,10 @@ export class WriteClient {
       if (model !== undefined && !LIMITS.modelPattern.test(model)) {
         return Promise.reject(new WriteSendError("local-invalid", "模型标识非法，未发送"));
       }
+      // v1.5（批A）：可选 cwd 域本地预校验（非空绝对路径；roots 域内+目录存在由服务端 4404 把关）。
+      if (cwd !== undefined && (cwd.length === 0 || !cwd.startsWith("/"))) {
+        return Promise.reject(new WriteSendError("local-invalid", "项目目录非法（须为绝对路径），未发送"));
+      }
     }
     const duplicate = this.snapshot.inflight.some((e) => e.file === file && e.kind === kind);
     if (duplicate) {
@@ -489,12 +496,16 @@ export class WriteClient {
       this.publish({ inflight: [...this.snapshot.inflight, { file, kind }] });
       try {
         if (kind === "prompt") {
-          // v1.4（M-OPS）：model 仅提供时携键（undefined 不出帧——v1 四字段严格形兼容缺省面）
-          this.emit(
-            model === undefined
-              ? { t: "prompt", requestId, file, text: text as string }
-              : { t: "prompt", requestId, file, text: text as string, model },
-          );
+          // v1.4（M-OPS）：model 仅提供时携键；v1.5（批A）：cwd 同口径（undefined 不出帧——
+          // v1 四字段严格形兼容缺省面；会话寿命内 cwd 固定，仅首建采纳）
+          this.emit({
+            t: "prompt",
+            requestId,
+            file,
+            text: text as string,
+            ...(model === undefined ? {} : { model }),
+            ...(cwd === undefined ? {} : { cwd }),
+          });
         } else {
           this.emit({ t: "stop", requestId, file });
         }

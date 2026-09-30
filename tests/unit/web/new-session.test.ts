@@ -4,34 +4,43 @@
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { NewSession, type ModelsSource } from "../../../apps/web/src/components/new-session";
-import type { ModelsState } from "../../../apps/web/src/ws/ws-client";
+import { NewSession, type ModelsSource, type RootsSource } from "../../../apps/web/src/components/new-session";
+import type { ModelsState, RootsState } from "../../../apps/web/src/ws/ws-client";
 import type { WriteClientSurface, WriteSnapshot } from "../../../apps/web/src/ws/write-client";
 
 afterEach(cleanup);
 
 const LAUNCHED = { kind: "launched", intentId: "i-1", commandId: 1 } as const;
 
-function modelsSnap(status: ModelsState["status"], items: ModelsState["items"] = [], cause: string | null = null): ModelsSource {
+const ROOTS_IDLE: RootsState = { status: "idle", items: [], cause: null };
+
+function modelsSnap(
+  status: ModelsState["status"],
+  items: ModelsState["items"] = [],
+  cause: string | null = null,
+  roots: RootsState = ROOTS_IDLE, // v1.5（批A）：默认 idle（禁载态），既有模型面测试不受目录选择器干扰
+): ModelsSource & RootsSource {
   // P2-3/P3-1：stub 补齐响应式面（订阅不触发——静态注入面够用；getSnapshot 引用恒稳满足 useSyncExternalStore 缓存语义）
-  const snap = { models: { status, items, cause }, state: "ready" };
+  const snap = { models: { status, items, cause }, roots, state: "ready" };
   return {
     requestModels: vi.fn(),
+    requestRoots: vi.fn(),
     subscribe: () => () => {},
     getSnapshot: () => snap,
   };
 }
 
 class StubWrite {
-  readonly sent: { file: string; text: string; model?: string }[] = [];
+  readonly sent: { file: string; text: string; model?: string; cwd?: string }[] = [];
   resolveWith: unknown = LAUNCHED;
   rejectWith: Error | null = null;
   private readonly listeners = new Set<() => void>();
   private snap: WriteSnapshot = { connState: "ready", errorKind: null, errorMessage: null, inflight: [], lastResult: null, lastResumeResult: null, resumeState: { phase: "idle", files: [] } } as unknown as WriteSnapshot;
   readonly subscribe = (l: () => void): (() => void) => { this.listeners.add(l); return () => { this.listeners.delete(l); }; };
   readonly getSnapshot = (): WriteSnapshot => this.snap;
-  sendPrompt(file: string, text: string, model?: string): Promise<unknown> {
-    this.sent.push({ file, text, model });
+  sendPrompt(file: string, text: string, model?: string, cwd?: string): Promise<unknown> {
+    // v1.5（批A）：cwd 仅在提供时落账（缺省面断言形状不变）
+    this.sent.push(cwd === undefined ? { file, text, model } : { file, text, model, cwd });
     return this.rejectWith !== null ? Promise.reject(this.rejectWith) : Promise.resolve(this.resolveWith);
   }
 }
@@ -183,13 +192,15 @@ describe("M-OPS NewSession", () => {
 
   it("P2-3：connecting 期挂载→ws 到 ready 后补拉清单（防 idle 永久停滞）", async () => {
     const listeners = new Set<() => void>();
-    let snap: { models: ModelsState; state: string } = {
+    let snap: { models: ModelsState; roots: RootsState; state: string } = {
       models: { status: "idle", items: [], cause: null },
+      roots: ROOTS_IDLE,
       state: "connecting",
     };
     const requestModels = vi.fn();
-    const wsClient: ModelsSource = {
+    const wsClient: ModelsSource & RootsSource = {
       requestModels,
+      requestRoots: vi.fn(),
       subscribe: (l: () => void) => {
         listeners.add(l);
         return () => {
@@ -211,5 +222,76 @@ describe("M-OPS NewSession", () => {
     snap = { ...snap, state: "ready" };
     listeners.forEach((l) => l());
     await waitFor(() => expect(requestModels).toHaveBeenCalledTimes(2)); // 到 ready 补拉
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v1.5（批A）目录选择器：roots 加载/禁载态/默认选中/选择透传 cwd/单根与失败降级。
+// UX 口径：首项=会话记录树（契约「非 cwd 候选」）不入选项；默认选中=候选首项（roots[1]）。
+// ---------------------------------------------------------------------------
+
+describe("v1.5 NewSession 目录选择器（批A roots）", () => {
+  const ROOTS3: RootsState = { status: "ok", items: ["/srv/sessions", "/srv/proj-a", "/home/yyj/ai"], cause: null };
+
+  function fillAndCreate(): void {
+    fill("会话文件名", "a.jsonl");
+    fill("首条消息", "hi");
+    fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
+  }
+
+  it("挂载即 requestRoots（与 requestModels 同补拉口径）", () => {
+    const src = modelsSnap("ok", [], null, ROOTS3);
+    setup(src);
+    expect(src.requestRoots).toHaveBeenCalledTimes(1);
+  });
+
+  it("禁载态：roots idle/loading→项目目录下拉禁用且仅占位项", () => {
+    setup(modelsSnap("ok", [], null, { status: "loading", items: [], cause: null }));
+    const select = screen.getByLabelText("项目目录") as HTMLSelectElement;
+    expect(select.disabled).toBe(true);
+    expect(select.querySelectorAll("option")).toHaveLength(1);
+    expect(select.options[0]!.textContent).toContain("加载中");
+  });
+
+  it("roots ok：首项（会话记录树）不入选项；默认选中=候选首项；创建携 cwd=roots[1]", async () => {
+    const { write, onLaunched } = setup(modelsSnap("ok", [], null, ROOTS3));
+    const select = screen.getByLabelText("项目目录") as HTMLSelectElement;
+    expect(select.disabled).toBe(false);
+    const values = [...select.options].map((o) => o.value);
+    expect(values).toEqual(["/srv/proj-a", "/home/yyj/ai"]); // 首项 /srv/sessions 不在
+    expect(select.value).toBe("/srv/proj-a"); // 默认选中=非首项的第一个
+    fillAndCreate();
+    await waitFor(() => expect(onLaunched).toHaveBeenCalledWith("a.jsonl"));
+    expect(write.sent).toEqual([{ file: "a.jsonl", text: "hi", model: undefined, cwd: "/srv/proj-a" }]);
+  });
+
+  it("用户改选第三项→创建携 cwd=roots[2]", async () => {
+    const { write, onLaunched } = setup(modelsSnap("ok", [], null, ROOTS3));
+    fireEvent.change(screen.getByLabelText("项目目录"), { target: { value: "/home/yyj/ai" } });
+    fillAndCreate();
+    await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+    expect(write.sent[0]!.cwd).toBe("/home/yyj/ai");
+  });
+
+  it("单根（仅会话记录树）：无选择器+降级提示；创建不携 cwd（服务端默认目录兜底）", async () => {
+    const { write, onLaunched } = setup(
+      modelsSnap("ok", [], null, { status: "ok", items: ["/srv/sessions"], cause: null }),
+    );
+    expect(screen.queryByLabelText("项目目录")).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("默认目录");
+    fillAndCreate();
+    await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+    expect(write.sent).toEqual([{ file: "a.jsonl", text: "hi", model: undefined }]); // 无 cwd 键
+  });
+
+  it("roots failed：降级提示含受控 cause；创建不携 cwd", async () => {
+    const { write, onLaunched } = setup(
+      modelsSnap("ok", [], null, { status: "failed", items: [], cause: "服务端错误（4402）" }),
+    );
+    expect(screen.queryByLabelText("项目目录")).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("服务端错误（4402）");
+    fillAndCreate();
+    await waitFor(() => expect(onLaunched).toHaveBeenCalled());
+    expect(write.sent).toEqual([{ file: "a.jsonl", text: "hi", model: undefined }]);
   });
 });

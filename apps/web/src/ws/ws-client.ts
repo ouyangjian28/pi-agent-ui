@@ -11,8 +11,8 @@
 // 与 apps/web Bundler 解析不兼容；contracts.ts 零 import 无副作用）。
 import type { ClientFrame, ErrorCode, ModelInfoDTO, ServerFrame, SessionSummaryDTO } from "@pi-agent-ui/protocol/src/contracts";
 
-/** 本客户端允许发送的帧（§5.1 六客户端帧的只读子集；写类 t 在类型层即不可达）。 */
-type OutgoingFrame = Extract<ClientFrame, { readonly t: "hello" } | { readonly t: "list-sessions" } | { readonly t: "get-models" }>;
+/** 本客户端允许发送的帧（§5.1 六客户端帧的只读子集+v1.5 get-roots；写类 t 在类型层即不可达）。 */
+type OutgoingFrame = Extract<ClientFrame, { readonly t: "hello" } | { readonly t: "list-sessions" } | { readonly t: "get-models" } | { readonly t: "get-roots" }>;
 
 /** 五态状态机：connecting→authenticating→ready；任一前置态可落 closed/error。 */
 export type WsClientState = "connecting" | "authenticating" | "ready" | "closed" | "error";
@@ -39,12 +39,21 @@ export interface SessionsSnapshot {
   readonly listVersion: number | null;
   /** M-OPS（v1.4）模型清单面：idle=未请求/loading=在途/ok=清单/failed=空表+cause（服务端降级口径）。 */
   readonly models: ModelsState;
+  /** v1.5（批A）授权根面：目录选择器数据源（get-roots 挂本 list 连接；首项=会话记录树非 cwd 候选）。 */
+  readonly roots: RootsState;
 }
 
 /** M-OPS（v1.4）：get-models 状态面（uiRequests keyed map 同源的单一快照字段；失败不判错——服务端明确降级为空表+cause）。 */
 export interface ModelsState {
   readonly status: "idle" | "loading" | "ok" | "failed";
   readonly items: readonly ModelInfoDTO[];
+  readonly cause: string | null;
+}
+
+/** v1.5（批A）：get-roots 状态面（同 models 面口径；服务端同步回 roots-list，failed 仅 error 帧路径）。 */
+export interface RootsState {
+  readonly status: "idle" | "loading" | "ok" | "failed";
+  readonly items: readonly string[];
   readonly cause: string | null;
 }
 
@@ -73,6 +82,8 @@ const defaultFactory: WebSocketFactory = (url) => {
 const LIST_REQUEST_ID = "list-sessions-1";
 /** M-OPS（v1.4）get-models 请求 ID（同 §5.7 pattern；清单面单请求，固定 id 即可）。 */
 const MODELS_REQUEST_ID = "get-models-1";
+/** v1.5（批A）get-roots 请求 ID（同 §5.7 pattern；根面单请求，固定 id 即可）。 */
+const ROOTS_REQUEST_ID = "get-roots-1";
 
 const INITIAL: SessionsSnapshot = {
   state: "connecting",
@@ -82,6 +93,7 @@ const INITIAL: SessionsSnapshot = {
   total: 0,
   listVersion: null,
   models: { status: "idle", items: [], cause: null },
+  roots: { status: "idle", items: [], cause: null },
 };
 
 // ---------------------------------------------------------------------------
@@ -102,6 +114,7 @@ type WelcomeFrame = Extract<ServerFrame, { readonly t: "welcome" }>;
 type SessionsFrame = Extract<ServerFrame, { readonly t: "sessions" }>;
 type ErrorFrame = Extract<ServerFrame, { readonly t: "error" }>;
 type ModelsListFrame = Extract<ServerFrame, { readonly t: "models-list" }>;
+type RootsListFrame = Extract<ServerFrame, { readonly t: "roots-list" }>;
 
 /** M-OPS（v1.4）：ModelInfoDTO 形状（provider/id 必须 string；context/thinking 可缺但必须 string）。 */
 function isModelInfo(v: unknown): v is ModelInfoDTO {
@@ -122,6 +135,14 @@ function asModelsListFrame(v: Record<string, unknown>): ModelsListFrame | null {
   }
   if (v.cause !== undefined && !isString(v.cause)) return null;
   return { t: "models-list", requestId: v.requestId, models, ...(v.cause === undefined ? {} : { cause: v.cause }) };
+}
+
+/** v1.5（批A）roots-list：requestId 必须 string；roots 数组逐项 string（任一畸形整帧拒绝——
+ * 授权根是 cwd 校验基准，错认不得入快照）。 */
+function asRootsListFrame(v: Record<string, unknown>): RootsListFrame | null {
+  if (!isString(v.requestId)) return null;
+  if (!Array.isArray(v.roots) || !v.roots.every(isString)) return null;
+  return { t: "roots-list", requestId: v.requestId, roots: v.roots };
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -229,6 +250,8 @@ export class WsClient {
   private listRequestPending = false;
   /** M-OPS（v1.4）：get-models 在途位（同 listRequestPending 语义；回帧/迟到零副作用）。 */
   private modelsRequestPending = false;
+  /** v1.5（批A）：get-roots 在途位（同 listRequestPending 语义）。 */
+  private rootsRequestPending = false;
   /** R3 不可逆停止位：close() 置位后一切回调零副作用、connect() 永久拒绝、重复 close 幂等。 */
   private stopped = false;
 
@@ -274,6 +297,7 @@ export class WsClient {
     this.stopped = true;
     this.listRequestPending = false;
     this.modelsRequestPending = false; // M-OPS（v1.4）：清单在途随连接天折（状态面定格不清空）
+    this.rootsRequestPending = false; // v1.5（批A）：根面同口径
     if (this.snapshot.state !== "closed" && this.snapshot.state !== "error") {
       this.transition({ state: "closed" });
     }
@@ -288,6 +312,16 @@ export class WsClient {
     this.modelsRequestPending = true;
     if (this.snapshot.models.status !== "loading") this.transition({ models: { status: "loading", items: [], cause: null } });
     this.sendFrame({ t: "get-models", requestId: MODELS_REQUEST_ID });
+  }
+
+  /** v1.5（批A）：请求授权根列表（幂等：在途/已 ok 不重发；failed 可重发=用户新显式动作）。
+   * 仅 ready 态可发；未连接/已关静默忽略（同 requestModels 口径）。 */
+  requestRoots(): void {
+    if (this.stopped || this.snapshot.state !== "ready") return;
+    if (this.rootsRequestPending || this.snapshot.roots.status === "ok") return;
+    this.rootsRequestPending = true;
+    if (this.snapshot.roots.status !== "loading") this.transition({ roots: { status: "loading", items: [], cause: null } });
+    this.sendFrame({ t: "get-roots", requestId: ROOTS_REQUEST_ID });
   }
 
   /** 订阅快照变更（含状态迁移）；返回退订函数。签名与 useSyncExternalStore 直接对齐。 */
@@ -352,6 +386,15 @@ export class WsClient {
         });
         return;
       }
+      case "roots-list": {
+        // v1.5（批A）：根回帧——在途中才接受（未请求/迟到=零副作用）；形状失败不消耗在途。
+        if (!this.rootsRequestPending) return;
+        const frame = asRootsListFrame(parsed);
+        if (frame === null || frame.requestId !== ROOTS_REQUEST_ID) return;
+        this.rootsRequestPending = false;
+        this.transition({ roots: { status: "ok", items: frame.roots, cause: null } });
+        return;
+      }
       case "error": {
         const frame = asErrorFrame(parsed);
         if (frame === null) return; // R1：畸形 error 帧（如 message 非字符串）整帧忽略
@@ -366,6 +409,12 @@ export class WsClient {
         }
         if (this.listRequestPending && frame.requestId === LIST_REQUEST_ID) {
           this.fail("list-failed", controlledErrorText(frame.code));
+          return;
+        }
+        if (this.rootsRequestPending && frame.requestId === ROOTS_REQUEST_ID) {
+          // v1.5（批A）：根面失败不连坐主连接——定格 failed+受控文案，可显式重试（同 models 降级哲学）
+          this.rootsRequestPending = false;
+          this.transition({ roots: { status: "failed", items: [], cause: controlledErrorText(frame.code) } });
         }
         return; // 无关联请求的 error 帧安全忽略
       }
@@ -392,6 +441,7 @@ export class WsClient {
   private fail(errorKind: WsClientErrorKind, errorMessage: string): void {
     this.listRequestPending = false;
     this.modelsRequestPending = false; // P3-5（DS 审）：与 close() 同口径——error 面在途清位（状态面定格不清空）
+    this.rootsRequestPending = false; // v1.5（批A）：根面同口径
     this.transition({ state: "error", errorKind, errorMessage });
   }
 

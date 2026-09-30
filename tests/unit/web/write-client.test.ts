@@ -975,3 +975,37 @@ describe("M-OPS sendPrompt model 形参", () => {
     expect(ws.sent.length).toBe(before); // 一律未发帧
   });
 });
+
+// ---------------------------------------------------------------------------
+// v1.5（批A）：sendPrompt 可选 cwd 形参（契约 v1.5 prompt.cwd；仅首次冷启动采纳）
+// ---------------------------------------------------------------------------
+
+describe("v1.5 sendPrompt cwd 形参（批A）", () => {
+  it("带合法 cwd：prompt 帧携带 cwd 域（与 model 可同携）", async () => {
+    const { client, ws } = ready();
+    const promise = client.sendPrompt("a.jsonl", "你好", "openai/gpt-5.3", "/srv/proj-a");
+    const frame = ws.frames()[1] as Record<string, unknown>;
+    expect(frame).toMatchObject({ t: "prompt", file: "a.jsonl", text: "你好", model: "openai/gpt-5.3", cwd: "/srv/proj-a" });
+    ws.receive({ t: "write-ack", requestId: sentRequestId(ws, 1), file: "a.jsonl", outcome: LAUNCHED });
+    await expect(promise).resolves.toEqual(LAUNCHED);
+  });
+
+  it("不带/显式 undefined cwd：prompt 帧无 cwd 键（v1 帧形兼容缺省面）", () => {
+    const { client, ws } = ready();
+    void client.sendPrompt("a.jsonl", "你好");
+    void client.sendPrompt("b.jsonl", "你好", undefined, undefined);
+    expect("cwd" in (ws.frames()[1] as Record<string, unknown>)).toBe(false);
+    expect("cwd" in (ws.frames()[2] as Record<string, unknown>)).toBe(false);
+  });
+
+  it("非法 cwd（相对路径/空串）→本地预校验拒（local-invalid），零帧成本", async () => {
+    const { client, ws } = ready();
+    const before = ws.sent.length;
+    for (const bad of ["relative/dir", "", "."]) {
+      const error = await expectWriteError(client.sendPrompt("a.jsonl", "你好", undefined, bad));
+      expect(error.kind).toBe("local-invalid");
+      expect(error.message).toContain("绝对路径");
+    }
+    expect(ws.sent.length).toBe(before); // 一律未发帧
+  });
+});

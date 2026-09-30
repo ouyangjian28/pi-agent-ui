@@ -117,8 +117,9 @@ interface TransientNotReady {
 /** 写动作返回契约（锚点⑤）：true=收到合法 ack；false=被拒（受控文案已进 errorMessage 视图）。 */
 export interface UseWrite {
   readonly view: WriteView;
-  /** M-OPS（v1.4）：可选 model——新建态/换模型路径携带；正常会话传 undefined（不改会话模型）。 */
-  readonly send: (text: string, model?: string) => Promise<boolean>;
+  /** M-OPS（v1.4）：可选 model——新建态/换模型路径携带；正常会话传 undefined（不改会话模型）。
+   * v1.5（批A）：可选 cwd——仅新建会话首 prompt 携带（会话寿命内 cwd 固定）；正常会话传 undefined。 */
+  readonly send: (text: string, model?: string, cwd?: string) => Promise<boolean>;
   readonly stop: () => Promise<boolean>;
   /** 恢复重发（v1.1）：intentId+generation 由调用方提供（演示位手输；默认 generation=1）。 */
   readonly resume: (intentId: string, generation: number) => Promise<boolean>;
@@ -149,10 +150,10 @@ export function useWrite(client: WriteClientSurface, file: string | null): UseWr
   };
 
   const send = useCallback(
-    (text: string, model?: string): Promise<boolean> => {
+    (text: string, model?: string, cwd?: string): Promise<boolean> => {
       if (file === null) return Promise.resolve(false);
       const seq = beginAttempt();
-      return client.sendPrompt(file, text, model).then(
+      return client.sendPrompt(file, text, model, cwd).then(
         (outcome) => {
           // M-OPS（v1.4）：not-ready=ack 已到但进程启动失败——受控信息落账（非错误路径）；
           // 迟到门：非最新动作不覆盖新动作/当前身份状态。

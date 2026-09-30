@@ -730,8 +730,9 @@ hr {
   max-width: 480px;
 }
 .new-session .panel-heading,
-.new-session .roots-hint {
-  color: var(--c-text-dim);
+.new-session .roots-hint,
+.new-session .cwd-status {
+  color: var(--c-muted);
   font-size: 12px;
 }
 .new-session-actions {
