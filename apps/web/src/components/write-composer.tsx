@@ -219,7 +219,7 @@ export function WriteComposer({ client, file, editor }: { client: WriteClientSur
           {phaseText}
         </span>
       </div>
-      {!editor && view.errorMessage !== null && result?.status !== "unknown" ? (
+      {view.errorMessage !== null && ((!editor && result?.status !== "unknown") || (editor && (view.lastResult?.kind === "stop" || view.lastResumeResult?.ok === false))) ? (
         <p className="banner" role="alert">
           {view.errorMessage}
         </p>
@@ -227,8 +227,8 @@ export function WriteComposer({ client, file, editor }: { client: WriteClientSur
       {!editor && view.notReady !== null ? (
         <NotReadyBanner info={view.notReady} onRetry={canSend ? onSend : undefined} />
       ) : null}
-      {view.lastResult !== null && (!editor || (view.lastResult.ok && view.lastResult.kind === "prompt" && view.lastResult.outcome.kind === "launched")) ? (
-        <p role="status">{editor ? "消息已受理，等待回复。" : lastResultText(view.lastResult)}</p>
+      {view.lastResult !== null && (!editor || (view.lastResult.ok && (view.lastResult.kind === "stop" || view.lastResult.outcome.kind === "launched"))) ? (
+        <p role="status">{editor && view.lastResult.kind === "prompt" ? "消息已受理，等待回复。" : lastResultText(view.lastResult)}</p>
       ) : null}
       <details className="resume-demo" hidden={editor?.isNew === true}>
         <summary>高级诊断</summary>

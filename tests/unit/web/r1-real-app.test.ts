@@ -148,6 +148,20 @@ describe("R1 真 AppRoot+三客户端首链", () => {
     expect(screen.getByLabelText("活动事件").textContent).toContain("日志修复");
     expect(Array.from(document.querySelectorAll(".live-final .live-stream-text"), (node) => node.textContent)).toEqual(["完整正文一", "完整正文二"]); expect(screen.getAllByText(/未确认入档/)).toHaveLength(2);
   });
+  it("真实 managed composer 保留停止结算与失败：prompt/stop 并行，停止不清残稿，不隐藏失败", async () => {
+    start(); fireEvent.click(screen.getByRole("button", { name: /已有对话 B/ })); snapshot("b.jsonl");
+    const textarea = screen.getByLabelText("写入消息内容") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "v1" } }); fireEvent.click(screen.getByRole("button", { name: "发送", exact: true }));
+    const prompt = Socket.all[2]!.sent.at(-1)!; fireEvent.change(textarea, { target: { value: "v2 残稿" } });
+    fireEvent.click(screen.getByRole("button", { name: "停止", exact: true })); const stop = Socket.all[2]!.sent.at(-1)!;
+    expect(stop).toMatchObject({ t: "stop", file: "b.jsonl" }); expect(stop.requestId).not.toBe(prompt.requestId);
+    await act(async () => { Socket.all[2]!.receive({ t: "write-stop-ack", requestId: stop.requestId, file: "b.jsonl", outcome: { kind: "deadline-exceeded" } }); await Promise.resolve(); });
+    expect(screen.getByText("停止超时：进程未在期限内退出")).toBeTruthy(); expect(textarea.value).toBe("v2 残稿");
+    await ack(prompt, { kind: "busy" }); fireEvent.click(screen.getByRole("button", { name: "停止", exact: true })); const secondStop = Socket.all[2]!.sent.at(-1)!;
+    await act(async () => { Socket.all[2]!.receive({ t: "error", requestId: secondStop.requestId, code: 4402, retryable: true, message: "never display stop error" }); await Promise.resolve(); });
+    const alerts = screen.getAllByRole("alert").map((node) => node.textContent).join(" "); expect(alerts).toContain("4402"); expect(alerts).not.toContain("never display stop error"); expect(textarea.value).toBe("v2 残稿");
+    expect(Socket.all[2]!.sent.filter((frame) => frame.t === "stop")).toHaveLength(2); expect(Socket.all[2]!.sent.filter((frame) => frame.t === "prompt")).toHaveLength(1);
+  });
   it("重连跨 client：页面和输入节点保留；零自动补发，新握手前零业务帧", async () => {
     vi.useFakeTimers(); start(); const { textarea } = firstSend("原始输入");
     fireEvent.change(textarea, { target: { value: "新编辑稿" } });

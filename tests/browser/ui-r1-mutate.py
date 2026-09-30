@@ -59,6 +59,8 @@ cases = [
     ("M25-unmount-leaks-wait-timer", [("apps/web/src/ws/use-conversation-lifetime.ts", 'if (epoch.current === lease) owner.dispose();', 'if (epoch.current === lease) { /* no cleanup */ }')], "r1-lifetime.test.ts", None),
     ("M26-screenreader-every-token", [(L, 'className="live-stream" aria-live="off"', 'className="live-stream" aria-live="polite"')], "r1-live-handoff.test.ts", None),
     ("M27-held-enter-sends", [("apps/web/src/components/write-composer.tsx", ' || event.repeat', '')], "r1-real-app.test.ts", None),
+    ("M28-stop-result-hidden", [("apps/web/src/components/write-composer.tsx", '(view.lastResult.kind === "stop" || view.lastResult.outcome.kind === "launched")', '(view.lastResult.kind === "prompt" && view.lastResult.outcome.kind === "launched")')], "r1-real-app.test.ts", None),
+    ("M29-stop-error-hidden", [("apps/web/src/components/write-composer.tsx", '(editor && (view.lastResult?.kind === "stop" || view.lastResumeResult?.ok === false))', 'false')], "r1-real-app.test.ts", None),
 ]
 results = []
 for name, edits, test, timezone in cases:
