@@ -571,6 +571,25 @@ describe("v1.5 授权根面（get-roots/roots-list，批A）", () => {
     }
   });
 
+  it("R2-P2-03（GPT r2 复审）：loading 通知内同步 close()→timer 已登记被物理撤销（终局后零资源创建）", () => {
+    vi.useFakeTimers();
+    try {
+      const { client, ws } = setup();
+      handshake(ws);
+      const unsub = client.subscribe(() => {
+        if (client.getSnapshot().roots.status === "loading") client.close(); // 订阅者同步重入关闭
+        unsub();
+      });
+      client.requestRoots();
+      expect(client.getSnapshot().state).toBe("closed");
+      expect(vi.getTimerCount()).toBe(0); // timer 登记先于通知→close 可见并撤销（顺序反转回旧序则此断言红）
+      vi.advanceTimersByTime(10_000);
+      expect(client.getSnapshot().roots.status).toBe("loading"); // 定格；零副作用
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("P2-02（GPT 批2审）：sendFrame 同步 throw→pending 回滚，下一 requestRoots 可重发（不悬挂）", () => {
     const { client, ws } = setup();
     handshake(ws);
