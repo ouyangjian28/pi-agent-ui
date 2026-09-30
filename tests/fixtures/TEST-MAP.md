@@ -1403,3 +1403,13 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - 变异 6/6（基线 9ec12a6 先 commit）：Mu-fix-1 防御摘除→坏行例红/Mu-fix-2 title 渲染摘除→杀例红/Mu-fix-3 日历摘除→13 月例红/Mu-b1-1..3 续红（8 红/2 红/2 红）。全还原复绿+树净核对。
 - **M-245 家族五犯险情（已防）**：验杀点时 `git checkout -- real-app.tsx` 会把未 commit 的 P1-02 壳改动一并还原——测试全绿是静默回归。教训固化：**变异验杀前基线必须已 commit（本批六连全在 9ec12a6 后做）**；checkout 还原后必须 `rg` 复核修复面仍在（本批 rg 发现 resolveTitle 消失→重应用）。
 - 全仓 1796 绿（+12 新例）；commit 9ec12a6。
+
+### M-UX 批1 修复批 r3：GPT R2 复审（NO-GO 84）四残余闭合（2026-10-10）
+
+- **R2-P2-01 server TS2339**（修复批自引入）：`typeof m==="object"` 收窄只到 object，`m.content` 报 TS2339。修=形状守卫内建 `rec = m as Record<string, unknown>` 局部变量再取 role/content（session-scan.ts:182-185）。server tsc 恢复 0（701f5c5 对照确证本批引入）。
+- **P1-02 空态残余+壳接线杀点**：session-detail.tsx 空态改 `<h2>{title ?? view.file ?? file}</h2>`+空态提示保留（use-write/use-session-detail 三处旧断言适配 /空会话：该会话文件/）；real-app.test 两杀例=①DTO 标题点选→空态 h2「搭建会话工作台」②新建 launched→补拉空表→h2 走 resolveTitle 派生（^\d+月\d+日 HH:mm（YYYY）$ 且非 .jsonl）。摘壳 title={null}→2 例真红（python 整段替换，sed 语法无效会假绿「no tests」）。
+- **P2-01 非 OPEN 静默未发**：sendFrame 改返回 boolean（true=已写入；false=stopped/无 socket/非 OPEN）；requestSessionsInternal 同口径回滚（throw 与静默未发都清 pending）。throw 例改真=先结算首拉（旧例未结算→requestSessions 走 dirty 分支根本没过 send，摘回滚仍绿）；新非 OPEN 例=readyState=2→零新帧→恢复 OPEN→refresh 真发新帧（悬挂时 dirty 合并会吃掉本次）。
+- **P2-02 B2 重写**：CSPRNG spy **字节递增**（首调 0xcd 再调 0xce——固定同字节时重掷同名断言不可见）+vi.useFakeTimers 冻结+两次同名创建+`await act(async()=>{click; await Promise.resolve()})` 结算后断言 input===name1+prompts 两条同名。变异 mu-b2（launched.then 里 setFile(autoFile())）真红（ce≠cd）。
+- **双重序列化坑**：FakeWebSocket.receive 内部已 JSON.stringify(frame)——测试传对象即可；`receive(JSON.stringify(...))` 双重序列化→isPlainObject 拒收→结算帧被丢（r3 两例首次红锅根因）。
+- **M-245 六犯（已防）**：清 probe 时 `git checkout -- ws-client.ts mux-b1.test.ts` 把 r3 未 commit 修复一并吞掉——重放并固化：**每文件改完即 commit**（本批 r3 分三个 commit）。
+- 全仓 1797 绿（+1）；tsc 两包 0。commit 链见 git log（TS2339+空态+壳接线+非 OPEN 回滚→throw 改真→B2 重写→spy 递增）。
