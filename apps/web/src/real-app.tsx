@@ -52,6 +52,8 @@ export function RealApp({ createSocket }: RealAppProps) {
   const [reconnectUi, setReconnectUi] = useState<{ attempts: number; nextInMs: number } | null>(null);
   // 选中会话留在 RealApp：重连（重建三件套）后选择不丢
   const [file, setFile] = useState<string | null>(null);
+  // R1：页面意图也归壳层；重建传输不再丢新建页/编辑器实例。
+  const [newSession, setNewSession] = useState(false);
   // B1：当前连接目标为跨源（dev 覆盖）时为真——拒绝面接管（不拨线+明白提示）
   const [untrustedTarget, setUntrustedTarget] = useState(false);
   const [untrustedUrl, setUntrustedUrl] = useState<string | null>(null);
@@ -87,7 +89,7 @@ export function RealApp({ createSocket }: RealAppProps) {
     const created = createAppClients({ url, token, createSocket });
     setClients(created);
     return () => {
-      setClients(null);
+      // 保持呈现 owner 挂载到新 client 替换；不以 clients=null 闪断整棵编辑器。
       created.dispose();
     };
   }, [token, retryNonce, createSocket]);
@@ -193,6 +195,8 @@ export function RealApp({ createSocket }: RealAppProps) {
   return (
     <ConnectedApp
       clients={clients}
+      newSession={newSession}
+      onNewSession={setNewSession}
       file={file}
       onSelectFile={setFile}
       onRetry={reconnectNow}
@@ -208,6 +212,8 @@ export function RealApp({ createSocket }: RealAppProps) {
 
 function ConnectedApp({
   clients,
+  newSession,
+  onNewSession,
   file,
   onSelectFile,
   onRetry,
@@ -216,6 +222,8 @@ function ConnectedApp({
   onClearToken,
 }: {
   clients: AppClients;
+  newSession: boolean;
+  onNewSession: (open: boolean) => void;
   file: string | null;
   onSelectFile: (file: string) => void;
   onRetry: () => void;
@@ -226,9 +234,7 @@ function ConnectedApp({
   const wsSnap = useSyncExternalStore(clients.wsClient.subscribe, clients.wsClient.getSnapshot);
   const subSnap = useSyncExternalStore(clients.subscribeClient.subscribe, clients.subscribeClient.getSnapshot);
   const writeSnap = useSyncExternalStore(clients.writeClient.subscribe, clients.writeClient.getSnapshot);
-  // M-OPS（v1.4）新建态：newSession=true 时右栏切 NewSession（不挂 SessionDetail——未建 file 不
-  // subscribe，避免 4402 门；首 prompt launched 后切回正常详情）。
-  const [newSession, setNewSession] = React.useState(false);
+  // 页面意图由 RealApp 持有，不属于可重建传输层。
 
   const authFailed =
     wsSnap.errorKind === "auth-failed" ||
@@ -289,7 +295,7 @@ function ConnectedApp({
               <button type="button" className="refresh" onClick={() => clients.wsClient.requestSessions()}>
                 刷新
               </button>
-              <button type="button" className="new-session-btn" onClick={() => setNewSession(true)}>
+              <button type="button" className="new-session-btn" onClick={() => onNewSession(true)}>
                 ＋新建
               </button>
             </div>
@@ -302,11 +308,11 @@ function ConnectedApp({
               wsClient={clients.wsClient}
               writeClient={clients.writeClient}
               onLaunched={(f) => {
-                setNewSession(false);
+                onNewSession(false);
                 onSelectFile(f);
                 clients.wsClient.requestSessions(); // M-UX D02：launched 后自动补拉列表（首 user 可能晚落盘；dirty 合并在途不丢）
               }}
-              onCancel={() => setNewSession(false)}
+              onCancel={() => onNewSession(false)}
             />
           ) : file === null ? (
             <div className="welcome">
