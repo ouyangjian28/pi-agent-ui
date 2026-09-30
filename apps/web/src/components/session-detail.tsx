@@ -321,8 +321,9 @@ export function SessionDetail({
   } else if (view.status === "empty") {
     body = (
       <div className="empty">
-        <h2>空会话</h2>
-        <p>该会话文件没有任何事件（空文件或刚创建）。</p>
+        {/* P1-02 空态残余（GPT R2）：空会话同样显示统一会话标题，空态提示保留 */}
+        <h2>{title ?? view.file ?? file}</h2>
+        <p>空会话：该会话文件没有任何事件（空文件或刚创建）。</p>
       </div>
     );
   } else {

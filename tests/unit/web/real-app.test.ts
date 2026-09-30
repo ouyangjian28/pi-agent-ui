@@ -192,7 +192,10 @@ describe("真模式 smoke：token 门→列表→详情→写面", () => {
         hasMore: false,
       });
     });
-    expect(screen.getByText("空会话")).toBeTruthy();
+    expect(screen.getByText(/空会话：该会话文件/)).toBeTruthy();
+    // P1-02 壳接线杀点（GPT R2）：空态详情标题与列表同源（DTO 标题非 file 名）；摘除 real-app 传参此断言必红
+    const detailHead = document.querySelector("section.session-detail h2");
+    expect(detailHead?.textContent).toBe("搭建会话工作台");
     const textarea = screen.getByLabelText("写入消息内容") as HTMLTextAreaElement;
     expect(textarea.disabled).toBe(false);
 
@@ -243,6 +246,28 @@ describe("真模式 smoke：token 门→列表→详情→写面", () => {
     // onLaunched：壳收新会话视图+列表连接自动补拉（首 user 可能晚落盘；dirty 合并保证不丢）
     const listAfter = FakeWebSocket.instances[0]!.sentFrames().filter((f) => f.t === "list-sessions").length;
     expect(listAfter).toBe(listBefore + 1);
+
+    // P1-02 缺席 DTO 派生回退（GPT R2）：补拉回空表（服务器未扫到新文件）→详情标题走
+    // resolveTitle 对 file 派生（auto- 名→「N月N日 HH:mm（YYYY）」），不显示 .jsonl 原名。
+    const repullReq = FakeWebSocket.instances[0]!.sentFrames().filter((f) => f.t === "list-sessions").slice(-1)[0]!;
+    act(() => {
+      FakeWebSocket.instances[0]!.receive({
+        t: "sessions", requestId: repullReq.requestId, sessions: [], total: 0, offset: 0,
+        hasMore: false, listVersion: 2, listReliability: "full",
+      });
+    });
+    // 订阅面快照（空会话）→空态视图也显示派生标题
+    const subReq2 = FakeWebSocket.instances[1]!.sentFrames().find((f) => f.t === "subscribe");
+    act(() => {
+      FakeWebSocket.instances[1]!.receive({
+        t: "snapshot", requestId: subReq2!.requestId, subscriptionId: "sub-2", streamId: "stream-2",
+        snapshotId: "snap-2", barrier: 0, status: STATUS, page: [], historyNext: null,
+        liveFrom: { streamId: "stream-2", seq: 1 }, hasMore: false,
+      });
+    });
+    const head2 = document.querySelector("section.session-detail h2");
+    expect(head2?.textContent ?? "").toMatch(/^\d+月\d+日 \d{2}:\d{2}（\d{4}）$/);
+    expect(head2?.textContent ?? "").not.toContain(".jsonl");
   });
 });
 

@@ -325,10 +325,13 @@ export class WsClient {
   private requestSessionsInternal(): void {
     this.listRequestPending = true;
     // P2-01（GPT 审）：发帧失败（同步 throw/readyState 非 OPEN 静默丢弃）不得悬挂在途位。
+    // R2：静默未发同回滚——sendFrame 返回 false（非 OPEN）与 throw 同口径。
     try {
-      this.sendFrame({ t: "list-sessions", requestId: LIST_REQUEST_ID });
+      if (!this.sendFrame({ t: "list-sessions", requestId: LIST_REQUEST_ID })) {
+        this.listRequestPending = false; // 未发出的请求不算在途；下一 refresh 重试
+      }
     } catch {
-      this.listRequestPending = false; // 未发出的请求不算在途；下一 refresh 重试
+      this.listRequestPending = false;
     }
   }
 
@@ -362,11 +365,13 @@ export class WsClient {
 
   readonly getSnapshot = (): SessionsSnapshot => this.snapshot;
 
-  private sendFrame(frame: OutgoingFrame): void {
-    if (this.stopped) return;
+  /** 返回 true=已写入 socket；false=静默未发（stopped/无 socket/非 OPEN）——调用方据此回滚在途位。 */
+  private sendFrame(frame: OutgoingFrame): boolean {
+    if (this.stopped) return false;
     const socket = this.socket;
-    if (!socket || socket.readyState !== OPEN) return;
+    if (!socket || socket.readyState !== OPEN) return false;
     socket.send(JSON.stringify(frame));
+    return true;
   }
 
   private onMessage(data: unknown): void {
