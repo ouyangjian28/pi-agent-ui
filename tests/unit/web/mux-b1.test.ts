@@ -264,8 +264,8 @@ describe("M-UX 批1修复 P2-02：CSPRNG 来源约束+同 file 不换名", () =>
     spy.mockRestore();
   });
 
-  it("B2 组件级：固定源+冻结时钟两次创建同名→两次 sendPrompt 同 file 照发（不假造冲突不自动换名）", async () => {
-    const { render, screen } = await import("@testing-library/react");
+  it("B2 组件级：固定 CSPRNG+冻结时钟→两次同名创建，结算后不换名不冲突（R2 改真：旧例 fixed 未用/未 await 结算/只一次创建，异步换名变异存活）", async () => {
+    const { render, screen, act } = await import("@testing-library/react");
     const React = (await import("react")).default;
     const { NewSession } = await import("../../../apps/web/src/components/new-session");
     const listeners = new Set<() => void>();
@@ -276,6 +276,7 @@ describe("M-UX 批1修复 P2-02：CSPRNG 来源约束+同 file 不换名", () =>
     };
     snap.getSnapshot = () => snap;
     snap.subscribe = (cb: () => void) => { listeners.add(cb); return () => { listeners.delete(cb); }; };
+    let launchedCount = 0;
     const writeSnap = { connState: "ready" };
     const prompts: string[] = [];
     const writeStub = {
@@ -284,30 +285,53 @@ describe("M-UX 批1修复 P2-02：CSPRNG 来源约束+同 file 不换名", () =>
       subscribe: snap.subscribe as () => () => void,
       getSnapshot: () => writeSnap,
     };
-    // 同组件两次：固定源+同时钟→预填同名；两次「创建」都照发同 file（服务端同名=追加语义，前端不换名）
-    const fixed = (n: number): Uint8Array => new Uint8Array(n).fill(0xcd);
+    // 固定源：CSPRNG 全 cd 字节（无需产品注入接口）+冻结时钟→预填名确定性
+    const spy = vi.spyOn(crypto, "getRandomValues").mockImplementation((arr: Uint8Array) => {
+      for (let i = 0; i < arr.length; i++) arr[i] = 0xcd;
+      return arr;
+    });
+    vi.useFakeTimers({ now: Date.UTC(2026, 8, 30, 6, 5, 4) });
     const el = React.createElement(NewSession, {
       wsClient: { requestModels: () => {}, requestRoots: () => {}, subscribe: snap.subscribe as never, getSnapshot: snap.getSnapshot as never },
       writeClient: writeStub as never,
       rootsHint: "x",
-      onLaunched: () => {},
+      onLaunched: () => { launchedCount++; },
       onCancel: () => {},
     });
-    // 用 fixed 源无法直接驱动组件内 autoFile（useState 已定型）——改为断言：预填名即 CSPRNG 名，两次渲染实例预填同名不可能（随机）；
-    // 组件级「不换名」断言=创建后 file 输入值不被改写。
-    render(el);
-    const input = screen.getByLabelText("会话文件名") as HTMLInputElement;
-    const name1 = input.value;
-    expect(name1).toMatch(/^auto-\d{8}-\d{6}-[0-9a-f]{32}\.jsonl$/);
-    // 填首条消息并创建
-    const textInput = screen.getByLabelText("首条消息") as HTMLTextAreaElement;
-    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
-    setter.call(textInput, "第一条消息");
-    textInput.dispatchEvent(new Event("input", { bubbles: true }));
-    screen.getByRole("button", { name: "创建会话" }).click();
-    expect(prompts).toHaveLength(1);
-    expect(prompts[0]).toBe(name1); // 发送用预填名
-    expect((screen.getByLabelText("会话文件名") as HTMLInputElement).value).toBe(name1); // 不自动换名
+    try {
+      render(el);
+      const input = screen.getByLabelText("会话文件名") as HTMLInputElement;
+      const name1 = input.value;
+      expect(name1).toMatch(/^auto-\d{8}-\d{6}-(?:cd){16}\.jsonl$/); // 固定源确定性（hex 全 cd）
+      // 第一次创建：填首条→click→**await 结算**（sendPrompt promise→onLaunched/异步链 flush）
+      const textInput = screen.getByLabelText("首条消息") as HTMLTextAreaElement;
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      setter.call(textInput, "第一条消息");
+      textInput.dispatchEvent(new Event("input", { bubbles: true }));
+      await act(async () => {
+        screen.getByRole("button", { name: "创建会话" }).click();
+        await Promise.resolve();
+      });
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0]).toBe(name1); // 发送用预填名
+      expect(launchedCount).toBe(1);
+      // 结算后不换名（异步换名变异必红：若 launched.then 重掷 autoFile，此处已 flush）
+      expect((screen.getByLabelText("会话文件名") as HTMLInputElement).value).toBe(name1);
+      // 第二次创建同 file：同名追加不冲突（服务端同名=追加语义，前端不换名不拒发）
+      setter.call(textInput, "第二条消息");
+      textInput.dispatchEvent(new Event("input", { bubbles: true }));
+      await act(async () => {
+        screen.getByRole("button", { name: "创建会话" }).click();
+        await Promise.resolve();
+      });
+      expect(prompts).toHaveLength(2);
+      expect(prompts[1]).toBe(name1);
+      expect(launchedCount).toBe(2);
+      expect((screen.getByLabelText("会话文件名") as HTMLInputElement).value).toBe(name1); // 两次后仍不换名
+    } finally {
+      spy.mockRestore();
+      vi.useRealTimers();
+    }
   });
 });
 
