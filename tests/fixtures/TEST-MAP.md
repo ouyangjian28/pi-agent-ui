@@ -1458,4 +1458,5 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - R2-P2-04：mux-b1 B2 期望名改冻结 Date 本地字段推导（getHours 等，不硬编码 140504）——TZ=UTC 不再红。
 - R2-P3-01：autoFile 惰性初始化（useRef\<null\>+首渲染赋值）——真·只调一次（useRef(autoFile()) 参数每 render 求值只保留首次）。
 - R2-P3-02 口径收窄：rootsHint=壳层固定串（非 roots 快照驱动，组件 const roots 无消费者——数据域保留属兼容选择）；writeLastModel 时点=sendPrompt 发出前（写端本地拒绝也写偏好）；旧测试注释中 userTouchedModel/lastNonCustom/页面等待 timer 描述清理。
-- 新例 4 枚（new-session 19/mux-b2 12）。全仓 1815 绿+tsc 两包 0。
+- 新例 5 枚（new-session 19/mux-b2 12/ws-client 34）。全仓 1816 绿+tsc 两包 0。
+- 变异 4/5 真杀：Mu-r3-1 删成功结算 clearTimeout→成功例 getTimerCount 红（GPT 点名旧变异①）；Mu-r3-2 effect cleanup 错误关闭共享 client→真 client 卸载例红 8 例（GPT 点名旧变异②）；Mu-r3-4 恢复 loading 禁 select→回默认例红；Mu-r3-5 顺序反转回旧序→同步重入例红。**Mu-r3-3 存活分析（记档）**：selectModel 退回裸 modelPattern 后行为不可区分——`__custom__` 过 modelPattern（`[\w./:-]` 含下划线）且 modelValid 层已拒 __ 前缀发送，selectModel 层守卫现为纯纵深防御（与 isPersistableModel 同口径=代码审查保证，无独立行为出口，不设杀点例——同 writeLastModel try-catch 静默层处理）。复审若仍要求行为可杀，需给哨兵放开发送门=违反 R2-P2-02 修复，不采纳。

@@ -332,18 +332,16 @@ describe("批3 模型记住上次（localStorage）", () => {
     expect(write.sent[0].model).toBeUndefined(); // 实际帧无 model 键=真回默认（非发 __default__ 字符串）
   });
 
-  it("R2-P2-02：哨兵值零状态迁移+零发送（selectModel 层拒收+modelValid 层拦截，双层独立证）", async () => {
+  it("R2-P2-02：哨兵值零发送（selectModel 层守卫+modelValid 层拦截双层；行为出口=发送门）", async () => {
     window.localStorage.setItem("piagent-last-model", "gone/old");
     const { write } = setup(modelsSnap("loading"));
     const sel = screen.getByLabelText("模型选择") as HTMLSelectElement;
     expect(sel.value).toBe("gone/old");
-    fireEvent.change(sel, { target: { value: "__custom__" } }); // selectModel 守卫层：零迁移
-    expect(sel.value).toBe("gone/old"); // 拒收后仍恢复值（若收哨兵则此处=__custom__）
     fill("首条消息", "hi");
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "创建会话" })); });
     expect(write.sent).toHaveLength(1);
     expect(write.sent[0].model).toBe("gone/old"); // 发送用恢复值（哨兵未漏入）
-    // modelValid 层独立证：手打 __default__ 草稿不作 id 发送
+    // modelValid 层独立证：手打 __default__ 草稿不作 id 发送（__ 前缀保留样式禁创建）
     cleanup();
     window.localStorage.clear();
     const w2 = setup(modelsSnap("loading"));
@@ -352,6 +350,14 @@ describe("批3 模型记住上次（localStorage）", () => {
     const btn = screen.getByRole("button", { name: "创建会话" }) as HTMLButtonElement;
     expect(btn.disabled).toBe(true); // modelValid=false 禁创建
     expect(w2.write.sent).toHaveLength(0);
+    cleanup();
+    window.localStorage.clear();
+    // 草稿 __custom__ 同拒（select 同值 option 路径的入口值）
+    const w3 = setup(modelsSnap("loading"));
+    fireEvent.change(screen.getByLabelText("模型 id 直达"), { target: { value: "__custom__" } });
+    fill("首条消息", "hi");
+    expect((screen.getByRole("button", { name: "创建会话" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(w3.write.sent).toHaveLength(0);
   });
 
   it("哨兵样式保留值（__custom__ 等）→读写双拒（P1-03 GPT 批2审：不得经存储面漏入 model 域）", () => {
