@@ -54,7 +54,6 @@ function setup(models: ModelsSource = modelsSnap("ok", [{ provider: "kimi-coding
     React.createElement(NewSession, {
       wsClient: models,
       writeClient: write as unknown as WriteClientSurface,
-      rootsHint: "/srv/sessions",
       onLaunched,
       onCancel,
     }),
@@ -119,7 +118,6 @@ describe("M-OPS NewSession", () => {
       React.createElement(NewSession, {
         wsClient: modelsSnap("ok"),
         writeClient: write as unknown as WriteClientSurface,
-        rootsHint: "x",
         onLaunched,
         onCancel: vi.fn(),
       }),
@@ -143,7 +141,6 @@ describe("M-OPS NewSession", () => {
       React.createElement(NewSession, {
         wsClient: modelsSnap("ok"),
         writeClient: write as unknown as WriteClientSurface,
-        rootsHint: "x",
         onLaunched: vi.fn(),
         onCancel: vi.fn(),
       }),
@@ -177,7 +174,6 @@ describe("M-OPS NewSession", () => {
       React.createElement(NewSession, {
         wsClient: modelsSnap("ok"),
         writeClient: write as unknown as WriteClientSurface,
-        rootsHint: "x",
         onLaunched,
         onCancel,
       }),
@@ -213,7 +209,6 @@ describe("M-OPS NewSession", () => {
       React.createElement(NewSession, {
         wsClient,
         writeClient: new StubWrite() as unknown as WriteClientSurface,
-        rootsHint: "x",
         onLaunched: vi.fn(),
         onCancel: vi.fn(),
       }),
@@ -227,7 +222,7 @@ describe("M-OPS NewSession", () => {
 
 // ---------------------------------------------------------------------------
 // 批3（用户拍板减法）：新建页零目录元素、零文件名输入框。
-// roots 数据域仍拉取（requestRoots 保留供壳层 rootsHint），UI 恒不渲染选择器；
+// roots 数据域仍拉取（requestRoots 兼容保留），UI 恒不渲染选择器；
 // 创建恒不携 cwd（服务端默认目录兜底）——多根/失败/单根场景一致。
 // ---------------------------------------------------------------------------
 
@@ -250,7 +245,7 @@ describe("批3 NewSession 目录减法", () => {
     const { write, onLaunched } = setup(modelsSnap("ok", [], null, ROOTS3));
     expect(screen.queryByLabelText("项目目录")).toBeNull();
     expect(screen.queryByLabelText("会话文件名")).toBeNull();
-    expect(screen.getByText("新会话将创建在：/srv/sessions")).toBeTruthy(); // rootsHint 一行提示保留
+    expect(screen.queryByText(/新会话将创建在/)).toBeNull(); // 体验收敛批：rootsHint 提示行已删
     fillAndCreate();
     await waitFor(() => expect(onLaunched).toHaveBeenCalled());
     expect(write.sent[0]).toEqual({ file: expect.stringMatching(/^auto-/), text: "hi", model: undefined }); // 无 cwd 键

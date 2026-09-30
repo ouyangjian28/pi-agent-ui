@@ -21,16 +21,10 @@ export function SessionList({
   if (view.status === "ready") {
     return (
       <section aria-label="会话列表区">
-        <div className="list-header">
-          <h2>会话</h2>
-          <button type="button" className="refresh" onClick={() => client.requestSessions()}>
-            刷新
-          </button>
-        </div>
         {view.sessions.length === 0 ? (
           <div className="empty">
             <h2>还没有会话</h2>
-            <p>服务端会话目录为空。</p>
+            <p>这里会列出服务端目录下的会话。点右上「＋新建」开始第一场对话。</p>
           </div>
         ) : (
           <ul className="session-list" aria-label="会话列表">

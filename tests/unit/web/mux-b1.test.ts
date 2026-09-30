@@ -298,7 +298,6 @@ describe("M-UX 批1修复 P2-02：CSPRNG 来源约束+同 file 不换名", () =>
     const el = React.createElement(NewSession, {
       wsClient: { requestModels: () => {}, requestRoots: () => {}, subscribe: snap.subscribe as never, getSnapshot: snap.getSnapshot as never },
       writeClient: writeStub as never,
-      rootsHint: "x",
       onLaunched: () => { launchedCount++; },
       onCancel: () => {},
     });
@@ -341,7 +340,7 @@ describe("M-UX 批1修复 P2-02：CSPRNG 来源约束+同 file 不换名", () =>
 
 // ---------- 组件级：刷新钮+自动 file 预填 ----------
 describe("M-UX D02/D03 组件面：列表刷新钮+新建自动 file 预填", () => {
-  it("刷新钮触发 requestSessions", async () => {
+  it("刷新钮触发 requestSessions（体验收敛批：钮上移 real-app panel-heading，SessionList 零内置标题）", async () => {
     const { render, screen } = await import("@testing-library/react");
     const React = (await import("react")).default;
     const { SessionList } = await import("../../../apps/web/src/components/session-list");
@@ -357,9 +356,34 @@ describe("M-UX D02/D03 组件面：列表刷新钮+新建自动 file 预填", ()
       getSnapshot: snap.getSnapshot as () => unknown,
       requestSessions: () => { requested++; },
     };
-    render(React.createElement(SessionList, { client, selectedFile: null, onSelect: () => {} }));
+    // 组件自身不再渲染标题行（去双标题）；刷新钮由宿主（real-app panel-actions）持有
+    render(
+      React.createElement(
+        "div",
+        null,
+        React.createElement(
+          "div",
+          { className: "panel-heading" },
+          React.createElement("h1", null, "会话"),
+          React.createElement(
+            "div",
+            { className: "panel-actions" },
+            React.createElement("button", { type: "button", className: "refresh", onClick: () => client.requestSessions() }, "刷新"),
+          ),
+        ),
+        React.createElement(
+          "div",
+          { "data-testid": "list-slot" },
+          React.createElement(SessionList, { client, selectedFile: null, onSelect: () => {} }),
+        ),
+      ),
+    );
     screen.getByRole("button", { name: "刷新" }).click();
     expect(requested).toBe(1);
+    // 组件面零重复 heading（去双标题回归杀点；scoped 到 SessionList 挂载槽——宿主自身的 h1 不在断言域）
+    const slot = screen.getByTestId("list-slot");
+    const headings = Array.from(slot.querySelectorAll("h1,h2"));
+    expect(headings.some((h) => h.textContent === "会话")).toBe(false); // 组件不再自带「会话」标题行
   });
 
   it("批3 新建表单：无文件名输入框；创建 file=auto- 自动格式", async () => {
@@ -389,7 +413,7 @@ describe("M-UX D02/D03 组件面：列表刷新钮+新建自动 file 预填", ()
     };
     const sent: string[] = [];
     writeStub.sendPrompt = (file: string) => { sent.push(file); return Promise.resolve({ kind: "launched" }); };
-    render(React.createElement(NewSession, { wsClient: source as never, writeClient: writeStub as never, rootsHint: "服务端配置的会话目录", onLaunched: () => {}, onCancel: () => {} }));
+    render(React.createElement(NewSession, { wsClient: source as never, writeClient: writeStub as never, onLaunched: () => {}, onCancel: () => {} }));
     expect(screen.queryByLabelText("会话文件名")).toBeNull(); // 批3：文件名不显示给用户
     // 创建后 file=auto- 自动格式（真实 CSPRNG+真实时钟→正则形态断言）
     const textInput = screen.getByLabelText("首条消息") as HTMLTextAreaElement;

@@ -1,6 +1,6 @@
 // 新建会话视图（批3 用户拍板减法）：**用户只见 模型+首条消息**——
 // 文件名后台自动生成（autoFile，用户不可见不可改）；工作目录恒服务端默认（不渲染选择器、
-// 不拉取等待面——requestRoots 数据域调用保留属兼容选择：壳层 rootsHint 为固定串，不消费快照）。
+// 不拉取等待面——requestRoots 数据域调用保留属兼容选择：UI 已无目录消费面，兼容保留）。
 // 首 prompt 成功（write-ack launched）→onLaunched(file) 由壳切正常 SessionDetail；
 // 启动失败（not-ready）→响亮红条（重试=重发同 prompt；换模型=清模型选择重选）。
 // 模型选择双通道：下拉（get-models 清单；loading/failed 均降级）+free-text 输入（优先生效——
@@ -98,14 +98,11 @@ function defaultRandomBytes(n: number): Uint8Array {
 export function NewSession({
   wsClient,
   writeClient,
-  rootsHint,
   onLaunched,
   onCancel,
 }: {
   wsClient: NewSessionSource;
   writeClient: WriteClientSurface;
-  /** 服务端会话目录提示（真壳传「服务端配置目录」类文案；演示位可自定义）。 */
-  rootsHint: string;
   onLaunched: (file: string) => void;
   onCancel: () => void;
 }): React.JSX.Element {
@@ -205,7 +202,6 @@ export function NewSession({
   return (
     <section className="new-session" aria-label="新建会话">
       <h2>新建会话</h2>
-      <p className="roots-hint">新会话将创建在：{rootsHint}</p>
       <label>
         模型（可手打 id；留空=pi 默认）
         <select
@@ -214,6 +210,16 @@ export function NewSession({
           aria-label="模型选择"
         >
           <option value={MODEL_DEFAULT}>默认（pi 配置）</option>
+          {models.status === "loading" ? (
+            <option value={MODEL_DEFAULT} disabled>
+              模型清单加载中…
+            </option>
+          ) : null}
+          {models.status === "failed" ? (
+            <option value={MODEL_DEFAULT} disabled>
+              模型清单加载失败（可手打 id）
+            </option>
+          ) : null}
           {inCustom ? (
             <option value={draftTrim}>自定义：{draftTrim}</option>
           ) : null}

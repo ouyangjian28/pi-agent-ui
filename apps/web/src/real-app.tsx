@@ -1,7 +1,8 @@
 // A1d 真模式组合根：token 门→createAppClients 三件套→列表选择→详情+写面。
-// 时序铁律：token 未确定前不建任何连接；token 确定后（或点「重新连接」）才 createAppClients。
-// 断开后不自动重连（现状客户端无重连）：状态条显三客户端连接态+「重新连接」按钮（=重建三件套）。
-// 认证失败（4401，任一客户端 errorKind=auth-failed）→受控错误面+「清除 token 重输」（清 localStorage 回输入面）。
+// 时序铁律：token 未确定前不建任何连接；token 确定后（或点「重新连接」/自动重连）才 createAppClients。
+// 自动重连（M-UX 体验收敛批）：任一连接意外终态（非认证失败）→壳层指数退避自动重建三件套
+//（1s/2s/4s…≤0s 封顶，永续）；重连后 welcome→自动拉清单/订阅/写面全自恢复。认证失败（4401）不重连。
+// 认证失败（任一客户端 errorKind=auth-failed）→受控错误面+「清除 token 重输」（清 localStorage 回输入面）。
 import React, { useEffect, useState, useSyncExternalStore } from "react";
 import { NewSession } from "./components/new-session";
 import { SessionDetail } from "./components/session-detail";
@@ -30,6 +31,9 @@ const CONN_LABEL: Record<ConnState, string> = {
   error: "连接错误",
 };
 
+const RECONNECT_BASE_MS = 1_000;
+const RECONNECT_MAX_MS = 30_000;
+
 export interface RealAppProps {
   /** 测试注入假 socket；缺省=浏览器全局 WebSocket。 */
   readonly createSocket?: WebSocketFactory | undefined;
@@ -39,6 +43,13 @@ export function RealApp({ createSocket }: RealAppProps) {
   const [token, setToken] = useState<string | null>(null);
   const [clients, setClients] = useState<AppClients | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
+  // 自动重连：意外断线→退避计时重建（attempts 跨重建存续，恢复归零）。timer/计划态为 ref（非渲染数据）。
+  const reconnectRef = React.useRef<{ attempts: number; timer: number | null; nextDelayMs: number | null }>({
+    attempts: 0,
+    timer: null,
+    nextDelayMs: null,
+  });
+  const [reconnectUi, setReconnectUi] = useState<{ attempts: number; nextInMs: number } | null>(null);
   // 选中会话留在 RealApp：重连（重建三件套）后选择不丢
   const [file, setFile] = useState<string | null>(null);
   // B1：当前连接目标为跨源（dev 覆盖）时为真——拒绝面接管（不拨线+明白提示）
@@ -60,6 +71,7 @@ export function RealApp({ createSocket }: RealAppProps) {
   }, []);
 
   // token 确定（或重试）才建三件套；换 token/重试/卸载时统一 dispose（close 屏障幂等）。
+  // 自动重连的重建也走本 effect（retryNonce++）——新三件套=全新身份，无残留在途。
   useEffect(() => {
     if (token === null) return;
     const url = resolveWsUrl(window.location, window.location.search);
@@ -98,6 +110,45 @@ export function RealApp({ createSocket }: RealAppProps) {
     clearStoredToken();
     setToken(null); // effect 清理负责 dispose 旧三件套
   };
+
+  // —— 自动重连状态机（壳层；三客户端内部不变式零改动）——
+  // 意外断线（任一连接终态且非认证失败）→指数退避重建；恢复（三连接全部非终态）→计数归零。
+  // 手动「立即重连」=清退避计时+立即重建（计数归零——手动介入后重新观察）。
+  const clearReconnectTimer = (): void => {
+    const r = reconnectRef.current;
+    if (r.timer !== null) {
+      clearTimeout(r.timer);
+      r.timer = null;
+    }
+    r.nextDelayMs = null;
+    setReconnectUi(null);
+  };
+  const handleConnDown = (down: boolean): void => {
+    const r = reconnectRef.current;
+    if (!down) {
+      r.attempts = 0; // 恢复归零（下一轮故障重新从 1s 起）
+      clearReconnectTimer();
+      return;
+    }
+    if (r.timer !== null) return; // 已在退避中（同一故障窗不叠加）
+    const delay = Math.min(RECONNECT_BASE_MS * 2 ** Math.min(r.attempts, 5), RECONNECT_MAX_MS);
+    r.nextDelayMs = delay;
+    setReconnectUi({ attempts: r.attempts + 1, nextInMs: delay });
+    r.timer = window.setTimeout(() => {
+      r.timer = null;
+      r.attempts += 1;
+      r.nextDelayMs = null;
+      setReconnectUi(null);
+      setRetryNonce((n) => n + 1); // 重建三件套（新身份；旧 effect 清理 dispose）
+    }, delay);
+  };
+  const reconnectNow = (): void => {
+    reconnectRef.current.attempts = 0;
+    clearReconnectTimer();
+    setRetryNonce((n) => n + 1);
+  };
+  // 卸载时清退避计时（防重建后孤儿 timer）
+  useEffect(() => () => clearReconnectTimer(), []);
 
   if (token === null) {
     return (
@@ -144,7 +195,9 @@ export function RealApp({ createSocket }: RealAppProps) {
       clients={clients}
       file={file}
       onSelectFile={setFile}
-      onRetry={() => setRetryNonce((n) => n + 1)}
+      onRetry={reconnectNow}
+      onConnDown={handleConnDown}
+      reconnectUi={reconnectUi}
       onClearToken={() => {
         clearStoredToken();
         setToken(null); // effect 清理负责 dispose 旧三件套
@@ -158,12 +211,16 @@ function ConnectedApp({
   file,
   onSelectFile,
   onRetry,
+  onConnDown,
+  reconnectUi,
   onClearToken,
 }: {
   clients: AppClients;
   file: string | null;
   onSelectFile: (file: string) => void;
   onRetry: () => void;
+  onConnDown: (down: boolean) => void;
+  reconnectUi: { attempts: number; nextInMs: number } | null;
   onClearToken: () => void;
 }) {
   const wsSnap = useSyncExternalStore(clients.wsClient.subscribe, clients.wsClient.getSnapshot);
@@ -177,6 +234,14 @@ function ConnectedApp({
     wsSnap.errorKind === "auth-failed" ||
     subSnap.errorKind === "auth-failed" ||
     writeSnap.errorKind === "auth-failed";
+  const states: readonly ConnState[] = [wsSnap.state, subSnap.connState, writeSnap.connState];
+  const anyDown = states.some((s) => s === "closed" || s === "error");
+  // 上报连接健康（自动重连驱动面；须在 authFailed 早退前=hooks 顺序稳定）：
+  // 认证失败不重连（重试无意义且撞限速）→上报恒 false。
+  useEffect(() => {
+    onConnDown(authFailed ? false : anyDown);
+  }, [authFailed, anyDown, onConnDown]);
+
   if (authFailed) {
     return (
       <div className="app">
@@ -193,8 +258,6 @@ function ConnectedApp({
     );
   }
 
-  const states: readonly ConnState[] = [wsSnap.state, subSnap.connState, writeSnap.connState];
-  const anyDown = states.some((s) => s === "closed" || s === "error");
   return (
     <div className="app">
       <header className="topbar">
@@ -207,9 +270,14 @@ function ConnectedApp({
         <span>列表：{CONN_LABEL[wsSnap.state]}</span>
         <span>订阅：{CONN_LABEL[subSnap.connState]}</span>
         <span>写：{CONN_LABEL[writeSnap.connState]}</span>
+        {reconnectUi !== null && (
+          <span className="reconnect-note">
+            自动重连中…（第 {reconnectUi.attempts} 次，约 {Math.round(reconnectUi.nextInMs / 1000)} 秒后）
+          </span>
+        )}
         {anyDown && (
           <button type="button" onClick={onRetry}>
-            重新连接
+            立即重连
           </button>
         )}
       </div>
@@ -217,9 +285,14 @@ function ConnectedApp({
         <nav className="session-panel" aria-label="会话列表">
           <div className="panel-heading">
             <h1>会话</h1>
-            <button type="button" className="new-session-btn" onClick={() => setNewSession(true)}>
-              ＋新建
-            </button>
+            <div className="panel-actions">
+              <button type="button" className="refresh" onClick={() => clients.wsClient.requestSessions()}>
+                刷新
+              </button>
+              <button type="button" className="new-session-btn" onClick={() => setNewSession(true)}>
+                ＋新建
+              </button>
+            </div>
           </div>
           <SessionList client={clients.wsClient} selectedFile={file} onSelect={onSelectFile} />
         </nav>
@@ -228,7 +301,6 @@ function ConnectedApp({
             <NewSession
               wsClient={clients.wsClient}
               writeClient={clients.writeClient}
-              rootsHint="服务端配置的会话目录"
               onLaunched={(f) => {
                 setNewSession(false);
                 onSelectFile(f);

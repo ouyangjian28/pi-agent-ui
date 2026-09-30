@@ -210,6 +210,14 @@ input {
   justify-content: space-between;
   padding: 20px var(--sp-4) var(--sp-3);
 }
+.panel-heading h1 {
+  white-space: nowrap;
+}
+.panel-actions {
+  display: inline-flex;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
 .attention-summary {
   margin: 0 var(--sp-4) var(--sp-4);
   padding: var(--sp-3);
@@ -422,6 +430,17 @@ hr {
 .new-session {
   max-width: 520px;
   padding: 28px;
+  box-sizing: border-box;
+  width: 100%;
+}
+.new-session button {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.new-session select,
+.new-session input {
+  max-width: 100%;
+  box-sizing: border-box;
 }
 .new-session label {
   display: grid;
@@ -657,10 +676,38 @@ hr {
   .workspace {
     display: flex;
   }
+  /* 体验收敛批：手机双栏收敏=堆叠（列表在上限高可滚，会话区全宽）——旧并排两窄条不可用 */
+  .workspace.two-col {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .workspace.two-col .session-panel {
+    border-right: 0;
+    border-bottom: 1px solid var(--c-border);
+    max-height: 40vh;
+    flex-shrink: 0;
+  }
   .session-panel,
   .conversation {
     width: 100%;
     border: 0;
+  }
+  .panel-heading {
+    padding: var(--sp-3) var(--sp-3);
+  }
+  .new-session {
+    padding: var(--sp-3);
+  }
+  .connbar {
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
+  }
+  .connbar .reconnect-note {
+    width: 100%;
+  }
+  .theme-toggle button {
+    min-height: 36px;
   }
   .inspector {
     display: none;

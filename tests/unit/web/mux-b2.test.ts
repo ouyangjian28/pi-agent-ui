@@ -120,7 +120,6 @@ describe("M-UX 批2 D05 数据域：M1 卸载后迟到回包照常入缓存（R2
     const mk = () => React.createElement(NewSession, {
       wsClient: client, // 真 WsClient：挂载 effect 真发 get-roots（写连接 ready 即发）
       writeClient: writeStub as never,
-      rootsHint: "x",
       onLaunched: () => {},
       onCancel: () => {},
     });
@@ -163,7 +162,6 @@ describe("批3 D05 页面等待域退役：目录减法（B4 改造）", () => {
     const el = React.createElement(NewSession, {
       wsClient: { requestModels: () => {}, requestRoots: () => {}, subscribe: snap.subscribe as never, getSnapshot: snap.getSnapshot as never },
       writeClient: writeStub as never,
-      rootsHint: "x",
       onLaunched: () => {},
       onCancel: () => {},
     });
@@ -203,12 +201,11 @@ describe("批3 D05 页面等待域退役：目录减法（B4 改造）", () => {
     const el = React.createElement(NewSession, {
       wsClient: { requestModels: () => {}, requestRoots: () => { rootsCalls++; }, subscribe: snap.subscribe as never, getSnapshot: snap.getSnapshot as never },
       writeClient: writeStub as never,
-      rootsHint: "x",
       onLaunched: () => {},
       onCancel: () => {},
     });
     render(el);
-    expect(rootsCalls).toBeGreaterThanOrEqual(1); // 数据域保留（兼容；批3 后壳层 rootsHint=固定串，不消费快照）
+    expect(rootsCalls).toBeGreaterThanOrEqual(1); // 数据域保留（兼容；UI 无目录消费面）
     await act(async () => {
       vi.advanceTimersByTime(8_000);
       snapNow = { ...snapNow, roots: { status: "ok", items: ["/journal", "/home/yyj/ai"], journalRoot: "/journal", cause: null } };
@@ -247,7 +244,6 @@ async function renderNewSession(
   const el = React.createElement(NewSession, {
     wsClient: wsStub as never,
     writeClient: writeStub as never,
-    rootsHint: "x",
     onLaunched: () => {},
     onCancel: () => {},
   });

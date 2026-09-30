@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // A1d 组合根 smoke：AppRoot 模式分叉（?demo=1=fixture 演示原样；缺省=真模式）+
 // 真模式全链（假 socket 驱动：token 门→列表→点选→详情订阅→写面发送）+
-// 连接状态条（三客户端可见）+断开「重新连接」=重建三件套（不自动重连）。
+// 连接状态条（三客户端可见）+断线自动重连（壳层退避重建三件套；认证失败不重连）。
 // 注入式假 socket，不起真网络。
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -270,23 +270,72 @@ describe("真模式 smoke：token 门→列表→详情→写面", () => {
   });
 });
 
-describe("连接状态条：断开可见+手动重连", () => {
-  it("订阅面断开→状态条示「已断开」+「重新连接」按钮；点击=重建三件套（旧面已关，无自动重连）", () => {
+describe("连接状态条：断开可见+自动重连", () => {
+  it("订阅面断开→状态条示「已断开」+退避提示；计时到点=自动重建三件套；恢复后提示消失", async () => {
+    vi.useFakeTimers();
+    try {
+      window.localStorage.setItem(TOKEN_STORAGE_KEY, "retry-token");
+      render(React.createElement(AppRoot, { createSocket: factory }));
+      handshakeAll();
+      expect(screen.queryByRole("button", { name: "重新连接" })).toBeNull();
+
+      act(() => FakeWebSocket.instances[1]!.serverClose(1006));
+      expect(document.body.textContent).toContain("订阅：已断开");
+      // 自动重连提示出现（第 1 次，约 1 秒后）
+      expect(document.body.textContent).toContain("自动重连中");
+      expect(screen.getByRole("button", { name: "立即重连" })).toBeTruthy();
+
+      // 退避到点：旧三件套统一关闭（含仍开着的列表/写面），新三件套重建
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      expect(FakeWebSocket.instances).toHaveLength(6);
+      expect(FakeWebSocket.instances[0]!.closeCount).toBe(1);
+      expect(FakeWebSocket.instances[2]!.closeCount).toBe(1);
+      // 新连接处于连接中，未自动发任何业务帧（open 前静默）
+      for (const ws of FakeWebSocket.instances.slice(3)) expect(ws.sent).toHaveLength(0);
+      // 新三件套握手成功（全部 ready）→恢复：提示消失+按钮消失
+      handshakeAll();
+      expect(document.body.textContent).not.toContain("自动重连中");
+      expect(screen.queryByRole("button", { name: "立即重连" })).toBeNull();
+      // 恢复后计时器归零（物理断言：无残留 timer）
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("认证失败（4401）→不自动重连（无退避 timer）", async () => {
+    vi.useFakeTimers();
+    try {
+      window.localStorage.setItem(TOKEN_STORAGE_KEY, "bad-token");
+      render(React.createElement(AppRoot, { createSocket: factory }));
+      // 列表面 open 后服务端拒：握手期 1008 关闭（§5.3 认证失败判定形态）
+      act(() => {
+        FakeWebSocket.instances[0]!.open();
+        FakeWebSocket.instances[0]!.serverClose(1008);
+      });
+      expect(document.body.textContent).toContain("认证失败");
+      expect(document.body.textContent).not.toContain("自动重连中");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(35_000);
+      });
+      // 认证失败不重连：35s（>30s 封顶）后零重建（timer 计数在 fake timers 下含 React scheduler
+      // 环境噪音，不作断言面——行为面=实例数不变）
+      expect(FakeWebSocket.instances).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("手动「立即重连」：不等待退避计时，直接重建", () => {
     window.localStorage.setItem(TOKEN_STORAGE_KEY, "retry-token");
     render(React.createElement(AppRoot, { createSocket: factory }));
     handshakeAll();
-    expect(screen.queryByRole("button", { name: "重新连接" })).toBeNull();
-
-    act(() => FakeWebSocket.instances[1]!.serverClose(1006));
-    expect(document.body.textContent).toContain("订阅：已断开");
-    const retry = screen.getByRole("button", { name: "重新连接" });
-
+    act(() => FakeWebSocket.instances[2]!.serverClose(1006)); // 写面断
+    const retry = screen.getByRole("button", { name: "立即重连" });
     fireEvent.click(retry);
-    // 旧三件套统一关闭（含仍开着的列表/写面），新三件套重建
-    expect(FakeWebSocket.instances).toHaveLength(6);
-    expect(FakeWebSocket.instances[0]!.closeCount).toBe(1);
-    expect(FakeWebSocket.instances[2]!.closeCount).toBe(1);
-    // 新连接处于连接中，未自动发任何业务帧
-    for (const ws of FakeWebSocket.instances.slice(3)) expect(ws.sent).toHaveLength(0);
+    expect(FakeWebSocket.instances).toHaveLength(6); // 同 tick 重建
+    expect(FakeWebSocket.instances.slice(3).every((ws) => ws.sent.length === 0)).toBe(true);
   });
 });
