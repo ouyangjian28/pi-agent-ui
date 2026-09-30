@@ -1413,3 +1413,18 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - **双重序列化坑**：FakeWebSocket.receive 内部已 JSON.stringify(frame)——测试传对象即可；`receive(JSON.stringify(...))` 双重序列化→isPlainObject 拒收→结算帧被丢（r3 两例首次红锅根因）。
 - **M-245 六犯（已防）**：清 probe 时 `git checkout -- ws-client.ts mux-b1.test.ts` 把 r3 未 commit 修复一并吞掉——重放并固化：**每文件改完即 commit**（本批 r3 分三个 commit）。
 - 全仓 1797 绿（+1）；tsc 两包 0。commit 链见 git log（TS2339+空态+壳接线+非 OPEN 回滚→throw 改真→B2 重写→spy 递增）。
+
+### M-UX 批2a：D05 目录请求身份+分域守卫（2026-10-10，GLM 写·待 GPT 实现审）
+
+- 设计=~/ai projects/pi-agent-ui/designs/m-ux-v4.md D05+v7 D09 B4 断言（批2 不触发设计门：纯 web 包 2 产品文件+契约 v1.6 帧型不变只改 requestId 生成）。
+- ws-client.ts：`ROOTS_REQUEST_BASE` 递增 requestId（get-roots-\<seq\>）+10s 请求 timer 捕获所属身份（fire 核验 rootsRequestPending+firedSeq===rootsSeq，防迟到 timer 错杀 force 后新请求）；roots-list/error 双身份核验（requestId===当前 seq+pending 门）→迟到旧回包零覆盖；requestRoots 在途/ok 幂等+failed 可 force；换代（close）清 rootsTimer。
+- new-session.tsx：挂载级总截止（页面等待域 10s useEffect）——到点 roots 仍 loading/idle→超时出口（默认目录常驻可创建）；ok/failed 终态优先（成功不被剩余总 timer 打回）；数据域（WsClient 快照）与页面等待域分立——组件卸载后迟到回包照常入缓存。
+- mux-b2.test.ts 七例（D05）：递增身份两 force/请求超时+迟到 R1 零覆盖/force 后旧 R1 拒/结算清 timer/卸载后入缓存/无 welcome t=10 超时出口可创建/ok 不被打回。全仓 1804 绿+tsc 两包 0。commit c3d6c31。
+- 踩坑：jsdom 测试文件头须 `// @vitest-environment jsdom`（默认 node 环境 document 未定义）；组件+fake timers 断言推进须 `await act(async()=>{advanceTimersByTime(...)})`（同步 act 不 flush setState）；useSyncExternalStore stub 的 getSnapshot 必须返回稳定引用（每次新对象=Maximum update depth）；user-event 内部真实 timer 与 fake timers 死锁→改 fireEvent.change。
+
+### M-UX 批2b：D04 模型选择域分离守卫（2026-10-10，GLM 写·待 GPT 实现审）
+
+- 设计=v4 D04 定案。new-session.tsx 模型区重构：modelChoice（已确认选择，null=默认不携 model 域）与 freeText（直达草稿，非空=custom 态优先生效）分立；意图门 userTouchedModel（任何编辑含非法输入/清空即置）；非 custom→custom 转移瞬间锚定 lastNonCustom（custom 内编辑不覆盖）；select 持久化过滤（只写 `__default__` 或过完整 LIMITS.modelPattern 的拼合值——畸形值零写入纵深防御）；清单项校验=完整 modelPattern 正则（拼合 provider/id 值），不过→option disabled+「（不可用）」；option value 由裸 m.id 改拼合值；custom 态 select 恒显「自定义：…」option；非 custom 态清空草稿=只清草稿不动 activeSelection（switchModel 同语义）。
+- not-ready 默认态说明（B3-5）：effectiveModel===undefined 时 NotReadyBanner 下 role=note「重试将不指定模型；本会话此前绑定的模型设置不会被重置，以服务端实际为准」——默认重试不声称显示实际模型；选了模型则不显示。
+- mux-b2 追加 B3 五例（12 例全绿）：B3-1 非法编辑意图冻结（草稿保留+清单到达不清）/B3-2 custom 内编辑不覆盖恢复目标（X→Y→清空回转移前选择）/B3-3 custom→B→清空仍 B/B3-4 拼合值不过正则禁选+不可用/B3-5 默认重试说明+选模型后不显示。全仓 1809 绿+tsc 0。commit bf1ce14。
+- 变异 4/4 真杀（基线 bf1ce14 先 commit）：Mu-b2a-1 roots-list 身份核验拆→force 后旧 R1 例红/Mu-b2a-2 结算不清 timer→清 timer 例红/Mu-b2b-3 总截止 useEffect 拆→无 welcome 超时例红/Mu-b2b-4 清单禁选拆→B3-4 红。**教训再现：变异脚本 assert 失败路径未还原工作树（残留静默变异直到 git diff 才发现）——变异脚本必须 try/finally 还原+收尾 git diff 复核。**
