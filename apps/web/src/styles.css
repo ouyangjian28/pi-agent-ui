@@ -887,6 +887,8 @@ hr {
 .real-app .resume-demo { padding-top: var(--sp-2); color: var(--c-muted); font-size: 11px; }
 .real-app .resume-demo summary { cursor: pointer; }
 .send-unknown { padding: var(--sp-3); margin-top: var(--sp-3); background: var(--c-warn-bg); color: var(--c-warn); border-radius: var(--r-md); font-size: 13px; line-height: 1.7; }
+.pending-answer-inline { margin: var(--sp-3); padding: var(--sp-3); border-radius: var(--r-md); background: var(--c-warn-bg); color: var(--c-warn); font-size: 12px; }
+.pending-answer-inline button { font-size: 12px; margin-top: var(--sp-2); }
 .unfinished-drafts { border-top: 1px solid var(--c-border); padding: var(--sp-4); font-size: 12px; }
 .unfinished-drafts h3 { color: var(--c-muted); font-size: 11px; margin-bottom: var(--sp-2); }
 .unfinished-drafts button { display: block; width: 100%; text-align: left; margin-bottom: var(--sp-2); font-size: 12px; }

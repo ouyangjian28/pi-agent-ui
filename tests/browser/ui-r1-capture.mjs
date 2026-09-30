@@ -21,8 +21,9 @@ await new Promise((yes) => server.listen(0, "127.0.0.1", yes));
 const url = `http://127.0.0.1:${server.address().port}/`;
 const browser = await chromium.launch({ executablePath: "/home/yyj/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome", headless: true });
 const evidence = [];
+const behaviorOnly = process.argv.includes("--behavior-only");
 try {
-  for (const width of [390, 1280]) for (const theme of ["light", "dark"]) {
+  for (const width of behaviorOnly ? [1280] : [390, 1280]) for (const theme of behaviorOnly ? ["light"] : ["light", "dark"]) {
     const context = await browser.newContext({ viewport: { width, height: 800 }, colorScheme: theme });
     await context.addInitScript(({ theme }) => {
       localStorage.setItem("pi-agent-ui.token", "local-ui-fixture-not-a-credential");
@@ -31,7 +32,7 @@ try {
       const dto = (file, title) => ({ sessionId: file, file, title: { text: title, truncated: false }, lastActiveMs: Date.now(), entryCount: 4, sizeBytes: 1024, hasRecoveryNotice: false, listReliability: "full" });
       const rows = [dto("design.jsonl", "设计一个安静的聊天工作台"), dto("notes.jsonl", "梳理本周的工作计划")];
       const status = (file) => ({ session: { sessionId: file, file, adapterSessionId: null }, process: { phase: "running", generation: 1, lastStartResult: null, lastStopResult: null, ready: true }, turn: { state: "idle" }, backgroundTasks: { availability: "known", activeCount: 0 }, reap: { eligible: false, idleElapsedMs: null, idleRemainingMs: null, idleMs: 0 }, recovery: { availability: "unavailable", resumeBlocked: null, diskBlocked: null, unknownEffectCount: null, unattributableFragments: null, intentsCount: null, settledCount: null, evidenceHash: null }, statusVersion: 1, serverTimeMs: Date.now() });
-      let mode = "launched", seq = 0, subscription = "";
+      let mode = "launched", seq = 0, subscription = "", liveSocket = null;
       const event = (role, text, n) => ({ seq: n, ts: Date.now(), generation: 1, intentId: null, kind: "message", entryId: `e-${n}`, role, final: true, textPreview: { text, truncated: false } });
       class Socket {
         readyState = 0; onopen = null; onclose = null; onmessage = null; onerror = null;
@@ -46,7 +47,7 @@ try {
           if (f.t === "get-models") receive({ t: "models-list", requestId: f.requestId, models: [{ provider: "local", id: "test-model", context: "200k" }] });
           if (f.t === "get-roots") receive({ t: "roots-list", requestId: f.requestId, roots: ["/local-fixture"] });
           if (f.t === "subscribe") {
-            subscription = `sub-${++seq}`;
+            liveSocket = this; subscription = `sub-${++seq}`;
             receive({ t: "snapshot", requestId: f.requestId, subscriptionId: subscription, streamId: `stream-${seq}`, snapshotId: `snap-${seq}`, barrier: 2, status: status(f.file), page: [event("user", "我想让聊天界面更清晰：保留必要信息，减少不必要的噪音。", 1), event("assistant", "可以。我们先让对话成为主角：左侧继续历史，右侧专注内容。连接状态和执行细节保留可查，但不占据阅读空间。", 2)], historyNext: null, liveFrom: { streamId: `stream-${seq}`, seq: 3 }, hasMore: false });
           }
           if (f.t === "prompt") {
@@ -58,13 +59,13 @@ try {
         }
       }
       window.WebSocket = Socket;
-      window.__uiRig = { frames, sockets, setMode: (value) => { mode = value; }, receive: (value) => sockets[1].receive(value), subscription: () => subscription };
+      window.__uiRig = { frames, sockets, setMode: (value) => { mode = value; }, receive: (value) => liveSocket?.receive(value), subscription: () => subscription };
     }, { theme });
     const page = await context.newPage(); const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(url); await page.locator('nav[aria-label="会话列表"]').waitFor();
     if (width === 390) await page.getByRole("button", { name: "＋新对话" }).click();
-    for (const scene of ["welcome", "conversation", "live", "question", "refused", "unknown", "health", "disconnected"]) {
+    for (const scene of behaviorOnly ? ["conversation"] : ["welcome", "conversation", "live", "question", "refused", "unknown", "health", "disconnected"]) {
       if (scene === "conversation") {
         if (width === 390) await page.getByRole("button", { name: "会话列表", exact: true }).click();
         await page.getByRole("button", { name: /设计一个安静的聊天工作台/ }).click();
@@ -96,6 +97,34 @@ try {
       await page.screenshot({ path, fullPage: true });
       const measurements = await page.evaluate(() => ({ overflowPx: document.documentElement.scrollWidth - innerWidth, textareas: [...document.querySelectorAll("textarea")].map((el) => ({ label: el.getAttribute("aria-label"), top: el.getBoundingClientRect().top, bottom: el.getBoundingClientRect().bottom })), frames: window.__uiRig.frames.map(({ t, file }) => ({ t, file })) }));
       evidence.push({ width, theme, scene, path, entry: "AppRoot→RealApp（无 demo）", url, errors, ...measurements });
+    }
+    if (width === 1280 && theme === "light") {
+      await page.reload(); await page.locator('nav[aria-label="会话列表"]').waitFor();
+      await page.getByRole("button", { name: /设计一个安静的聊天工作台/ }).click();
+      await page.getByText(/可以。我们先让对话成为主角/).waitFor();
+      await page.getByLabel("写入消息内容").fill("浏览器保活草稿");
+      await page.evaluate(() => { window.__composerNode = document.querySelector(".write-composer textarea"); window.__uiRig.receive({ t: "events", subscriptionId: window.__uiRig.subscription(), origin: "history", refSeq: 121, events: Array.from({ length: 119 }, (_, index) => ({ seq: index + 3, ts: null, generation: null, intentId: null, kind: "message", entryId: `scroll-${index + 3}`, role: "assistant", final: true, textPreview: { text: `历史滚动 ${index + 3} ` + "用于核验贴底跟随和向上阅读保护。".repeat(12), truncated: false } })) }); });
+      await page.waitForFunction(() => { const el = document.querySelector(".conversation-body"); return el.scrollHeight - el.scrollTop - el.clientHeight <= 4; });
+      await page.evaluate(() => { const el = document.querySelector(".conversation-body"); el.scrollTop = 0; el.dispatchEvent(new Event("scroll", { bubbles: true })); window.__uiRig.receive({ t: "events", subscriptionId: window.__uiRig.subscription(), origin: "live", liveSeq: 1, refSeq: null, events: [{ kind: "message-delta", part: "text", contentIndex: 0, delta: "新增直播行，向上阅读时不能抢滚动。" }] }); });
+      await page.getByText("新增直播行，向上阅读时不能抢滚动。").waitFor({ state: "attached" });
+      const readerTop = await page.locator(".conversation-body").evaluate((el) => el.scrollTop);
+      if (readerTop > 1) throw new Error(`向上阅读被直播抢回底部：${readerTop}`);
+      const before = await page.evaluate(() => window.__uiRig.frames.filter((frame) => frame.t === "subscribe" || frame.t === "unsubscribe" || frame.t === "ui-answer" || frame.t === "stop").length);
+      for (const viewportWidth of [767, 768, 390]) await page.setViewportSize({ width: viewportWidth, height: 800 });
+      await page.getByRole("button", { name: "会话列表", exact: true }).click();
+      await page.getByRole("button", { name: /设计一个安静的聊天工作台/ }).click();
+      const preserved = await page.evaluate(() => window.__composerNode === document.querySelector(".write-composer textarea"));
+      if (!preserved || await page.getByLabel("写入消息内容").inputValue() !== "浏览器保活草稿") throw new Error("断点/手机返回重挂或丢稿");
+      const after = await page.evaluate(() => window.__uiRig.frames.filter((frame) => frame.t === "subscribe" || frame.t === "unsubscribe" || frame.t === "ui-answer" || frame.t === "stop").length);
+      if (after !== before) throw new Error("可见性导航产生业务退订/作答/停止帧");
+      await page.setViewportSize({ width: 390, height: 420 });
+      await page.getByLabel("写入消息内容").click();
+      const hit = await page.getByRole("button", { name: "发送", exact: true }).evaluate((el) => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight && el.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)); });
+      if (!hit) throw new Error("短动态视口下唯一发送入口被裁切或遮挡");
+      await page.getByLabel("写入消息内容").evaluate((el) => el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true })));
+      if (await page.evaluate(() => window.__uiRig.frames.some((frame) => frame.t === "prompt"))) throw new Error("真实浏览器 IME 选词触发发送");
+      await page.screenshot({ path: join(out, "390-light-short-viewport.png"), fullPage: true });
+      evidence.push({ scene: "browser-behaviors", readerTop, viewport: "390×420（缩短视口模拟，不冒充真手机软键盘）", composerPreserved: preserved, businessFrameDelta: after - before, sendHit: hit, imePromptCount: 0, errors });
     }
     await context.close();
   }

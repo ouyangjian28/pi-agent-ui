@@ -330,7 +330,8 @@ function ConnectedApp({
             </div>
           </div>
           <SessionList client={clients.wsClient} selectedFile={file} onSelect={select} />
-          {ui.drafts.size > 0 && <section className="unfinished-drafts" aria-label="未完成草稿"><h3>未完成草稿</h3>{[...ui.drafts.values()].filter((draft) => draft.operation !== null).map((draft) => <button key={draft.id} type="button" onClick={() => restore(draft.id)}>{draft.phase === "settled-launched" ? "打开已受理对话" : draft.phase === "settled-unknown" ? "找回结果未知的草稿" : draft.operation?.pending ? "找回发送中的草稿" : "找回未发送成功的草稿"}<small>{draft.operation?.text.slice(0, 40)}</small></button>)}</section>}
+          {pendingQuestions && file && <div className="pending-answer-inline" role="status"><p>当前对话有待回答的问题。</p><button type="button" onClick={() => owner.open(file)}>回到待答对话</button></div>}
+          {ui.drafts.size > 0 && <section className="unfinished-drafts" aria-label="未完成草稿"><h3>未完成草稿</h3>{[...ui.drafts.values()].filter((draft) => draft.operation !== null && (draft.phase !== "settled-launched" || !wsSnap.sessions?.some((session) => session.file === draft.file))).map((draft) => <button key={draft.id} type="button" onClick={() => restore(draft.id)}>{draft.phase === "settled-launched" ? "打开已受理对话" : draft.phase === "settled-unknown" ? "找回结果未知的草稿" : draft.operation?.pending ? "找回发送中的草稿" : "找回未发送成功的草稿"}<small>{draft.operation?.text.slice(0, 40)}</small></button>)}</section>}
         </nav>
         <main ref={mainRef} className={`conversation ${isNew ? "conversation-new" : ""}`} aria-label="当前会话" inert={narrow && ui.view.kind === "list"}>
           <ConversationHeader title={title} isNew={isNew} onBack={() => owner.back()} onNew={() => { newDraft(); }} canCreate={owner.canCreate} status={!isNew ? detail.statusSummary?.turn : undefined} />

@@ -7,10 +7,10 @@ import { TOKEN_STORAGE_KEY } from "../../../apps/web/src/components/token-gate";
 import type { WebSocketLike } from "../../../apps/web/src/ws/ws-client";
 class Socket implements WebSocketLike {
   static all: Socket[] = [];
-  readyState = 0; sent: Record<string, unknown>[] = []; onopen: (() => void) | null = null;
+  readyState = 0; sent: Record<string, unknown>[] = []; modelsAtPrompt: (string | null)[] = []; onopen: (() => void) | null = null;
   onclose: ((event: { code: number }) => void) | null = null; onmessage: ((event: { data: unknown }) => void) | null = null; onerror: (() => void) | null = null;
   constructor() { Socket.all.push(this); }
-  send(bytes: string) { this.sent.push(JSON.parse(bytes)); }
+  send(bytes: string) { const frame = JSON.parse(bytes); if (frame.t === "prompt") this.modelsAtPrompt.push(window.localStorage.getItem("piagent-last-model")); this.sent.push(frame); }
   receive(frame: unknown) { this.onmessage?.({ data: JSON.stringify(frame) }); }
   close(code = 1000) { this.readyState = 3; this.onclose?.({ code }); }
   open() { this.readyState = 1; this.onopen?.(); this.receive({ t: "welcome", serverBootId: "fixture", serverBuildId: "fixture", protocolVersion: 1 }); }
@@ -18,9 +18,9 @@ class Socket implements WebSocketLike {
 const factory = () => new Socket();
 const dto = (file: string, text: string) => ({ sessionId: file, file, title: { text, truncated: false }, lastActiveMs: Date.now(), entryCount: 2, sizeBytes: 50, hasRecoveryNotice: false, listReliability: "full" });
 const status = (file: string) => ({ session: { sessionId: file, file, adapterSessionId: null }, process: { phase: "running", generation: 1, ready: true, lastStartResult: null, lastStopResult: null }, turn: { state: "idle" }, backgroundTasks: { availability: "known", activeCount: 0 }, reap: { eligible: false, idleElapsedMs: null, idleRemainingMs: null, idleMs: 0 }, recovery: { availability: "unavailable", resumeBlocked: null, diskBlocked: null, unknownEffectCount: null, unattributableFragments: null, intentsCount: null, settledCount: null, evidenceHash: null }, statusVersion: 1, serverTimeMs: Date.now() });
-function list(rows: ReturnType<typeof dto>[]) {
+function list(rows: ReturnType<typeof dto>[], total = rows.length, offset = 0, hasMore = false) {
   const socket = Socket.all[0]!; const request = socket.sent.filter((frame) => frame.t === "list-sessions").at(-1)!;
-  act(() => socket.receive({ t: "sessions", requestId: request.requestId, sessions: rows, offset: 0, total: rows.length, hasMore: false, listVersion: 1, listReliability: "full" }));
+  act(() => socket.receive({ t: "sessions", requestId: request.requestId, sessions: rows, offset, total, hasMore, listVersion: 1, listReliability: "full" }));
 }
 function start() {
   render(React.createElement(AppRoot, { createSocket: factory }));
@@ -52,6 +52,7 @@ describe("R1 真 AppRoot+三客户端首链", () => {
     fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" })); const frame = Socket.all[2]!.sent.at(-1)!;
     expect(frame).toMatchObject({ t: "prompt", text: "第一句话", file: expect.stringMatching(/^auto-/) });
     expect(frame).not.toHaveProperty("model"); expect(frame).not.toHaveProperty("cwd");
+    expect(Socket.all[2]!.modelsAtPrompt).toEqual(["__default__"]); // 真出帧时已写偏好，非 ACK 后补写
     expect(Socket.all[1]!.sent.filter((f) => f.t === "subscribe")).toHaveLength(0);
     await ack(frame, { kind: "launched", intentId: "i-1", commandId: 1 });
     expect(screen.getByLabelText("写入消息内容")).toBe(textarea); expect(textarea.value).toBe("");
@@ -59,6 +60,14 @@ describe("R1 真 AppRoot+三客户端首链", () => {
     expect(within(document.querySelector(".session-list")!).getByRole("button", { name: /第一句话/ }).getAttribute("aria-current")).toBe("page"); expect(screen.getByText(/真实历史正文/)).toBeTruthy();
     fireEvent.change(textarea, { target: { value: "第二句话" } }); fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
     expect(Socket.all[2]!.sent.filter((f) => f.t === "prompt")).toHaveLength(2); expect(Socket.all[2]!.sent.at(-1)).toMatchObject({ file: frame.file, text: "第二句话" });
+  });
+  it("列表第51条真实可见、点选正确 file；partial 与累计数量可发现", () => {
+    start(); fireEvent.click(screen.getByRole("button", { name: "刷新" })); list(Array.from({ length: 50 }, (_, index) => dto(`p${index + 1}.jsonl`, `第${index + 1}条对话`)), 51, 0, true);
+    expect(screen.getByText("已载 50 / 共 51")).toBeTruthy(); fireEvent.click(screen.getByRole("button", { name: "加载更多" }));
+    expect(Socket.all[0]!.sent.filter((f) => f.t === "list-sessions").at(-1)).toMatchObject({ offset: 50 });
+    list([dto("p51.jsonl", "第51条对话")], 51, 50, false);
+    expect(screen.getByText("已载 51 / 共 51")).toBeTruthy(); fireEvent.click(screen.getByRole("button", { name: /第51条对话/ }));
+    expect(Socket.all[1]!.sent.filter((f) => f.t === "subscribe").at(-1)).toMatchObject({ file: "p51.jsonl" });
   });
   it("Enter/Shift+Enter/IME：真 composer composing/229 零发送", () => {
     start(); const textarea = draft(); fireEvent.change(textarea, { target: { value: "中文输入" } });
@@ -126,6 +135,8 @@ describe("R1 真 AppRoot+三客户端首链", () => {
     expect(Array.from(document.querySelectorAll(".live-final .live-stream-text"), (node) => node.textContent)).toEqual(["完整正文一", "完整正文二"]);
     act(() => Socket.all[1]!.receive({ t: "events", subscriptionId: "sub-1", origin: "history", refSeq: 3, events: [{ seq: 2, ts: null, intentId: null, generation: null, kind: "message", role: "assistant", entryId: "e-2", final: true, textPreview: { text: "历史另一个助手", truncated: false } }, { seq: 3, ts: null, intentId: null, generation: null, kind: "journal-repair", repairReason: "torn-tail", repairByteStart: 10, repairByteEnd: 12 }] }));
     expect(screen.getByText("历史另一个助手")).toBeTruthy(); expect(screen.getByText(/日志修复/)).toBeTruthy();
+    expect(screen.getByLabelText("历史事件").textContent).not.toContain("日志修复");
+    expect(screen.getByLabelText("活动事件").textContent).toContain("日志修复");
     expect(Array.from(document.querySelectorAll(".live-final .live-stream-text"), (node) => node.textContent)).toEqual(["完整正文一", "完整正文二"]); expect(screen.getAllByText(/未确认入档/)).toHaveLength(2);
   });
   it("重连跨 client：页面和输入节点保留；零自动补发，新握手前零业务帧", async () => {
