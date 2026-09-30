@@ -1428,6 +1428,7 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - not-ready 默认态说明（B3-5）：effectiveModel===undefined 时 NotReadyBanner 下 role=note「重试将不指定模型；本会话此前绑定的模型设置不会被重置，以服务端实际为准」——默认重试不声称显示实际模型；选了模型则不显示。
 - mux-b2 追加 B3 五例（12 例全绿）：B3-1 非法编辑意图冻结（草稿保留+清单到达不清）/B3-2 custom 内编辑不覆盖恢复目标（X→Y→清空回转移前选择）/B3-3 custom→B→清空仍 B/B3-4 拼合值不过正则禁选+不可用/B3-5 默认重试说明+选模型后不显示。全仓 1809 绿+tsc 0。commit bf1ce14。
 - 变异 4/4 真杀（基线 bf1ce14 先 commit）：Mu-b2a-1 roots-list 身份核验拆→force 后旧 R1 例红/Mu-b2a-2 结算不清 timer→清 timer 例红/Mu-b2b-3 总截止 useEffect 拆→无 welcome 超时例红/Mu-b2b-4 清单禁选拆→B3-4 红。**教训再现：变异脚本 assert 失败路径未还原工作树（残留静默变异直到 git diff 才发现）——变异脚本必须 try/finally 还原+收尾 git diff 复核。**
+- **【勘正 2026-09-30 GPT r2 复审】** Mu-b2a-2「清 timer 例红」实为 pending 门兜底假绿：删成功分支物理 clearTimeout（保留 pending 清位）五文件 90/90 仍绿；r3 修复批已给成功例补 `vi.getTimerCount()===0` 物理断言后该变异真杀。requestRoots 的 failed 后重发为普通重试（public 无 force 参数；「force」措辞全面退役）。本节「换代（close）清 rootsTimer」表述保留但同 client closed 后无重连——「重挂可重发」准确口径=**重建 client 后**可重新请求。
 
 ### M-UX 批3：新建页减法（用户拍板；2026-10-10，GLM 写·线上 16:18 面）
 
@@ -1446,3 +1447,15 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - 杀点例三枚（变异 3/3 真杀，基线 d17014d）：P1-05 例=serverClose→**vi.getTimerCount()===0 物理撤销断言**（GPT P1-06 口径：pending 门拦截≠timer 清理，首版例存活实证）+advance 10s 零通知+迟到回包零副作用；P2-02 例=error 4402（retryable:true 必带）结算 failed→send throw 不悬挂可重发（get-roots 帧≥2）；哨兵例=读丢弃+写零写入（先 removeItem 隔离：拒写≠清污染）+合法值不覆盖。
 - commit d17014d+ab4d644（timer 计数断言补强）。全仓 1813 绿+tsc 两包 0。
 - 尾债：models 请求 send-throw 悬挂同型弱点未修（本批范围外，GPT 未点名；M-DEPLOY 后统一处置）。
+
+### M-UX 批2 修复批 r3：GPT 复审 NO-GO 80 处置（2026-10-10，GLM 修·待复审）
+
+- 审报=~/ai projects/pi-agent-ui/audits/gpt-muxb2r2-review-2026-09-30.md（P1×1+P2×4+P3×2；三项消解+三枚 r2 变异获认可）。
+- **R2-P1-01（唯一阻断）测试假绿闭合**：①mux-b2 成功例补结算当下 `vi.getTimerCount()===0` 物理断言（在途恰 1→成功结算 0；GPT 窄变异「删成功 clearTimeout 保留 pending 门」此前 90/90 绿）；②卸载例重写真 client 接线（组件 props 传真 WsClient→挂载 effect 真发 get-roots→断言 rid 来自组件自身→unmount→迟到回包入缓存 ok→重挂零新请求幂等）——旧例 stub client 与真 client 脱节（错误 cleanup 变异 12/12 绿）；③批2a 节旧变异口径勘正（见上）。
+- R2-P2-01：select 删 `disabled={models.status==="loading"}`——默认项/已恢复自定义项不依赖清单恒可选；清单项仅 ok 时渲染（无需禁用态）。恢复旧 id+清单挂起→可选默认→帧无 model 键（新例全链）。
+- R2-P2-02：selectModel 守卫改 isPersistableModel 同口径（拒 __ 前缀保留样式）；modelValid 发送面同拒（草稿 `__default__`/`__custom__` 禁创建+文案点明；回默认走 select 默认项）。新例：手打哨兵→按钮禁+零发送。
+- R2-P2-03：requestRoots 顺序反转——**timer 登记先于 loading transition**（订阅者同步重入 close() 时可见 timer 物理撤销；终局后零资源创建）。
+- R2-P2-04：mux-b1 B2 期望名改冻结 Date 本地字段推导（getHours 等，不硬编码 140504）——TZ=UTC 不再红。
+- R2-P3-01：autoFile 惰性初始化（useRef\<null\>+首渲染赋值）——真·只调一次（useRef(autoFile()) 参数每 render 求值只保留首次）。
+- R2-P3-02 口径收窄：rootsHint=壳层固定串（非 roots 快照驱动，组件 const roots 无消费者——数据域保留属兼容选择）；writeLastModel 时点=sendPrompt 发出前（写端本地拒绝也写偏好）；旧测试注释中 userTouchedModel/lastNonCustom/页面等待 timer 描述清理。
+- 新例 4 枚（new-session 19/mux-b2 12）。全仓 1815 绿+tsc 两包 0。

@@ -372,8 +372,9 @@ export class WsClient {
       this.rootsRequestPending = false; // 非 OPEN 静默未发/发送异常：不算在途（同 list-sessions 回滚口径）
       return; // 状态面不动：请求未上线不产生 loading 迁移（failed 等终态保留）
     }
-    if (this.snapshot.roots.status !== "loading") this.transition({ roots: { status: "loading", items: [], journalRoot: null, cause: null } }); // 发出成功才示 loading
-    // 请求截止域：timer 捕获所属身份；fire 时身份失配（已被 force 替代/已结算）零副作用。
+    // 请求截止域：timer 捕获所属身份；fire 时身份失配（已结算/换代）零副作用。
+    // 顺序（R2-P2-03）：资源登记先于 loading 通知——订阅者在通知里同步 close() 时可见 timer 并物理撤销，
+    // 终局之后不再创建资源。
     const firedSeq = this.rootsSeq;
     this.rootsTimer = setTimeout(() => {
       this.rootsTimer = null;
@@ -381,6 +382,7 @@ export class WsClient {
       this.rootsRequestPending = false;
       this.transition({ roots: { status: "failed", items: [], journalRoot: null, cause: "timeout（10s）" } });
     }, ROOTS_TIMEOUT_MS);
+    if (this.snapshot.roots.status !== "loading") this.transition({ roots: { status: "loading", items: [], journalRoot: null, cause: null } }); // 发出成功才示 loading
   }
 
   /** 订阅快照变更（含状态迁移）；返回退订函数。签名与 useSyncExternalStore 直接对齐。 */

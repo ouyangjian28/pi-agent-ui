@@ -305,7 +305,11 @@ describe("M-UX 批1修复 P2-02：CSPRNG 来源约束+同 file 不换名", () =>
     try {
       render(el);
       expect(screen.queryByLabelText("会话文件名")).toBeNull(); // 批3：文件名不显示给用户
-      const name1 = `auto-${"20260930"}-${"140504"}-${"cd".repeat(16)}.jsonl`; // 固定源确定性（hex 全 cd；冻结时钟 UTC 06:05:04=本地 14:05:04，autoFile 用本地时区）
+      const frozen = new Date(Date.UTC(2026, 8, 30, 6, 5, 4));
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const ymd = `${frozen.getFullYear()}${pad(frozen.getMonth() + 1)}${pad(frozen.getDate())}`;
+      const hms = `${pad(frozen.getHours())}${pad(frozen.getMinutes())}${pad(frozen.getSeconds())}`;
+      const name1 = `auto-${ymd}-${hms}-${"cd".repeat(16)}.jsonl`; // 固定源确定性（hex 全 cd；期望名从冻结 Date 本地字段推导——autoFile 用本地时区，测试不暗依赖开发机 TZ）
       // 第一次创建：填首条→click→**await 结算**（sendPrompt promise→onLaunched/异步链 flush）
       const textInput = screen.getByLabelText("首条消息") as HTMLTextAreaElement;
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;

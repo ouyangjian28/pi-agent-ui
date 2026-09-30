@@ -133,8 +133,9 @@ export function NewSession({
   const [notReady, setNotReady] = useState<NotReadyInfo | null>(null);
   const [sending, setSending] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
-  // 批3：文件名后台自动（用户不可见）——挂载一次性生成，创建全程稳定。
-  const fileRef = useRef<string>(autoFile());
+  // 批3：文件名后台自动（用户不可见）——首次渲染惰性生成一次，此后保留（候选值丢弃），创建全程稳定。
+  const fileRef = useRef<string | null>(null);
+  if (fileRef.current === null) fileRef.current = autoFile();
   const file = fileRef.current;
 
   // D04：草稿优先（custom 态）；空=用已确认选择；均无=默认（不携带 model 域）
@@ -144,7 +145,8 @@ export function NewSession({
 
   const fileValid = LIMITS.filePattern.test(file); // autoFile 恒合法（防御：万一非法创建门拦）
   const textValid = text.trim().length > 0;
-  const modelValid = effectiveModel === undefined || LIMITS.modelPattern.test(effectiveModel);
+  // R2-P2-02：__ 前缀=界面保留样式（如 __default__/__custom__），不作真实模型 id 发送；回默认走 select 默认项。
+  const modelValid = effectiveModel === undefined || (!effectiveModel.startsWith("__") && LIMITS.modelPattern.test(effectiveModel));
   const writeReady = writeClient.getSnapshot().connState === "ready";
 
   const create = (): void => {
@@ -154,7 +156,7 @@ export function NewSession({
       return;
     }
     if (!modelValid) {
-      setLocalError("模型标识非法（只收精确 id，非 glob）");
+      setLocalError("模型标识非法（只收精确 id，非 glob；__ 前缀为界面保留值，回默认请选「默认」）");
       return;
     }
     setSending(true);
@@ -187,7 +189,7 @@ export function NewSession({
   // D04 select 写入门（持久化过滤）：只接受 __default__ 哨兵或过完整 modelPattern 的值；
   // 显式 select=放弃草稿并确认选择（非 custom 态→更新锚）。
   const selectModel = (v: string): void => {
-    if (v !== MODEL_DEFAULT && !LIMITS.modelPattern.test(v)) return; // 纵深防御：畸形值零写入
+    if (!isPersistableModel(v)) return; // 纵深防御：畸形值/保留样式（__ 前缀非默认哨兵）零迁移（与持久化同口径）
     setFreeText("");
     setModelChoice(v === MODEL_DEFAULT ? null : v);
   };
@@ -209,7 +211,6 @@ export function NewSession({
         <select
           value={inCustom ? draftTrim : (modelChoice ?? MODEL_DEFAULT)}
           onChange={(e) => selectModel(e.target.value)}
-          disabled={models.status === "loading"}
           aria-label="模型选择"
         >
           <option value={MODEL_DEFAULT}>默认（pi 配置）</option>

@@ -3,7 +3,7 @@
 // not-ready→红条+重试重发+换模型清直达/清单 failed 降级 free-text 仍可用/free-text 优先生效。
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach } from "vitest";
 import { NewSession, writeLastModel, type ModelsSource, type RootsSource } from "../../../apps/web/src/components/new-session";
 import type { ModelsState, RootsState } from "../../../apps/web/src/ws/ws-client";
@@ -316,6 +316,31 @@ describe("批3 模型记住上次（localStorage）", () => {
     cleanup();
     setup(modelsSnap("ok", []));
     expect((screen.getByLabelText("模型选择") as HTMLSelectElement).value).toBe("openai-codex/gpt-5.3");
+  });
+
+  it("R2-P2-01：恢复旧模型+清单永久挂起（loading）→select 仍可选「默认」→创建帧无 model 键", async () => {
+    window.localStorage.setItem("piagent-last-model", "gone/old"); // 合法但清单外旧 id
+    const { write } = setup(modelsSnap("loading")); // 清清单项：loading 永不回包（无重试）
+    const sel = screen.getByLabelText("模型选择") as HTMLSelectElement;
+    expect(sel.value).toBe("gone/old"); // 恢复成功（自定义项显示）
+    expect(sel.disabled).toBe(false); // R2-P2-01：loading 不禁 select（默认项不依赖清单）
+    fireEvent.change(sel, { target: { value: "__default__" } }); // 回默认（此前被 loading 禁用不可达）
+    expect(sel.value).toBe("__default__");
+    fill("首条消息", "hi");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "创建会话" })); });
+    expect(write.sent).toHaveLength(1);
+    expect(write.sent[0].model).toBeUndefined(); // 实际帧无 model 键=真回默认（非发 __default__ 字符串）
+  });
+
+  it("R2-P2-02：草稿输 __ 前缀保留值→创建被拦（__default__/__custom__ 不作真实 id 发送）", async () => {
+    const { write } = setup(modelsSnap("loading"));
+    fireEvent.change(screen.getByLabelText("模型选择"), { target: { value: "__custom__" } }); // 受控探针：custom option 同值
+    // 修后：草稿面直接拦（modelValid 含 __ 前缀拒收）
+    fireEvent.change(screen.getByLabelText("模型 id 直达"), { target: { value: "__default__" } }); // 手打哨兵也不当 id 发
+    fill("首条消息", "hi");
+    const btn = screen.getByRole("button", { name: "创建会话" }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true); // modelValid=false 禁创建
+    expect(write.sent).toHaveLength(0);
   });
 
   it("哨兵样式保留值（__custom__ 等）→读写双拒（P1-03 GPT 批2审：不得经存储面漏入 model 域）", () => {

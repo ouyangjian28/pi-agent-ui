@@ -5,7 +5,7 @@
 // timer 打回；M1 卸载后 R2 迟到回包入缓存；超时/force 后旧 R1 零覆盖；既有 t=10/t=11 断言保留
 //（ws-client.test.ts v1.5 节五例不回归）。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
 
 afterEach(cleanup);
 import { fireEvent } from "@testing-library/react";
@@ -92,54 +92,53 @@ describe("M-UX 批2 D05 请求域：身份三件+超时/force 零覆盖", () => 
     expect(client.getSnapshot().roots.items).toEqual(ROOTS);
   });
 
-  it("成功取消所属 timer：R2 结算后再推进 10s 不打回 failed（timer 清理）", () => {
+  it("成功取消所属 timer：结算当下物理清零（R2-P1-01 口径：pending 门兜底≠物理清理）", () => {
     vi.useFakeTimers();
     client.requestRoots();
     const r1 = (ws.sentFrames().at(-1) as { requestId: string }).requestId;
+    expect(vi.getTimerCount()).toBe(1); // 在途恰一个 timer
     ws.receive({ t: "roots-list", requestId: r1, roots: ROOTS });
     expect(client.getSnapshot().roots.status).toBe("ok");
+    expect(vi.getTimerCount()).toBe(0); // 成功结算物理撤销（非 pending 门拦截）
     vi.advanceTimersByTime(20_000);
-    expect(client.getSnapshot().roots.status).toBe("ok"); // 残留 timer 零副作用
+    expect(client.getSnapshot().roots.status).toBe("ok"); // 残留 timer 零副作用（双保险）
   });
 });
 
-describe("M-UX 批2 D05 数据域：M1 卸载后迟到回包照常入缓存", () => {
-  it("组件卸载（无消费者）后 roots-list 到达→WsClient 快照照常 ok（供下次挂载/列表用）", async () => {
+describe("M-UX 批2 D05 数据域：M1 卸载后迟到回包照常入缓存（R2-P1-01：真 client 接线，非脱节 stub）", () => {
+  it("组件挂载真发 get-roots→卸载→迟到回包入 WsClient 缓存→重挂不重发", async () => {
     const { render } = await import("@testing-library/react");
     const React = (await import("react")).default;
     const { NewSession } = await import("../../../apps/web/src/components/new-session");
     vi.useFakeTimers();
-    const listeners = new Set<() => void>();
-    const snap: Record<string, unknown> = {
-      state: "ready",
-      models: { status: "ok", items: [], cause: null },
-      roots: { status: "loading", items: [], journalRoot: null, cause: null },
-    };
-    snap.getSnapshot = () => snap;
-    snap.subscribe = (cb: () => void) => { listeners.add(cb); return () => { listeners.delete(cb); }; };
     const writeStub = {
       sendPrompt: () => Promise.resolve({ kind: "launched" }),
       getNotReady: () => null,
-      subscribe: snap.subscribe as never,
+      subscribe: client.subscribe as never,
       getSnapshot: () => ({ connState: "ready" }),
     };
-    const el = React.createElement(NewSession, {
-      wsClient: { requestModels: () => {}, requestRoots: () => {}, subscribe: snap.subscribe as never, getSnapshot: snap.getSnapshot as never },
+    const mk = () => React.createElement(NewSession, {
+      wsClient: client, // 真 WsClient：挂载 effect 真发 get-roots（写连接 ready 即发）
       writeClient: writeStub as never,
       rootsHint: "x",
       onLaunched: () => {},
       onCancel: () => {},
     });
-    const { unmount } = render(el);
-    unmount(); // M1 卸载——页面等待域 timer 已清，但数据域（WsClient）不受影响
-    // R2 迟到回包（组件已不在）：数据域照常入账
-    client.requestRoots();
-    const rid = (ws.sentFrames().at(-1) as { requestId: string }).requestId;
-    ws.receive({ t: "roots-list", requestId: rid, roots: ROOTS });
-    expect(client.getSnapshot().roots.status).toBe("ok");
+    const r1 = render(mk()); // 挂载：effect 真发 get-roots-1（此 client 已 welcome/ready）
+    await act(async () => { await Promise.resolve(); });
+    const rid = (ws.sentFrames().findLast((f) => (f as { t: string }).t === "get-roots") as { requestId: string }).requestId;
+    expect(rid).toMatch(/^get-roots-\d+$/); // 组件自己发的（非测试驱动）
+    r1.unmount(); // 卸载：消费者离开，数据域（WsClient）不受影响
+    ws.receive({ t: "roots-list", requestId: rid, roots: ROOTS }); // 迟到回包（组件已不在）
+    expect(client.getSnapshot().roots.status).toBe("ok"); // 照常入账（下次挂载可用）
     expect(client.getSnapshot().roots.items).toEqual(ROOTS);
+    const before = ws.sentFrames().length;
+    const r2 = render(mk()); // 重挂：ok 幂等门→不重发
+    await act(async () => { await Promise.resolve(); });
+    expect(ws.sentFrames().length).toBe(before); // 零新请求
+    r2.unmount();
   });
-});
+});;
 
 describe("批3 D05 页面等待域退役：目录减法（B4 改造）", () => {
   it("roots 永不回包：页面无任何等待面/超时出口——用户无感，直接可创建（默认目录）", async () => {
