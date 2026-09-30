@@ -98,6 +98,7 @@ export interface ManagedEditor {
   readonly slot: EditorSlot | null;
   readonly source: ModelSource;
   readonly isNew: boolean;
+  readonly defaultChoice?: string;
   readonly onEdit: (text: string) => void;
   readonly onConfigure: (choice: string, freeText: string) => void;
   readonly onSend: (confirmed: boolean) => Promise<SendResult>;
@@ -128,7 +129,7 @@ export function WriteComposer({ client, file, editor }: { client: WriteClientSur
   const identityRef = useRef({ client, file });
   identityRef.current = { client, file };
 
-  const model = editor?.isNew ? effectiveModel(editor.slot?.modelChoice ?? MODEL_DEFAULT, editor.slot?.freeText ?? "") : undefined;
+  const model = editor?.isNew ? effectiveModel(editor.slot?.modelChoice ?? editor.defaultChoice ?? MODEL_DEFAULT, editor.slot?.freeText ?? "") : undefined;
   const pending = editor ? (editor.slot?.operation?.pending === true && editor.slot.operation.client === client) : view.sending;
   const canSend = (editor?.isNew || file !== null) && view.ready && !pending && !view.stopping && text.trim().length > 0 && isSendableModel(model);
   const canStop = file !== null && view.ready && !view.stopping;
@@ -186,7 +187,11 @@ export function WriteComposer({ client, file, editor }: { client: WriteClientSur
 
   return (
     <section className="write-composer" aria-label={`写消息${file === null ? "" : `：${file}`}`}>
-      {editor?.isNew && <ModelPicker source={editor.source} choice={editor.slot?.modelChoice ?? MODEL_DEFAULT} freeText={editor.slot?.freeText ?? ""} onConfigure={editor.onConfigure} />}
+      {result?.status === "unknown" && <div className="send-unknown" role="alert"><p>{result.message}</p>{editor && <button type="button" onClick={editor.onViewTarget}>查看目标会话</button>}{pending && <p>原请求仍在途。请从顶部连接明细立即重连；重连不会自动补发。</p>}</div>}
+      {result?.status === "rejected" && result.outcome.kind !== "not-ready" && <p className="banner" role="alert">{promptOutcomeText(result.outcome)}；草稿已保留，可显式重试。</p>}
+      {editor && result?.status === "local" && <p className="banner" role="alert">{result.message}</p>}
+      {editor && result?.status === "rejected" && result.outcome.kind === "not-ready" && <><NotReadyBanner info={{ cause: result.outcome.cause ?? null, detail: result.outcome.detail ?? null }} onRetry={canSend ? onSend : undefined} onSwitchModel={() => editor.onConfigure(editor.slot?.modelChoice ?? MODEL_DEFAULT, "")} />{model === undefined && <p role="note">重试将不指定模型；本会话此前绑定的模型设置不会被重置，以服务端实际为准</p>}</>}
+      {editor?.isNew && <ModelPicker source={editor.source} choice={editor.slot?.modelChoice ?? editor.defaultChoice ?? MODEL_DEFAULT} freeText={editor.slot?.freeText ?? ""} onConfigure={editor.onConfigure} />}
       <label>
         {editor?.isNew ? "首条消息" : "写入消息"}
         <textarea
@@ -214,10 +219,6 @@ export function WriteComposer({ client, file, editor }: { client: WriteClientSur
           {phaseText}
         </span>
       </div>
-      {result?.status === "unknown" && <div className="send-unknown" role="alert"><p>{result.message}</p>{editor && <button type="button" onClick={editor.onViewTarget}>查看目标会话</button>}{pending && <p>原请求仍在途。请从顶部连接明细立即重连；重连不会自动补发。</p>}</div>}
-      {result?.status === "rejected" && result.outcome.kind !== "not-ready" && <p className="banner" role="alert">{promptOutcomeText(result.outcome)}；草稿已保留，可显式重试。</p>}
-      {editor && result?.status === "local" && <p className="banner" role="alert">{result.message}</p>}
-      {editor && result?.status === "rejected" && result.outcome.kind === "not-ready" && <><NotReadyBanner info={{ cause: result.outcome.cause ?? null, detail: result.outcome.detail ?? null }} onRetry={canSend ? onSend : undefined} onSwitchModel={() => editor.onConfigure(editor.slot?.modelChoice ?? MODEL_DEFAULT, "")} />{model === undefined && <p role="note">重试将不指定模型；本会话此前绑定的模型设置不会被重置，以服务端实际为准</p>}</>}
       {!editor && view.errorMessage !== null && result?.status !== "unknown" ? (
         <p className="banner" role="alert">
           {view.errorMessage}
@@ -226,8 +227,8 @@ export function WriteComposer({ client, file, editor }: { client: WriteClientSur
       {!editor && view.notReady !== null ? (
         <NotReadyBanner info={view.notReady} onRetry={canSend ? onSend : undefined} />
       ) : null}
-      {!editor && view.lastResult !== null ? (
-        <p role="status">{lastResultText(view.lastResult)}</p>
+      {view.lastResult !== null && (!editor || (view.lastResult.ok && view.lastResult.kind === "prompt" && view.lastResult.outcome.kind === "launched")) ? (
+        <p role="status">{editor ? "消息已受理，等待回复。" : lastResultText(view.lastResult)}</p>
       ) : null}
       <details className="resume-demo" hidden={editor?.isNew === true}>
         <summary>高级诊断</summary>

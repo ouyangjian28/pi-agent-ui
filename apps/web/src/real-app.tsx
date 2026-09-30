@@ -255,6 +255,31 @@ function ConnectedApp({
       mainRef.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus();
     }
   }, [narrow, ui.view.kind]);
+  const messageScroll = React.useRef<HTMLDivElement>(null);
+  const nearBottom = React.useRef(true);
+  const scrollPositions = React.useRef(new Map<string, { top: number; follow: boolean }>());
+  React.useLayoutEffect(() => {
+    const element = messageScroll.current;
+    if (!element || !file) return;
+    const saved = scrollPositions.current.get(file);
+    nearBottom.current = saved?.follow ?? true;
+    if (saved && !saved.follow) element.scrollTop = saved.top;
+    else element.scrollTop = element.scrollHeight;
+  }, [file, narrow, ui.view.kind]);
+  React.useLayoutEffect(() => {
+    const element = messageScroll.current;
+    if (element && nearBottom.current) element.scrollTop = element.scrollHeight;
+  }, [detail.events, detail.liveEvents, detail.uiRequests]);
+  useEffect(() => {
+    const element = messageScroll.current;
+    if (!element) return;
+    // rAF 直播提交发生在父 layout effect 之后；观察真实 DOM 尺寸内容变更才跟随。
+    const observer = new MutationObserver(() => {
+      if (nearBottom.current) element.scrollTop = element.scrollHeight;
+    });
+    observer.observe(element, { childList: true, characterData: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
   const title = isNew ? "新对话" : resolveTitle(wsSnap.sessions?.find((session) => session.file === file) ?? { file: file!, title: { text: "", truncated: false } });
 
   const authFailed =
@@ -309,11 +334,15 @@ function ConnectedApp({
         </nav>
         <main ref={mainRef} className={`conversation ${isNew ? "conversation-new" : ""}`} aria-label="当前会话" inert={narrow && ui.view.kind === "list"}>
           <ConversationHeader title={title} isNew={isNew} onBack={() => owner.back()} onNew={() => { newDraft(); }} canCreate={owner.canCreate} status={!isNew ? detail.statusSummary?.turn : undefined} />
-          <div className="conversation-body">
+          <div ref={messageScroll} className="conversation-body" onScroll={(event) => {
+            const element = event.currentTarget;
+            nearBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight <= 64;
+            if (file) scrollPositions.current.set(file, { top: element.scrollTop, follow: nearBottom.current });
+          }}>
             {isNew ? <div className="welcome"><span className="welcome-mark">π</span><h1>从一个想法开始</h1><p>从左侧继续或直接开始新对话</p></div> : <SessionDetail managed client={clients.subscribeClient} file={file} title={title} />}
           </div>
           <WriteComposer client={clients.writeClient} file={slot?.file ?? null} editor={{
-            slot, source: clients.wsClient, isNew,
+            slot, source: clients.wsClient, isNew, defaultChoice: readLastModel() ?? MODEL_DEFAULT,
             onEdit: (text) => { const id = ensureDraft(); if (id) owner.edit(id, text); },
             onConfigure: (choice, text) => { if (!isPersistableModel(choice)) return; const id = ensureDraft(); if (id) owner.configure(id, choice, text); },
             onCancel: () => owner.back(),

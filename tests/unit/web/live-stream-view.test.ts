@@ -37,6 +37,9 @@ function assistantMsg(seq: number, text = `助手消息 ${seq}`): HistoryEvent {
   };
 }
 
+function liveText(): string {
+  return Array.from(screen.getByLabelText("直播正文").querySelectorAll("p.live-stream-text"), (node) => node.textContent ?? "").join("\n");
+}
 function mount(liveEvents: readonly LiveEvent[], historyEvents: readonly HistoryEvent[] = []) {
   return render(React.createElement(LiveStreamView, { liveEvents, historyEvents }));
 }
@@ -63,13 +66,13 @@ describe("LiveStreamView 直播正文渲染", () => {
       }),
     );
     await flushFrame();
-    expect(screen.getByLabelText("直播正文").textContent).toBe("你好，世界\n第二段");
+    expect(liveText()).toBe("你好，世界\n第二段");
   });
 
   it("final 权威替换：增量残留被终局全文取代", async () => {
     const view = mount([delta("text", 0, "半截增量缺")]);
     await flushFrame();
-    expect(screen.getByLabelText("直播正文").textContent).toBe("半截增量缺");
+    expect(liveText()).toBe("半截增量缺");
     view.rerender(
       React.createElement(LiveStreamView, {
         liveEvents: [delta("text", 0, "半截增量缺"), final("完整终局全文。")],
@@ -77,13 +80,13 @@ describe("LiveStreamView 直播正文渲染", () => {
       }),
     );
     await flushFrame();
-    expect(screen.getByLabelText("直播正文").textContent).toBe("完整终局全文。");
+    expect(liveText()).toBe("完整终局全文。");
   });
 
   it("空 delta 直接收 final（合法路径）：零增量也渲染终局全文", async () => {
     mount([final("短回复整体吸收")]);
     await flushFrame();
-    expect(screen.getByLabelText("直播正文").textContent).toBe("短回复整体吸收");
+    expect(liveText()).toBe("短回复整体吸收");
   });
 
   it("thinking 缺省不渲染：折叠区留槽（有内容才出开关），开关默认关、点开可见", async () => {
@@ -98,17 +101,19 @@ describe("LiveStreamView 直播正文渲染", () => {
     expect(region.textContent).toContain("内心活动");
   });
 
-  it("turn 边界清空：assistant 正文落历史后直播区清空本轮（防重复显示）", async () => {
+  it("v6 诚实交接：assistant 正文落历史不能证明覆盖，定格仍在且未确认", async () => {
     const live = [delta("text", 0, "本轮正文"), final("本轮正文")];
     const view = mount(live);
     await flushFrame();
-    expect(screen.getByLabelText("直播正文").textContent).toBe("本轮正文");
-    // 历史区落行（同帧不再含 live 新增）→ 直播区清空
+    expect(liveText()).toBe("本轮正文");
+    // 历史区落行（同帧无 live 新增）≠覆盖证明，正文不得被自动删
     view.rerender(
       React.createElement(LiveStreamView, { liveEvents: live, historyEvents: [assistantMsg(1, "本轮正文")] }),
     );
     await flushFrame();
-    expect(screen.queryByLabelText("直播正文")).toBeNull();
+    expect(liveText()).toBe("本轮正文");
+    expect(screen.getByText(/未确认入档/)).toBeTruthy();
+    expect(document.querySelectorAll(".live-final")).toHaveLength(1);
   });
 
   it("part-end 缺失/重复幂等：缺锚下一 contentIndex 自闭合；重复锚输出不变", async () => {
@@ -121,20 +126,20 @@ describe("LiveStreamView 直播正文渲染", () => {
       partEnd("text", 9), // 未知段
     ]);
     await flushFrame();
-    expect(screen.getByLabelText("直播正文").textContent).toBe("段一\n段二");
+    expect(liveText()).toBe("段一\n段二");
   });
 
   it("直播数组重置（事实④ 重订阅缩短）即整体清零从头处理", async () => {
     const old = [delta("text", 0, "旧流内容"), delta("text", 0, "续")];
     const view = mount(old);
     await flushFrame();
-    expect(screen.getByLabelText("直播正文").textContent).toBe("旧流内容续");
+    expect(liveText()).toBe("旧流内容续");
     view.rerender(React.createElement(LiveStreamView, { liveEvents: [], historyEvents: [] })); // 重订阅重置
     await flushFrame();
     expect(screen.queryByLabelText("直播正文")).toBeNull();
     view.rerender(React.createElement(LiveStreamView, { liveEvents: [delta("text", 0, "新流")], historyEvents: [] }));
     await flushFrame();
-    expect(screen.getByLabelText("直播正文").textContent).toBe("新流");
+    expect(liveText()).toBe("新流");
   });
 
   it("rAF 批处理：同帧多批推进合并为一次提交，千级 delta 正确拼接", async () => {
@@ -146,21 +151,20 @@ describe("LiveStreamView 直播正文渲染", () => {
       view.rerender(React.createElement(LiveStreamView, { liveEvents: [...all], historyEvents: [] }));
     }
     await flushFrame();
-    const region = screen.getByLabelText("直播正文");
-    expect(region.textContent).toBe(all.map((e) => (e.kind === "message-delta" ? e.delta : "")).join(""));
-    expect(region.textContent?.length).toBeGreaterThan(3000);
+    expect(liveText()).toBe(all.map((e) => (e.kind === "message-delta" ? e.delta : "")).join(""));
+    expect(liveText().length).toBeGreaterThan(3000);
   });
 
   it("final 后再来 delta=新一轮开始（事实⑤ 无轮次身份的划界）", async () => {
     const old = [final("上一轮全文")];
     const view = mount(old);
     await flushFrame();
-    expect(screen.getByLabelText("直播正文").textContent).toBe("上一轮全文");
+    expect(liveText()).toBe("上一轮全文");
     view.rerender(
       React.createElement(LiveStreamView, { liveEvents: [...old, delta("text", 0, "新一轮增量")], historyEvents: [] }),
     );
     await flushFrame();
-    expect(screen.getByLabelText("直播正文").textContent).toBe("新一轮增量");
+    expect(liveText()).toBe("新一轮增量");
   });
 });
 
@@ -219,7 +223,7 @@ describe("SessionDetail 接线：D2 直播正文面", () => {
     );
     await flushFrame();
     // 正文区=final 权威全文
-    expect(screen.getByLabelText("直播正文").textContent).toBe("流式正文终局");
+    expect(liveText()).toBe("流式正文终局");
     // live-list 只剩旁路事件；D1 文本化占位（［正文增量］/［助手全文］）已退役
     const liveList = screen.getByLabelText("直播事件");
     expect(liveList.textContent).toContain("进度 message_update");
@@ -232,7 +236,7 @@ describe("SessionDetail 接线：D2 直播正文面", () => {
     render(React.createElement(SessionDetail, { client: stub, file: "a.jsonl" }));
     stub.push(detailSnap({ liveEvents: [delta("text", 0, "只有正文")] }));
     await flushFrame();
-    expect(screen.getByLabelText("直播正文").textContent).toBe("只有正文");
+    expect(liveText()).toBe("只有正文");
     expect(screen.queryByLabelText("直播事件")).toBeNull();
   });
 });

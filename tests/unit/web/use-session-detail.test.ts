@@ -346,7 +346,7 @@ describe("SessionDetail 空态族（StubClient 推进快照）", () => {
     mount(client);
     expect(screen.getByRole("status")).toBeTruthy();
     client.push(detailSnap({ connState: "ready", phase: "paging", events: [msg(1)], status: STATUS }));
-    expect(screen.getByText(/#1 消息/)).toBeTruthy();
+    expect(screen.getByText(/^消息 1$/)).toBeTruthy();
     expect(screen.getByText("正在加载更多历史…")).toBeTruthy();
   });
 });
@@ -372,7 +372,7 @@ describe("SessionDetail 流态渲染（StubClient）", () => {
         }),
       ),
     );
-    expect(screen.getByText(/#1 消息/)).toBeTruthy(); // 内容保留
+    expect(screen.getByText(/^消息 1$/)).toBeTruthy(); // 内容保留
     const banner = screen.getByRole("status");
     expect(banner.textContent).toContain("4431");
     expect(banner.textContent).toContain("重新选择会话文件"); // C4 诚实标注
@@ -562,7 +562,7 @@ describe("真实链：SubscribeClient→SessionDetail DOM（假 socket 注入，
       });
     });
     // 中间态②：分页中首条内容已可见 + 分页加载提示在场（断言落在中间态而非末页后）
-    expect(screen.getByText(/#1 消息/)).toBeTruthy();
+    expect(screen.getByText(/^消息 1$/)).toBeTruthy();
     expect(screen.getByText("正在加载更多历史…")).toBeTruthy();
     const pageRequestId = (ws.sentFrames()[2] as { requestId: string }).requestId;
     act(() => {
@@ -581,7 +581,7 @@ describe("真实链：SubscribeClient→SessionDetail DOM（假 socket 注入，
       });
     });
     expect(screen.queryByText("正在加载更多历史…")).toBeNull(); // 末页后分页提示消失
-    expect(screen.getByText(/#3 消息/)).toBeTruthy();
+    expect(screen.getByText(/^消息 3$/)).toBeTruthy();
     const subscriptionId = "sub-1";
     act(() => {
       ws.receive({ t: "events", subscriptionId, origin: "live", liveSeq: 1, refSeq: null, events: [progress] });
@@ -595,7 +595,7 @@ describe("真实链：SubscribeClient→SessionDetail DOM（假 socket 注入，
     act(() => {
       ws.receive({ t: "events", subscriptionId, origin: "history", refSeq: 4, events: [msg(4), msg(4)] }); // 帧内重复 seq
     });
-    expect(screen.getByText(/#4 消息/)).toBeTruthy();
+    expect(screen.getByText(/^消息 4$/)).toBeTruthy();
     expect(screen.getByLabelText("历史事件").children.length).toBe(4);
   });
 
@@ -667,7 +667,7 @@ describe("真实链：SubscribeClient→SessionDetail DOM（假 socket 注入，
         retryable: false,
       });
     });
-    expect(screen.getByText(/#3 消息/)).toBeTruthy();
+    expect(screen.getByText(/^消息 3$/)).toBeTruthy();
     const banner = screen.getByRole("status");
     expect(banner.textContent).toContain("4431");
     expect(banner.textContent).not.toContain(SENTINEL);
@@ -682,7 +682,7 @@ describe("真实链：SubscribeClient→SessionDetail DOM（假 socket 注入，
     });
     expect(ws.sentFrames().length).toBe(sentBefore); // 无自动重发
     expect(screen.getByRole("status").textContent).toContain("重新同步");
-    expect(screen.getByText(/#3 消息/)).toBeTruthy();
+    expect(screen.getByText(/^消息 3$/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "继续读取" }));
     expect(ws.sentFrames().at(-1)).toEqual({
       t: "subscribe",
@@ -745,7 +745,7 @@ describe("真实链：SubscribeClient→SessionDetail DOM（假 socket 注入，
     act(() => {
       ws.receive({ t: "resync-required", subscriptionId, reason: "stream-replaced" });
     });
-    expect(screen.getByText(/#3 消息/)).toBeTruthy(); // 内容保留（冻结）
+    expect(screen.getByText(/^消息 3$/)).toBeTruthy(); // 内容保留（冻结）
     const banner = screen.getByRole("status");
     expect(banner.textContent).toContain("旧流已停止");
     expect(banner.textContent).toContain("重新选择会话文件");

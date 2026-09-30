@@ -316,6 +316,8 @@ function historyEventOk(v: unknown): v is HistoryEvent {
     case "unknown-line":
     case "journal-corrupt":
       return true;
+    case "journal-repair":
+      return v.repairReason === "torn-tail" && nonNegNum(v.repairByteStart) && nonNegNum(v.repairByteEnd) && v.repairByteEnd > v.repairByteStart;
     case "response-timeout":
       return nonNegNum(v.commandId);
     case "clear":
@@ -351,6 +353,12 @@ function liveEventOk(v: unknown): v is LiveEvent {
       return v.phase === "running" || v.phase === "stopping";
     case "ui-note":
       return (v.notifyType === "info" || v.notifyType === "warning" || v.notifyType === "error") && str(v.message);
+    case "message-delta":
+      return (v.part === "text" || v.part === "thinking") && typeof v.contentIndex === "number" && Number.isSafeInteger(v.contentIndex) && v.contentIndex >= 0 && str(v.delta);
+    case "message-part-end":
+      return (v.part === "text" || v.part === "thinking") && typeof v.contentIndex === "number" && Number.isSafeInteger(v.contentIndex) && v.contentIndex >= 0;
+    case "message-final":
+      return v.role === "assistant" && str(v.text);
     default:
       return false;
   }

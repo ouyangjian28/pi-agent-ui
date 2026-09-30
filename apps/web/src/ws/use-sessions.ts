@@ -13,6 +13,10 @@ export interface SessionsView {
   readonly total: number;
   readonly listVersion: number | null;
   readonly errorMessage: string | null;
+  readonly hasMore: boolean;
+  readonly paging: boolean;
+  readonly pageError: string | null;
+  readonly partial: boolean;
 }
 
 /** 快照→视图派生（纯函数）：connecting/authenticating/ready 未收首帧=loading；ready 已收帧=ready。 */
@@ -33,6 +37,10 @@ export function sessionsViewOf(snap: SessionsSnapshot): SessionsView {
     total: snap.total,
     listVersion: snap.listVersion,
     errorMessage: snap.errorMessage,
+    hasMore: snap.hasMore ?? false,
+    paging: snap.pageState === "loading",
+    pageError: snap.pageError ?? null,
+    partial: snap.listReliability === "partial",
   };
 }
 

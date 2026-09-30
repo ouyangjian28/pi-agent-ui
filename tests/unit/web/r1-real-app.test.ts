@@ -116,6 +116,18 @@ describe("R1 真 AppRoot+三客户端首链", () => {
     expect(Socket.all[2]!.sent.some((f) => f.t === "stop" || f.t === "prompt")).toBe(false);
     expect(document.body.textContent).not.toContain("当前模型");
   });
+  it("真 SubscribeClient 消费正文三形：坏形零消费，连续 final 真正文不被 history 增量删除", async () => {
+    start(); fireEvent.click(screen.getByRole("button", { name: /已有对话 B/ })); snapshot("b.jsonl");
+    const receive = (events: unknown[], liveSeq: number) => act(() => Socket.all[1]!.receive({ t: "events", subscriptionId: "sub-1", origin: "live", refSeq: null, liveSeq, events }));
+    receive([{ kind: "message-delta", part: "text", contentIndex: -1, delta: "坏形正文" }], 1);
+    await act(async () => { await new Promise((yes) => setTimeout(yes, 25)); }); expect(screen.queryByLabelText("直播正文")).toBeNull();
+    receive([{ kind: "message-delta", part: "text", contentIndex: 0, delta: "增量" }, { kind: "message-part-end", part: "text", contentIndex: 0 }, { kind: "message-final", role: "assistant", text: "完整正文一" }, { kind: "message-final", role: "assistant", text: "完整正文二" }], 4);
+    await act(async () => { await new Promise((yes) => setTimeout(yes, 25)); });
+    expect(Array.from(document.querySelectorAll(".live-final .live-stream-text"), (node) => node.textContent)).toEqual(["完整正文一", "完整正文二"]);
+    act(() => Socket.all[1]!.receive({ t: "events", subscriptionId: "sub-1", origin: "history", refSeq: 3, events: [{ seq: 2, ts: null, intentId: null, generation: null, kind: "message", role: "assistant", entryId: "e-2", final: true, textPreview: { text: "历史另一个助手", truncated: false } }, { seq: 3, ts: null, intentId: null, generation: null, kind: "journal-repair", repairReason: "torn-tail", repairByteStart: 10, repairByteEnd: 12 }] }));
+    expect(screen.getByText("历史另一个助手")).toBeTruthy(); expect(screen.getByText(/日志修复/)).toBeTruthy();
+    expect(Array.from(document.querySelectorAll(".live-final .live-stream-text"), (node) => node.textContent)).toEqual(["完整正文一", "完整正文二"]); expect(screen.getAllByText(/未确认入档/)).toHaveLength(2);
+  });
   it("重连跨 client：页面和输入节点保留；零自动补发，新握手前零业务帧", async () => {
     vi.useFakeTimers(); start(); const { textarea } = firstSend("原始输入");
     fireEvent.change(textarea, { target: { value: "新编辑稿" } });

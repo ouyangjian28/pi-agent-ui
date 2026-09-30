@@ -808,6 +808,31 @@ hr {
   cursor: pointer;
 }
 
+/* R1 消息主读面与活动二级层；live 未确认条目不可因样式收起而被删除。 */
+.session-list-region { min-height: 0; overflow: auto; flex: 1; }
+.session-group > h3 { padding: var(--sp-4) var(--sp-3) var(--sp-2); color: var(--c-muted); font-size: 11px; font-weight: 500; }
+.session-group > ul { padding: 0; margin: 0; list-style: none; }
+.list-pagination { padding: var(--sp-4) var(--sp-5); display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2); }
+.list-pagination button { font-size: 12px; width: 100%; background: transparent; }
+.list-pagination p { font-size: 11px; line-height: 1.6; color: var(--c-muted); }
+.session-detail .history-list { list-style: none; margin: 0; padding: 0; }
+.chat-message { margin: var(--sp-2) 0 var(--sp-6); padding: var(--sp-2) 0; overflow-wrap: anywhere; font-size: 14px; line-height: 1.85; }
+.message-author { display: block; font-family: system-ui, sans-serif; margin-bottom: var(--sp-2); font-size: 11px; color: var(--c-muted); }
+.chat-message p, .chat-preview, .entry-text { white-space: pre-wrap; line-height: 1.85; }
+.chat-user { background: var(--c-bg); border: 1px solid var(--c-border); border-radius: var(--r-lg); padding: var(--sp-4); margin-left: 12%; }
+.chat-assistant { padding-right: var(--sp-4); }
+.session-detail .live-stream { border: 0; background: transparent; padding: 0; margin: 0; }
+.live-final .message-author { color: var(--c-muted); }
+.frozen-summary { display: block; width: 100%; text-align: left; background: var(--c-bg); border: 0; font-size: 12px; color: var(--c-muted); }
+.frozen-content { margin-top: var(--sp-2); }
+.activity-details { border-top: 1px solid var(--c-border); padding-top: var(--sp-3); color: var(--c-muted); font-size: 12px; margin: var(--sp-5) 0; }
+.activity-details > summary { cursor: pointer; min-height: 44px; }
+.activity-list { padding-left: var(--sp-4); font-size: 12px; line-height: 1.7; }
+.activity-row { margin-bottom: var(--sp-2); }
+.activity-row .row-title { font-size: 12px; }
+.entry-expand { font-size: 11px; min-height: 32px; padding: var(--sp-1) var(--sp-2); background: transparent; margin-top: var(--sp-2); }
+@media (max-width: 767px) { .chat-message { font-size: 14px; } .chat-user { margin-left: var(--sp-5); } }
+
 /* R1 真聊天壳：订阅生命周期不由这些可见性规则控制。演示壳不受影响。 */
 .real-app .topbar { min-height: 64px; flex: 0 0 auto; justify-content: space-between; padding: var(--sp-3) var(--sp-5); gap: var(--sp-3); }
 .real-app .topbar strong { display: flex; align-items: center; font-size: 16px; letter-spacing: -0.02em; }
@@ -850,7 +875,7 @@ hr {
 .real-app .write-composer:focus-within { border-color: var(--c-accent); }
 .real-app .write-composer textarea:focus-visible { outline: none; }
 .real-app .write-actions > button:nth-child(2) { background: transparent; border-color: transparent; }
-.real-app .write-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.real-app .write-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); position: sticky; bottom: 0; background: var(--c-panel); z-index: 2; padding-top: var(--sp-2); }
 .real-app .write-actions > button:first-child { background: var(--c-fg); color: var(--c-panel); border-color: var(--c-fg); margin-left: auto; order: 3; font-size: 13px; }
 .real-app .write-actions > span { color: var(--c-muted); font-size: 11px; flex: 1; }
 .model-picker { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); border-bottom: 1px solid var(--c-border); padding-bottom: var(--sp-3); }
@@ -885,7 +910,7 @@ hr {
   .real-app .brand { font-size: 24px; }
   .real-app .topbar-actions { gap: var(--sp-1); }
   .real-app .health-dot { padding: var(--sp-2); min-height: 44px; }
-  .real-app .health-dot > span:last-child { display: none; }
+  .real-app .health-dot > span:last-child { font-size: 10px; white-space: nowrap; }
   .real-app .theme-toggle button { padding: var(--sp-2); font-size: 11px; min-height: 36px; }
   .real-app .workspace.two-col { display: flex; flex-direction: row; }
   .real-app .session-panel { width: 100%; max-height: none; border: 0; flex: 1; }
@@ -896,7 +921,7 @@ hr {
   .conversation-header { gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); min-height: 68px; }
   .back-to-list { display: block; font-size: 14px; border: 0; background: transparent; padding: var(--sp-2); }
   .back-to-list span { display: none; }
-  .new-model-conversation { max-width: 92px; font-size: 11px; padding: var(--sp-2); white-space: normal; }
+  .new-model-conversation { max-width: 116px; font-size: 11px; padding: var(--sp-2); white-space: nowrap; }
   .real-app .session-detail { padding: var(--sp-4); }
   .real-app .write-composer { width: calc(100% - var(--sp-5)); margin: var(--sp-3) auto max(var(--sp-3), env(safe-area-inset-bottom)); padding: var(--sp-3); max-height: 48dvh; }
   .real-app .conversation-new .write-composer { margin-bottom: auto; }
@@ -911,6 +936,7 @@ hr {
 }
 @media (max-height: 560px) {
   .real-app .conversation-new .conversation-body { margin-top: 0; }
+  .real-app .conversation-new .welcome { display: none; }
   .real-app .welcome { gap: var(--sp-2); padding: var(--sp-2); }
   .real-app .welcome-mark, .real-app .welcome p { display: none; }
   .real-app .write-composer { max-height: 60dvh; }

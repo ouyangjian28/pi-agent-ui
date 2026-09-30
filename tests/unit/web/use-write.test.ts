@@ -617,7 +617,7 @@ describe("K5 B2：composer 稳定挂载（空态↔内容态不丢草稿/在途/
       ws.receive({ t: "write-ack", requestId: "wr-p-1", file: "a.jsonl", outcome: LAUNCHED });
     });
     expect(textarea.value).toBe(""); // ack 清空（无在途编辑）
-    expect(screen.getByText(/#1 消息/)).toBeTruthy(); // 内容呈现
+    expect(screen.getByText(/^消息 1$/)).toBeTruthy(); // 内容呈现
     expect(
       screen
         .getAllByRole("status")

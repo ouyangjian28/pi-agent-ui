@@ -69,8 +69,8 @@ class FakeWebSocket implements WebSocketLike {
 }
 
 const WELCOME = { t: "welcome", serverBootId: "boot-1", serverBuildId: "b", protocolVersion: 1 } as const;
-const sessionsFrame = (v: number) => ({
-  t: "sessions", requestId: "list-sessions-1", offset: 0, total: 1, listVersion: v, hasMore: false, listReliability: "full" as const,
+const sessionsFrame = (v: number, requestId = "list-sessions-1") => ({
+  t: "sessions", requestId, offset: 0, total: 1, listVersion: v, hasMore: false, listReliability: "full" as const,
   sessions: [{ sessionId: `s-${v}`, file: `f${v}.jsonl`, title: { text: "t", truncated: false }, lastActiveMs: 1, entryCount: 1, sizeBytes: 10, hasRecoveryNotice: false, listReliability: "full" as const }],
 });
 
@@ -91,7 +91,7 @@ describe("M-UX D02 ws-client requestSessions：显式刷新+dirty 合并", () =>
     client.requestSessions();
     expect(ws.sent).toHaveLength(before + 1);
     expect((ws.sentFrames().at(-1) as { t: string }).t).toBe("list-sessions");
-    ws.receive({ ...sessionsFrame(2), requestId: "list-sessions-1" });
+    ws.receive(sessionsFrame(2, (ws.sentFrames().at(-1) as { requestId: string }).requestId));
     expect(client.getSnapshot().listVersion).toBe(2);
   });
 
@@ -103,7 +103,7 @@ describe("M-UX D02 ws-client requestSessions：显式刷新+dirty 合并", () =>
     expect(ws.sent).toHaveLength(inFlight);
     ws.receive(sessionsFrame(1)); // 结算→dirty 触发补拉
     expect(ws.sent).toHaveLength(inFlight + 1); // 恰一次补拉（dirty 只补一次）
-    ws.receive(sessionsFrame(2));
+    ws.receive(sessionsFrame(2, (ws.sentFrames().at(-1) as { requestId: string }).requestId));
     expect(client.getSnapshot().listVersion).toBe(2);
   });
 
@@ -151,7 +151,7 @@ describe("M-UX 批1修复 P2-01：同步重入原子化", () => {
     expect(ws.sent).toHaveLength(2);
     ws.receive(sessionsFrame(1)); // 结算→dirty 触发补拉
     expect(ws.sent).toHaveLength(3);
-    ws.receive(sessionsFrame(2));
+    ws.receive(sessionsFrame(2, (ws.sentFrames().at(-1) as { requestId: string }).requestId));
     expect(client.getSnapshot().listVersion).toBe(2);
   });
 
@@ -171,7 +171,7 @@ describe("M-UX 批1修复 P2-01：同步重入原子化", () => {
     client.requestSessions(); // 在途记 dirty
     ws.receive(sessionsFrame(1)); // 结算：回调发 R2（pending 立起）→needRepull 让位不再发 R3
     expect(ws.sent).toHaveLength(3); // hello+首拉+R2，无双发
-    ws.receive(sessionsFrame(3));
+    ws.receive(sessionsFrame(3, (ws.sentFrames().at(-1) as { requestId: string }).requestId));
     expect(client.getSnapshot().listVersion).toBe(3);
   });
 

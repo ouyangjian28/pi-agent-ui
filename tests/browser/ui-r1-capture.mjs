@@ -64,12 +64,33 @@ try {
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(url); await page.locator('nav[aria-label="会话列表"]').waitFor();
     if (width === 390) await page.getByRole("button", { name: "＋新对话" }).click();
-    for (const scene of ["welcome", "conversation"]) {
+    for (const scene of ["welcome", "conversation", "live", "question", "refused", "unknown", "health", "disconnected"]) {
       if (scene === "conversation") {
         if (width === 390) await page.getByRole("button", { name: "会话列表", exact: true }).click();
         await page.getByRole("button", { name: /设计一个安静的聊天工作台/ }).click();
       }
       if (scene === "conversation") await page.locator("section.session-detail").getByText(/可以。我们先让对话成为主角/).waitFor();
+      if (scene === "live") {
+        await page.evaluate(() => window.__uiRig.receive({ t: "events", subscriptionId: window.__uiRig.subscription(), origin: "live", refSeq: null, liveSeq: 3, events: [{ kind: "message-final", role: "assistant", text: "这条回复已生成，但当前协议不能证明它已经入档。" }, { kind: "message-final", role: "assistant", text: "这是另一个独立回复，不覆盖前一条。" }, { kind: "message-delta", part: "text", contentIndex: 0, delta: "下一条仍在生成中…" }] }));
+        await page.getByText(/pi · 已生成/).first().waitFor();
+      }
+      if (scene === "question") {
+        await page.evaluate(() => window.__uiRig.receive({ t: "ui-request", requestId: "q-local", file: "design.jsonl", method: "confirm", title: "是否继续调整布局？", message: "这是本地测试问题，不执行真实操作。" }));
+        await page.getByText("是否继续调整布局？").waitFor();
+      }
+      if (scene === "refused" || scene === "unknown") {
+        if (scene === "refused") await page.evaluate(() => window.__uiRig.receive({ t: "ui-closed", requestId: "q-local", reason: "answered" }));
+        await page.evaluate((value) => window.__uiRig.setMode(value), scene === "refused" ? "busy" : "server");
+        await page.getByLabel("写入消息内容").fill("发送失败时，这份草稿必须完整保留。");
+        await page.getByRole("button", { name: "发送", exact: true }).click();
+        await page.getByRole("alert").filter({ hasText: scene === "refused" ? "草稿已保留" : "可能已受理" }).waitFor();
+      }
+      if (scene === "health") await page.getByRole("button", { name: /连接状态：/ }).click();
+      if (scene === "disconnected") {
+        await page.keyboard.press("Escape");
+        await page.evaluate(() => window.__uiRig.sockets[2].close(1006));
+        await page.getByText(/自动重连中/).waitFor();
+      }
       await page.evaluate(() => Promise.all(document.getAnimations().filter((animation) => animation.effect?.getTiming().iterations !== Infinity).map((animation) => animation.finished.catch(() => {}))));
       const path = join(out, `${width}-${theme}-${scene}.png`);
       await page.screenshot({ path, fullPage: true });
