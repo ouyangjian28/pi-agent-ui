@@ -1467,3 +1467,13 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - 渲染面同步拒绝：清单项 usable 判据补 `!full.startsWith("__")`（与 selectModel/持久化同口径）。
 - 注释口径清理：new-session.tsx 头注（rootsHint 固定串/sendPrompt 前写偏好/autoFile 后台生成/effect 数据域兼容保留/lazy 单次）；ws-client.ts force 措辞退役（重试/新身份替代+同 client 无重连需重建）；mux-b2.test.ts force 全清+182 题名收窄+225 死状态注记；new-session.test.ts:267 题名收窄。
 - 变异三连真杀（基线 b5798b6 先 commit）：Mu-r3-3 复注入（selectModel 退回裸 pattern）→杀点 A/B 2 例红；usable 旧判据→杀点 B 红；autoFile 每 render 求值→单次断言红。还原后全绿 447（web）。
+
+## M-UX 体验收敛批（用户震怒反馈一次全清；9797674+fb327b8；2026-10-10 GLM 写·小修免审档）
+- 断线自动重连（壳层重建）：real-app.tsx RealApp 持 reconnectRef{attempts,timer,nextDelayMs}+reconnectUi state；handleConnDown（down→指数退避 1s/2s/4s…30s 封顶 setTimeout→retryNonce++ 重建三件套；up→attempts 归零清 timer；同故障窗 timer 已在不叠加）；reconnectNow（手动=归零+立即重建）；卸载清 timer。ConnectedApp 上报 useEffect 须在 authFailed 早退前（hooks 顺序稳定）+authFailed 恒报 false（认证失败不重连——重试无意义且撞限速）。connbar 增「自动重连中…（第 N 次，约 X 秒后）」+按钮改「立即重连」。
+- 表单减负：rootsHint prop+提示行删除（NewSession 签名变更）；模型清单 loading/failed 占位 option（status 枚举=loading/idle/ok/failed——pending/error 拼错会 TS2367）；空态文案友好化（session-list）。
+- 左栏双标题去重：SessionList 内置 list-header（会话+刷新）删除；刷新钮上移 real-app panel-heading .panel-actions（与＋新建同排）；杀点=mux-b1 刷新例重写（宿主供钮+slot.querySelector 无文本=「会话」的 heading）。
+- 手机响应式（styles.css @media 767px）：.workspace.two-col flex-direction:column 堆叠（session-panel max-height:40vh+border-bottom；会话区全宽）；.new-session width:100%+box-sizing:border-box+select/input max-width:100%；.new-session button white-space:nowrap 防断字；connbar flex-wrap；theme-toggle 36px。
+- 无头复查（demo 模式 ?demo=1，chromium-1243）：390px 列表/表单 overflowPx=0、formRight=390 恰贴边、创建钮 342×44 无折行、headings 仅「会话」一个；桌面 1280px 同绿。视觉问题来源=looker 子代理审查（四截图七问题：表单溢出 P0/按钮断字 P0/双标题/双栏不收敛/对比度/触控）。
+- 测试：real-app.test 重连三例（断线→1s 后重建→握手→提示消失+二次断线归零杀点「第 1 次/约 1 秒后」；认证失败 1008→35s 零重建——timer 计数不作断言面：fake timers 下 React scheduler 环境噪音恒挂 1 个 timer；手动立即重连同 tick 重建）；4401 判定=握手期 close 1008（§5.3；serverClose(4401) 不映射 auth-failed）。全仓 1821 绿双稳+tsc 0。
+- 变异三连真杀（基线 9797674 先 commit）：MU-UXE-1 删退避调度→断线重建例红；MU-UXE-2 authFailed 不排除→认证例红；MU-UXE-3 恢复不归零→首跑存活→补二次断线杀点例→复注入红。
+- 未入本批（已立案下一批）：历史会话贯通（~/.pi/agent/sessions 分组子目录树 vs 单层裸名 FILE_RE+file 契约全链=P0 安全面大改，走设计门）。
