@@ -9,6 +9,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { WriteComposer } from "../../../apps/web/src/components/write-composer";
 import { SessionDetail } from "../../../apps/web/src/components/session-detail";
 import { writeViewOf, useWrite, type WriteView } from "../../../apps/web/src/ws/use-write";
+import type { SendResult } from "../../../apps/web/src/ws/conversation-state";
 import {
   WriteClient,
   WriteSendError,
@@ -245,7 +246,7 @@ describe("writeViewOf 派生（纯函数）", () => {
 
 describe("useWrite hook", () => {
   /** 渲染探针：把最近一次视图+动作暴露到模块级变量（每次渲染刷新）。 */
-  let probe: { view: WriteView; send: (text: string, model?: string, cwd?: string) => Promise<boolean>; stop: () => Promise<boolean> } | null = null;
+  let probe: { view: WriteView; send: (text: string, model?: string, cwd?: string) => Promise<SendResult>; stop: () => Promise<boolean> } | null = null;
   function Probe({ client, file }: { client: StubWriteClient; file: string | null }): React.ReactElement {
     const { view, send, stop } = useWrite(client, file);
     probe = { view, send, stop };
@@ -257,18 +258,18 @@ describe("useWrite hook", () => {
     render(React.createElement(Probe, { client, file: "a.jsonl" }));
     expect(probe?.view.phase).toBe("idle");
     client.rejectWith = new WriteSendError("in-flight", "该会话已有发送中的消息，请等待结果");
-    let ok = true;
+    let ok: SendResult | null = null;
     await act(async () => {
       ok = await probe!.send("hi");
     });
-    expect(ok).toBe(false); // 恒不 reject：失败 resolve false
+    expect(ok).toMatchObject({ status: "local", kind: "in-flight" }); // 结构化零帧分类，恒不 reject
     expect(probe?.view.phase).toBe("error");
     expect(probe?.view.errorMessage).toContain("发送中的消息");
     client.rejectWith = null;
     await act(async () => {
       ok = await probe!.send("again");
     });
-    expect(ok).toBe(true);
+    expect(ok).toMatchObject({ status: "launched", outcome: LAUNCHED });
     expect(probe?.view.phase).toBe("idle"); // 新尝试清除瞬态错误
   });
 
@@ -286,11 +287,11 @@ describe("useWrite hook", () => {
     const client = new StubWriteClient();
     render(React.createElement(Probe, { client, file: "a.jsonl" }));
     await act(async () => {
-      expect(await probe!.send("hi", "openai/gpt-5.3")).toBe(true);
+      expect(await probe!.send("hi", "openai/gpt-5.3")).toMatchObject({ status: "launched", outcome: LAUNCHED });
     });
     expect(client.calls).toEqual(["prompt:a.jsonl:hi:openai/gpt-5.3"]);
     await act(async () => {
-      expect(await probe!.send("again")).toBe(true);
+      expect(await probe!.send("again")).toMatchObject({ status: "launched", outcome: LAUNCHED });
     });
     expect(client.calls).toEqual(["prompt:a.jsonl:hi:openai/gpt-5.3", "prompt:a.jsonl:again:∅"]);
   });
@@ -299,11 +300,11 @@ describe("useWrite hook", () => {
     const client = new StubWriteClient();
     render(React.createElement(Probe, { client, file: "a.jsonl" }));
     await act(async () => {
-      expect(await probe!.send("hi", undefined, "/srv/proj-a")).toBe(true);
+      expect(await probe!.send("hi", undefined, "/srv/proj-a")).toMatchObject({ status: "launched", outcome: LAUNCHED });
     });
     expect(client.calls).toEqual(["prompt:a.jsonl:hi:∅:/srv/proj-a"]);
     await act(async () => {
-      expect(await probe!.send("again")).toBe(true);
+      expect(await probe!.send("again")).toMatchObject({ status: "launched", outcome: LAUNCHED });
     });
     expect(client.calls).toEqual(["prompt:a.jsonl:hi:∅:/srv/proj-a", "prompt:a.jsonl:again:∅"]);
   });
@@ -312,11 +313,11 @@ describe("useWrite hook", () => {
     const client = new StubWriteClient();
     client.resolveWith = { kind: "not-ready", cause: "spawn-exited", detail: "Error: model \"nope\" not found" };
     render(React.createElement(Probe, { client, file: "a.jsonl" }));
-    let ok = false;
+    let ok: SendResult | null = null;
     await act(async () => {
       ok = await probe!.send("hi");
     });
-    expect(ok).toBe(true); // 合法 ack（非错误路径）
+    expect(ok).toMatchObject({ status: "rejected", outcome: { kind: "not-ready" } }); // 合法 ACK≠launched
     expect(probe?.view.notReady).toEqual({ cause: "spawn-exited", detail: "Error: model \"nope\" not found" });
     expect(probe?.view.errorMessage).toBeNull(); // 不连坐错误面
     client.resolveWith = LAUNCHED;
@@ -353,7 +354,7 @@ describe("useWrite hook", () => {
     }
     const client = new PendingStub();
     render(React.createElement(Probe, { client, file: "a.jsonl" }));
-    let sendPromise: Promise<boolean> = Promise.resolve(false);
+    let sendPromise: Promise<SendResult>;
     await act(async () => {
       sendPromise = probe!.send("hi"); // seq=1 挂起
     });
@@ -676,7 +677,7 @@ describe("K5 B2：composer 稳定挂载（空态↔内容态不丢草稿/在途/
 });
 
 describe("K5 B3：瞬态错误身份门（client×file 绑定+动作序号迟到门）", () => {
-  let probeB3: { view: WriteView; send: (text: string) => Promise<boolean> } | null = null;
+  let probeB3: { view: WriteView; send: (text: string) => Promise<SendResult> } | null = null;
   function ProbeB3({ client, file }: { client: StubWriteClient; file: string | null }): React.ReactElement {
     const { view, send } = useWrite(client, file);
     probeB3 = { view, send };

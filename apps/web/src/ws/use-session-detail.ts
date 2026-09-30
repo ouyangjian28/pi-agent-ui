@@ -130,13 +130,13 @@ export function sessionDetailViewOf(snap: SessionDetailSnapshot, targetFile?: st
 }
 
 /** 订阅单文件会话详情：file 变更即（重新）订阅，卸载/换目标即退订；视图由快照纯派生（保真②⑤）。 */
-export function useSessionDetail(client: SubscribeClientSurface, file: string | null): SessionDetailView {
+export function useSessionDetail(client: SubscribeClientSurface, file: string | null, ownSubscription = true): SessionDetailView {
   const snap = useSyncExternalStore(client.subscribe, client.getSnapshot);
   useEffect(() => {
-    if (file === null) return;
+    if (!ownSubscription || file === null) return;
     client.subscribeSession(file);
     return () => client.unsubscribeSession();
-  }, [client, file]);
+  }, [client, file, ownSubscription]);
   // 身份门以目标 file 在提交阶段复核——file prop 切换后的首次提交即无旧文件内容（不依赖 effect 事后清理）
   return sessionDetailViewOf(snap, file);
 }

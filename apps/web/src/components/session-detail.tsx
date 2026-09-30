@@ -226,6 +226,7 @@ export function SessionDetail({
   file,
   writeClient = null,
   title = null,
+  managed = false,
 }: {
   client: SubscribeClientSurface;
   file: string | null;
@@ -233,8 +234,10 @@ export function SessionDetail({
   writeClient?: WriteClientSurface | null;
   /** M-UX 批1修复 P1-02：壳传入的同源标题（resolveTitle 唯一真值源；null=回退 file 显示，壳层未算出时）。 */
   title?: string | null;
+  /** RealApp 单 owner 持有订阅与 composer，本组件只呈现。 */
+  managed?: boolean;
 }) {
-  const view = useSessionDetail(client, file);
+  const view = useSessionDetail(client, file, !managed);
   // D4 批③：展开缓存（组件本地 state，key=entryId；§4.4 P3-N7——换 file/流终局一并清，
   // 与 subscribe-client entryRequests 清理同址精神：session 文件改写后不残留旧全文）。
   const [expansions, setExpansions] = React.useState<ReadonlyMap<string, ExpansionState>>(new Map());
@@ -270,7 +273,7 @@ export function SessionDetail({
   // key=file——同一槽位换会话强制新 composer 实例（旧草稿不泄入新会话）；同一会话内视图切换实例保留
   //（草稿/在途/结果态不丢）。
   const composerVisible =
-    writeClient !== null && file !== null &&
+    !managed && writeClient !== null && file !== null &&
     (view.status === "empty" || view.status === "streaming" || view.status === "resync-needed" || view.status === "stopped");
   const composer = composerVisible ? <WriteComposer key={file} client={writeClient} file={file} /> : null;
 

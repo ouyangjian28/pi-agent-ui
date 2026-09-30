@@ -213,7 +213,8 @@ describe("真模式 smoke：token 门→列表→详情→写面", () => {
         outcome: { kind: "launched", intentId: "i-1", commandId: 7 },
       });
     });
-    expect(document.body.textContent).toContain("已入队（intentId=i-1）");
+    expect(FakeWebSocket.instances[2]!.sentFrames().filter((f) => f.t === "prompt")).toHaveLength(1);
+    expect(document.querySelector('section.write-composer textarea')?.getAttribute("aria-label")).toBe("写入消息内容");
   });
 
   it("M-UX 批1 D02：新建 launched→onLaunched 自动补拉列表（接线杀点：摘除 real-app 补拉行此例必红）", async () => {
@@ -228,10 +229,10 @@ describe("真模式 smoke：token 门→列表→详情→写面", () => {
       });
     });
     // 打开新建表单（批3：无文件名输入框）→填首条消息→创建（file=auto- 自动生成）
-    fireEvent.click(screen.getByRole("button", { name: "＋新建" }));
+    fireEvent.click(screen.getByRole("button", { name: "＋新对话" }));
     expect(screen.queryByLabelText("会话文件名")).toBeNull();
     fireEvent.change(screen.getByLabelText("首条消息"), { target: { value: "新会话第一条" } });
-    fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
+    fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" }));
     const promptFrame = FakeWebSocket.instances[2]!.sentFrames().find((f) => f.t === "prompt");
     expect(promptFrame).toBeDefined();
     const listBefore = FakeWebSocket.instances[0]!.sentFrames().filter((f) => f.t === "list-sessions").length;

@@ -23,6 +23,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useWrite } from "../ws/use-write";
 import { NotReadyBanner } from "./not-ready-banner";
+import { ModelPicker, type ModelSource } from "./model-picker";
+import { effectiveModel, isSendableModel, MODEL_DEFAULT } from "../ws/draft-model";
+import type { EditorSlot, SendResult } from "../ws/conversation-state";
 import type { WriteClientSurface, WriteLastResult, WriteResumeResult } from "../ws/write-client";
 import type { WriteResumeOutcomeDTO, WriteSendOutcomeDTO, WriteStopOutcomeDTO } from "@pi-agent-ui/protocol/src/contracts";
 
@@ -91,9 +94,22 @@ function lastResultText(result: WriteLastResult): string | null {
   return result.message;
 }
 
-export function WriteComposer({ client, file }: { client: WriteClientSurface; file: string | null }) {
+export interface ManagedEditor {
+  readonly slot: EditorSlot | null;
+  readonly source: ModelSource;
+  readonly isNew: boolean;
+  readonly onEdit: (text: string) => void;
+  readonly onConfigure: (choice: string, freeText: string) => void;
+  readonly onSend: (confirmed: boolean) => Promise<SendResult>;
+  readonly onViewTarget: () => void;
+  readonly onCancel: () => void;
+}
+export function WriteComposer({ client, file, editor }: { client: WriteClientSurface; file: string | null; editor?: ManagedEditor }) {
   const { view, send, stop, resume } = useWrite(client, file);
-  const [text, setText] = useState("");
+  const [localText, setText] = useState("");
+  const text = editor ? (editor.slot?.text ?? "") : localText;
+  const [sendResult, setSendResult] = useState<SendResult | null>(null);
+  const result = editor ? (editor.slot?.result ?? null) : sendResult;
   // 恢复重发演示位（v1.1 最小面：手输 intentId+generation 默认 1；完整恢复面板不在本批）
   const [resumeIntentId, setResumeIntentId] = useState("");
   const [resumeGeneration, setResumeGeneration] = useState("1");
@@ -112,7 +128,9 @@ export function WriteComposer({ client, file }: { client: WriteClientSurface; fi
   const identityRef = useRef({ client, file });
   identityRef.current = { client, file };
 
-  const canSend = file !== null && view.ready && !view.sending && !view.stopping && text.length > 0;
+  const model = editor?.isNew ? effectiveModel(editor.slot?.modelChoice ?? MODEL_DEFAULT, editor.slot?.freeText ?? "") : undefined;
+  const pending = editor ? (editor.slot?.operation?.pending === true && editor.slot.operation.client === client) : view.sending;
+  const canSend = (editor?.isNew || file !== null) && view.ready && !pending && !view.stopping && text.trim().length > 0 && isSendableModel(model);
   const canStop = file !== null && view.ready && !view.stopping;
   const generationNum = Number(resumeGeneration);
   const canResume =
@@ -128,8 +146,8 @@ export function WriteComposer({ client, file }: { client: WriteClientSurface; fi
     : "写连接未就绪";
 
   const onChange = (value: string): void => {
-    draftVersion.current += 1; // 任何编辑（含改回同文本）都替换草稿身份
-    setText(value);
+    draftVersion.current += 1;
+    if (editor) editor.onEdit(value); else setText(value);
   };
 
   const onSend = (): void => {
@@ -138,9 +156,14 @@ export function WriteComposer({ client, file }: { client: WriteClientSurface; fi
     // 吞掉用户在途新输入）。
     const sent = { client, file, version: draftVersion.current };
     lastSentRef.current = text; // P3-2（DS 审）：not-ready 落账时恢复草稿用（冷启动失败不吞输入）
-    void send(text).then((ok) => {
+    if (!canSend) return;
+    const confirmed = result?.status === "unknown" ? window.confirm("上一条可能已受理。再次发送可能重复执行，确定再次发送吗？") : false;
+    if (result?.status === "unknown" && !confirmed) return;
+    if (editor) { void editor.onSend(confirmed); return; }
+    void send(text).then((outcome) => {
+      setSendResult(outcome);
       if (
-        ok &&
+        outcome.status === "launched" &&
         identityRef.current.client === sent.client &&
         identityRef.current.file === sent.file &&
         draftVersion.current === sent.version
@@ -155,48 +178,58 @@ export function WriteComposer({ client, file }: { client: WriteClientSurface; fi
   const lastSentRef = useRef("");
   const notReadyNow = view.notReady;
   useEffect(() => {
-    if (notReadyNow !== null && text === "" && lastSentRef.current !== "") {
+    if (!editor && notReadyNow !== null && text === "" && lastSentRef.current !== "") {
       setText(lastSentRef.current);
     }
-  }, [notReadyNow, text]);
+  }, [notReadyNow, text, editor]);
 
   return (
     <section className="write-composer" aria-label={`写消息${file === null ? "" : `：${file}`}`}>
+      {editor?.isNew && <ModelPicker source={editor.source} choice={editor.slot?.modelChoice ?? MODEL_DEFAULT} freeText={editor.slot?.freeText ?? ""} onConfigure={editor.onConfigure} />}
       <label>
-        写入消息
+        {editor?.isNew ? "首条消息" : "写入消息"}
         <textarea
           value={text}
           onChange={(event) => onChange(event.target.value)}
-          aria-label="写入消息内容"
+          aria-label={editor?.isNew ? "首条消息" : "写入消息内容"}
           rows={3}
-          disabled={file === null || !view.ready}
-          placeholder={file === null ? "先选择会话" : "输入要发送给写宿主的消息"}
+          disabled={!editor && (file === null || !view.ready)}
+          placeholder={editor?.isNew ? "想从哪里开始？" : "继续这段对话…"}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229) return;
+            if (canSend) { event.preventDefault(); onSend(); }
+          }}
         />
       </label>
       <div className="write-actions">
         <button type="button" onClick={onSend} disabled={!canSend}>
-          发送
+          {editor?.isNew ? (pending ? "发送中…" : "发送并开始对话") : "发送"}
         </button>
-        <button type="button" onClick={() => void stop()} disabled={!canStop}>
+        {editor?.isNew ? <button type="button" onClick={editor.onCancel}>返回列表</button> : null}
+        <button type="button" onClick={() => void stop()} disabled={!canStop || editor?.isNew === true} hidden={editor?.isNew === true}>
           停止
         </button>
         <span role="status" aria-live="polite">
           {phaseText}
         </span>
       </div>
-      {view.errorMessage !== null ? (
+      {result?.status === "unknown" && <div className="send-unknown" role="alert"><p>{result.message}</p>{editor && <button type="button" onClick={editor.onViewTarget}>查看目标会话</button>}{pending && <p>原请求仍在途。请从顶部连接明细立即重连；重连不会自动补发。</p>}</div>}
+      {result?.status === "rejected" && result.outcome.kind !== "not-ready" && <p className="banner" role="alert">{promptOutcomeText(result.outcome)}；草稿已保留，可显式重试。</p>}
+      {editor && result?.status === "local" && <p className="banner" role="alert">{result.message}</p>}
+      {editor && result?.status === "rejected" && result.outcome.kind === "not-ready" && <><NotReadyBanner info={{ cause: result.outcome.cause ?? null, detail: result.outcome.detail ?? null }} onRetry={canSend ? onSend : undefined} onSwitchModel={() => editor.onConfigure(editor.slot?.modelChoice ?? MODEL_DEFAULT, "")} />{model === undefined && <p role="note">重试将不指定模型；本会话此前绑定的模型设置不会被重置，以服务端实际为准</p>}</>}
+      {!editor && view.errorMessage !== null && result?.status !== "unknown" ? (
         <p className="banner" role="alert">
           {view.errorMessage}
         </p>
       ) : null}
-      {view.notReady !== null ? (
+      {!editor && view.notReady !== null ? (
         <NotReadyBanner info={view.notReady} onRetry={canSend ? onSend : undefined} />
       ) : null}
-      {view.lastResult !== null ? (
+      {!editor && view.lastResult !== null ? (
         <p role="status">{lastResultText(view.lastResult)}</p>
       ) : null}
       <details className="resume-demo">
-        <summary>恢复重发</summary>
+        <summary>高级诊断</summary>
         <div className="resume-fields">
           <label>
             意图标识

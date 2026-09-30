@@ -3,6 +3,7 @@
 // autoFile CSPRNG+filePattern / 刷新钮接线 / launched 后自动补拉（real-app 集成面由 real-app.test 覆盖壳层）。
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
+import { READY_WRITE_SNAPSHOT } from "./r1-write-fixture";
 
 afterEach(cleanup);
 import { resolveTitle } from "../../../apps/web/src/ws/resolve-title";
@@ -277,7 +278,7 @@ describe("M-UX 批1修复 P2-02：CSPRNG 来源约束+同 file 不换名", () =>
     snap.getSnapshot = () => snap;
     snap.subscribe = (cb: () => void) => { listeners.add(cb); return () => { listeners.delete(cb); }; };
     let launchedCount = 0;
-    const writeSnap = { connState: "ready" };
+    const writeSnap = READY_WRITE_SNAPSHOT;
     const prompts: string[] = [];
     const writeStub = {
       sendPrompt: (file: string) => { prompts.push(file); return Promise.resolve({ kind: "launched" }); },
@@ -315,7 +316,7 @@ describe("M-UX 批1修复 P2-02：CSPRNG 来源约束+同 file 不换名", () =>
       setter.call(textInput, "第一条消息");
       textInput.dispatchEvent(new Event("input", { bubbles: true }));
       await act(async () => {
-        screen.getByRole("button", { name: "创建会话" }).click();
+        screen.getByRole("button", { name: "发送并开始对话" }).click();
         await Promise.resolve();
       });
       expect(prompts).toHaveLength(1);
@@ -325,7 +326,7 @@ describe("M-UX 批1修复 P2-02：CSPRNG 来源约束+同 file 不换名", () =>
       setter.call(textInput, "第二条消息");
       textInput.dispatchEvent(new Event("input", { bubbles: true }));
       await act(async () => {
-        screen.getByRole("button", { name: "创建会话" }).click();
+        screen.getByRole("button", { name: "发送并开始对话" }).click();
         await Promise.resolve();
       });
       expect(prompts).toHaveLength(2);
@@ -404,7 +405,7 @@ describe("M-UX D02/D03 组件面：列表刷新钮+新建自动 file 预填", ()
       subscribe: snap.subscribe as () => () => void,
       getSnapshot: snap.getSnapshot as () => unknown,
     };
-    const writeSnap = { connState: "ready" };
+    const writeSnap = READY_WRITE_SNAPSHOT;
     const writeStub = {
       sendPrompt: (file: string) => { sent.push(file); return Promise.resolve({ kind: "launched" }); },
       getNotReady: () => null,
@@ -421,7 +422,7 @@ describe("M-UX D02/D03 组件面：列表刷新钮+新建自动 file 预填", ()
     setter.call(textInput, "hi");
     textInput.dispatchEvent(new Event("input", { bubbles: true }));
     await act(async () => {
-      screen.getByRole("button", { name: "创建会话" }).click();
+      screen.getByRole("button", { name: "发送并开始对话" }).click();
       await Promise.resolve();
     });
     expect(sent[0]).toMatch(/^auto-\d{8}-\d{6}-[0-9a-f]{32}\.jsonl$/);
