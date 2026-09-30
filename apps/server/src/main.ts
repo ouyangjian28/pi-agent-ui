@@ -6,8 +6,8 @@
 // 约束：Node ≥24（仓内 ws-transport 等用参数属性=非纯 erasable，故需 transform-types；
 // 零新依赖——CLI/信号/生命周期全是本文件+组合根既有件）。
 import { startServer } from "./composition.ts";
-import { stat } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { stat, mkdir } from "node:fs/promises";
+import { isAbsolute, relative, resolve } from "node:path";
 
 interface CliArgs {
   port?: number;
@@ -34,8 +34,8 @@ function usage(): string {
     "  --origin        Origin 白名单（默认=推导 http://127.0.0.1:<port> 与 http://localhost:<port>）",
     "  --host          监听地址（默认 127.0.0.1——loopback-only 是本工具的威胁模型边界）",
     "  --pi-bin        pi 可执行路径（默认=PATH 里的 pi；启用写面+模型清单服务）",
-    "  --trusted-proxy 可信代理 CIDR/IP（可重复；反向代理回程——启用后 X-Forwarded-* 才被采信）",
-    "  --session-dir   journal 落盘树（默认=第一个 root；须在 roots 内——否则写出 journal 读面不可达）",
+    "  --trusted-proxy 可信代理精确 IP（可重复；反向代理回程——启用后 X-Forwarded-* 才被采信；不支持 CIDR）",
+    "  --session-dir   journal 控制树 D（默认=第一个 root）；pi 转录树 T=<D>/pi 自动创建，读面首根=T",
     "  --read-only     关闭写面（只读部署逃生门；默认写面开——--root 即授权写入 journal 域）",
   ].join("\n");
 }
@@ -88,7 +88,6 @@ async function main(): Promise<void> {
   }
   const roots: string[] = [];
   for (const r of args.roots) roots.push(await assertDir(r, "--root"));
-  const scanDir = args.scanDir !== undefined ? await assertDir(args.scanDir, "--scan-dir") : roots[0]!;
   const staticDir = args.staticDir !== undefined ? await assertDir(args.staticDir, "--static-dir") : undefined;
   const host = args.host ?? "127.0.0.1";
   const origins = args.origins.length > 0
@@ -99,9 +98,23 @@ async function main(): Promise<void> {
   // 故 sessionDir 必须排在 effectiveRoots[0]——逻辑名→journal 落点=首根命中=journal 树（否则落
   // 项目根错位，生产烟测⑥ 抓过）。副作用全为正：scanDir 默认=首根=journal 扫描树（原本错扫项目根）；
   // 授权域仍含全部 roots（读面/cwd 门不变）。
+  // 批A-r2（P1-A1 双树）：journal 控制树 D 与 pi 转录树 T 分离。
+  // D=--session-dir（默认=第一个 root；控制 journal 落盘树）；T=<D>/pi（自动创建；真 pi 转录+读面首根）。
+  // 读面（扫描/entry/直播/恢复 session）首根=T；写面键（sendPrompt/stop/statusFor/UI 归因/recovery journal）
+  // 经 journalOf 落 D（composition journalLayout 接线）。两树同名同构：D/<name>.jsonl ↔ T/<name>.jsonl。
+  // 兼容：rig 未传 --session-dir 且 roots=[单根] 时 D=roots[0]、T=D/pi——旧测试若直拼 journal 绝对路径
+  // （根顶层）仍落在 D 域内，行为不变。
   const sessionDir = args.sessionDir !== undefined ? await assertDir(args.sessionDir, "--session-dir") : roots[0]!;
-  const effectiveRoots = [sessionDir, ...roots.filter((r) => r !== sessionDir)];
+  const transcriptsDir = resolve(sessionDir, "pi");
+  await mkdir(transcriptsDir, { recursive: true });
+  const effectiveRoots = [transcriptsDir, sessionDir, ...roots.filter((r) => r !== sessionDir)];
+  const defaultScanDir = transcriptsDir; // v1.6：扫描树=T（旧默认 roots[0] 会把 journal 当会话列）
+  const scanDir = args.scanDir !== undefined ? await assertDir(args.scanDir, "--scan-dir") : defaultScanDir;
   const piBin = args.piBin ?? "pi";
+  // P2-A4（GPT 批A审）：ws-transport 只支持精确 IP（trustedProxies.includes）；CIDR 掩码传入=静默
+  // 不生效→采信层丬失。入口拒之并明说，不改运行时语义。
+  const badProxy = args.trustedProxies.find((p) => p.includes("/"));
+  if (badProxy !== undefined) throw new Error(`--trusted-proxy 目前仅支持精确 IP（收到 CIDR：${badProxy}）——请展开为具体地址或去掉该项`);
 
   const audit = (line: string): void => { console.log(`${new Date().toISOString()} ${line}`); };
   const server = await startServer({
@@ -109,10 +122,15 @@ async function main(): Promise<void> {
     allowedOrigins: origins,
     roots: effectiveRoots,
     scanDir,
+    journalLayout: { transcriptsRoot: transcriptsDir, journalRoot: sessionDir }, // v1.6（批A-r2）双树
+    sessionFor: (file: string) => resolve(transcriptsDir, file), // 读面：逻辑名→转录绝对（entryAbsFor/dual session 子源/recovery 相对名适配同源）
     ...(staticDir !== undefined ? { staticDir } : {}),
     ...(args.readOnly !== true ? {
       write: {
-        sessionFor: (file: string) => file, // 写面 file 键=网关首根解析后的绝对路径（E2E rig 同口径）；此处直通（RpcWriteHost 层消费绝对路径）
+        sessionFor: (j: string) => { // 写面：journal 绝对→转录绝对（registry sessionFile=RpcSession --session 落点）
+          const rel = relative(sessionDir, j);
+          return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel) ? resolve(transcriptsDir, rel) : j;
+        },
         piBin,
       },
     } : {}),
@@ -122,7 +140,7 @@ async function main(): Promise<void> {
     registerSighup: true,
     audit,
   });
-  audit(`main ready url=http://${host === "127.0.0.1" ? "127.0.0.1" : host}:${server.port}${staticDir !== undefined ? " (静态托管 " + staticDir + ")" : ""} origins=${origins.join(",")} roots=${roots.join(",")}${args.readOnly !== true ? ` write=on sessionDir=${sessionDir} piBin=${piBin}` : " write=off"}${args.trustedProxies.length > 0 ? ` trustedProxies=${args.trustedProxies.join(",")}` : ""}`);
+  audit(`main ready url=http://${host === "127.0.0.1" ? "127.0.0.1" : host}:${server.port}${staticDir !== undefined ? " (静态托管 " + staticDir + ")" : ""} origins=${origins.join(",")} roots=${effectiveRoots.join(",")}${args.readOnly !== true ? ` write=on journalRoot=${sessionDir} transcriptsRoot=${transcriptsDir} piBin=${piBin}` : " write=off"}${args.trustedProxies.length > 0 ? ` trustedProxies=${args.trustedProxies.join(",")}` : ""}`);
 
   let closing = false;
   const shutdown = (signal: string): void => {

@@ -378,6 +378,7 @@ export interface RootsListFrame {
   readonly t: "roots-list";
   readonly requestId: string;
   readonly roots: readonly string[]; // 绝对路径（服务端 --root 序）
+  readonly journalRoot?: string; // v1.6（批A-r2）：journal 树绝对路径（=写面会话控制文件所在树；前端目录选择器应把它从 cwd 候选中过滤/标注——它不是项目目录）
 }
 
 export type ServerFrame =

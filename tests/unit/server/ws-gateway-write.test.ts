@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import { WsGateway, type ConnMeta, type GatewayConnHooks, type WsGatewayOpts } from "../../../apps/server/src/ws/ws-gateway.ts";
 import type { WriteHostPort } from "../../../apps/server/src/ws/write-host.ts";
 import { TokenAuthority } from "../../../apps/server/src/ws/token-auth.ts";
@@ -415,5 +415,49 @@ describe("3c-1 写侧帧：网关派发面", () => {
       expect(f).toBeDefined();
       expect(f?.roots).toEqual([r.dir]);
     } finally { await r.dispose(); }
+  });
+
+  // v1.6（批A-r2）：writeJournalFor 双树映射+journalRoot 下发+cwd realpath 门。
+  it("W21 writeJournalFor 配置→写帧宿主收 journal 键（T 内名→D 同名）；未配=首根旧语义", async () => {
+    const d2 = await mkdtemp(join(tmpdir(), "ws-write-jd-"));
+    const r = await makeRig({ writeJournalFor: (f) => join(d2, basename(f)) });
+    try {
+      const c = await authed(r);
+      await c.say({ t: "prompt", requestId: "r21", file: r.inFile, text: "hi" });
+      expect(c.frames().some((f) => f.t === "write-ack" && (f as { outcome?: { kind?: string } }).outcome?.kind === "launched")).toBe(true);
+      expect(r.host.prompts).toEqual([{ file: join(d2, "s1.jsonl"), text: "hi", generation: undefined, model: undefined, cwd: undefined }]); // journal 键=映射后
+      expect(c.frames().some((f) => f.t === "error")).toBe(false);
+    } finally { await r.dispose(); await rm(d2, { recursive: true, force: true }); }
+  });
+
+  it("W22 prompt 携根内 symlink 指根外→4404 拒（realpath 复核；宿主未被调）", async () => {
+    const r = await makeRig();
+    const outside = await mkdtemp(join(tmpdir(), "outside-"));
+    try {
+      const { symlink } = await import("node:fs/promises");
+      await symlink(outside, join(r.dir, "esc-link"));
+      const c = await authed(r);
+      await c.say({ t: "prompt", requestId: "r22", file: r.inFile, text: "hi", cwd: join(r.dir, "esc-link") });
+      expect(errs(c).some((f) => f.code === 4404)).toBe(true); // 词法根内但真实身份根外
+      expect(r.host.prompts.length).toBe(0);
+    } finally { await r.dispose(); await rm(outside, { recursive: true, force: true }); }
+  });
+
+  it("W23 journalRoot 配置→roots-list 下发 journalRoot 字段；未配→无字段", async () => {
+    const d2 = await mkdtemp(join(tmpdir(), "ws-write-jd2-"));
+    const r = await makeRig({ journalRoot: d2 });
+    try {
+      const c = await authed(r);
+      await c.say({ t: "get-roots", requestId: "rr23" });
+      const f = c.frames().find((fr) => fr.t === "roots-list") as { roots?: string[]; journalRoot?: string } | undefined;
+      expect(f?.journalRoot).toBe(d2);
+    } finally { await r.dispose(); await rm(d2, { recursive: true, force: true }); }
+    const r2 = await makeRig();
+    try {
+      const c = await authed(r2);
+      await c.say({ t: "get-roots", requestId: "rr23b" });
+      const f = c.frames().find((fr) => fr.t === "roots-list") as { journalRoot?: string } | undefined;
+      expect(f?.journalRoot).toBeUndefined(); // 未配=字段缺席（客户端可选消费）
+    } finally { await r2.dispose(); }
   });
 });

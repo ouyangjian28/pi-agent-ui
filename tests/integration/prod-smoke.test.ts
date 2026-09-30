@@ -123,9 +123,11 @@ describe("批A 生产烟测：真实 main.ts 入口→写面全链", () => {
     try {
       await say({ t: "get-roots", requestId: "roots-1" });
       await until(() => frames.some((f) => f.t === "roots-list"), "roots-list");
-      const rootsFrame = frames.find((f) => f.t === "roots-list") as unknown as { roots: string[] };
-      // effectiveRoots 序：journal 树（sessionDir）排首（写面 file 域首根命中）+项目根授权域全量。
-      expect(rootsFrame.roots).toEqual([r.sessionDir, r.projRoot]);
+      const rootsFrame = frames.find((f) => f.t === "roots-list") as unknown as { roots: string[]; journalRoot?: string };
+      // 批A-r2 双树：effectiveRoots=[T(转录=sessionDir/pi，读面首根), D(journal=sessionDir), 项目根]。
+      // journalRoot 字段下发（v1.6）供前端目录选择器过滤。
+      expect(rootsFrame.roots).toEqual([join(r.sessionDir, "pi"), r.sessionDir, r.projRoot]);
+      expect(rootsFrame.journalRoot).toBe(r.sessionDir);
 
       await say({ t: "prompt", requestId: "p1", file: "smoke.jsonl", text: "在项目目录里跑起来", cwd: r.projRoot });
       await until(() => frames.some((f) => f.t === "write-ack"), "write-ack");
@@ -144,13 +146,37 @@ describe("批A 生产烟测：真实 main.ts 入口→写面全链", () => {
     expect(rec.argv.includes("--session")).toBe(true);
   }, 15_000);
 
-  it("⑥ pi argv --session 指向 --session-dir 树内（journal 目标树正确；真 pi 才写盘，fake 不写——机制面等价断言）", async () => {
+  it("⑥ pi argv --session 指向转录树 T（journal 双树分离机制面；真 pi 才写盘，fake 写最小 header）", async () => {
     const r = rig!;
     await until(() => existsSync(r.cwdRecordFile), "fake pi cwd 记录落盘");
     const raw = await readFile(r.cwdRecordFile, "utf8");
     const rec = JSON.parse(raw.trim().split("\n")[0]!) as { argv: string[] };
     const sessionArg = rec.argv[rec.argv.indexOf("--session") + 1];
-    expect(sessionArg).toBe(join(r.sessionDir, "smoke.jsonl"));
+    expect(sessionArg).toBe(join(r.sessionDir, "pi", "smoke.jsonl"));
+  }, 15_000);
+
+  it("⑦ 双树分离：journal 控制 D/smoke.jsonl 与 pi 转录 T/smoke.jsonl 两个文件（P1-A1 修复面）", async () => {
+    const r = rig!;
+    await until(() => existsSync(join(r.sessionDir, "smoke.jsonl")), "journal 控制文件落 D"); // RpcSession FileDurability 写 journalPath
+    const jFirst = (await readFile(join(r.sessionDir, "smoke.jsonl"), "utf8")).trim().split("\n")[0]!;
+    expect(jFirst).not.toContain('"type":"session"'); // 控制文件≠pi 转录格式（SDK open 会拒）
+    await until(() => existsSync(join(r.sessionDir, "pi", "smoke.jsonl")), "pi 转录 header 落 T"); // fake pi --session 落点
+    const sFirst = JSON.parse((await readFile(join(r.sessionDir, "pi", "smoke.jsonl"), "utf8")).trim().split("\n")[0]!);
+    expect(sFirst.type).toBe("session");
+    expect(sFirst.version).toBe(3); // 真 pi SDK header 形状
+  }, 15_000);
+
+  it("⑧ list-sessions 能列新会话且 journal 不进列表（扫描树=T）", async () => {
+    const r = rig!;
+    const { ws, frames, say } = await connect();
+    try {
+      await say({ t: "list-sessions", requestId: "ls-1" });
+      await until(() => frames.some((f) => f.t === "sessions"), "sessions 帧");
+      const items = ((frames.find((f) => f.t === "sessions") as unknown as { sessions?: { file?: string }[] }).sessions ?? []);
+      const files = items.map((x) => x.file);
+      expect(files.some((f) => f === "smoke.jsonl")).toBe(true); // 转录被扫到（逻辑名）
+      expect(files.every((f) => f !== "pi/smoke.jsonl")).toBe(true); // 无带前缀重复条目
+    } finally { ws.close(); }
   }, 15_000);
 });
 
