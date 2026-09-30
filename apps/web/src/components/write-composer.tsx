@@ -141,6 +141,7 @@ export function WriteComposer({ client, file, editor }: { client: WriteClientSur
     : view.phase === "stopping" ? "停止中…"
     : view.phase === "resuming" ? "恢复重发中…"
     : view.phase === "error" ? "写连接异常"
+    : editor?.isNew ? (view.ready ? "Enter 发送 · Shift+Enter 换行" : "连接中，可先写草稿")
     : file === null ? "未选择会话"
     : view.ready ? "可发送"
     : "写连接未就绪";
@@ -228,7 +229,7 @@ export function WriteComposer({ client, file, editor }: { client: WriteClientSur
       {!editor && view.lastResult !== null ? (
         <p role="status">{lastResultText(view.lastResult)}</p>
       ) : null}
-      <details className="resume-demo">
+      <details className="resume-demo" hidden={editor?.isNew === true}>
         <summary>高级诊断</summary>
         <div className="resume-fields">
           <label>

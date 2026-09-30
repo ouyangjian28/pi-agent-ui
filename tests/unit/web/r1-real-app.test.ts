@@ -94,6 +94,39 @@ describe("R1 真 AppRoot+三客户端首链", () => {
       confirm.mockReturnValue(true); fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" })); expect(Socket.all[2]!.sent.filter((f) => f.t === "prompt")).toHaveLength(2);
     } else expect(screen.getByRole("alert").textContent).toContain("草稿已保留");
   });
+  it("手机返回/767↔768 保订阅待答与同一个 composer；真换 file 必须提示", () => {
+    const changes = new Set<() => void>();
+    const media = { matches: true, addEventListener: (_: string, fn: () => void) => changes.add(fn), removeEventListener: (_: string, fn: () => void) => changes.delete(fn) };
+    vi.stubGlobal("matchMedia", () => media);
+    start(); fireEvent.click(screen.getByRole("button", { name: /已有对话 B/ })); snapshot("b.jsonl");
+    const textarea = screen.getByLabelText("写入消息内容"); fireEvent.change(textarea, { target: { value: "保持 IME 草稿" } });
+    act(() => Socket.all[1]!.receive({ t: "ui-request", requestId: "question-1", file: "b.jsonl", method: "confirm", title: "是否继续？" }));
+    expect(screen.getByText("是否继续？")).toBeTruthy(); const before = Socket.all[1]!.sent.length;
+    fireEvent.click(screen.getByRole("button", { name: "会话列表" }));
+    expect(document.querySelector("main")?.hasAttribute("inert")).toBe(true); expect(Socket.all[1]!.sent).toHaveLength(before);
+    act(() => { media.matches = false; changes.forEach((fn) => fn()); });
+    expect(document.querySelector("main")?.hasAttribute("inert")).toBe(false); expect(screen.getByLabelText("写入消息内容")).toBe(textarea);
+    act(() => { media.matches = true; changes.forEach((fn) => fn()); });
+    fireEvent.click(screen.getByRole("button", { name: /已有对话 B/ }));
+    expect(screen.getByLabelText("写入消息内容")).toBe(textarea); expect((textarea as HTMLTextAreaElement).value).toBe("保持 IME 草稿");
+    expect(Socket.all[1]!.sent).toHaveLength(before);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    fireEvent.click(screen.getByRole("button", { name: "换模型开新对话" }));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("取消待答")); expect(Socket.all[1]!.sent).toHaveLength(before);
+    expect(Socket.all[2]!.sent.some((f) => f.t === "stop" || f.t === "prompt")).toBe(false);
+    expect(document.body.textContent).not.toContain("当前模型");
+  });
+  it("重连跨 client：页面和输入节点保留；零自动补发，新握手前零业务帧", async () => {
+    vi.useFakeTimers(); start(); const { textarea } = firstSend("原始输入");
+    fireEvent.change(textarea, { target: { value: "新编辑稿" } });
+    act(() => Socket.all[2]!.close(1006));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(Socket.all).toHaveLength(6); expect(screen.getByLabelText("首条消息")).toBe(textarea); expect(textarea.value).toBe("新编辑稿");
+    expect(Socket.all.slice(3).every((s) => s.sent.length === 0)).toBe(true);
+    act(() => Socket.all.slice(3).forEach((s) => s.open()));
+    expect(Socket.all.flatMap((s) => s.sent).filter((f) => f.t === "prompt")).toHaveLength(1);
+    expect(screen.getByRole("alert").textContent).toContain("可能已受理");
+  });
   it("新建拒收六类均保全文（不订未创建 file）", async () => {
     start(); const { textarea, frame } = firstSend("不吞输入"); await ack(frame, { kind: "not-ready", cause: "spawn-exited", detail: "fixture" });
     expect(textarea.value).toBe("不吞输入"); expect(Socket.all[1]!.sent.filter((f) => f.t === "subscribe")).toHaveLength(0);

@@ -63,9 +63,14 @@ try {
     const page = await context.newPage(); const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(url); await page.locator('nav[aria-label="会话列表"]').waitFor();
+    if (width === 390) await page.getByRole("button", { name: "＋新对话" }).click();
     for (const scene of ["welcome", "conversation"]) {
-      if (scene === "conversation") await page.getByRole("button", { name: /设计一个安静的聊天工作台/ }).click();
+      if (scene === "conversation") {
+        if (width === 390) await page.getByRole("button", { name: "会话列表", exact: true }).click();
+        await page.getByRole("button", { name: /设计一个安静的聊天工作台/ }).click();
+      }
       if (scene === "conversation") await page.locator("section.session-detail").getByText(/可以。我们先让对话成为主角/).waitFor();
+      await page.evaluate(() => Promise.all(document.getAnimations().filter((animation) => animation.effect?.getTiming().iterations !== Infinity).map((animation) => animation.finished.catch(() => {}))));
       const path = join(out, `${width}-${theme}-${scene}.png`);
       await page.screenshot({ path, fullPage: true });
       const measurements = await page.evaluate(() => ({ overflowPx: document.documentElement.scrollWidth - innerWidth, textareas: [...document.querySelectorAll("textarea")].map((el) => ({ label: el.getAttribute("aria-label"), top: el.getBoundingClientRect().top, bottom: el.getBoundingClientRect().bottom })), frames: window.__uiRig.frames.map(({ t, file }) => ({ t, file })) }));

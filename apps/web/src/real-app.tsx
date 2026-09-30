@@ -5,6 +5,8 @@
 // 认证失败（任一客户端 errorKind=auth-failed）→受控错误面+「清除 token 重输」（清 localStorage 回输入面）。
 import React, { useEffect, useState, useSyncExternalStore } from "react";
 import { WriteComposer } from "./components/write-composer";
+import { HealthDot } from "./components/health-dot";
+import { ConversationHeader } from "./components/conversation-header";
 import { ConversationState } from "./ws/conversation-state";
 import { autoFile, readLastModel, writeLastModel, MODEL_DEFAULT, effectiveModel, isPersistableModel } from "./ws/draft-model";
 import { useSessionDetail } from "./ws/use-session-detail";
@@ -25,14 +27,6 @@ import type { AppClients } from "./ws/app-clients";
 import type { WebSocketFactory } from "./ws/ws-client";
 
 type ConnState = "connecting" | "authenticating" | "ready" | "closed" | "error";
-
-const CONN_LABEL: Record<ConnState, string> = {
-  connecting: "连接中",
-  authenticating: "认证中",
-  ready: "已连接",
-  closed: "已断开",
-  error: "连接错误",
-};
 
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
@@ -244,6 +238,24 @@ function ConnectedApp({
   const select = (target: string): void => { if (target === file || allowLeave()) owner.open(target); };
   const restore = (id: string): void => { if (allowLeave()) owner.restore(id); };
   const ensureDraft = (): string | null => slot?.id ?? newDraft();
+  const [narrow, setNarrow] = useState(() => window.matchMedia?.("(max-width: 767px)").matches ?? false);
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(max-width: 767px)");
+    const change = () => setNarrow(media.matches);
+    media.addEventListener("change", change); change();
+    return () => media.removeEventListener("change", change);
+  }, []);
+  const mainRef = React.useRef<HTMLElement>(null);
+  const navRef = React.useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (narrow && ui.view.kind === "list") {
+      navRef.current?.querySelector<HTMLButtonElement>('[aria-current="page"]')?.focus();
+    } else if (!mainRef.current?.contains(document.activeElement) && ui.view.kind !== "list") {
+      mainRef.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+    }
+  }, [narrow, ui.view.kind]);
+  const title = isNew ? "新对话" : resolveTitle(wsSnap.sessions?.find((session) => session.file === file) ?? { file: file!, title: { text: "", truncated: false } });
 
   const authFailed =
     wsSnap.errorKind === "auth-failed" ||
@@ -274,30 +286,13 @@ function ConnectedApp({
   }
 
   return (
-    <div className="app">
+    <div className="app real-app" data-view={ui.view.kind}>
       <header className="topbar">
-        <strong>
-          <span className="brand">π</span> pi 工作台
-        </strong>
-        <ThemeToggle />
+        <strong><span className="brand">π</span> <span>pi agent</span></strong>
+        <div className="topbar-actions"><HealthDot states={states} onReconnect={onRetry} reconnect={reconnectUi} /><ThemeToggle /></div>
       </header>
-      <div className="connbar" role="status" aria-live="polite">
-        <span>列表：{CONN_LABEL[wsSnap.state]}</span>
-        <span>订阅：{CONN_LABEL[subSnap.connState]}</span>
-        <span>写：{CONN_LABEL[writeSnap.connState]}</span>
-        {reconnectUi !== null && (
-          <span className="reconnect-note">
-            自动重连中…（第 {reconnectUi.attempts} 次，约 {Math.round(reconnectUi.nextInMs / 1000)} 秒后）
-          </span>
-        )}
-        {anyDown && (
-          <button type="button" onClick={onRetry}>
-            立即重连
-          </button>
-        )}
-      </div>
       <div className="workspace two-col">
-        <nav className="session-panel" aria-label="会话列表">
+        <nav ref={navRef} className="session-panel" aria-label="会话列表" inert={narrow && ui.view.kind !== "list"}>
           <div className="panel-heading">
             <h1>会话</h1>
             <div className="panel-actions">
@@ -312,9 +307,10 @@ function ConnectedApp({
           <SessionList client={clients.wsClient} selectedFile={file} onSelect={select} />
           {ui.drafts.size > 0 && <section className="unfinished-drafts" aria-label="未完成草稿"><h3>未完成草稿</h3>{[...ui.drafts.values()].filter((draft) => draft.operation !== null).map((draft) => <button key={draft.id} type="button" onClick={() => restore(draft.id)}>{draft.phase === "settled-launched" ? "打开已受理对话" : draft.phase === "settled-unknown" ? "找回结果未知的草稿" : draft.operation?.pending ? "找回发送中的草稿" : "找回未发送成功的草稿"}<small>{draft.operation?.text.slice(0, 40)}</small></button>)}</section>}
         </nav>
-        <main className="conversation" aria-label="当前会话">
+        <main ref={mainRef} className={`conversation ${isNew ? "conversation-new" : ""}`} aria-label="当前会话" inert={narrow && ui.view.kind === "list"}>
+          <ConversationHeader title={title} isNew={isNew} onBack={() => owner.back()} onNew={() => { newDraft(); }} canCreate={owner.canCreate} status={!isNew ? detail.statusSummary?.turn : undefined} />
           <div className="conversation-body">
-            {isNew ? <div className="welcome"><span className="welcome-mark">π</span><h1>从一个想法开始</h1><p>从左侧继续或直接开始新对话</p></div> : <SessionDetail managed client={clients.subscribeClient} file={file} title={resolveTitle(wsSnap.sessions?.find((session) => session.file === file) ?? { file: file!, title: { text: "", truncated: false } })} />}
+            {isNew ? <div className="welcome"><span className="welcome-mark">π</span><h1>从一个想法开始</h1><p>从左侧继续或直接开始新对话</p></div> : <SessionDetail managed client={clients.subscribeClient} file={file} title={title} />}
           </div>
           <WriteComposer client={clients.writeClient} file={slot?.file ?? null} editor={{
             slot, source: clients.wsClient, isNew,
