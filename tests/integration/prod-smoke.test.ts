@@ -205,11 +205,11 @@ describe("批A 生产烟测：真实 main.ts 入口→写面全链", () => {
       await until(() => existsSync(join(r.sessionDir, "..audit.jsonl")), "journal 落 D/..audit.jsonl");
       const jFirst = (await readFile(join(r.sessionDir, "..audit.jsonl"), "utf8")).trim().split("\n")[0]!;
       expect(jFirst).not.toContain('"type":"session"'); // 控制文件非 pi 转录格式
-      // T 树里 ..audit.jsonl 若存在必须是 fake pi 转录 header（旧 startsWith 判据会把 journal 错落到这里）
-      if (existsSync(join(r.sessionDir, "pi", "..audit.jsonl"))) {
-        const tFirst = (await readFile(join(r.sessionDir, "pi", "..audit.jsonl"), "utf8")).trim().split("\n")[0]!;
-        expect(tFirst).toContain('"type":"session"'); // 只允许 pi 转录，不允许 journal 控制行错落
-      }
+      // 转录必须存在且同名（无条件正向断言——GPT 复审 P3-R2F-01：条件分支会放过同名转录映射回归）
+      await until(() => existsSync(join(r.sessionDir, "pi", "..audit.jsonl")), "转录 header 落 T/..audit.jsonl");
+      const tFirst = JSON.parse((await readFile(join(r.sessionDir, "pi", "..audit.jsonl"), "utf8")).trim().split("\n")[0]!);
+      expect(tFirst.type).toBe("session");
+      expect(tFirst.version).toBe(3);
     } finally { ws.close(); }
   }, 20_000);
 });

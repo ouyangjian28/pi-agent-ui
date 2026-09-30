@@ -29,7 +29,7 @@ function usage(): string {
     "  --port          固定端口（staticDir 模式必填：同源 origin 白名单需预知端口）",
     "  --token-file    token 文件（0600 {version:1,tokens:[…]}）",
     "  --root          授权根（可重复；绝对路径且存在）——读面文件域+写面 cwd 授权域+目录选择器选项",
-    "  --scan-dir      list-sessions 扫描目录（默认=转录树 T=<session-dir>/pi；未设 --session-dir 时=第一个 root）",
+    "  --scan-dir      list-sessions 扫描目录（默认=转录树 T；D=--session-dir 或第一个 root，T=<D>/pi）",
     "  --static-dir    web 构建产物目录（设为同端口静态托管）",
     "  --origin        Origin 白名单（默认=推导 http://127.0.0.1:<port> 与 http://localhost:<port>）",
     "  --host          监听地址（默认 127.0.0.1——loopback-only 是本工具的威胁模型边界）",
@@ -94,16 +94,11 @@ async function main(): Promise<void> {
     ? args.origins
     : [`http://127.0.0.1:${args.port}`, `http://localhost:${args.port}`];
   // 批A（P1-01）：写面接线——journal 树与项目根分离。
-  // 写面 file 域口径=resolveWithinRoots 首根命中（网关/statusFor/uiHost/entry/恢复链全链同源）：
-  // 故 sessionDir 必须排在 effectiveRoots[0]——逻辑名→journal 落点=首根命中=journal 树（否则落
-  // 项目根错位，生产烟测⑥ 抓过）。副作用全为正：scanDir 默认=首根=journal 扫描树（原本错扫项目根）；
-  // 授权域仍含全部 roots（读面/cwd 门不变）。
   // 批A-r2（P1-A1 双树）：journal 控制树 D 与 pi 转录树 T 分离。
-  // D=--session-dir（默认=第一个 root；控制 journal 落盘树）；T=<D>/pi（自动创建；真 pi 转录+读面首根）。
+  // D=--session-dir（默认=第一个 root；控制 journal 落盘树）；T=<D>/pi（自动创建；真 pi 转录+读面首根+扫描树）。
   // 读面（扫描/entry/直播/恢复 session）首根=T；写面键（sendPrompt/stop/statusFor/UI 归因/recovery journal）
   // 经 journalOf 落 D（composition journalLayout 接线）。两树同名同构：D/<name>.jsonl ↔ T/<name>.jsonl。
-  // 兼容：rig 未传 --session-dir 且 roots=[单根] 时 D=roots[0]、T=D/pi——旧测试若直拼 journal 绝对路径
-  // （根顶层）仍落在 D 域内，行为不变。
+  // 授权域仍含全部 roots（读面/cwd 门不变）。
   const sessionDir = args.sessionDir !== undefined ? await assertDir(args.sessionDir, "--session-dir") : roots[0]!;
   const transcriptsDir = resolve(sessionDir, "pi");
   await mkdir(transcriptsDir, { recursive: true });
