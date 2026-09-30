@@ -58,6 +58,7 @@ cases = [
     ("M24-Strict-destroys-owner", [("apps/web/src/ws/use-conversation-lifetime.ts", 'const lease = ++epoch.current;', 'epoch.current += 1;'), ("apps/web/src/ws/use-conversation-lifetime.ts", 'return () => queueMicrotask(() => {\n      if (epoch.current === lease) owner.dispose();\n    });', 'return () => owner.dispose();')], "r1-real-app.test.ts", None),
     ("M25-unmount-leaks-wait-timer", [("apps/web/src/ws/use-conversation-lifetime.ts", 'if (epoch.current === lease) owner.dispose();', 'if (epoch.current === lease) { /* no cleanup */ }')], "r1-lifetime.test.ts", None),
     ("M26-screenreader-every-token", [(L, 'className="live-stream" aria-live="off"', 'className="live-stream" aria-live="polite"')], "r1-live-handoff.test.ts", None),
+    ("M27-held-enter-sends", [("apps/web/src/components/write-composer.tsx", ' || event.repeat', '')], "r1-real-app.test.ts", None),
 ]
 results = []
 for name, edits, test, timezone in cases:

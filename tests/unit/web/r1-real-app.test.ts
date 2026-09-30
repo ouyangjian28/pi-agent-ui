@@ -80,7 +80,7 @@ describe("R1 真 AppRoot+三客户端首链", () => {
   });
   it("Enter/Shift+Enter/IME：真 composer composing/229 零发送", () => {
     start(); const textarea = draft(); fireEvent.change(textarea, { target: { value: "中文输入" } });
-    fireEvent.keyDown(textarea, { key: "Enter", isComposing: true }); fireEvent.keyDown(textarea, { key: "Enter", keyCode: 229 }); fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
+    fireEvent.keyDown(textarea, { key: "Enter", isComposing: true }); fireEvent.keyDown(textarea, { key: "Enter", keyCode: 229 }); fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true }); fireEvent.keyDown(textarea, { key: "Enter", repeat: true });
     expect(Socket.all[2]!.sent.filter((frame) => frame.t === "prompt")).toHaveLength(0);
     fireEvent.keyDown(textarea, { key: "Enter" }); expect(Socket.all[2]!.sent.filter((frame) => frame.t === "prompt")).toHaveLength(1);
   });

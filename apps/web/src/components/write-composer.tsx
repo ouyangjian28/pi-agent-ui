@@ -202,7 +202,7 @@ export function WriteComposer({ client, file, editor }: { client: WriteClientSur
           disabled={!editor && (file === null || !view.ready)}
           placeholder={editor?.isNew ? "想从哪里开始？" : "继续这段对话…"}
           onKeyDown={(event) => {
-            if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229) return;
+            if (event.key !== "Enter" || event.repeat || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229) return;
             if (canSend) { event.preventDefault(); onSend(); }
           }}
         />
