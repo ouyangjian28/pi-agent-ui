@@ -31,7 +31,7 @@ R = "apps/web/src/real-app.tsx"
 W = "apps/web/src/ws/ws-client.ts"
 L = "apps/web/src/components/live-stream.tsx"
 cases = [
-    ("M01-premature-subscribe", [(S, 'this.publish({ view: { kind: "draft", id }, activeFile: null });', 'this.publish({ view: { kind: "draft", id }, activeFile: file });')], "conversation-state.test.ts", None),
+    ("M01-premature-subscribe", [(S, 'this.put(this.blank(id, file, true, modelChoice));\n    this.publish({ view: { kind: "draft", id }, activeFile: null });', 'this.put(this.blank(id, file, true, modelChoice));\n    this.publish({ view: { kind: "draft", id }, activeFile: file });')], "conversation-state.test.ts", None),
     ("M02-old-version-clears", [(S, ' && current.version === op.version', '')], "conversation-state.test.ts", None),
     ("M03-ack-steals-B", [(S, ' && view.kind === "draft" && view.id === id', '')], "conversation-state.test.ts", None),
     # 转移一次和目标槽保护为两层防线；组合撤销代表同一“恢复重灌”故障，不冒称单层各自可杀。
