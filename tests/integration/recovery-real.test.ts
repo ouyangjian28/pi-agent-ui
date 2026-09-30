@@ -71,6 +71,34 @@ async function makeRig(maxRecovery?: number): Promise<Rig> {
 }
 const rigDispose = async (r: Rig): Promise<void> => { await r.srv.dispose(); };
 
+// P2-R2-01 杀例 rig：双树布局（批A-r2 journalLayout）+main 同构 sessionFor——验证恢复域 sessionRoots 首根=T。
+// 差异构造：journal D=5000B、转录 T=5100B、max=10000。新代码（T 计入）：5000+5100>10000→oversized；
+// 旧默认（sessionRoots 落回 recoveryRoots 首根 D）："q.jsonl" 先在 D 命中 journal→5000+5000≤10000 不拒——双计 D 漏计 T。
+async function makeLayoutRig(maxRecovery: number): Promise<Rig & { tRoot: string; tFile: string }> {
+  const base = await mkdtemp(join(tmpdir(), "rr-l-"));
+  const tRoot = join(base, "t"); const dRoot = join(base, "d");
+  await (await import("node:fs/promises")).mkdir(tRoot, { recursive: true });
+  await (await import("node:fs/promises")).mkdir(dRoot, { recursive: true });
+  const td = await mkdtemp(join(tmpdir(), "rr-lt-"));
+  const tokenFile = join(td, "tokens.json");
+  await writeFile(tokenFile, JSON.stringify({ version: 1, tokens: ["tok-ok"] }), { mode: 0o600 });
+  await chmod(tokenFile, 0o600);
+  const jp = join(dRoot, "q.jsonl");
+  const tFile = join(tRoot, "q.jsonl");
+  const audits: string[] = [];
+  const srv = await startServer({
+    tokenFile,
+    allowedOrigins: ["http://localhost:5173"],
+    roots: [tRoot, dRoot],
+    journalLayout: { transcriptsRoot: tRoot, journalRoot: dRoot },
+    sessionFor: (file: string) => (file === "q.jsonl" ? tFile : join(tRoot, file)), // main 同构：绝对直通→recoverySessionFor 转相对名
+    scanDir: tRoot,
+    maxRecoveryCombinedBytes: maxRecovery,
+    audit: (l) => { audits.push(l); },
+  });
+  return { srv, url: `ws://127.0.0.1:${srv.port}`, jp, sp: tFile, audits, tRoot, tFile };
+}
+
 describe("3b-4 恢复真读源集成（真 WS+真文件）", () => {
   it("I1 501 意图多页完整期望 ID 数组；源变后同 hash 续页=冻结页（无刷新）；无 hash=新快照", async () => {
     const r = await makeRig();
@@ -206,6 +234,26 @@ describe("3b-4 恢复真读源集成（真 WS+真文件）", () => {
     } finally {
       c2.dispose();
       await rigDispose(w);
+    }
+  });
+
+  it("I8 P2-R2-01 杀例：双树布局恢复域 sessionRoots 首根=T（转录计入合计预算；旧默认 D+D 双计漏 T 应红）", async () => {
+    const r = await makeLayoutRig(10_000);
+    const c = new WsClient(r.url, "http://localhost:5173");
+    try {
+      await writeFile(r.jp, Buffer.alloc(5_000));  // journal 落 D
+      await writeFile(r.tFile, Buffer.alloc(5_100)); // 转录落 T
+      await c.hello();
+      await c.say({ t: "get-recovery", requestId: "l1", file: "q.jsonl", offset: 0 });
+      await until(() => c.recovery().length > 0);
+      const f = c.recovery().at(-1) as Record<string, unknown>;
+      // 新代码：session 解析进 T（5100）+journal D（5000）=10100>10000 → oversized
+      // 旧默认（sessionRoots=recoveryRoots 首根 D）："q.jsonl" 命中 D 的 journal（5000+5000≤10000）→不拒=测试红
+      expect(f).toMatchObject({ availability: "unavailable", reason: "oversized" });
+      expect(r.audits.some((l) => l.includes("recovery-oversized") && l.includes("journal=5000") && l.includes("session=5100"))).toBe(true);
+    } finally {
+      c.dispose();
+      await r.srv.dispose();
     }
   });
 });
