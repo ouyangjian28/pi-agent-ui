@@ -1390,3 +1390,16 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - 测试：server ws-support B1 四例（多块拼合 env 不透片段/非 BMP 无孤立代理/纯附件锁定/空白块跳过）+web mux-b1 12 例（resolveTitle 三级/autoFile CSPRNG+固定源/ready 刷新+dirty 合并四反例/刷新钮/预填可编辑）。全仓 1784 绿+tsc 两包 0。
 - 变异 3/3（基线 e4b5f4c 先 commit）：Mu-b1-1 foundFirstUser 摘除→B1-3 红/Mu-b1-2 dirty 补拉摘除→合并例红/Mu-b1-3 CSPRNG→fill(0)→随机性例红。**变异教训：替换须语法有效（`void 0`/fill(0) 而非注释——注释化会让 TS 编译失败造成 36 绿假象 461ms 异常短）。**
 - 测试帧教训：自造 sessions 帧须带全帧级 hasMore/listReliability+条目 hasRecoveryNotice；error code 须在锚定码表（4429 可，500 不行）——否则形状校验整帧拒绝造成假红定位偏。
+
+### M-UX 批1 修复批：GPT 实现审 NO-GO 78→P1×2+P2×3 全闭合（2026-10-10，GLM 修·待 GPT 复审）
+
+- 审报=~/ai projects/pi-agent-ui/audits/gpt-muxb1-review-2026-10-10.md（19KB；git archive /tmp 副本变异+自跑 48/48）。
+- **P1-01**：session-scan `o.message` 形状防御（JSON `message:null` 使 `null.role` 抛错→整表 4402——旧 `m?.content` 对 null 安全，批1 类型断言引入回归）。杀例=坏行后合法首 user 仍取标题+邻文件不受影响。
+- **P1-02**：SessionDetail `title?:string|null` prop+壳 resolveTitle 传参（`wsSnap.sessions.find(s=>s.file===file)`，DTO 缺席同一解析器对 file 派生回退——不另算一份）。杀例=use-session-detail 新例锚 title 传入/回退两分支（heading role+name 断言）。
+- **P2-01**：ws-client 原子化——welcome 先 requestSessionsInternal 占位再 transition ready（同步回调重入被在途位记 dirty 不双发）；sessions 结算先清位+快照再通知，`needRepull && !pending` 补拉让位（回调已发新请求不重复）；onClose 非认证路径清 pending/dirty；requestSessionsInternal 包 try-catch（sendFrame throw 回滚 pending 不悬挂）。杀例四：welcome 窗口恰 2 帧/结算让位/serverClose 迟到回包零副作用/throw 后可重试。
+- **P2-02**：假绿修——B1-2 精确断言（`"a".repeat(19)`+isWellFormed+逐码元配对循环）；CSPRNG spy（vi.spyOn(crypto,"getRandomValues") 被调+length=16）；B2 固定同名组件级例（预填即发送名+创建后不换名）；**launched 补拉接线杀点**（real-app 集成例：write-ack launched→列表连接 list-sessions +1；摘 real-app.tsx 补拉行验证真红）。error 面 dirty 清位变异不可观察（终态屏障下无危害）——诚实记档不假装覆盖。
+- **P2-03**：AUTO_RE 收窄 `/^auto-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-[0-9a-f]{32}\.jsonl$/`+月日粗验+UTC 构造回读精确日历（13 月/2 月 30/25 时回退 file 名；闰 2 月 29 合法）。
+- B1 收紧：B1-4 `toBe("实际内容")`（空白块整块跳过）；B1-3 补全空白 string user 后第二 user 锁定例。
+- 变异 6/6（基线 9ec12a6 先 commit）：Mu-fix-1 防御摘除→坏行例红/Mu-fix-2 title 渲染摘除→杀例红/Mu-fix-3 日历摘除→13 月例红/Mu-b1-1..3 续红（8 红/2 红/2 红）。全还原复绿+树净核对。
+- **M-245 家族五犯险情（已防）**：验杀点时 `git checkout -- real-app.tsx` 会把未 commit 的 P1-02 壳改动一并还原——测试全绿是静默回归。教训固化：**变异验杀前基线必须已 commit（本批六连全在 9ec12a6 后做）**；checkout 还原后必须 `rg` 复核修复面仍在（本批 rg 发现 resolveTitle 消失→重应用）。
+- 全仓 1796 绿（+12 新例）；commit 9ec12a6。
