@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-// M-UX 批2 D05（设计 v7）：get-roots 请求身份三件（递增 requestId+10s timer 捕获身份+force 替换）
+// M-UX 批2 D05（设计 v7）：get-roots 请求身份三件（递增 requestId+10s timer 捕获身份+重试新身份替代旧请求）
 // 批3 减法后：目录选择器/等待面整体退役（requestRoots 数据域保留）。
 // B4 改批3 断言：零目录元素+零等待面+零超时出口；创建永不因 roots 阻塞。
-// timer 打回；M1 卸载后 R2 迟到回包入缓存；超时/force 后旧 R1 零覆盖；既有 t=10/t=11 断言保留
+// timer 打回；M1 卸载后 R2 迟到回包入缓存；超时/重试后旧 R1 零覆盖；既有 t=10/t=11 断言保留
 //（ws-client.test.ts v1.5 节五例不回归）。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
@@ -45,14 +45,14 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("M-UX 批2 D05 请求域：身份三件+超时/force 零覆盖", () => {
-  it("递增 requestId：两次 force（failed 重发）→get-roots-1/get-roots-2；回帧按身份结算", () => {
+describe("M-UX 批2 D05 请求域：身份三件+超时/重试零覆盖", () => {
+  it("递增 requestId：两次请求（failed 重发）→get-roots-1/get-roots-2；回帧按身份结算", () => {
     client.requestRoots();
     const r1 = (ws.sentFrames().at(-1) as { requestId: string }).requestId;
     expect(r1).toBe("get-roots-1");
     ws.receive({ t: "error", code: 4402, message: "m", retryable: false, requestId: r1 });
     expect(client.getSnapshot().roots.status).toBe("failed");
-    client.requestRoots(); // failed 可重发（force）
+    client.requestRoots(); // failed 可重发（新身份替代旧请求）
     const r2 = (ws.sentFrames().at(-1) as { requestId: string }).requestId;
     expect(r2).toBe("get-roots-2");
     ws.receive({ t: "roots-list", requestId: r2, roots: ROOTS });
@@ -75,13 +75,13 @@ describe("M-UX 批2 D05 请求域：身份三件+超时/force 零覆盖", () => 
     expect(client.getSnapshot().roots.items).toEqual([]);
   });
 
-  it("force 后旧 R1 零覆盖：超时 failed→重试发 R2→R1 迟到回包被身份核验拒", () => {
+  it("重试后旧 R1 零覆盖：超时 failed→重试发 R2→R1 迟到回包被身份核验拒", () => {
     vi.useFakeTimers();
     client.requestRoots();
     const r1 = (ws.sentFrames().at(-1) as { requestId: string }).requestId;
     vi.advanceTimersByTime(10_000);
     expect(client.getSnapshot().roots.status).toBe("failed");
-    client.requestRoots(); // force：新身份 R2 立即生效
+    client.requestRoots(); // 重试：新身份 R2 立即生效
     const r2 = (ws.sentFrames().at(-1) as { requestId: string }).requestId;
     expect(r2).toBe("get-roots-2");
     expect(client.getSnapshot().roots.status).toBe("loading");
@@ -179,7 +179,7 @@ describe("批3 D05 页面等待域退役：目录减法（B4 改造）", () => {
     expect((btn as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("roots 中途 ok/failed 到达：页面零反应（目录域状态不冒泡到 UI）；requestRoots 数据域保留", async () => {
+  it("roots 中途 ok 到达：页面零反应（目录域状态不冒泡到 UI）；requestRoots 数据域保留", async () => {
     vi.useFakeTimers();
     const { render, screen, act } = await import("@testing-library/react");
     const React = (await import("react")).default;
@@ -208,7 +208,7 @@ describe("批3 D05 页面等待域退役：目录减法（B4 改造）", () => {
       onCancel: () => {},
     });
     render(el);
-    expect(rootsCalls).toBeGreaterThanOrEqual(1); // 数据域保留（壳层 rootsHint 供源）
+    expect(rootsCalls).toBeGreaterThanOrEqual(1); // 数据域保留（兼容；批3 后壳层 rootsHint=固定串，不消费快照）
     await act(async () => {
       vi.advanceTimersByTime(8_000);
       snapNow = { ...snapNow, roots: { status: "ok", items: ["/journal", "/home/yyj/ai"], journalRoot: "/journal", cause: null } };
@@ -222,7 +222,7 @@ describe("批3 D05 页面等待域退役：目录减法（B4 改造）", () => {
 });
 
 // ---------- M-UX 批2b D04：模型选择域守卫（B3 五断言，设计 v4 D04 定案） ----------
-// 域分离：modelChoice(已确认选择)+freeText(草稿)+意图门 userTouchedModel+转移锚 lastNonCustom。
+// 域分离：modelChoice(已确认选择)+freeText(草稿)（批2r2 已删意图门 userTouchedModel/转移锚 lastNonCustom 死状态）。
 // 持久化过滤：select 只写 __default__ 或过完整 modelPattern 的拼合值；清单项校验=完整正则禁选。
 async function renderNewSession(
   listeners: Set<() => void>,

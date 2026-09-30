@@ -264,7 +264,7 @@ describe("批3 NewSession 目录减法", () => {
     expect(write.sent[0]).toEqual({ file: expect.stringMatching(/^auto-/), text: "hi", model: undefined });
   });
 
-  it("roots failed/loading：用户无感（无等待面无降级文案）；创建仍不携 cwd", async () => {
+  it("roots failed：用户无感（无等待面无降级文案）；创建仍不携 cwd（loading 例见上例）", async () => {
     const { write, onLaunched } = setup(
       modelsSnap("ok", [], null, { status: "failed", items: [], cause: "服务端错误（4402）" }),
     );

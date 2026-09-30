@@ -1452,11 +1452,18 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 
 - 审报=~/ai projects/pi-agent-ui/audits/gpt-muxb2r2-review-2026-09-30.md（P1×1+P2×4+P3×2；三项消解+三枚 r2 变异获认可）。
 - **R2-P1-01（唯一阻断）测试假绿闭合**：①mux-b2 成功例补结算当下 `vi.getTimerCount()===0` 物理断言（在途恰 1→成功结算 0；GPT 窄变异「删成功 clearTimeout 保留 pending 门」此前 90/90 绿）；②卸载例重写真 client 接线（组件 props 传真 WsClient→挂载 effect 真发 get-roots→断言 rid 来自组件自身→unmount→迟到回包入缓存 ok→重挂零新请求幂等）——旧例 stub client 与真 client 脱节（错误 cleanup 变异 12/12 绿）；③批2a 节旧变异口径勘正（见上）。
-- R2-P2-01：select 删 `disabled={models.status==="loading"}`——默认项/已恢复自定义项不依赖清单恒可选；清单项仅 ok 时渲染（无需禁用态）。恢复旧 id+清单挂起→可选默认→帧无 model 键（新例全链）。
+- R2-P2-01：select 删 `disabled={models.status==="loading"}`——默认项/已恢复自定义项不依赖清单恒可选；清单项仅 ok 时渲染（无需禁用态）。恢复旧 id+清单挂起→可选默认→组件参数 model===undefined（新例证明参数级；「帧无 model 键」由写客户端序列化例承接 write-client.test.ts:952-969，非组件级线帧 E2E）。
 - R2-P2-02：selectModel 守卫改 isPersistableModel 同口径（拒 __ 前缀保留样式）；modelValid 发送面同拒（草稿 `__default__`/`__custom__` 禁创建+文案点明；回默认走 select 默认项）。新例：手打哨兵→按钮禁+零发送。
 - R2-P2-03：requestRoots 顺序反转——**timer 登记先于 loading transition**（订阅者同步重入 close() 时可见 timer 物理撤销；终局后零资源创建）。
 - R2-P2-04：mux-b1 B2 期望名改冻结 Date 本地字段推导（getHours 等，不硬编码 140504）——TZ=UTC 不再红。
 - R2-P3-01：autoFile 惰性初始化（useRef\<null\>+首渲染赋值）——真·只调一次（useRef(autoFile()) 参数每 render 求值只保留首次）。
 - R2-P3-02 口径收窄：rootsHint=壳层固定串（非 roots 快照驱动，组件 const roots 无消费者——数据域保留属兼容选择）；writeLastModel 时点=sendPrompt 发出前（写端本地拒绝也写偏好）；旧测试注释中 userTouchedModel/lastNonCustom/页面等待 timer 描述清理。
-- 新例 5 枚（new-session 19/mux-b2 12/ws-client 34）。全仓 1816 绿+tsc 两包 0。
-- 变异 4/5 真杀：Mu-r3-1 删成功结算 clearTimeout→成功例 getTimerCount 红（GPT 点名旧变异①）；Mu-r3-2 effect cleanup 错误关闭共享 client→真 client 卸载例红 8 例（GPT 点名旧变异②）；Mu-r3-4 恢复 loading 禁 select→回默认例红；Mu-r3-5 顺序反转回旧序→同步重入例红。**Mu-r3-3 存活分析（记档）**：selectModel 退回裸 modelPattern 后行为不可区分——`__custom__` 过 modelPattern（`[\w./:-]` 含下划线）且 modelValid 层已拒 __ 前缀发送，selectModel 层守卫现为纯纵深防御（与 isPersistableModel 同口径=代码审查保证，无独立行为出口，不设杀点例——同 writeLastModel try-catch 静默层处理）。复审若仍要求行为可杀，需给哨兵放开发送门=违反 R2-P2-02 修复，不采纳。
+- 新增 3 例+重写/补强 2 例（new-session 19/mux-b2 12/ws-client 34；全仓净增 1813→1816）。全仓 1816 绿+tsc 两包 0。
+- 变异 4/5 真杀：Mu-r3-1 删成功结算 clearTimeout→成功例 getTimerCount 红（GPT 点名旧变异①）；Mu-r3-2 effect cleanup 错误关闭共享 client→真 client 卸载例红 8 例（GPT 点名旧变异②）；Mu-r3-4 恢复 loading 禁 select→回默认例红；Mu-r3-5 顺序反转回旧序→同步重入例红。**Mu-r3-3 存活分析（r3 原记档，三审勘误如下）**：~~selectModel 层守卫无独立行为出口，不设杀点例~~。**GPT 三审裁决：不接受「行为不可区分」解释**——selectModel 拒收时「不清 freeText/不改 modelChoice」本身就是可断言的独立状态迁移出口（旧守卫会对 `__custom__` 误迁移：清草稿+锚定哨兵）；modelValid 只拦发送不回滚状态。杀点 A（哨兵拒收不清草稿+回退锚不变）/杀点 B（`__reserved/m` 清单项 handler 拒收 select 值不变）已入尾债批 new-session.test.ts，Mu-r3-3 复注入 2 例真红。教训：断言纵深防御层「不可测」前，先找它的状态迁移消费面（草稿/选择锚/渲染），勿与纯静默层（writeLastModel try-catch）混同。
+
+### M-UX 批2 尾债批（2026-10-10；GPT 三审 GO 92 §5 建议，小修免审·变异自证）
+
+- 杀点 A 入仓（selectModel 哨兵拒收零状态迁移：草稿不清+回退锚不变+按钮恢复）；杀点 B+R3-P3-01 入仓（`__reserved` 清单项渲染 disabled+标「不可用」+handler 拒收 select 值不变+正常项不连坐）；autoFile 单次调用断言入仓（crypto.getRandomValues spy 全生命周期恰 1 次）。
+- 渲染面同步拒绝：清单项 usable 判据补 `!full.startsWith("__")`（与 selectModel/持久化同口径）。
+- 注释口径清理：new-session.tsx 头注（rootsHint 固定串/sendPrompt 前写偏好/autoFile 后台生成/effect 数据域兼容保留/lazy 单次）；ws-client.ts force 措辞退役（重试/新身份替代+同 client 无重连需重建）；mux-b2.test.ts force 全清+182 题名收窄+225 死状态注记；new-session.test.ts:267 题名收窄。
+- 变异三连真杀（基线 b5798b6 先 commit）：Mu-r3-3 复注入（selectModel 退回裸 pattern）→杀点 A/B 2 例红；usable 旧判据→杀点 B 红；autoFile 每 render 求值→单次断言红。还原后全绿 447（web）。
