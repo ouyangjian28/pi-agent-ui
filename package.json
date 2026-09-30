@@ -18,7 +18,11 @@
     "test": "vitest run",
     "test:e2e": "PI_E2E=1 vitest run tests/integration/pi-e2e.test.ts",
     "test:watch": "vitest",
-    "build": "npm run build -w apps/web -w apps/server"
+    "build": "npm run build -w apps/web -w apps/server",
+    "test:unit": "vitest run tests/unit",
+    "test:int": "vitest run tests/integration",
+    "test:web": "vitest run apps/web",
+    "test:fast": "vitest run tests/unit apps/web"
   },
   "devDependencies": {
     "@types/node": "^24.13.6",
