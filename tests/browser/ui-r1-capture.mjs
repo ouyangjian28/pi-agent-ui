@@ -1,5 +1,6 @@
 // 真生产构建 AppRoot→RealApp；仅浏览器 WebSocket 替身，本机静态端口，无生产服务/令牌。
 import { createServer } from "node:http";
+import { execFileSync } from "node:child_process";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { resolve, join, extname } from "node:path";
 import { chromium } from "playwright";
@@ -130,6 +131,9 @@ try {
   }
 } finally { await browser.close(); await new Promise((yes) => server.close(yes)); }
 const html = await readFile(join(dist, "index.html"), "utf8");
-await writeFile(join(out, "manifest.json"), JSON.stringify({ build: html.match(/assets\/index-[^" ]+\.js/)?.[0], evidence }, null, 2));
+let sourceCommit;
+try { sourceCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); }
+catch { sourceCommit = process.env.UI_R1_BASELINE ?? "archive-without-reference"; }
+await writeFile(join(out, "manifest.json"), JSON.stringify({ sourceCommit, createdAt: new Date().toISOString(), build: html.match(/assets\/index-[^" ]+\.js/)?.[0], policy: { entry: "AppRoot→RealApp", demo: false, fakeSocket: true, productionTokenUsed: false }, evidence }, null, 2));
 console.log(`RealApp screenshots: ${evidence.length}; page errors: ${evidence.reduce((n, e) => n + e.errors.length, 0)}; ${out}`);
 if (evidence.some((e) => e.errors.length)) process.exitCode = 1;

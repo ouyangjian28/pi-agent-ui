@@ -79,6 +79,7 @@ for name, edits, test, timezone in cases:
         for path in changed:
             (COPY / path).write_text(changed[path])
         env = dict(os.environ)
+        env["UI_R1_BASELINE"] = BASELINE
         if timezone:
             env["TZ"] = timezone
         if test == "browser":
