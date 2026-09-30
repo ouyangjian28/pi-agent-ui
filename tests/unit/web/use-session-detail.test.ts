@@ -142,6 +142,21 @@ const mount = (client: SubscribeClientSurface, file: string | null = "a.jsonl") 
 afterEach(cleanup);
 
 describe("sessionDetailViewOf 派生（纯函数）", () => {
+  it("M-UX 批1修复 P1-02 杀点：title prop 同源渲染，未传回退 file 名（壳层摘传参/组件丢回退此例红）", () => {
+    const stub1 = new StubClient(detailSnap({ file: "auto-20260930-141530-abcdef0123456789abcdef0123456789.jsonl", events: [msg(1)] }));
+    const r1 = render(React.createElement(SessionDetail, {
+      client: stub1, file: "auto-20260930-141530-abcdef0123456789abcdef0123456789.jsonl",
+      writeClient: null, title: "9月30日 14:15（2026）",
+    }));
+    expect(r1.getByRole("heading", { level: 2, name: "9月30日 14:15（2026）" })).toBeTruthy();
+    cleanup();
+    const stub2 = new StubClient(detailSnap({ file: "manual-name.jsonl", events: [msg(1)] }));
+    const r2 = render(React.createElement(SessionDetail, {
+      client: stub2, file: "manual-name.jsonl", writeClient: null, title: null,
+    }));
+    expect(r2.getByRole("heading", { level: 2, name: "manual-name.jsonl" })).toBeTruthy();
+  });
+
   it("连接级优先：connecting/authenticating→loading；closed→closed；error 细分 auth-failed/error", () => {
     expect(sessionDetailViewOf(detailSnap({ connState: "connecting", phase: "idle" })).status).toBe("loading");
     expect(sessionDetailViewOf(detailSnap({ connState: "authenticating", phase: "subscribing" })).status).toBe(

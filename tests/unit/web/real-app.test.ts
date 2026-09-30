@@ -212,6 +212,38 @@ describe("真模式 smoke：token 门→列表→详情→写面", () => {
     });
     expect(document.body.textContent).toContain("已入队（intentId=i-1）");
   });
+
+  it("M-UX 批1 D02：新建 launched→onLaunched 自动补拉列表（接线杀点：摘除 real-app 补拉行此例必红）", async () => {
+    window.history.replaceState(null, "", "/?token=smoke-token");
+    render(React.createElement(AppRoot, { createSocket: factory }));
+    handshakeAll();
+    const listReq = FakeWebSocket.instances[0]!.sentFrames().find((f) => f.t === "list-sessions");
+    act(() => {
+      FakeWebSocket.instances[0]!.receive({
+        t: "sessions", requestId: listReq!.requestId, sessions: [], total: 0, offset: 0,
+        hasMore: false, listVersion: 1, listReliability: "full",
+      });
+    });
+    // 打开新建表单→预填 auto- 名→填首条消息→创建
+    fireEvent.click(screen.getByRole("button", { name: "＋新建" }));
+    const fileInput = screen.getByLabelText("会话文件名") as HTMLInputElement;
+    expect(fileInput.value).toMatch(/^auto-\d{8}-\d{6}-[0-9a-f]{32}\.jsonl$/);
+    fireEvent.change(screen.getByLabelText("首条消息"), { target: { value: "新会话第一条" } });
+    fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
+    const promptFrame = FakeWebSocket.instances[2]!.sentFrames().find((f) => f.t === "prompt");
+    expect(promptFrame).toBeDefined();
+    const listBefore = FakeWebSocket.instances[0]!.sentFrames().filter((f) => f.t === "list-sessions").length;
+    await act(async () => {
+      FakeWebSocket.instances[2]!.receive({
+        t: "write-ack", requestId: promptFrame!.requestId, file: promptFrame!.file,
+        outcome: { kind: "launched", intentId: "i-2", commandId: 8 },
+      });
+      await Promise.resolve(); // flush write-client resolve→then 链（onLaunched→requestSessions）
+    });
+    // onLaunched：壳收新会话视图+列表连接自动补拉（首 user 可能晚落盘；dirty 合并保证不丢）
+    const listAfter = FakeWebSocket.instances[0]!.sentFrames().filter((f) => f.t === "list-sessions").length;
+    expect(listAfter).toBe(listBefore + 1);
+  });
 });
 
 describe("连接状态条：断开可见+手动重连", () => {

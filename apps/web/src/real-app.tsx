@@ -16,6 +16,7 @@ import {
   storeToken,
 } from "./components/token-gate";
 import { createAppClients, isSameOriginWsTarget, resolveWsUrl } from "./ws/app-clients";
+import { resolveTitle } from "./ws/resolve-title";
 import type { AppClients } from "./ws/app-clients";
 import type { WebSocketFactory } from "./ws/ws-client";
 
@@ -242,7 +243,18 @@ function ConnectedApp({
               <p>从左侧列表选择一个会话文件，或点「＋新建」创建新会话。</p>
             </div>
           ) : (
-            <SessionDetail client={clients.subscribeClient} file={file} writeClient={clients.writeClient} />
+            <SessionDetail
+              client={clients.subscribeClient}
+              file={file}
+              writeClient={clients.writeClient}
+              title={(() => {
+                // M-UX 批1修复 P1-02：详情标题与列表同源（resolveTitle 唯一真值源）；
+                // DTO 缺席（列表未含/新建后未拉到）用同一解析器对 file 派生回退，不另算一份。
+                const sessions = wsSnap.sessions ?? [];
+                const dto = sessions.find((s) => s.file === file);
+                return resolveTitle(dto ?? { file, title: { text: "", truncated: false } });
+              })()}
+            />
           )}
         </main>
       </div>

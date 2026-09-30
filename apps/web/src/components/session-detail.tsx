@@ -225,11 +225,14 @@ export function SessionDetail({
   client,
   file,
   writeClient = null,
+  title = null,
 }: {
   client: SubscribeClientSurface;
   file: string | null;
   /** 可选写面（A1c 挂点）：注入即挂写输入（独立写连接）；不注入=纯只读视图，既有调用点零改动。 */
   writeClient?: WriteClientSurface | null;
+  /** M-UX 批1修复 P1-02：壳传入的同源标题（resolveTitle 唯一真值源；null=回退 file 显示，壳层未算出时）。 */
+  title?: string | null;
 }) {
   const view = useSessionDetail(client, file);
   // D4 批③：展开缓存（组件本地 state，key=entryId；§4.4 P3-N7——换 file/流终局一并清，
@@ -327,7 +330,7 @@ export function SessionDetail({
     body = (
       <>
         <header>
-          <h2>{view.file ?? file}</h2>
+          <h2>{title ?? view.file ?? file}</h2>
           {view.statusSummary ? (
             <small>
               {view.statusSummary.process} · {view.statusSummary.turn}

@@ -324,7 +324,12 @@ export class WsClient {
 
   private requestSessionsInternal(): void {
     this.listRequestPending = true;
-    this.sendFrame({ t: "list-sessions", requestId: LIST_REQUEST_ID });
+    // P2-01（GPT 审）：发帧失败（同步 throw/readyState 非 OPEN 静默丢弃）不得悬挂在途位。
+    try {
+      this.sendFrame({ t: "list-sessions", requestId: LIST_REQUEST_ID });
+    } catch {
+      this.listRequestPending = false; // 未发出的请求不算在途；下一 refresh 重试
+    }
   }
 
   /** M-OPS（v1.4）：请求模型清单（幂等：在途/已 ok 不重发；failed 可重发=用户新显式动作）。
@@ -379,9 +384,10 @@ export class WsClient {
       case "welcome": {
         if (state !== "authenticating") return; // 重复 welcome 幂等忽略
         if (asWelcomeFrame(parsed) === null) return; // R1：缺字段/版本不符=未知帧，不得算握手成功
-        this.transition({ state: "ready" });
-        // 握手成功才发 list-sessions（§5.1 帧协议；welcome 前发任何非 hello 帧会被 4401）
+        // P2-01（GPT 审）：先占位发帧再通知 ready——同步订阅回调里 requestSessions 会被在途位
+        // 记 dirty，不会与 welcome 首拉双发同 requestId 帧（旧序 transition→发帧会被回调插入 R2）。
         this.requestSessionsInternal();
+        this.transition({ state: "ready" });
         return;
       }
       case "sessions": {
@@ -389,11 +395,14 @@ export class WsClient {
         const frame = asSessionsFrame(parsed);
         // R1：形状/条目校验失败=未知帧零副作用——不消耗唯一在途请求；requestId 不符同忽略。
         if (frame === null || frame.requestId !== LIST_REQUEST_ID) return;
+        // P2-01（GPT 审）：先落地全部本地状态（清位+快照）再通知——同步回调重入时要么看到
+        // pending=false 可发新请求，要么被在途位合并，不会双发；补拉在通知后按快照决策。
+        const needRepull = this.listDirty;
+        this.listDirty = false;
         this.listRequestPending = false;
         this.transition({ sessions: frame.sessions, total: frame.total, listVersion: frame.listVersion });
-        // M-UX D02 dirty 合并：在途期间的刷新请求不丢——结算后自动补拉一次
-        if (this.listDirty) {
-          this.listDirty = false;
+        // M-UX D02 dirty 合并：在途期间的刷新请求不丢——结算后自动补拉一次（回调已发新请求则让位）
+        if (needRepull && !this.listRequestPending) {
           this.requestSessionsInternal();
         }
         return;
@@ -461,6 +470,8 @@ export class WsClient {
       this.fail("auth-failed", "认证失败（连接被 1008 关闭）");
       return;
     }
+    this.listRequestPending = false; // P2-01（GPT 审）：server 侧关闭同口径清位（迟到回包零副作用）
+    this.listDirty = false;
     this.transition({ state: "closed" }); // 终态；无自动重连（后续迭代）
   }
 

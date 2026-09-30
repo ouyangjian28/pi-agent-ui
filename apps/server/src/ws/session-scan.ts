@@ -178,8 +178,9 @@ export function parseSessionBuffer(buf: Buffer, name: string, sizeBytes: number,
     // 纯附件/全空白→无标题，不跳第二条 user；多 text 块非空块以 \n 连接后整体过产线
     // ——完整形态识别先于 limit20 截断，敏感单元不透片段）。
     if (!foundFirstUser) {
-      const m = o.message as Record<string, unknown> | undefined;
-      if (m !== undefined && m.role === "user") {
+      // P1-01（GPT 审）：message 可能是合法 JSON 的 null/数组/原始值——先验形状再取 role（旧断言 m?.content 对 null 安全，本批引入回归）。
+      const m = o.message;
+      if (typeof m === "object" && m !== null && !Array.isArray(m) && (m as { role?: unknown }).role === "user") {
         foundFirstUser = true;
         const c = m.content;
         if (typeof c === "string" && c.trim() !== "") rawTitle = c;

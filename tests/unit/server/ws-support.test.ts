@@ -426,7 +426,40 @@ describe("session-scan（D21）", () => {
       const r = await scanSessions(d);
       const t = r.sessions[0]!.title;
       expect(t.truncated).toBe(true);
-      expect(/\uD800[\uDC00-\uDFFF]|[\uDC00-\uDFFF](?![\uD800-\uDFFF])|^[\uD800-\uDFFF](?![\uDC00-\uDFFF])/u.test(t.text)).toBe(false); // 无孤立代理项
+      expect(t.text).toBe("a".repeat(19)); // 精确输出：末尾 😀（2 码元）被代理对保护整对回退
+      expect(t.text.isWellFormed?.() ?? true).toBe(true); // 无孤立代理项（ES2024；不可用环境跳过）
+      // 兜底逐码元配对检查（不依赖 isWellFormed 可用性；末尾孤立高代理必被捕获）
+      for (let i = 0; i < t.text.length; i++) {
+        const cu = t.text.charCodeAt(i);
+        if (cu >= 0xd800 && cu <= 0xdbff) {
+          const next = t.text.charCodeAt(i + 1);
+          expect(next >= 0xdc00 && next <= 0xdfff).toBe(true); // 高代理必跟低代理
+          i++;
+        } else if (cu >= 0xdc00 && cu <= 0xdfff) {
+          expect(i).toBeGreaterThan(0);
+          const prev = t.text.charCodeAt(i - 1);
+          expect(prev >= 0xd800 && prev <= 0xdbff).toBe(true); // 低代理必跟高代理
+        }
+      }
+    } finally { await rm(d, { recursive: true, force: true }); }
+  });
+
+  it("M-UX 批1修复 P1-01：message:null/数组/原始值不使整表失败，坏行后合法首 user 仍取标题", async () => {
+    const d = await tmp();
+    try {
+      await writeFile(join(d, "bad.jsonl"), JSON.stringify({ type: "session", id: "s", timestamp: 1 }) + "\n" +
+        JSON.stringify({ type: "message", timestamp: 2, message: null }) + "\n" +
+        JSON.stringify({ type: "message", timestamp: 3, message: ["not", "an", "object"] }) + "\n" +
+        JSON.stringify({ type: "message", timestamp: 4, message: 42 }) + "\n" +
+        JSON.stringify({ type: "message", timestamp: 5, message: { role: "user", content: "坏行之后的合法首 user" } }) + "\n");
+      const r = await scanSessions(d);
+      expect(r.sessions).toHaveLength(1);
+      expect(r.sessions[0]!.title.text).toBe("坏行之后的合法首 user");
+      // 邻文件不受坏文件影响
+      await writeFile(join(d, "good.jsonl"), JSON.stringify({ type: "session", id: "s2", timestamp: 6 }) + "\n" +
+        JSON.stringify({ type: "message", timestamp: 7, message: { role: "user", content: "邻文件标题" } }) + "\n");
+      const r2 = await scanSessions(d);
+      expect(r2.sessions).toHaveLength(2);
     } finally { await rm(d, { recursive: true, force: true }); }
   });
 
@@ -441,6 +474,15 @@ describe("session-scan（D21）", () => {
       const s = r.sessions[0]!;
       expect(s.title.text).toBe(""); // 首 user=纯附件→无标题，不跳第二条
       expect(s.entryCount).toBe(3);
+      // GPT 批1审补充：全空白 string user 后跟第二带文本 user 同样锁定（空白≠可跳过）
+      const d2 = await tmp();
+      try {
+        await writeFile(join(d2, "w.jsonl"), JSON.stringify({ type: "session", id: "s", timestamp: 1 }) + "\n" +
+          JSON.stringify({ type: "message", timestamp: 2, message: { role: "user", content: "  \t " } }) + "\n" +
+          JSON.stringify({ type: "message", timestamp: 3, message: { role: "user", content: "第二条不该被拿" } }) + "\n");
+        const r2 = await scanSessions(d2);
+        expect(r2.sessions[0]!.title.text).toBe("");
+      } finally { await rm(d2, { recursive: true, force: true }); }
     } finally { await rm(d, { recursive: true, force: true }); }
   });
 
@@ -457,7 +499,7 @@ describe("session-scan（D21）", () => {
       const r = await scanSessions(d);
       const a = r.sessions.find((s) => s.file === "m4a.jsonl")!;
       const b = r.sessions.find((s) => s.file === "m4b.jsonl")!;
-      expect(a.title.text).toContain("实际内容"); // 空白块跳过后拼合非空块
+      expect(a.title.text).toBe("实际内容"); // 空白块整块跳过——拼合恰为非空块文本（无空白/换行混入）
       expect(b.title.text).toBe(""); // 全空白串→无标题
     } finally { await rm(d, { recursive: true, force: true }); }
   });
