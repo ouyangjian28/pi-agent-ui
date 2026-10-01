@@ -1,7 +1,8 @@
 import { chromium } from 'playwright';
 import fs from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-const root = '/home/yyj/ai/repos/pi-agent-ui-hybrid';
+const root = fileURLToPath(new URL('../../', import.meta.url)).replace(/\/$/, '');
 const out = `${root}/designs/previews/hybrid-core`;
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
