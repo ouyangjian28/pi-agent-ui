@@ -769,10 +769,10 @@ button svg {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation: none !important;
-    transition: none !important;
+  .preview .live-dot,
+  .preview .typing-cursor,
+  .preview .chevron svg {
+    animation: none;
+    transition: none;
   }
 }
