@@ -52,11 +52,21 @@ describe("R1 真 AppRoot+三客户端首链", () => {
     expect(within(composer as HTMLElement).queryByRole("button", { name: "返回列表" })).toBeNull();
     expect(screen.getByRole("button", { name: "会话列表" })).toBeTruthy();
     const textarea = screen.getByLabelText("首条消息") as HTMLTextAreaElement;
-    fireEvent.change(screen.getByLabelText("下一条思考级别"), { target: { value: "high" } });
+    const thinking = screen.getByLabelText("下一条思考级别") as HTMLSelectElement;
+    expect((thinking.querySelector('option[value="high"]') as HTMLOptionElement).disabled).toBe(true);
+    fireEvent.change(thinking, { target: { value: "high" } });
+    expect(thinking.value).toBe(""); // Unknown/default identity cannot be forced into a claimed capability.
+    const modelRequest = Socket.all[0]!.sent.filter(frame => frame.t === "get-models").at(-1)!;
+    expect(modelRequest).toBeTruthy();
+    act(() => Socket.all[0]!.receive({ t: "models-list", requestId: modelRequest.requestId, models: [{ provider: "controlled", id: "reasoner", thinkingLevels: ["off", "low", "high"] }] }));
+    fireEvent.change(screen.getByLabelText("模型选择"), { target: { value: "controlled/reasoner" } });
+    expect((thinking.querySelector('option[value="high"]') as HTMLOptionElement).disabled).toBe(false);
+    expect((thinking.querySelector('option[value="max"]') as HTMLOptionElement).disabled).toBe(true);
+    fireEvent.change(thinking, { target: { value: "high" } });
     fireEvent.change(textarea, { target: { value: "首条带思考" } });
     fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" }));
     const first = Socket.all[2]!.sent.filter(frame => frame.t === "prompt").at(-1)!;
-    expect(first).toMatchObject({ thinkingLevel: "high", text: "首条带思考" });
+    expect(first).toMatchObject({ model: "controlled/reasoner", thinkingLevel: "high", text: "首条带思考" });
     await ack(first, { kind: "launched", intentId: "i-thinking", commandId: 1 });
     snapshot(String(first.file));
     expect(screen.getByLabelText("写入消息内容")).toBe(textarea);
@@ -65,7 +75,7 @@ describe("R1 真 AppRoot+三客户端首链", () => {
     fireEvent.change(screen.getByLabelText("下一条思考级别"), { target: { value: "low" } });
     fireEvent.change(textarea, { target: { value: "暖会话带思考" } });
     fireEvent.keyDown(textarea, { key: "Enter" });
-    expect(Socket.all[2]!.sent.filter(frame => frame.t === "prompt").at(-1)).toMatchObject({ file: first.file, thinkingLevel: "low", text: "暖会话带思考" });
+    expect(Socket.all[2]!.sent.filter(frame => frame.t === "prompt").at(-1)).toMatchObject({ file: first.file, model: "controlled/reasoner", thinkingLevel: "low", text: "暖会话带思考" });
   });
   it("欢迎首字不重挂；默认在线帧缺 model/cwd；launched→真实列表新行/正文→第二条同 file", async () => {
     start(); const textarea = screen.getByLabelText("首条消息") as HTMLTextAreaElement;
