@@ -355,6 +355,7 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     ...(layout !== undefined ? { journalFor: journalOf } : {}), // v1.6：journal 子源读 D（T 首根会错拿转录文件）
     ...(config.maxScanBytes !== undefined ? { maxScanBytes: config.maxScanBytes } : {}),
     ...(config.thinkingVisible === true ? { thinkingVisible: true } : {}),
+    ...(config.write !== undefined ? { sessionJoinDelayMs: 250 } : {}),
     audit,
   });
 

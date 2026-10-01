@@ -36,6 +36,8 @@ export interface DualHistorySourceOpts {
   /** D4 §4.5a：thinking 门控单一真值源（服务级 config，默认 false）。扫描面连线点=本类
    *  projector 闭包（sessionToScanRows 唯一生产调用点）；直播面=makeLiveOnPiEvent 另接。 */
   readonly thinkingVisible?: boolean;
+  /** 写模式冷启动：首次订阅可能先于SDK创建转录；最多两次短等待，缺面仍诚实降级。默认0保留只读语义。 */
+  readonly sessionJoinDelayMs?: number;
 }
 
 /** 3b2b-R1：装载重试上限（等待窗内 journal 换代/改写的有界重装；超出=fail-closed null）。 */
@@ -92,6 +94,7 @@ export class DualHistorySource implements HistorySourcePort {
   private disposed = false;
 
   constructor(private readonly opts: DualHistorySourceOpts) {
+    if (opts.sessionJoinDelayMs !== undefined && (!Number.isSafeInteger(opts.sessionJoinDelayMs) || opts.sessionJoinDelayMs < 0 || opts.sessionJoinDelayMs > 500)) throw new Error("sessionJoinDelayMs must be an integer in [0, 500]");
     this.journalSrc = new FileHistorySource({
       roots: opts.roots,
       ...(opts.journalFor === undefined ? {} : { journalFor: opts.journalFor }),
@@ -192,6 +195,13 @@ export class DualHistorySource implements HistorySourcePort {
         continue;
       }
       if (srows === null) {
+        const delay = this.opts.sessionJoinDelayMs ?? 0;
+        if (delay > 0 && attempt < LOAD_ATTEMPTS) {
+          this.journalSrc.release(file);
+          this.audit(`session-join-wait file=${file} attempt=${attempt}`);
+          await new Promise<void>((done) => setTimeout(done, delay));
+          continue; // 顶部终态门阻止dispose后重开；每次重新读取/复核，不拼旧快照。
+        }
         this.audit(`session-missing file=${file} attempt=${attempt}`); // journal-only 降级（可呈现缺面）
         return cur; // 当前基线（吸收等待窗增长；session 不可读→补接必 null，不越附）
       }

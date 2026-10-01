@@ -176,11 +176,12 @@ try {
     () => liveEvents().some((e) => e.kind === "message-final" && e.text === "受控应用正文 ✓ 第1轮"),
     "actual pi final one",
   );
-  await until(
-    () => page.locator(".chat-assistant").filter({ hasText: "受控应用正文 ✓ 第1轮" }).count(),
-    "first reply rendered",
-  );
   await settled(first.file, first.outcome.intentId);
+  await until(() => frames.some((frame) => (frame.t === "snapshot" ? frame.page : frame.t === "events" && frame.kind === "history" ? frame.events : [])?.some((event) => event.kind === "message" && event.textPreview?.text === "受控应用正文 ✓ 第1轮")), "first persisted reply in history without navigation or refresh");
+  await until(
+    () => page.locator(".history-list .chat-assistant").filter({ hasText: "受控应用正文 ✓ 第1轮" }).count(),
+    "first persisted reply rendered after settled",
+  );
   assert(
     liveEvents().some((e) => e.kind === "message-delta" && e.part === "text" && e.delta),
     "Actual incremental text absent",
