@@ -1,0 +1,3351 @@
+{
+  "sourceCommit": "7842c0b62c57c989eae779df5116297edf2f11aa",
+  "createdAt": "2026-10-01T06:04:31.957Z",
+  "build": "assets/index--nkz6oi2.js",
+  "policy": {
+    "entry": "AppRoot→RealApp",
+    "demo": false,
+    "fakeSocket": true,
+    "productionTokenUsed": false,
+    "fullPage": false,
+    "realPhoneKeyboardTested": false
+  },
+  "evidence": [
+    {
+      "width": 360,
+      "height": 800,
+      "theme": "light",
+      "scene": "welcome",
+      "path": ".pi/hybrid-real/root-contained-capture/360-light-welcome.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [],
+      "textareas": [
+        {
+          "label": "首条消息",
+          "top": 536.703125,
+          "bottom": 642.265625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        }
+      ]
+    },
+    {
+      "width": 360,
+      "height": 800,
+      "theme": "light",
+      "scene": "conversation",
+      "path": ".pi/hybrid-real/root-contained-capture/360-light-conversation.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 360,
+      "height": 800,
+      "theme": "light",
+      "scene": "live",
+      "path": ".pi/hybrid-real/root-contained-capture/360-light-live.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 360,
+      "height": 800,
+      "theme": "light",
+      "scene": "question",
+      "path": ".pi/hybrid-real/root-contained-capture/360-light-question.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 360,
+      "height": 800,
+      "theme": "light",
+      "scene": "refused",
+      "path": ".pi/hybrid-real/root-contained-capture/360-light-refused.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 360,
+      "height": 800,
+      "theme": "light",
+      "scene": "unknown",
+      "path": ".pi/hybrid-real/root-contained-capture/360-light-unknown.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 360,
+      "height": 800,
+      "theme": "light",
+      "scene": "health",
+      "path": ".pi/hybrid-real/root-contained-capture/360-light-health.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 360,
+      "height": 800,
+      "theme": "light",
+      "scene": "disconnected",
+      "path": ".pi/hybrid-real/root-contained-capture/360-light-disconnected.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 360,
+      "height": 800,
+      "theme": "dark",
+      "scene": "welcome",
+      "path": ".pi/hybrid-real/root-contained-capture/360-dark-welcome.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [],
+      "textareas": [
+        {
+          "label": "首条消息",
+          "top": 536.703125,
+          "bottom": 642.265625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        }
+      ]
+    },
+    {
+      "width": 360,
+      "height": 800,
+      "theme": "dark",
+      "scene": "conversation",
+      "path": ".pi/hybrid-real/root-contained-capture/360-dark-conversation.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 360,
+      "height": 800,
+      "theme": "dark",
+      "scene": "live",
+      "path": ".pi/hybrid-real/root-contained-capture/360-dark-live.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 360,
+      "height": 800,
+      "theme": "dark",
+      "scene": "question",
+      "path": ".pi/hybrid-real/root-contained-capture/360-dark-question.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 360,
+      "height": 800,
+      "theme": "dark",
+      "scene": "refused",
+      "path": ".pi/hybrid-real/root-contained-capture/360-dark-refused.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 360,
+      "height": 800,
+      "theme": "dark",
+      "scene": "unknown",
+      "path": ".pi/hybrid-real/root-contained-capture/360-dark-unknown.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 360,
+      "height": 800,
+      "theme": "dark",
+      "scene": "health",
+      "path": ".pi/hybrid-real/root-contained-capture/360-dark-health.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 360,
+      "height": 800,
+      "theme": "dark",
+      "scene": "disconnected",
+      "path": ".pi/hybrid-real/root-contained-capture/360-dark-disconnected.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "height": 800,
+      "theme": "light",
+      "scene": "welcome",
+      "path": ".pi/hybrid-real/root-contained-capture/390-light-welcome.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [],
+      "textareas": [
+        {
+          "label": "首条消息",
+          "top": 536.703125,
+          "bottom": 642.265625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "height": 800,
+      "theme": "light",
+      "scene": "conversation",
+      "path": ".pi/hybrid-real/root-contained-capture/390-light-conversation.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "height": 800,
+      "theme": "light",
+      "scene": "live",
+      "path": ".pi/hybrid-real/root-contained-capture/390-light-live.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "height": 800,
+      "theme": "light",
+      "scene": "question",
+      "path": ".pi/hybrid-real/root-contained-capture/390-light-question.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "height": 800,
+      "theme": "light",
+      "scene": "refused",
+      "path": ".pi/hybrid-real/root-contained-capture/390-light-refused.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "height": 800,
+      "theme": "light",
+      "scene": "unknown",
+      "path": ".pi/hybrid-real/root-contained-capture/390-light-unknown.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "height": 800,
+      "theme": "light",
+      "scene": "health",
+      "path": ".pi/hybrid-real/root-contained-capture/390-light-health.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "height": 800,
+      "theme": "light",
+      "scene": "disconnected",
+      "path": ".pi/hybrid-real/root-contained-capture/390-light-disconnected.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "height": 800,
+      "theme": "dark",
+      "scene": "welcome",
+      "path": ".pi/hybrid-real/root-contained-capture/390-dark-welcome.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [],
+      "textareas": [
+        {
+          "label": "首条消息",
+          "top": 536.703125,
+          "bottom": 642.265625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "height": 800,
+      "theme": "dark",
+      "scene": "conversation",
+      "path": ".pi/hybrid-real/root-contained-capture/390-dark-conversation.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "height": 800,
+      "theme": "dark",
+      "scene": "live",
+      "path": ".pi/hybrid-real/root-contained-capture/390-dark-live.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "height": 800,
+      "theme": "dark",
+      "scene": "question",
+      "path": ".pi/hybrid-real/root-contained-capture/390-dark-question.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "height": 800,
+      "theme": "dark",
+      "scene": "refused",
+      "path": ".pi/hybrid-real/root-contained-capture/390-dark-refused.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "height": 800,
+      "theme": "dark",
+      "scene": "unknown",
+      "path": ".pi/hybrid-real/root-contained-capture/390-dark-unknown.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "height": 800,
+      "theme": "dark",
+      "scene": "health",
+      "path": ".pi/hybrid-real/root-contained-capture/390-dark-health.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "height": 800,
+      "theme": "dark",
+      "scene": "disconnected",
+      "path": ".pi/hybrid-real/root-contained-capture/390-dark-disconnected.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 567.4375,
+          "bottom": 673
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "theme": "light",
+      "scene": "welcome",
+      "path": ".pi/hybrid-real/root-contained-capture/1280-light-welcome.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [],
+      "textareas": [
+        {
+          "label": "首条消息",
+          "top": 523.03125,
+          "bottom": 623.53125
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "theme": "light",
+      "scene": "conversation",
+      "path": ".pi/hybrid-real/root-contained-capture/1280-light-conversation.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "theme": "light",
+      "scene": "live",
+      "path": ".pi/hybrid-real/root-contained-capture/1280-light-live.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "theme": "light",
+      "scene": "question",
+      "path": ".pi/hybrid-real/root-contained-capture/1280-light-question.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "theme": "light",
+      "scene": "refused",
+      "path": ".pi/hybrid-real/root-contained-capture/1280-light-refused.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "theme": "light",
+      "scene": "unknown",
+      "path": ".pi/hybrid-real/root-contained-capture/1280-light-unknown.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "theme": "light",
+      "scene": "health",
+      "path": ".pi/hybrid-real/root-contained-capture/1280-light-health.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "theme": "light",
+      "scene": "disconnected",
+      "path": ".pi/hybrid-real/root-contained-capture/1280-light-disconnected.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "scene": "browser-behaviors",
+      "readerTop": 0,
+      "viewport": "390×420（缩短视口模拟，不冒充真手机软键盘）",
+      "composerPreserved": true,
+      "shortLayout": {
+        "documentScrollY": 0,
+        "documentScrollHeight": 420,
+        "viewportHeight": 420,
+        "headerTop": 0
+      },
+      "businessFrameDelta": 0,
+      "sendHit": true,
+      "imePromptCount": 0,
+      "errors": []
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "theme": "dark",
+      "scene": "welcome",
+      "path": ".pi/hybrid-real/root-contained-capture/1280-dark-welcome.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [],
+      "textareas": [
+        {
+          "label": "首条消息",
+          "top": 523.03125,
+          "bottom": 623.53125
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "theme": "dark",
+      "scene": "conversation",
+      "path": ".pi/hybrid-real/root-contained-capture/1280-dark-conversation.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "theme": "dark",
+      "scene": "live",
+      "path": ".pi/hybrid-real/root-contained-capture/1280-dark-live.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "theme": "dark",
+      "scene": "question",
+      "path": ".pi/hybrid-real/root-contained-capture/1280-dark-question.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "theme": "dark",
+      "scene": "refused",
+      "path": ".pi/hybrid-real/root-contained-capture/1280-dark-refused.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "theme": "dark",
+      "scene": "unknown",
+      "path": ".pi/hybrid-real/root-contained-capture/1280-dark-unknown.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "theme": "dark",
+      "scene": "health",
+      "path": ".pi/hybrid-real/root-contained-capture/1280-dark-health.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "height": 800,
+      "theme": "dark",
+      "scene": "disconnected",
+      "path": ".pi/hybrid-real/root-contained-capture/1280-dark-disconnected.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 800,
+      "theme": "light",
+      "scene": "welcome",
+      "path": ".pi/hybrid-real/root-contained-capture/1440-light-welcome.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [],
+      "textareas": [
+        {
+          "label": "首条消息",
+          "top": 523.03125,
+          "bottom": 623.53125
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 800,
+      "theme": "light",
+      "scene": "conversation",
+      "path": ".pi/hybrid-real/root-contained-capture/1440-light-conversation.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 800,
+      "theme": "light",
+      "scene": "live",
+      "path": ".pi/hybrid-real/root-contained-capture/1440-light-live.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 800,
+      "theme": "light",
+      "scene": "question",
+      "path": ".pi/hybrid-real/root-contained-capture/1440-light-question.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 800,
+      "theme": "light",
+      "scene": "refused",
+      "path": ".pi/hybrid-real/root-contained-capture/1440-light-refused.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 800,
+      "theme": "light",
+      "scene": "unknown",
+      "path": ".pi/hybrid-real/root-contained-capture/1440-light-unknown.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 800,
+      "theme": "light",
+      "scene": "health",
+      "path": ".pi/hybrid-real/root-contained-capture/1440-light-health.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 800,
+      "theme": "light",
+      "scene": "disconnected",
+      "path": ".pi/hybrid-real/root-contained-capture/1440-light-disconnected.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 800,
+      "theme": "dark",
+      "scene": "welcome",
+      "path": ".pi/hybrid-real/root-contained-capture/1440-dark-welcome.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [],
+      "textareas": [
+        {
+          "label": "首条消息",
+          "top": 523.03125,
+          "bottom": 623.53125
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 800,
+      "theme": "dark",
+      "scene": "conversation",
+      "path": ".pi/hybrid-real/root-contained-capture/1440-dark-conversation.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 800,
+      "theme": "dark",
+      "scene": "live",
+      "path": ".pi/hybrid-real/root-contained-capture/1440-dark-live.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 800,
+      "theme": "dark",
+      "scene": "question",
+      "path": ".pi/hybrid-real/root-contained-capture/1440-dark-question.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 800,
+      "theme": "dark",
+      "scene": "refused",
+      "path": ".pi/hybrid-real/root-contained-capture/1440-dark-refused.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 800,
+      "theme": "dark",
+      "scene": "unknown",
+      "path": ".pi/hybrid-real/root-contained-capture/1440-dark-unknown.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 800,
+      "theme": "dark",
+      "scene": "health",
+      "path": ".pi/hybrid-real/root-contained-capture/1440-dark-health.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "height": 800,
+      "theme": "dark",
+      "scene": "disconnected",
+      "path": ".pi/hybrid-real/root-contained-capture/1440-dark-disconnected.png",
+      "screenshot": "actual viewport, not fullPage",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:43515/",
+      "errors": [],
+      "overflowPx": 0,
+      "chatFonts": [
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif",
+        "Inter, \"Noto Sans CJK SC\", system-ui, sans-serif"
+      ],
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 584.90625,
+          "bottom": 685.40625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    }
+  ]
+}

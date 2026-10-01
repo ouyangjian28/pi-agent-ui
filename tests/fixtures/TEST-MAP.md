@@ -1532,5 +1532,5 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - 65 图及 manifest、final 日志/原始 gzip、独立 HTML/JS hash 与 source/task 索引：`tests/fixtures/run-records/ui-hybrid-real/`。原 manifest 的 .pi 图片路径保留；耐久镜像 `final-capture/` 同名文件和 final-archive.json 提供对应关系。
 - 服务器业务/协议/冻结文档不变，升级依赖和原测试替身修正另记；没有复制样板假状态到正式入口。实际工具 LiveEvent 仅通用进度，未捏造具名工具卡或更改冻结数据。
 - 当前 UI 证据是本地假 socket；应用真实连接本地 pi 0.99.2、新窄变异、独立交叉/视觉审、真手机和用户试用仍未完成；未部署日常服务。
-- **后续截图自查发现漏检**：8c30ff4 短屏输入聚焦后全页滚动把导航带出屏幕（root scrollHeight=38570/scrollY=187/headerTop=-187）。原发送命中断言不证明整体可用；9250834 加 root/header/文档高度约束，在旧 UI 真红，7842c0b 仅 CSS 为无障碍直播状态设内部 containing block，不删状态/不强制滚动归零。`run-records/ui-hybrid-real/root-scroll/` 保存红灯及边界；完整任务 ba1d5ff80 待结果。不是新窄变异，不将旧脚本过当视觉 PASS。
+- **后续截图自查发现漏检**：8c30ff4 短屏输入聚焦后全页滚动把导航带出屏幕（root scrollHeight=38570/scrollY=187/headerTop=-187）。原发送命中断言不证明整体可用；9250834 加 root/header/文档高度约束，在旧 UI 真红，7842c0b 仅 CSS 为无障碍直播状态设内部 containing block，不删状态/不强制滚动归零。`run-records/ui-hybrid-real/root-scroll/` 保存红灯及边界；完整任务 ba1d5ff80 exit 0：定向/1879+24/build/三包类型/65记录均过，聚焦后 documentScrollY=0、scrollHeight=viewportHeight=420、headerTop=0，源 7842c0b。root-scroll/capture、日志/原始 gzip、result.json 含耐久对应与 SHA256；人工读修后短屏图确认导航在顶部、空白漂移消除。不是新窄变异，不冒充独立视觉或实机键盘 PASS；真 pi 应用链与用户试用仍另验。
 
