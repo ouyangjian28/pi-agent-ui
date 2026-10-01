@@ -1,0 +1,8 @@
+file:///home/yyj/ai/repos/pi-agent-ui-hybrid/tests/browser/ui-hybrid-capture.mjs:397
+          throw new Error(
+                ^
+
+Error: Short viewport root document escaped internal history scroll: {"documentScrollY":187,"documentScrollHeight":38570,"viewportHeight":420,"headerTop":-187}
+    at file:///home/yyj/ai/repos/pi-agent-ui-hybrid/tests/browser/ui-hybrid-capture.mjs:397:17
+
+Node.js v24.18.0
