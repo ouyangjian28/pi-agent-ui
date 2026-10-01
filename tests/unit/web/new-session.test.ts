@@ -165,7 +165,7 @@ describe("M-OPS NewSession", () => {
     expect(write.sent[0]!.model).toBe("kimi-coding/k3");
   });
 
-  it("取消按钮→onCancel；非 launched 非 not-ready 结果→受控横幅", async () => {
+  it("新输入区不含局部返回；非 launched 非 not-ready 结果→受控横幅", async () => {
     const write = new StubWrite();
     write.resolveWith = { kind: "busy" };
     const onLaunched = vi.fn();
@@ -179,8 +179,8 @@ describe("M-OPS NewSession", () => {
       }),
     );
     fill("首条消息", "hi");
-    fireEvent.click(screen.getByRole("button", { name: "返回列表" }));
-    expect(onCancel).toHaveBeenCalledTimes(1); // P2-2 补真断言（原版零断言空转）
+    expect(screen.queryByRole("button", { name: "返回列表" })).toBeNull(); // 用户明确移除仅局部返回；主导航另由真AppRoot验证。
+    expect(onCancel).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("未入队：写宿主忙"));
     expect(onLaunched).not.toHaveBeenCalled();

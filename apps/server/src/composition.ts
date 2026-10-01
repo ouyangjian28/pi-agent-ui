@@ -218,10 +218,13 @@ export function makeResumeAuthority(deps: {
       const got = await reportOf(file, signal);
       if (got === null) return null;
       const rec = got.report.intents.find((i) => i.intentId === intentId);
+      const payload = rec?.payload ?? null;
+      // 原无配置/无图prompt保持旧rawText-only接口；配置或附件事实不得被旧形状吞掉。
+      const legacyPlain = payload?.kind === "prompt" && payload.composer === undefined && payload.attachments.length === 0;
       // 授权在则 intents 必含该 id（resendKeys 从 intents 派生）；缺=证据不完整（防御 null，非身份错）
       return {
         report: { resendAuthorized: [...got.report.resendAuthorized], resumeBlocked: got.report.resumeBlocked },
-        payload: rec === undefined ? null : rec.payload,
+        payload: legacyPlain ? { rawText: payload.rawText } : payload,
       };
     },
   };

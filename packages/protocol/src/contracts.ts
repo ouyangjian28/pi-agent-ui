@@ -1,7 +1,7 @@
 // ②WS/UI 只读面共享契约 v1.2 — 类型与运行时校验单源（c3 冻结门第 4 步）。
 // 零 node 依赖（浏览器安全）。语义权威=docs/ws-ui-contracts-v1.md；语义变更=协议版本+1 双方审记。
 // 注意：TS1024——interface 方法签名禁 readonly 前缀。
-import { isAttachmentIds, isThinkingLevel, type ThinkingLevel } from "./composer-input.js";
+import { isAttachmentIds, isThinkingLevel, type ThinkingLevel } from "./composer-input.ts";
 
 // ---------------------------------------------------------------------------
 // 限额常量（§5.7 逐字段表；contracts.ts=冻结源）
