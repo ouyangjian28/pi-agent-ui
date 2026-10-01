@@ -122,4 +122,18 @@ describe("ModelsListingService", () => {
     expect(calls).toBe(1); // 失败也缓存（防故障风暴）
     expect(r2.ok).toBe(false);
   });
+  it("supported-level enrichment is cached and concurrent requests stay single-flight", async () => {
+    const decorate = async (models: readonly ModelEntry[]) => models.map((m) => ({ ...m, thinkingLevels: ["off", "high"] as const }));
+    let calls = 0;
+    const svc = new ModelsListingService({ piBin: "pi", spawnImpl: async () => ({ ok: true, models: [{ provider: "controlled", id: "m" }] }), enrichThinkingLevels: async (models) => { calls++; return decorate(models); } });
+    const [a, b] = await Promise.all([svc.list(), svc.list()]);
+    expect(a).toEqual({ ok: true, models: [{ provider: "controlled", id: "m", thinkingLevels: ["off", "high"] }] });
+    expect(b).toEqual(a); expect(calls).toBe(1); expect(await svc.list()).toEqual(a); expect(calls).toBe(1);
+  });
+  it("failed optional capability discovery preserves the model list and releases inflight", async () => {
+    let calls = 0;
+    const svc = new ModelsListingService({ piBin: "pi", cacheTtlMs: 0, spawnImpl: async () => ({ ok: true, models: [{ provider: "controlled", id: "m", thinking: "yes" }] }), enrichThinkingLevels: async () => { calls++; throw new Error("do not expose provider configuration"); } });
+    const expected = { ok: true, models: [{ provider: "controlled", id: "m", thinking: "yes" }] };
+    expect(await svc.list()).toEqual(expected); expect(await svc.list()).toEqual(expected); expect(calls).toBe(2);
+  });
 });

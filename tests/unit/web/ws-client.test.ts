@@ -444,6 +444,20 @@ describe("C1 握手期非认证失败受控反馈", () => {
 // ---------------------------------------------------------------------------
 
 describe("M-OPS 模型清单面（get-models/models-list）", () => {
+  it("preserves verified per-model thinking levels for the real menu consumer", () => {
+    const { client, ws } = setup(); handshake(ws); client.requestModels();
+    const requestId = (ws.sentFrames().at(-1) as { requestId: string }).requestId;
+    ws.receive({ t: "models-list", requestId, models: [{ provider: "controlled", id: "reasoner", thinkingLevels: ["off", "high"] }] });
+    expect(client.getSnapshot().models.items[0]?.thinkingLevels).toEqual(["off", "high"]);
+    expect(client.getSnapshot().models.status).toBe("ok"); client.close();
+  });
+  it.each([null, "high", ["unknown"], ["off", "off"], Array(8).fill("high"), [1]])("malformed thinking levels %j do not change the snapshot or emit notifications", (thinkingLevels) => {
+    const { client, ws } = setup(); handshake(ws); client.requestModels();
+    const requestId = (ws.sentFrames().at(-1) as { requestId: string }).requestId;
+    const before = client.getSnapshot(); const listener = vi.fn(); client.subscribe(listener);
+    ws.receive({ t: "models-list", requestId, models: [{ provider: "controlled", id: "reasoner", thinkingLevels }] });
+    expect(client.getSnapshot()).toBe(before); expect(listener).not.toHaveBeenCalled(); client.close();
+  });
   it("ready 后 requestModels 发 get-models（requestId 过 pattern）；回帧 ok→快照 items；再调幂等不重发", () => {
     const { client, ws } = setup();
     handshake(ws);
