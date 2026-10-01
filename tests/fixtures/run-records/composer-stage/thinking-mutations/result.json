@@ -1,0 +1,62 @@
+{
+  "baselineCommit": "1223edebf55c53ea12f2f5c73e406e0cd05ef036",
+  "consumerCopyPublicProtocolAlias": true,
+  "repositorySourceTouched": false,
+  "results": [
+    {
+      "fault": "baseline",
+      "source": "apps/web/src/components/thinking-picker.tsx",
+      "exitCode": 0,
+      "failedAssertions": 0,
+      "validEvidence": true,
+      "copySourceSha256": "cfcbf650fac5c09aa13b6fe675d50311353b698fc97b60f7456b390b2c979b8c",
+      "rawLogSha256": "4764cd6fecae0fe51b6578101459cd9e6d24cc7ec7ecc2b5e0f9ca6f41fef5b5"
+    },
+    {
+      "fault": "unknown-capabilities-guessed",
+      "source": "apps/web/src/components/thinking-picker.tsx",
+      "exitCode": 1,
+      "failedAssertions": 2,
+      "validEvidence": true,
+      "copySourceSha256": "4884746a3e73a5400f68f215f057e85ba42c15e482e9870b039e2f4c78781f93",
+      "rawLogSha256": "41d9fa9fa35f96d319258bacbdb1c7e24c2bf5ed190c2df8648abae7c22d6501"
+    },
+    {
+      "fault": "silent-clamp-existing-choice",
+      "source": "apps/web/src/components/thinking-picker.tsx",
+      "exitCode": 1,
+      "failedAssertions": 1,
+      "validEvidence": true,
+      "copySourceSha256": "e28fb1bc429a21fb00d6ac532f7e621b09f6417e25242867faf2df60fa307096",
+      "rawLogSha256": "a037ace660d883cc1e215a44a29ef5e5e9a2c2fba11ee736c567bd9c652dccd1"
+    },
+    {
+      "fault": "ambiguous-alias-first-match",
+      "source": "apps/web/src/components/thinking-picker.tsx",
+      "exitCode": 1,
+      "failedAssertions": 1,
+      "validEvidence": true,
+      "copySourceSha256": "bdf78b938cdcf422e78776355238a9d917125a112846234f7945c7935cdfda81",
+      "rawLogSha256": "d0364914d814b07c3361b3dc38795d39c7f7302b217ba7a00702d778727ac16b"
+    },
+    {
+      "fault": "duplicate-levels-accepted",
+      "source": "apps/web/src/ws/ws-client.ts",
+      "exitCode": 1,
+      "failedAssertions": 1,
+      "validEvidence": true,
+      "copySourceSha256": "ab1cd9fece52598d523b9d03dcc999654b0cf5513cd68dac3bd88632cbfaf616",
+      "rawLogSha256": "fd98cee9579a34df97187b04fd169e41e54ca0487502ba49b0a9ffafb707df57"
+    },
+    {
+      "fault": "wrong-sdk-version-enriched",
+      "source": "apps/server/src/ws/models-thinking.ts",
+      "exitCode": 1,
+      "failedAssertions": 2,
+      "validEvidence": true,
+      "copySourceSha256": "5f45f7adbda01378a95b00efcc5fdb4ac3ca64d3f9c0ee8662771b115876bfbe",
+      "rawLogSha256": "4ac34286bca7dfeb9deb82cfc94ca0d8295bc7050e765fa88169d4ada6b762ff"
+    }
+  ],
+  "limitation": "Five narrow menu/consumer/version faults only; not authentication/provider/transport/full unknown-intent restart acceptance"
+}

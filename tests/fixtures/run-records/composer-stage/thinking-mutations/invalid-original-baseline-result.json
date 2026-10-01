@@ -1,0 +1,17 @@
+{
+  "baselineCommit": "2877dae7023e02b0c22b3648fb516d5070ec5ccf",
+  "consumerCopyPublicProtocolAlias": true,
+  "repositorySourceTouched": false,
+  "results": [
+    {
+      "fault": "baseline",
+      "source": "apps/web/src/components/thinking-picker.tsx",
+      "exitCode": 1,
+      "failedAssertions": 1,
+      "validEvidence": false,
+      "copySourceSha256": "cfcbf650fac5c09aa13b6fe675d50311353b698fc97b60f7456b390b2c979b8c",
+      "rawLogSha256": "58120d953158148978105b6ddbb99a6d764071d7031b7f67c50c4b192691a827"
+    }
+  ],
+  "limitation": "Five narrow menu/consumer/version faults only; not authentication/provider/transport/full unknown-intent restart acceptance"
+}
