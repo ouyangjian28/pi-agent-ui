@@ -25,9 +25,13 @@ import {
   type UiClosedReason,
   type UiRequestMethod,
   LIMITS,
+  isThinkingLevel,
+  type ComposerPromptOptions,
 } from "@pi-agent-ui/protocol";
 import { IdleReaper, MapRegistry } from "./idle-reaper.ts";
 import { readFileSync, writeFileSync } from "node:fs";
+import { RpcSettingsChannel, SettingsRpcError } from "./rpc-settings-channel.ts";
+import { prepareComposerSettings } from "./composer-settings.ts";
 
 export interface RpcSessionOpts {
   /**
@@ -55,6 +59,8 @@ export interface RpcSessionOpts {
   readonly responseTimeoutMs?: number;
   readonly turnTimeoutMs?: number;
   readonly readinessTimeoutMs?: number;
+  /** Per settings RPC total stdin+response deadline, default 3000ms (1..30000). */
+  readonly settingsTimeoutMs?: number;
   /** 超时巡检周期（默认 250ms；驱动协调器 response/turn 双超时检查）。 */
   readonly timeoutPollMs?: number;
   /** 闲置期限（默认 30 分钟；双条件=agent_settled+登记表空才开始计时）。 */
@@ -179,8 +185,8 @@ export class RpcSession {
   private readonly supervisor: ProcessSupervisor;
   /** S5-R3：两代 spawn 共用的 pi 参数（构造时解析：显式 piArgs 或绑定 sessionFile）。 */
   private readonly piArgs: readonly string[];
-  /** M-OPS（v1.4）：会话级模型 id（undefined=用 pi 默认）。首 prompt 带 model→更新+落 sidecar；
-   *  构造期从 sidecar 恢复（server 重启后会话不静默换模型）；优先级=prompt.model>sidecar>pi 默认。 */
+  /** Confirmed session model (undefined=pi default). Explicit choices are applied by real
+   *  RPC before the next prompt; only confirmed settings update the restart sidecar. */
   private sessionModel: string | undefined;
   /** sidecar 路径（sessionFile 缺省的测试模式=null=不读写 sidecar）。 */
   private readonly sessionFileSidecar: string | null;
@@ -195,6 +201,9 @@ export class RpcSession {
   private readonly ordinals = new Map<string, number>();
   private readonly readyPromise = new Map<number, Promise<void>>();
   private readonly settledNotified = new Set<string>(); // intentId → 已发完成通知（恰好一次/轮）
+  private readonly settings: RpcSettingsChannel;
+  private sending = false;
+  private preparingSettings = false;
   private cmdSeq = 0;
   private intentSeq = 0;
   private pollTimer: NodeJS.Timeout | null; // dispose 置 null
@@ -243,6 +252,7 @@ export class RpcSession {
         // M-OPS：意外退出时取消挂起的 readiness 探针（秒退/ENOENT 面不再等满超时；
         // 分类由 start() exitOf 复核归 spawn-exited）。
         this.cancelReadiness(generation);
+        this.settings.cancelGeneration(generation);
       },
       onStderr: (t, generation) => {
         // M-OPS（v1.4）：尾部环缓冲（启动失败 detail 源；保留尾 16 行/每行 4KiB 截断）
@@ -276,6 +286,18 @@ export class RpcSession {
       nowMs: () => performance.now(),
       sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
       audit: (l: string) => safeAudit(`supervisor ${l}`),
+    });
+    this.settings = new RpcSettingsChannel({
+      ...(opts.settingsTimeoutMs !== undefined ? { timeoutMs: opts.settingsTimeoutMs } : {}),
+      isCurrent: (generation) => {
+        const st = this.supervisor.getState();
+        return this.disposeP === null && st.generation === generation && st.phase === "running" && !st.retired && this.readyGeneration === generation;
+      },
+      write: (generation, line) => {
+        const st = this.supervisor.getState();
+        if (st.generation !== generation || st.phase !== "running" || st.retired || this.gate.getState().kind !== "idle") return Promise.resolve(false);
+        return this.supervisor.writeControlLine(line); // synchronously captures THIS handle
+      },
     });
     // S5-R3：持久身份建模——sessionFile 与 piArgs 必须显式给一个（默认绑定同一 sessionFile）
     if (opts.piArgs === undefined && opts.sessionFile === undefined) {
@@ -335,6 +357,7 @@ export class RpcSession {
   /** 释放本地资源（Y-C2/s4c：巡检定时器+耐久句柄）；进程退役另走 stop()。幂等。 */
   async dispose(): Promise<void> {
     if (this.disposeP !== null) return this.disposeP;
+    this.settings.dispose();
     // s5c B2：同步急停——公开 dispose 调用返回前 tick 通道立即失效（interval 清+回收器置废）。
     // 此前清停排在未来微任务（F3 先发布后运行），而到期 tick 的 audit 同步重入 dispose 后
     // 当前 tick 仍会继续执行并发起回收（对真进程发 EOF/SIGTERM）。
@@ -372,7 +395,9 @@ export class RpcSession {
 
   /** demux：supervisor 已按代次过滤的 stdout 事件行 → 协调器三入口。 */
   private demux(ev: unknown, generation: number): void {
+    if (this.settings.accept(ev, generation)) return;
     const o = ev as { type?: unknown; id?: unknown; success?: unknown };
+    if (o !== null && typeof o === "object" && o.type === "agent_start" && this.preparingSettings) this.settings.quarantine(generation);
     if (o !== null && typeof o === "object" && o.type === "response" && typeof o.id === "string") {
       const waiter = this.readiness.get(o.id);
       if (waiter !== undefined) {
@@ -638,7 +663,7 @@ export class RpcSession {
   }
 
   /** 启动（或意外退出后重启）：gate 若因上代关闭先 reopen→spawn→readiness 往返。 */
-  async start(): Promise<SessionStartResult> {
+  async start(initialModel?: string): Promise<SessionStartResult> {
     if (this.gate.getState().kind === "closed") {
       const ok = this.gate.reopen();
       if (!ok) return { kind: "rejected", reason: "not-idle" }; // reopen 仅 closed→idle（B1-01）
@@ -646,8 +671,9 @@ export class RpcSession {
     // M-OPS（v1.4）：尾追恒胜——会话模型在 extraPiArgs 之后（--model 为最后项；设计 §3 拍板）
     // K3 审 P2-1：stderrTail=per-generation 语义——换代 spawn 前清空，防上代残留行错归当代 detail
     this.stderrTail = [];
+    const spawnModel = initialModel ?? this.sessionModel;
     const r = this.supervisor.spawnNext(
-      this.sessionModel !== undefined ? [...this.piArgs, "--model", this.sessionModel] : this.piArgs,
+      spawnModel !== undefined ? [...this.piArgs, "--model", spawnModel] : this.piArgs,
       this.opts.cwd, // v1.5（批A）：per-session 项目目录（undefined=继承服务进程）
     );
     if (r.kind !== "spawned") {
@@ -704,22 +730,24 @@ export class RpcSession {
   /** 发一轮用户消息（三写硬序在纯逻辑层；本层只渲染帧+对账 id）。expectedGeneration=v1.1
    * 可选期望代次（早拒：入口快照活代≠期望→invalidated；零窗口权威点在 supervisor.submitTurn
    * 同步比对层——两层把关，早拒层为省协调器记账的快路径）。model=M-OPS（v1.4）可选模型 id
-   * （undefined=不改会话模型；给了→更新会话级模型+落 sidecar，冷启动 spawn 带上）。 */
-  async send(message: string, expectedGeneration?: number, model?: string): Promise<SessionSendResult> {
-    if (model !== undefined) {
-      this.sessionModel = model; // 首 prompt 带 model→会话级记忆（后续 spawn 尾追；进程已在跑时本轮不生效，换代后生效）
-      if (this.sessionFileSidecar !== null) {
-        try {
-          writeFileSync(this.sessionFileSidecar, `${model}\n`, "utf8");
-        } catch (e: unknown) {
-          this.safeAudit(`rpc-session model-sidecar-write-error ${String(e instanceof Error ? e.message : e)}`);
-        }
-      }
-    }
+   * （undefined=不改会话模型；显式值须由本代真实RPC确认后再落偏好、发送，暖进程也立即生效）。 */
+  async send(message: string, expectedGeneration?: number, model?: string, options: ComposerPromptOptions = {}): Promise<SessionSendResult> {
+    if (this.disposeP !== null) return { kind: "not-ready", cause: "disposed" };
+    if (this.sending) return { kind: "busy" };
+    const gs = this.gate.getState();
+    if (gs.kind !== "idle" && gs.kind !== "closed") return { kind: "busy" };
+    if (options.attachments !== undefined && options.attachments.length !== 0) return { kind: "not-ready", cause: "attachments-not-wired" };
+    if (options.thinkingLevel !== undefined && !isThinkingLevel(options.thinkingLevel)) return { kind: "not-ready", cause: "settings-malformed" };
+    this.sending = true; // synchronous lease covers startup/configuration/journal/stdin
+    try { return await this.sendPrepared(message, expectedGeneration, model, options); }
+    finally { this.sending = false; }
+  }
+
+  private async sendPrepared(message: string, expectedGeneration: number | undefined, model: string | undefined, options: ComposerPromptOptions): Promise<SessionSendResult> {
     let st = this.supervisor.getState();
     // 切片5①：闲置回收后无进程——send=明确申请执行，冷启动拉起（查看不拉起；原会话文件+readiness）
     if (st.phase === "idle") {
-      const sr = await this.start();
+      const sr = await this.start(model);
       // ②面准备：失败原因结构化透传（cause），UI 不得只显一律「未就绪」
       // M-OPS（v1.4）：三路启动失败附 stderr 尾行 detail（净化口径=strip 控制字符+≤500）
       // K3 审 P2-2：新捕获面顺手落审计（设计 §4+契约 §10.3）
@@ -740,6 +768,30 @@ export class RpcSession {
     // B2 面：ready 标志之外还须现态 running（stopping/已退出不开真实派发）
     if (gen === null || st.phase !== "running" || this.readyGeneration !== gen) return { kind: "not-ready", cause: "not-running" };
     if (expectedGeneration !== undefined && gen !== expectedGeneration) return { kind: "invalidated", stage: "first-byte" }; // r3c 早拒
+    if (this.settings.isUncertain(gen)) return { kind: "not-ready", cause: "settings-uncertain" };
+    if (model !== undefined || options.thinkingLevel !== undefined) {
+      this.preparingSettings = true;
+      try {
+        const confirmed = await prepareComposerSettings(this.settings, gen, {
+          ...(model !== undefined ? { model } : {}),
+          ...(options.thinkingLevel !== undefined ? { thinkingLevel: options.thinkingLevel } : {}),
+        }, () => this.disposeP === null && this.gate.getState().kind === "idle" && this.supervisor.getState().generation === gen && this.supervisor.getState().phase === "running");
+        // Recheck identity BEFORE preference persistence; stale/busy requests change no sidecar.
+        const current = this.supervisor.getState();
+        if (current.generation !== gen || current.phase !== "running" || this.disposeP !== null) return { kind: "invalidated", stage: "first-byte" };
+        this.sessionModel = confirmed.model.id;
+        if (this.sessionFileSidecar !== null) {
+          try { writeFileSync(this.sessionFileSidecar, `${confirmed.model.id}\n`, "utf8"); }
+          catch { this.safeAudit("rpc-session model-sidecar-write-error"); }
+        }
+      } catch (error) {
+        // A partial/late setter cannot be allowed to leak into a later prompt. Retire only OUR generation.
+        if (this.settings.isUncertain(gen) && this.supervisor.getState().generation === gen && this.disposeP === null) await this.stop();
+        const code = error instanceof SettingsRpcError ? error.code : "malformed";
+        this.safeAudit(`rpc-session settings-rejected generation=${gen} code=${code}`);
+        return { kind: "not-ready", cause: `settings-${code}`, detail: "模型或思考强度未确认，本条消息未发送；草稿应保留。" };
+      } finally { this.preparingSettings = false; }
+    }
     const commandId = (this.cmdSeq += 1);
     const intentId = `i-${(this.intentSeq += 1)}`;
     const mk = matchKeyOf(message, [], this.takeOrdinal(message));
@@ -765,7 +817,10 @@ export class RpcSession {
    *  挂起的启动等待立即结束而非等超时）；退役确认后清 readyGeneration。 */
   async stop(): Promise<RetireOutcome> {
     const gen = this.supervisor.getState().generation;
-    if (gen !== null) this.cancelReadiness(gen);
+    if (gen !== null) {
+      this.cancelReadiness(gen);
+      this.settings.cancelGeneration(gen);
+    }
     const r = await this.supervisor.retireCurrent();
     if (r.kind === "confirmed" && this.readyGeneration === gen) this.readyGeneration = null;
     return r;

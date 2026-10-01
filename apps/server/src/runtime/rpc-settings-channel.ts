@@ -105,6 +105,11 @@ export class RpcSettingsChannel {
     return true;
   }
 
+  quarantine(generation: number): void {
+    this.uncertainGeneration = generation;
+    this.cancelGeneration(generation);
+  }
+
   cancelGeneration(generation: number): void {
     for (const pending of [...this.pending.values()]) {
       if (pending.generation === generation) pending.reject(new SettingsRpcError("stale"));
