@@ -1,0 +1,80 @@
+{
+  "baselineCommit": "e13485197fc587a8a24e5ec2d3cf1329ed457c2d",
+  "consumerCopyPublicProtocolAlias": true,
+  "repositorySourceTouched": false,
+  "results": [
+    {
+      "fault": "baseline",
+      "source": "apps/server/src/runtime/prompt-attachments.ts",
+      "exitCode": 0,
+      "failedAssertions": 0,
+      "validEvidence": true,
+      "copySourceSha256": "8dba00aee5caf0e652da2622480d55f2966341d0088f32f5af7d2b7dd7aebae4",
+      "rawLogSha256": "0a068498e004a49a0b9751656e3f33af053d7355d4858e036c1a761fcc369e98"
+    },
+    {
+      "fault": "image-bytes-change",
+      "source": "apps/server/src/runtime/prompt-attachments.ts",
+      "exitCode": 1,
+      "failedAssertions": 1,
+      "validEvidence": true,
+      "copySourceSha256": "c262e195b1f5b61c441c6262e220fa7e6f98df3ea29b301d683507d05e522423",
+      "rawLogSha256": "e5c6f4c4427814507eecc4fd2963196511dc9ac48435e0e356dcfa043e288a7e"
+    },
+    {
+      "fault": "restore-other-owner",
+      "source": "apps/server/src/runtime/prompt-attachments.ts",
+      "exitCode": 1,
+      "failedAssertions": 1,
+      "validEvidence": true,
+      "copySourceSha256": "fe5bf895a682486349bf61eb7d76c2926aca49dd4652bfe08b9e28cda534c3ca",
+      "rawLogSha256": "71cf75e0369e719e3400b7572ebf1cc11963450bf14c4aa23468cd278b7282a9"
+    },
+    {
+      "fault": "restore-object-drift",
+      "source": "apps/server/src/runtime/prompt-attachments.ts",
+      "exitCode": 1,
+      "failedAssertions": 1,
+      "validEvidence": true,
+      "copySourceSha256": "9583b108eb9ed39b110e4392373e5a9ae02bed4f49811901b014adf663c54cd9",
+      "rawLogSha256": "5d75f6c9ea997b6a8b45e43652b6387ff6d737d81d601197f9f60a5f7f0c261a"
+    },
+    {
+      "fault": "restore-image-count-order",
+      "source": "apps/server/src/runtime/prompt-attachments.ts",
+      "exitCode": 1,
+      "failedAssertions": 1,
+      "validEvidence": true,
+      "copySourceSha256": "44cac05be9906108f1e5800735db378b453252fb2db6f62f15fa867d4a9a270e",
+      "rawLogSha256": "6a8ce145185499f7652d7d812d6d2fbc73d5fc9d086735045a32973a6908c392"
+    },
+    {
+      "fault": "pin-can-be-deleted",
+      "source": "apps/server/src/http/attachment-store.ts",
+      "exitCode": 1,
+      "failedAssertions": 1,
+      "validEvidence": true,
+      "copySourceSha256": "810e8cb4d57f103a8a777a28c1cfa671ab6c2344f571a95e2dcd3878e5d9c342",
+      "rawLogSha256": "8473ee3d9499738bbc292d9147548cac846892f917491f9261b1a612971733bf"
+    },
+    {
+      "fault": "late-ack-clears-new-files",
+      "source": "apps/web/src/ws/conversation-state.ts",
+      "exitCode": 1,
+      "failedAssertions": 1,
+      "validEvidence": true,
+      "copySourceSha256": "e293bfc4702fbc3256ef266969303a76df356f5fe1985cb62eba325d9a783b32",
+      "rawLogSha256": "a530b3b2acdef931b1744bf85385b746905e04e430907e262c39db864ae826c1"
+    },
+    {
+      "fault": "send-during-upload",
+      "source": "apps/web/src/ws/conversation-state.ts",
+      "exitCode": 1,
+      "failedAssertions": 1,
+      "validEvidence": true,
+      "copySourceSha256": "2d9ef7b132a930991fa34b066f934750cfa1fd851acc5b855a16c7fb0e81128e",
+      "rawLogSha256": "f48a621679ea2561ba9634c8ecf2a8e86952acf5c09a5403290ec6867446c9f7"
+    }
+  ],
+  "limitation": "7 narrow consumer/byte/owner faults only; not decoder/transport/configuration/whole-app crash recovery mutation acceptance"
+}
