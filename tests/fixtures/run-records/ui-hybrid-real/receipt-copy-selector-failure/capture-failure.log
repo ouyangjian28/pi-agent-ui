@@ -1,0 +1,14 @@
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+locator.waitFor: Timeout 30000ms exceeded.
+Call log:
+  - waiting for getByText(/pi · 已生成/).first() to be visible
+
+    at /home/yyj/ai/repos/pi-agent-ui-hybrid/tests/browser/ui-hybrid-capture.mjs:239:14 {
+  log: [ '  - waiting for getByText(/pi · 已生成/).first() to be visible' ],
+  name: 'TimeoutError'
+}
+
+Node.js v24.18.0

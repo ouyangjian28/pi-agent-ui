@@ -233,10 +233,28 @@ try {
               ],
             }),
           );
-          await page
-            .getByText(/pi · 已生成/)
-            .first()
-            .waitFor();
+          const copies = page.locator(".live-final.retained-reply");
+          await copies.first().getByText("实时回复副本 · 未确认入档关联", { exact: true }).waitFor();
+          if ((await copies.count()) !== 2 || (await page.locator(".live-final.chat-assistant").count()) !== 0)
+            throw new Error("Unpaired finals must stay two independent secondary copies, not duplicate main replies");
+          const fullTexts = ["这条回复已生成，但当前协议不能证明它已经入档。", "这是另一个独立回复，不覆盖前一条。"];
+          for (let index = 0; index < 2; index += 1) {
+            const copy = copies.nth(index);
+            const toggle = copy.getByRole("button", { name: /已生成 ·/ });
+            const body = copy.locator(".frozen-content");
+            if ((await toggle.getAttribute("aria-expanded")) !== "false" || (await body.isVisible()))
+              throw new Error("Retained reply must start collapsed");
+            await toggle.click();
+            if ((await toggle.getAttribute("aria-expanded")) !== "true" || !(await body.isVisible()) ||
+                (await body.locator(".live-stream-text").textContent()) !== fullTexts[index])
+              throw new Error("Opening a retained reply must expose its complete independent text");
+            const font = await body.locator(".live-stream-text").evaluate((element) => getComputedStyle(element).fontFamily);
+            if (/monospace|mono cjk/i.test(font)) throw new Error(`Retained copy inherited legacy font: ${font}`);
+            await toggle.click();
+            if (await body.isVisible()) throw new Error("Retained copy did not close again");
+          }
+          if ((await page.locator(".live-generating .live-stream-text").textContent()) !== "下一条仍在生成中…")
+            throw new Error("Visible primary live body must remain the new stream, not a retained copy");
         }
         if (scene === "question") {
           await page.evaluate(() =>
