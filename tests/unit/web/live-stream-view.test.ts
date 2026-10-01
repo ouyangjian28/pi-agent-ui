@@ -164,7 +164,10 @@ describe("LiveStreamView 直播正文渲染", () => {
       React.createElement(LiveStreamView, { liveEvents: [...old, delta("text", 0, "新一轮增量")], historyEvents: [] }),
     );
     await flushFrame();
-    expect(liveText()).toBe("新一轮增量");
+    // 完整旧副本现在保留在 hidden DOM：不仅可重开，还须验证主显示仍只有新增量。
+    expect(liveText()).toBe("上一轮全文\n新一轮增量");
+    expect(document.querySelector<HTMLElement>(".live-final .frozen-content")?.hidden).toBe(true);
+    expect(document.querySelector(".live-generating .live-stream-text")?.textContent).toBe("新一轮增量");
   });
 });
 
