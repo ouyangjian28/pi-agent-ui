@@ -65,13 +65,15 @@ try {
     readinessTimeoutMs: 20000, settingsTimeoutMs: 3000, responseTimeoutMs: 15000, audit: () => undefined });
   const first = await session.send('Owned first turn', undefined, 'ui-settings-test/one', { thinkingLevel: 'low' });
   assert(first.kind === 'launched', `Cold configuration rejected: ${JSON.stringify(first)}`);
-  await settled(first.intentId);
+  assert(typeof first.key?.intentId === 'string', 'Internal LaunchOutcome.key.intentId missing');
+  await settled(first.key.intentId);
   assert((await readFile(join(root, 'transcript.jsonl.model'), 'utf8')).trim() === 'ui-settings-test/one', 'Cold canonical preference not confirmed');
   checks.push('cold real model/thinking confirmed before durable prompt and settled');
   const marker = sent.length;
   const second = await session.send('Owned second turn', 1, 'ui-settings-test/two', { thinkingLevel: 'high' });
   assert(second.kind === 'launched', `Warm configuration rejected: ${JSON.stringify(second)}`);
-  await settled(second.intentId);
+  assert(typeof second.key?.intentId === 'string', 'Internal LaunchOutcome.key.intentId missing');
+  await settled(second.key.intentId);
   const types = sent.slice(marker).map(frame => frame.type);
   assert(types.indexOf('set_model') >= 0 && types.indexOf('set_thinking_level') > types.indexOf('set_model') && types.indexOf('prompt') > types.indexOf('set_thinking_level'), 'Warm configuration order broken');
   assert(spawns === 1, 'Model change respawned rather than reconfigured warm process');
