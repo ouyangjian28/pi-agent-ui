@@ -1,0 +1,31 @@
+{
+  "task": "b2dd049ad",
+  "status": "failed",
+  "exitCode": 1,
+  "phase": "capture",
+  "failure": "Retained copy inherited legacy font: ui-monospace, SF Mono...",
+  "exactFailureLog": "capture-failure.log.gz",
+  "defaultRegression": {
+    "passed": 1897,
+    "unchangedSkips": 24
+  },
+  "buildAndPackageTypes": "passed",
+  "completeCapture": "not_passed",
+  "strictRealBridge": "not_run_in_this_task",
+  "artifactSha256": {
+    "build.log": "b49a891ae4e480f705c344e6e8ca07b2d804242606932559874ab1f77abef267",
+    "build.log.gz": "b5b57084f62d0a15c612e924205c187dd94b437b7faa5bdd9cda8ef8003394ff",
+    "capture-failure.log": "70fd4272abbf0e118fa3972b607e8c01ce4a6bf1046ad52b53cb474744f38788",
+    "capture-failure.log.gz": "a61bc54f5727fb973b906063e00e77ecd9744546040d2c18c18e21e07792e284",
+    "partial-capture/360-light-conversation.png": "48c50018f33954db74a049373d9312aed4bf08131b7aa495ccc6bcc04afdeb5d",
+    "partial-capture/360-light-welcome.png": "807aed3a5aa387c2a0fbadbd449bb8abde5640a3ac95e233ed04dfb22f27e4d9",
+    "protocol-types.log": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+    "protocol-types.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "server-types.log": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+    "server-types.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "tests.log": "ef862458968b8759e65db97853b0b5fe86e0afc7a8035ca1c15c178fc13bbd43",
+    "tests.log.gz": "7be5a5c8288bcddc683df774ace3b55499b492aa775a3215b234eea3c2b5a3b7",
+    "web-types.log": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+    "web-types.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+  }
+}

@@ -1,0 +1,10 @@
+file:///home/yyj/ai/repos/pi-agent-ui-hybrid/tests/browser/ui-hybrid-capture.mjs:252
+            if (/monospace|mono cjk/i.test(font)) throw new Error(`Retained copy inherited legacy font: ${font}`);
+                                                        ^
+
+Error: Retained copy inherited legacy font: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace
+    at file:///home/yyj/ai/repos/pi-agent-ui-hybrid/tests/browser/ui-hybrid-capture.mjs:252:57
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at process.processImmediate (node:internal/timers:472:9)
+
+Node.js v24.18.0
