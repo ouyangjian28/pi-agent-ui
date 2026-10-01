@@ -1,0 +1,35 @@
+
+ RUN  v5.0.1 /home/yyj/ai/repos/pi-agent-ui-r1
+
+ ❯ |unit| tests/unit/web/r1-real-app.test.ts (11 tests | 1 failed | 10 skipped) 59ms
+   ❯ R1 真 AppRoot+三客户端首链 (11)
+     × 真实 main 的 StrictMode 重挂探测不销毁状态 owner，首字与首帧保持 58ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |unit| tests/unit/web/r1-real-app.test.ts > R1 真 AppRoot+三客户端首链 > 真实 main 的 StrictMode 重挂探测不销毁状态 owner，首字与首帧保持
+AssertionError: expected '' to be 'Strict 首字' // Object.is equality
+
+- Expected
++ Received
+
+- Strict 首字
+
+ ❯ tests/unit/web/r1-real-app.test.ts:69:28
+     67|     const textarea = screen.getByLabelText("首条消息") as HTMLTextAreaElem…
+     68|     fireEvent.change(textarea, { target: { value: "Strict 首字" } });
+     69|     expect(textarea.value).toBe("Strict 首字"); expect(screen.getByLabel…
+       |                            ^
+     70|     fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" }));
+     71|     expect(Socket.all.flatMap((socket) => socket.sent).filter((frame) …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 10 skipped (11)
+   Start at  02:36:22
+   Duration  692ms (environment 45%, transform 30%, import 14%, tests 10%)
+
+
+VITEST_EXIT=1

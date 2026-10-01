@@ -1,0 +1,11 @@
+--- a/apps/web/src/components/health-dot.tsx
++++ b/apps/web/src/components/health-dot.tsx
+@@ -4,7 +4,7 @@
+ /** v6 §3.4：只聚合真实传输事实，不推断模型/业务成功。 */
+ export function connectionHealth(states: readonly ConnectionState[], authFailed = false): { tone: "ok" | "warn" | "err"; text: string } {
+   if (authFailed) return { tone: "err", text: "认证失败" };
+-  if (states.every((state) => state === "ready")) return { tone: "ok", text: "全部已连接" };
++  if (states.some((state) => state === "ready")) return { tone: "ok", text: "全部已连接" };
+   if (states.every((state) => state === "closed" || state === "error")) return { tone: "err", text: "连接已断开" };
+   return { tone: "warn", text: states.some((state) => state === "closed" || state === "error") ? "部分不可用" : "连接中" };
+ }

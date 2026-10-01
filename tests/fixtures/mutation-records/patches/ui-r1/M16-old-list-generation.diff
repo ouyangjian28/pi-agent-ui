@@ -1,0 +1,11 @@
+--- a/apps/web/src/ws/ws-client.ts
++++ b/apps/web/src/ws/ws-client.ts
+@@ -459,7 +459,7 @@
+         const needRepull = this.listDirty;
+         this.listDirty = false;
+         this.listRequestPending = false;
+-        if (needRepull || this.pendingListGeneration !== this.listGeneration) {
++        if (false && (needRepull || this.pendingListGeneration !== this.listGeneration)) {
+           this.requestSessionsInternal(); // 丢旧请求世代，offset=0
+           return;
+         }

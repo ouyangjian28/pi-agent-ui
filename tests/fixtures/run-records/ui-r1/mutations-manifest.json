@@ -1,0 +1,705 @@
+{
+  "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+  "source": "/home/yyj/ai/repos/pi-agent-ui-r1",
+  "copy": "/tmp/ui-r1-mutation-ldwdymty",
+  "results": [
+    {
+      "name": "M01-premature-subscribe",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "conversation-state.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "v6 转移表，独立三门 行1/2/3：发送前零订阅目标；launched 才开 A、清 v1、刷列表",
+          "messages": [
+            "AssertionError: expected 'a.jsonl' to be null\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/conversation-state.test.ts:39:63\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3257:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3876:64"
+          ]
+        },
+        {
+          "fullName": "v6 转移表，独立三门 行7/10c：list 收 launched 不订 A；人工恢复才订 A 残稿一次",
+          "messages": [
+            "AssertionError: expected { view: { kind: 'list' }, …(4) } to match object { view: { kind: 'list' }, …(1) }\n(3 matching properties omitted from actual)\n    at Proxy.<anonymous> (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/index.m3L2HgmY.js:2040:10)\n    at Proxy.<anonymous> (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/index.m3L2HgmY.js:1934:14)\n    at Proxy.methodWrapper (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/chai/index.js:1700:25)\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/conversation-state.test.ts:73:35\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        },
+        {
+          "fullName": "v6 转移表，独立三门 行15-18：手机返回保 file；同 file 重开无换目标；换 B/新建才换目标",
+          "messages": [
+            "AssertionError: expected 'd2.jsonl' to be null\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/conversation-state.test.ts:110:46\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3257:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3876:64"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M01-premature-subscribe.diff",
+      "restored": {
+        "apps/web/src/ws/conversation-state.ts": "1b45f30815805a0ccbda3afd0a1951b59078a6be9e6d24af2818439fa6539eb8"
+      }
+    },
+    {
+      "name": "M02-old-version-clears",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "conversation-state.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "v6 转移表，独立三门 行3：在途编辑后改回同文本也不清；残稿首次带入，再开不重灌",
+          "messages": [
+            "AssertionError: expected '' to be 'v1' // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/conversation-state.test.ts:52:73\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        },
+        {
+          "fullName": "v6 转移表，独立三门 行6/10：返回保原操作；禁新 D2 但恢复 D 不二发",
+          "messages": [
+            "AssertionError: expected '' to be 'v2' // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/conversation-state.test.ts:69:73\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        },
+        {
+          "fullName": "v6 转移表，独立三门 行8/9/10a/10b：busy 不依赖成功路径找回 v1，重试旧结果不清新稿",
+          "messages": [
+            "AssertionError: expected '' to be 'new' // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/conversation-state.test.ts:90:73\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        },
+        {
+          "fullName": "v6 转移表，独立三门 行8/9/10a/10b：4402 不依赖成功路径找回 v1，重试旧结果不清新稿",
+          "messages": [
+            "AssertionError: expected '' to be 'new' // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/conversation-state.test.ts:90:73\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        },
+        {
+          "fullName": "v6 转移表，独立三门 行11-14：选 B 后 A launched，B 页面/file/composer 保真",
+          "messages": [
+            "AssertionError: expected '' to be 'v2' // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/conversation-state.test.ts:101:125\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M02-old-version-clears.diff",
+      "restored": {
+        "apps/web/src/ws/conversation-state.ts": "1b45f30815805a0ccbda3afd0a1951b59078a6be9e6d24af2818439fa6539eb8"
+      }
+    },
+    {
+      "name": "M03-ack-steals-B",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "conversation-state.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "v6 转移表，独立三门 行7/10c：list 收 launched 不订 A；人工恢复才订 A 残稿一次",
+          "messages": [
+            "AssertionError: expected { …(5) } to match object { view: { kind: 'list' }, …(1) }\n(4 matching properties omitted from actual)\n    at Proxy.<anonymous> (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/index.m3L2HgmY.js:2040:10)\n    at Proxy.<anonymous> (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/index.m3L2HgmY.js:1934:14)\n    at Proxy.methodWrapper (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/chai/index.js:1700:25)\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/conversation-state.test.ts:73:35\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        },
+        {
+          "fullName": "v6 转移表，独立三门 行11-14：选 B 后 A launched，B 页面/file/composer 保真",
+          "messages": [
+            "AssertionError: expected { …(5) } to match object { …(2) }\n(3 matching properties omitted from actual)\n    at Proxy.<anonymous> (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/index.m3L2HgmY.js:2040:10)\n    at Proxy.<anonymous> (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/index.m3L2HgmY.js:1934:14)\n    at Proxy.methodWrapper (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/chai/index.js:1700:25)\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/conversation-state.test.ts:97:35\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M03-ack-steals-B.diff",
+      "restored": {
+        "apps/web/src/ws/conversation-state.ts": "1b45f30815805a0ccbda3afd0a1951b59078a6be9e6d24af2818439fa6539eb8"
+      }
+    },
+    {
+      "name": "M04-residual-reinject",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "conversation-state.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "v6 转移表，独立三门 行3：在途编辑后改回同文本也不清；残稿首次带入，再开不重灌",
+          "messages": [
+            "AssertionError: expected 'v1' to be 'A 新稿' // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/conversation-state.test.ts:54:73\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        },
+        {
+          "fullName": "v6 转移表，独立三门 行7/10c：list 收 launched 不订 A；人工恢复才订 A 残稿一次",
+          "messages": [
+            "AssertionError: expected 'v2' to be '后续稿' // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/conversation-state.test.ts:77:73\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M04-residual-reinject.diff",
+      "restored": {
+        "apps/web/src/ws/conversation-state.ts": "1b45f30815805a0ccbda3afd0a1951b59078a6be9e6d24af2818439fa6539eb8"
+      }
+    },
+    {
+      "name": "M05-server-as-rejected",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "conversation-state.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "v6 五域穷尽分类 发出后 server 不降为拒收",
+          "messages": [
+            "AssertionError: expected 'rejected' to be 'unknown' // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/conversation-state.test.ts:34:117\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2869:63\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3257:10)"
+          ]
+        },
+        {
+          "fullName": "v6 转移表，独立三门 行8/9/10a/10b：4402 不依赖成功路径找回 v1，重试旧结果不清新稿",
+          "messages": [
+            "AssertionError: expected 'settled-rejected' to be 'settled-unknown' // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/conversation-state.test.ts:83:59\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        },
+        {
+          "fullName": "v6 转移表，独立三门 行11-14：选 B 后 A 4402，B 页面/file/composer 保真",
+          "messages": [
+            "AssertionError: expected 'settled-rejected' to be 'settled-unknown' // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/conversation-state.test.ts:99:59\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M05-server-as-rejected.diff",
+      "restored": {
+        "apps/web/src/ws/conversation-state.ts": "1b45f30815805a0ccbda3afd0a1951b59078a6be9e6d24af2818439fa6539eb8"
+      }
+    },
+    {
+      "name": "M06-cutoff-cancels-pending",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "conversation-state.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "v6 转移表，独立三门 等待截止非协议终局：恢复不二发，原 pending 迟到 launched 仍进三门",
+          "messages": [
+            "AssertionError: expected { id: 'draft-1', …(10) } to match object { phase: 'settled-unknown', …(1) }\n(20 matching properties omitted from actual)\n    at Proxy.<anonymous> (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/index.m3L2HgmY.js:2040:10)\n    at Proxy.<anonymous> (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/index.m3L2HgmY.js:1934:14)\n    at Proxy.methodWrapper (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/chai/index.js:1700:25)\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/conversation-state.test.ts:120:52\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M06-cutoff-cancels-pending.diff",
+      "restored": {
+        "apps/web/src/ws/conversation-state.ts": "1b45f30815805a0ccbda3afd0a1951b59078a6be9e6d24af2818439fa6539eb8"
+      }
+    },
+    {
+      "name": "M07-reserved-model-accepted",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "new-session.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "批3 模型记住上次（localStorage） R2-P2-02：哨兵值零发送（selectModel 层守卫+modelValid 层拦截双层；行为出口=发送门）",
+          "messages": [
+            "AssertionError: expected false to be true // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/new-session.test.ts:354:93\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        },
+        {
+          "fullName": "批3 模型记住上次（localStorage） 杀点A（GPT 三审 Mu-r3-3 裁决）：selectModel 哨兵拒收→零状态迁移（草稿不清/锚不变），非行为等价死层",
+          "messages": [
+            "AssertionError: expected false to be true // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/new-session.test.ts:367:93\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3257:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3876:64"
+          ]
+        },
+        {
+          "fullName": "批3 模型记住上次（localStorage） 杀点B+R3-P3-01（GPT 三审）：__ 前缀清单项渲染同步拒绝（disabled+标不可用）；handler 拒收值不变",
+          "messages": [
+            "AssertionError: expected false to be true // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/new-session.test.ts:384:26\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3257:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3876:64"
+          ]
+        },
+        {
+          "fullName": "批3 模型记住上次（localStorage） 哨兵样式保留值（__custom__ 等）→读写双拒（P1-03 GPT 批2审：不得经存储面漏入 model 域）",
+          "messages": [
+            "AssertionError: expected '__custom__' to be '__default__' // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/new-session.test.ts:406:72\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3257:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3876:64"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M07-reserved-model-accepted.diff",
+      "restored": {
+        "apps/web/src/ws/draft-model.ts": "2f93248e31705830f0a94e58cd9c07bc3d126c895d95937c1e34d22692ac7e22"
+      }
+    },
+    {
+      "name": "M08-preference-not-restored",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "new-session.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "批3 模型记住上次（localStorage） 手打自定义 id 创建→写入该值；再挂载恢复（自定义 option 呈现）",
+          "messages": [
+            "AssertionError: expected '__default__' to be 'openai-codex/gpt-5.3' // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/new-session.test.ts:313:72\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        },
+        {
+          "fullName": "批3 模型记住上次（localStorage） R2-P2-01：恢复旧模型+清单永久挂起（loading）→select 仍可选「默认」→创建帧无 model 键",
+          "messages": [
+            "AssertionError: expected '__default__' to be 'gone/old' // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/new-session.test.ts:320:23\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3257:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3876:64"
+          ]
+        },
+        {
+          "fullName": "批3 模型记住上次（localStorage） R2-P2-02：哨兵值零发送（selectModel 层守卫+modelValid 层拦截双层；行为出口=发送门）",
+          "messages": [
+            "AssertionError: expected '__default__' to be 'gone/old' // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/new-session.test.ts:334:23\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3257:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3876:64"
+          ]
+        },
+        {
+          "fullName": "批3 模型记住上次（localStorage） 杀点A（GPT 三审 Mu-r3-3 裁决）：selectModel 哨兵拒收→零状态迁移（草稿不清/锚不变），非行为等价死层",
+          "messages": [
+            "AssertionError: expected '__default__' to be 'gone/old' // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/new-session.test.ts:363:23\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3257:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3876:64"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M08-preference-not-restored.diff",
+      "restored": {
+        "apps/web/src/ws/draft-model.ts": "2f93248e31705830f0a94e58cd9c07bc3d126c895d95937c1e34d22692ac7e22"
+      }
+    },
+    {
+      "name": "M09-preference-after-send",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "r1-real-app.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "R1 真 AppRoot+三客户端首链 欢迎首字不重挂；默认在线帧缺 model/cwd；launched→真实列表新行/正文→第二条同 file",
+          "messages": [
+            "AssertionError: expected [ null ] to deeply equal [ '__default__' ]\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/r1-real-app.test.ts:55:43\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3257:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3876:64"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M09-preference-after-send.diff",
+      "restored": {
+        "apps/web/src/real-app.tsx": "b407a9d846e6ab7b665287cf423a92ddd88c8b9fd217223846b229e6ce0bd504"
+      }
+    },
+    {
+      "name": "M10-model-ready-not-repulled",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "new-session.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "M-OPS NewSession P2-3：connecting 期挂载→ws 到 ready 后补拉清单（防 idle 永久停滞）",
+          "messages": [
+            "AssertionError: expected \"vi.fn()\" to be called 2 times, but got 1 times\n\nIgnored nodes: comments, script, style\n\u001b[36m<html>\u001b[39m\n  \u001b[36m<head />\u001b[39m\n  \u001b[36m<body>\u001b[39m\n    \u001b[36m<div>\u001b[39m\n      \u001b[36m<section\u001b[39m\n        \u001b[33maria-label\u001b[39m=\u001b[32m\"写消息：auto-20261001-031452-7725e2e6412876ff88f760da32013e49.jsonl\"\u001b[39m\n        \u001b[33mclass\u001b[39m=\u001b[32m\"write-composer\"\u001b[39m\n      \u001b[36m>\u001b[39m\n        \u001b[36m<div\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"model-picker\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[36m<label>\u001b[39m\n            \u001b[0m待发模型\u001b[0m\n            \u001b[36m<select\u001b[39m\n              \u001b[33maria-label\u001b[39m=\u001b[32m\"模型选择\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[36m<option\u001b[39m\n                \u001b[33mvalue\u001b[39m=\u001b[32m\"__default__\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[0m默认（pi 配置）\u001b[0m\n              \u001b[36m</option>\u001b[39m\n            \u001b[36m</select>\u001b[39m\n          \u001b[36m</label>\u001b[39m\n          \u001b[36m<details\u001b[39m\n            \u001b[33mclass\u001b[39m=\u001b[32m\"custom-model\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[36m<summary>\u001b[39m\n              \u001b[0m自定义模型\u001b[0m\n            \u001b[36m</summary>\u001b[39m\n            \u001b[36m<label>\u001b[39m\n              \u001b[0m模型 id 直达\u001b[0m\n              \u001b[36m<input\u001b[39m\n                \u001b[33maria-label\u001b[39m=\u001b[32m\"模型 id 直达\"\u001b[39m\n                \u001b[33mplaceholder\u001b[39m=\u001b[32m\"provider/model-id\"\u001b[39m\n                \u001b[33mvalue\u001b[39m=\u001b[32m\"\"\u001b[39m\n              \u001b[36m/>\u001b[39m\n            \u001b[36m</label>\u001b[39m\n          \u001b[36m</details>\u001b[39m\n        \u001b[36m</div>\u001b[39m\n        \u001b[36m<label>\u001b[39m\n          \u001b[0m首条消息\u001b[0m\n          \u001b[36m<textarea\u001b[39m\n            \u001b[33maria-label\u001b[39m=\u001b[32m\"首条消息\"\u001b[39m\n            \u001b[33mplaceholder\u001b[39m=\u001b[32m\"想从哪里开始？\"\u001b[39m\n            \u001b[33mrows\u001b[39m=\u001b[32m\"3\"\u001b[39m\n          \u001b[36m/>\u001b[39m\n        \u001b[36m</label>\u001b[39m\n        \u001b[36m<div\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"write-actions\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[36m<button\u001b[39m\n            \u001b[33mdisabled\u001b[39m=\u001b[32m\"\"\u001b[39m\n            \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[0m发送并开始对话\u001b[0m\n          \u001b[36m</button>\u001b[39m\n          \u001b[36m<button\u001b[39m\n            \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[0m返回列表\u001b[0m\n          \u001b[36m</button>\u001b[39m\n          \u001b[36m<button\u001b[39m\n            \u001b[33mdisabled\u001b[39m=\u001b[32m\"\"\u001b[39m\n            \u001b[33mhidden\u001b[39m=\u001b[32m\"\"\u001b[39m\n            \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[0m停止\u001b[0m\n          \u001b[36m</button>\u001b[39m\n          \u001b[36m<span\u001b[39m\n            \u001b[33maria-live\u001b[39m=\u001b[32m\"polite\"\u001b[39m\n            \u001b[33mrole\u001b[39m=\u001b[32m\"status\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[0mEnter 发送 · Shift+Enter 换行\u001b[0m\n          \u001b[36m</span>\u001b[39m\n        \u001b[36m</div>\u001b[39m\n        \u001b[36m<details\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"resume-demo\"\u001b[39m\n          \u001b[33mhidden\u001b[39m=\u001b[32m\"\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[36m<summary>\u001b[39m\n            \u001b[0m高级诊断\u001b[0m\n          \u001b[36m</summary>\u001b[39m\n          \u001b[36m<div\u001b[39m\n            \u001b[33mclass\u001b[39m=\u001b[32m\"resume-fields\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[36m<label>\u001b[39m\n              \u001b[0m意图标识\u001b[0m\n              \u001b[36m<input\u001b[39m\n                \u001b[33maria-label\u001b[39m=\u001b[32m\"恢复重发意图标识\"\u001b[39m\n                \u001b[33mplaceholder\u001b[39m=\u001b[32m\"如 i-1\"\u001b[39m\n                \u001b[33mtype\u001b[39m=\u001b[32m\"text\"\u001b[39m\n                \u001b[33mvalue\u001b[39m=\u001b[32m\"\"\u001b[39m\n              \u001b[36m/>\u001b[39m\n            \u001b[36m</label>\u001b[39m\n            \u001b[36m<label>\u001b[39m\n              \u001b[0m进程代次\u001b[0m\n              \u001b[36m<input\u001b[39m\n                \u001b[33maria-label\u001b[39m=\u001b[32m\"恢复重发进程代次\"\u001b[39m\n                \u001b[33mmin\u001b[39m=\u001b[32m\"1\"\u001b[39m\n                \u001b[33mstep\u001b[39m=\u001b[32m\"1\"\u001b[39m\n                \u001b[33mtype\u001b[39m=\u001b[32m\"number\"\u001b[39m\n                \u001b[33mvalue\u001b[39m=\u001b[32m\"1\"\u001b[39m\n              \u001b[36m/>\u001b[39m\n            \u001b[36m</label>\u001b[39m\n            \u001b[36m<button\u001b[39m\n              \u001b[33mdisabled\u001b[39m=\u001b[32m\"\"\u001b[39m\n              \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[0m恢复重发\u001b[0m\n            \u001b[36m</button>\u001b[39m\n          \u001b[36m</div>\u001b[39m\n        \u001b[36m</details>\u001b[39m\n      \u001b[36m</section>\u001b[39m\n    \u001b[36m</div>\u001b[39m\n  \u001b[36m</body>\u001b[39m\n\u001b[36m</html>\u001b[39m\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/new-session.test.ts:219:47\n    at runWithExpensiveErrorDiagnosticsDisabled (/home/yyj/ai/repos/pi-agent-ui/node_modules/@testing-library/dom/dist/config.js:47:12)\n    at checkCallback (/home/yyj/ai/repos/pi-agent-ui/node_modules/@testing-library/dom/dist/wait-for.js:124:77)\n    at Timeout.checkRealTimersCallback (/home/yyj/ai/repos/pi-agent-ui/node_modules/@testing-library/dom/dist/wait-for.js:118:16)\n    at listOnTimeout (node:internal/timers:605:17)\n    at processTimers (node:internal/timers:541:7)"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M10-model-ready-not-repulled.diff",
+      "restored": {
+        "apps/web/src/components/model-picker.tsx": "2d35d66035bcf53535b482065e3be0a5a2c8adb61b9c8401749aa2499b37fcf3"
+      }
+    },
+    {
+      "name": "M11-partial-green",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "health-dot.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "HealthDot 三档完整映射 125 组合优先级穷尽：全 ready 绿、全终态红，其余黄；认证优先",
+          "messages": [
+            "AssertionError: expected 'ok' to be 'warn' // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/health-dot.test.ts:12:43\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3257:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3876:64"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M11-partial-green.diff",
+      "restored": {
+        "apps/web/src/components/health-dot.tsx": "99b8bead8b5b32f16e992bfa4d98efbacb04e71596090097f3e7c13ae2b40127"
+      }
+    },
+    {
+      "name": "M12-back-unsubscribes",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "r1-real-app.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "R1 真 AppRoot+三客户端首链 手机返回/767↔768 保订阅待答与同一个 composer；真换 file 必须提示",
+          "messages": [
+            "AssertionError: expected [ { t: 'hello', …(2) }, …(2) ] to have a length of 2 but got 3\n    at Proxy.<anonymous> (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/index.m3L2HgmY.js:2137:20)\n    at Proxy.<anonymous> (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/index.m3L2HgmY.js:1934:14)\n    at Proxy.methodWrapper (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/chai/index.js:1700:25)\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/r1-real-app.test.ts:124:107\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M12-back-unsubscribes.diff",
+      "restored": {
+        "apps/web/src/real-app.tsx": "b407a9d846e6ab7b665287cf423a92ddd88c8b9fd217223846b229e6ce0bd504"
+      }
+    },
+    {
+      "name": "M13-IME-sends",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "r1-real-app.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "R1 真 AppRoot+三客户端首链 Enter/Shift+Enter/IME：真 composer composing/229 零发送",
+          "messages": [
+            "AssertionError: expected [ { t: 'prompt', …(3) } ] to have a length of +0 but got 1\n    at Proxy.<anonymous> (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/index.m3L2HgmY.js:2137:20)\n    at Proxy.<anonymous> (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/index.m3L2HgmY.js:1934:14)\n    at Proxy.methodWrapper (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/chai/index.js:1700:25)\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/r1-real-app.test.ts:84:73\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M13-IME-sends.diff",
+      "restored": {
+        "apps/web/src/components/write-composer.tsx": "097e08969dbfc9ea52fa34741f548dbfacf0b660ffdf272b3274d7114fbe03f6"
+      }
+    },
+    {
+      "name": "M14-dedup-offset",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "r1-list.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "R1 续页，raw 游标×请求世代 第51条可到达；短页 hasMore 不跳，重复行不影响 nextOffset",
+          "messages": [
+            "AssertionError: expected 51 to be 52 // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/r1-list.test.ts:17:137\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3257:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3876:64"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M14-dedup-offset.diff",
+      "restored": {
+        "apps/web/src/ws/ws-client.ts": "59972f753214cdd60ff56d2c94208d7f84c53a93fcbc9aa67e1ca095a23d8179"
+      }
+    },
+    {
+      "name": "M15-mixed-list-version",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "r1-list.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "R1 续页，raw 游标×请求世代 listVersion 变丢累计页，offset0 重拉；旧 requestId 晚到零并入",
+          "messages": [
+            "AssertionError: expected [ { sessionId: 's-99', …(7) }, …(2) ] to be null\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/r1-list.test.ts:23:77\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3257:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3876:64"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M15-mixed-list-version.diff",
+      "restored": {
+        "apps/web/src/ws/ws-client.ts": "59972f753214cdd60ff56d2c94208d7f84c53a93fcbc9aa67e1ca095a23d8179"
+      }
+    },
+    {
+      "name": "M16-old-list-generation",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "r1-list.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "R1 续页，raw 游标×请求世代 在途续页期间刷新换世代，旧页不并入；dirty 合并只补拉一次",
+          "messages": [
+            "AssertionError: expected [ 'f2.jsonl', 'f1.jsonl' ] to deeply equal [ 'f1.jsonl' ]\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/r1-list.test.ts:30:90\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3257:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3876:64"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M16-old-list-generation.diff",
+      "restored": {
+        "apps/web/src/ws/ws-client.ts": "59972f753214cdd60ff56d2c94208d7f84c53a93fcbc9aa67e1ca095a23d8179"
+      }
+    },
+    {
+      "name": "M17-fixed-day-DST",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "r1-list.test.ts",
+      "timezone": "America/New_York",
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "R1 自然日四互斥组（TZ 三态外部复跑） 今天/昨天/过去7天/更早四边界、未来、null、无效Date；DST 不用固定毫秒",
+          "messages": [
+            "AssertionError: expected [ Array(4) ] to deeply equal [ [ '今天', …(1) ], …(3) ]\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/r1-list.test.ts:51:89\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3257:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3876:64"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M17-fixed-day-DST.diff",
+      "restored": {
+        "apps/web/src/ws/session-groups.ts": "3d966989f28d97e07ec8e3dfc7a7b2e2379922b29952396f8b03ded869a6ef6a"
+      }
+    },
+    {
+      "name": "M18-history-deletes-live",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "r1-live-handoff.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "v6 每个 final 独立、不因历史增量或文本配对删除 连续 final/零 delta/同文本都独立定格，工具前后多个 assistant 不互相覆盖",
+          "messages": [
+            "AssertionError: expected [] to deeply equal [ '工具前回复', '工具后回复', '工具后回复', '（空正文）' ]\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/r1-live-handoff.test.ts:22:27\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        },
+        {
+          "fullName": "v6 每个 final 独立、不因历史增量或文本配对删除 唯一清理=世代切换（包含等长 live 数组），旧 file/client/subscription 内容不泄漏",
+          "messages": [
+            "AssertionError: expected [] to deeply equal [ '旧正文' ]\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/r1-live-handoff.test.ts:35:126\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        },
+        {
+          "fullName": "v6 每个 final 独立、不因历史增量或文本配对删除 首页部分：基线未完成，任何已读 assistant 增量都不能删当前直播定格正文",
+          "messages": [
+            "AssertionError: expected [] to deeply equal [ '本轮未证实入档' ]\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/r1-live-handoff.test.ts:41:27\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        },
+        {
+          "fullName": "v6 每个 final 独立、不因历史增量或文本配对删除 相位门丢 final：未见的新轮只出现在历史，H/F 数量相等不授权删上一条定格",
+          "messages": [
+            "AssertionError: expected [] to deeply equal [ '已收到 F1' ]\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/r1-live-handoff.test.ts:55:131\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        },
+        {
+          "fullName": "v6 每个 final 独立、不因历史增量或文本配对删除 续页保留旧历史数组：数组累计含多个旧 assistant，不是当前 final 的覆盖证明",
+          "messages": [
+            "AssertionError: expected [] to deeply equal [ '当前 final' ]\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/r1-live-handoff.test.ts:60:136\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M18-history-deletes-live.diff",
+      "restored": {
+        "apps/web/src/components/live-stream.tsx": "4e0f6dd7a4a9a0ec31b68cfd210bc0fbceeef1fb595e34ce493756cd12d0bc01"
+      }
+    },
+    {
+      "name": "M19-finals-overwrite",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "r1-live-handoff.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "v6 每个 final 独立、不因历史增量或文本配对删除 连续 final/零 delta/同文本都独立定格，工具前后多个 assistant 不互相覆盖",
+          "messages": [
+            "AssertionError: expected [ '（空正文）' ] to deeply equal [ '工具前回复', '工具后回复', '工具后回复', '（空正文）' ]\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/r1-live-handoff.test.ts:20:27\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M19-finals-overwrite.diff",
+      "restored": {
+        "apps/web/src/components/live-stream.tsx": "4e0f6dd7a4a9a0ec31b68cfd210bc0fbceeef1fb595e34ce493756cd12d0bc01"
+      }
+    },
+    {
+      "name": "M20-true-client-drops-final",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "r1-real-app.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "R1 真 AppRoot+三客户端首链 真 SubscribeClient 消费正文三形：坏形零消费，连续 final 真正文不被 history 增量删除",
+          "messages": [
+            "AssertionError: expected [] to deeply equal [ '完整正文一', '完整正文二' ]\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/r1-real-app.test.ts:144:112\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M20-true-client-drops-final.diff",
+      "restored": {
+        "apps/web/src/ws/subscribe-client.ts": "c484742ea61724ea0937473c6e4d4754ed041ac7cafda22ba2f1a6d865281763"
+      }
+    },
+    {
+      "name": "M21-more-button-no-frame",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "r1-real-app.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "R1 真 AppRoot+三客户端首链 列表第51条真实可见、点选正确 file；partial 与累计数量可发现",
+          "messages": [
+            "AssertionError: expected { t: 'list-sessions', …(1) } to match object { offset: 50 }\n(2 matching properties omitted from actual)\n    at Proxy.<anonymous> (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/index.m3L2HgmY.js:2040:10)\n    at Proxy.<anonymous> (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/index.m3L2HgmY.js:1934:14)\n    at Proxy.methodWrapper (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/chai/index.js:1700:25)\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/r1-real-app.test.ts:76:79\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M21-more-button-no-frame.diff",
+      "restored": {
+        "apps/web/src/components/session-list.tsx": "00d2def31768cd6f3091b9fa59e66b66308188e664c3431c5d2b4ab5e26e0deb"
+      }
+    },
+    {
+      "name": "M22-message-activity-mixed",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "r1-real-app.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "R1 真 AppRoot+三客户端首链 真 SubscribeClient 消费正文三形：坏形零消费，连续 final 真正文不被 history 增量删除",
+          "messages": [
+            "TestingLibraryElementError: Found multiple elements with the text: /日志修复/\n\nHere are the matching elements:\n\nIgnored nodes: comments, script, style\n\u001b[36m<span\u001b[39m\n  \u001b[33mclass\u001b[39m=\u001b[32m\"row-title\"\u001b[39m\n\u001b[36m>\u001b[39m\n  \u001b[0m#\u001b[0m\n  \u001b[0m3\u001b[0m\n  \u001b[0m \u001b[0m\n  \u001b[0m日志修复\u001b[0m\n\u001b[36m</span>\u001b[39m\n\nIgnored nodes: comments, script, style\n\u001b[36m<span\u001b[39m\n  \u001b[33mclass\u001b[39m=\u001b[32m\"row-title\"\u001b[39m\n\u001b[36m>\u001b[39m\n  \u001b[0m#\u001b[0m\n  \u001b[0m3\u001b[0m\n  \u001b[0m \u001b[0m\n  \u001b[0m日志修复\u001b[0m\n\u001b[36m</span>\u001b[39m\n\n(If this is intentional, then use the `*AllBy*` variant of the query (like `queryAllByText`, `getAllByText`, or `findAllByText`)).\n\nIgnored nodes: comments, script, style\n\u001b[36m<body>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<div\u001b[39m\n      \u001b[33mclass\u001b[39m=\u001b[32m\"app real-app\"\u001b[39m\n      \u001b[33mdata-view\u001b[39m=\u001b[32m\"session\"\u001b[39m\n    \u001b[36m>\u001b[39m\n      \u001b[36m<header\u001b[39m\n        \u001b[33mclass\u001b[39m=\u001b[32m\"topbar\"\u001b[39m\n      \u001b[36m>\u001b[39m\n        \u001b[36m<strong>\u001b[39m\n          \u001b[36m<span\u001b[39m\n            \u001b[33mclass\u001b[39m=\u001b[32m\"brand\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[0mπ\u001b[0m\n          \u001b[36m</span>\u001b[39m\n          \u001b[0m \u001b[0m\n          \u001b[36m<span>\u001b[39m\n            \u001b[0mpi agent\u001b[0m\n          \u001b[36m</span>\u001b[39m\n        \u001b[36m</strong>\u001b[39m\n        \u001b[36m<div\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"topbar-actions\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[36m<div\u001b[39m\n            \u001b[33mclass\u001b[39m=\u001b[32m\"health-control\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[36m<button\u001b[39m\n              \u001b[33maria-expanded\u001b[39m=\u001b[32m\"false\"\u001b[39m\n              \u001b[33maria-haspopup\u001b[39m=\u001b[32m\"dialog\"\u001b[39m\n              \u001b[33maria-label\u001b[39m=\u001b[32m\"连接状态：全部已连接\"\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"health-dot health-ok\"\u001b[39m\n              \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[36m<span\u001b[39m\n                \u001b[33maria-hidden\u001b[39m=\u001b[32m\"true\"\u001b[39m\n                \u001b[33mclass\u001b[39m=\u001b[32m\"health-indicator\"\u001b[39m\n              \u001b[36m/>\u001b[39m\n              \u001b[36m<span>\u001b[39m\n                \u001b[0m全部已连接\u001b[0m\n              \u001b[36m</span>\u001b[39m\n            \u001b[36m</button>\u001b[39m\n          \u001b[36m</div>\u001b[39m\n          \u001b[36m<div\u001b[39m\n            \u001b[33maria-label\u001b[39m=\u001b[32m\"主题\"\u001b[39m\n            \u001b[33mclass\u001b[39m=\u001b[32m\"theme-toggle\"\u001b[39m\n            \u001b[33mrole\u001b[39m=\u001b[32m\"group\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[36m<button\u001b[39m\n              \u001b[33maria-pressed\u001b[39m=\u001b[32m\"false\"\u001b[39m\n              \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[0m亮色\u001b[0m\n            \u001b[36m</button>\u001b[39m\n            \u001b[36m<button\u001b[39m\n              \u001b[33maria-pressed\u001b[39m=\u001b[32m\"false\"\u001b[39m\n              \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[0m暗色\u001b[0m\n            \u001b[36m</button>\u001b[39m\n            \u001b[36m<button\u001b[39m\n              \u001b[33maria-pressed\u001b[39m=\u001b[32m\"true\"\u001b[39m\n              \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[0m跟随系统\u001b[0m\n            \u001b[36m</button>\u001b[39m\n          \u001b[36m</div>\u001b[39m\n        \u001b[36m</div>\u001b[39m\n      \u001b[36m</header>\u001b[39m\n      \u001b[36m<div\u001b[39m\n        \u001b[33mclass\u001b[39m=\u001b[32m\"workspace two-col\"\u001b[39m\n      \u001b[36m>\u001b[39m\n        \u001b[36m<nav\u001b[39m\n          \u001b[33maria-label\u001b[39m=\u001b[32m\"会话列表\"\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"session-panel\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[36m<div\u001b[39m\n            \u001b[33mclass\u001b[39m=\u001b[32m\"panel-heading\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[36m<h1>\u001b[39m\n              \u001b[0m会话\u001b[0m\n            \u001b[36m</h1>\u001b[39m\n            \u001b[36m<div\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"panel-actions\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[36m<button\u001b[39m\n                \u001b[33mclass\u001b[39m=\u001b[32m\"refresh\"\u001b[39m\n                \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[0m刷新\u001b[0m\n              \u001b[36m</button>\u001b[39m\n              \u001b[36m<button\u001b[39m\n                \u001b[33mclass\u001b[39m=\u001b[32m\"new-session-btn\"\u001b[39m\n                \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[0m＋新对话\u001b[0m\n              \u001b[36m</button>\u001b[39m\n            \u001b[36m</div>\u001b[39m\n          \u001b[36m</div>\u001b[39m\n          \u001b[36m<section\u001b[39m\n            \u001b[33maria-label\u001b[39m=\u001b[32m\"会话列表区\"\u001b[39m\n            \u001b[33mclass\u001b[39m=\u001b[32m\"session-list-region\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[36m<ul\u001b[39m\n              \u001b[33maria-label\u001b[39m=\u001b[32m\"会话列表\"\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"session-list\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[36m<li\u001b[39m\n                \u001b[33mclass\u001b[39m=\u001b[32m\"session-group\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[36m<h3>\u001b[39m\n                  \u001b[0m今天\u001b[0m\n                \u001b[36m</h3>\u001b[39m\n                \u001b[36m<ul>\u001b[39m\n                  \u001b[36m<li>\u001b[39m\n                    \u001b[36m<button\u001b[39m\n                      \u001b[33maria-current\u001b[39m=\u001b[32m\"page\"\u001b[39m\n                      \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n                    \u001b[36m>\u001b[39m\n                      \u001b[36m<span\u001b[39m\n                        \u001b[33mclass\u001b[39m=\u001b[32m\"row-title\"\u001b[39m\n                      \u001b[36m>\u001b[39m\n                        \u001b[0m已有对话 B\u001b[0m\n                      \u001b[36m</span>\u001b[39m\n                      \u001b[36m<small>\u001b[39m\n                        \u001b[0m2\u001b[0m\n                        \u001b[0m 条消息\u001b[0m\n                      \u001b[36m</small>\u001b[39m\n                    \u001b[36m</button>\u001b[39m\n                  \u001b[36m</li>\u001b[39m\n                \u001b[36m</ul>\u001b[39m\n              \u001b[36m</li>\u001b[39m\n            \u001b[36m</ul>\u001b[39m\n            \u001b[36m<div\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"list-pagination\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[36m<small>\u001b[39m\n                \u001b[0m已载 \u001b[0m\n                \u001b[0m1\u001b[0m\n                \u001b[0m / 共 \u001b[0m\n                \u001b[0m1\u001b[0m\n              \u001b[36m</small>\u001b[39m\n            \u001b[36m</div>\u001b[39m\n          \u001b[36m</section>\u001b[39m\n        \u001b[36m</nav>\u001b[39m\n        \u001b[36m<main\u001b[39m\n          \u001b[33maria-label\u001b[39m=\u001b[32m\"当前会话\"\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"conversation \"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[36m<header\u001b[39m\n            \u001b[33mclass\u001b[39m=\u001b[32m\"conversation-header\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[36m<button\u001b[39m\n              \u001b[33maria-label\u001b[39m=\u001b[32m\"会话列表\"\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"back-to-list\"\u001b[39m\n              \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[0m← \u001b[0m\n              \u001b[36m<span>\u001b[39m\n                \u001b[0m会话\u001b[0m\n              \u001b[36m</span>\u001b[39m\n            \u001b[36m</button>\u001b[39m\n            \u001b[36m<div\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"conversation-heading\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[36m<h2\u001b[39m\n                \u001b[33mtabindex\u001b[39m=\u001b[32m\"-1\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[0m已有对话 B\u001b[0m\n              \u001b[36m</h2>\u001b[39m\n              \u001b[36m<small>\u001b[39m\n                \u001b[0m空闲\u001b[0m\n              \u001b[36m</small>\u001b[39m\n            \u001b[36m</div>\u001b[39m\n            \u001b[36m<button\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"new-model-conversation\"\u001b[39m\n              \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[0m换模型开新对话\u001b[0m\n            \u001b[36m</button>\u001b[39m\n          \u001b[36m</header>\u001b[39m\n          \u001b[36m<div\u001b[39m\n            \u001b[33mclass\u001b[39m=\u001b[32m\"conversation-body\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[36m<section\u001b[39m\n              \u001b[33maria-label\u001b[39m=\u001b[32m\"会话详情\"\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"session-detail\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[36m<header>\u001b[39m\n                \u001b[36m<h2>\u001b[39m\n                  \u001b[0m已有对话 B\u001b[0m\n                \u001b[36m</h2>\u001b[39m\n                \u001b[36m<small>\u001b[39m\n                  \u001b[0m进程运行中·就绪\u001b[0m\n                  \u001b[0m · \u001b[0m\n                  \u001b[0m空闲\u001b[0m\n                \u001b[36m</small>\u001b[39m\n              \u001b[36m</header>\u001b[39m\n              \u001b[36m<ol\u001b[39m\n                \u001b[33maria-label\u001b[39m=\u001b[32m\"历史事件\"\u001b[39m\n                \u001b[33mclass\u001b[39m=\u001b[32m\"history-list\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[36m<li\u001b[39m\n                  \u001b[33mclass\u001b[39m=\u001b[32m\"chat-message chat-assistant\"\u001b[39m\n                \u001b[36m>\u001b[39m\n                  \u001b[36m<small\u001b[39m\n                    \u001b[33mclass\u001b[39m=\u001b[32m\"message-author\"\u001b[39m\n                  \u001b[36m>\u001b[39m\n                    \u001b[0mpi\u001b[0m\n                  \u001b[36m</small>\u001b[39m\n                  \u001b[36m<p\u001b[39m\n                    \u001b[33mclass\u001b[39m=\u001b[32m\"chat-preview\"\u001b[39m\n                  \u001b[36m>\u001b[39m\n                    \u001b[0m真实历史正文\u001b[0m\n                  \u001b[36m</p>\u001b[39m\n                \u001b[36m</li>\u001b[39m\n                \u001b[36m<li\u001b[39m\n                  \u001b[33mclass\u001b[39m=\u001b[32m\"chat-message chat-assistant\"\u001b[39m\n                \u001b[36m>\u001b[39m\n                  \u001b[36m<small\u001b[39m\n                    \u001b[33mclass\u001b[39m=\u001b[32m\"message-author\"\u001b[39m\n                  \u001b[36m>\u001b[39m\n                    \u001b[0mpi\u001b[0m\n                  \u001b[36m</small>\u001b[39m\n                  \u001b[36m<p\u001b[39m\n                    \u001b[33mclass\u001b[39m=\u001b[32m\"chat-preview\"\u001b[39m\n                  \u001b[36m>\u001b[39m\n                    \u001b[0m历史另一个助手\u001b[0m\n                  \u001b[36m</p>\u001b[39m\n                \u001b[36m</li>\u001b[39m\n                \u001b[36m<li\u001b[39m\n                  \u001b[33mclass\u001b[39m=\u001b[32m\"activity-row\"\u001b[39m\n                \u001b[36m>\u001b[39m\n                  \u001b[36m<span\u001b[39m\n                    \u001b[33mclass\u001b[39m=\u001b[32m\"row-title\"\u001b[39m\n                  \u001b[36m>\u001b[39m\n                    \u001b[0m#\u001b[0m\n                    \u001b[0m3\u001b[0m\n                    \u001b[0m \u001b[0m\n                    \u001b[0m日志修复\u001b[0m\n                  \u001b[36m</span>\u001b[39m\n                \u001b[36m</li>\u001b[39m\n              \u001b[36m</ol>\u001b[39m\n              \u001b[36m<div\u001b[39m\n                \u001b[33maria-label\u001b[39m=\u001b[32m\"直播正文\"\u001b[39m\n                \u001b[33maria-live\u001b[39m=\u001b[32m\"off\"\u001b[39m\n                \u001b[33mclass\u001b[39m=\u001b[32m\"live-stream\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[36m<p\u001b[39m\n                  \u001b[33maria-live\u001b[39m=\u001b[32m\"polite\"\u001b[39m\n                  \u001b[33mclass\u001b[39m=\u001b[32m\"sr-only\"\u001b[39m\n                  \u001b[33mrole\u001b[39m=\u001b[32m\"status\"\u001b[39m\n                \u001b[36m>\u001b[39m\n                  \u001b[0m已生成 2 条回复，归档状态待核对。\u001b[0m\n                \u001b[36m</p>\u001b[39m\n                \u001b[36m<article\u001b[39m\n                  \u001b[33mclass\u001b[39m=\u001b[32m\"live-final chat-message chat-assistant\"\u001b[39m\n                \u001b[36m>\u001b[39m\n                  \u001b[36m<small\u001b[39m\n                    \u001b[33mclass\u001b[39m=\u001b[32m\"message-author\"\u001b[39m\n                  \u001b[36m>\u001b[39m\n                    \u001b[0mpi · 已生成（未确认入档）\u001b[0m\n                  \u001b[36m</small>\u001b[39m\n                  \u001b[36m<div\u001b[39m\n                    \u001b[33mclass\u001b[39m=\u001b[32m\"frozen-content\"\u001b[39m\n                  \u001b[36m>\u001b[39m\n                    \u001b[36m<p\u001b[39m\n                      \u001b[33mclass\u001b[39m=\u001b[32m\"live-stream-text\"\u001b[39m\n                    \u001b[36m>\u001b[39m\n                      \u001b[0m完整正文一\u001b[0m\n                    \u001b[36m</p>\u001b[39m\n                  \u001b[36m</div>\u001b[39m\n                \u001b[36m</article>\u001b[39m\n                \u001b[36m<article\u001b[39m\n                  \u001b[33mclass\u001b[39m=\u001b[32m\"live-final chat-message chat-assistant\"\u001b[39m\n                \u001b[36m>\u001b[39m\n                  \u001b[36m<small\u001b[39m\n                    \u001b[33mclass\u001b[39m=\u001b[32m\"message-author\"\u001b[39m\n                  \u001b[36m>\u001b[39m\n                    \u001b[0mpi · 已生成（未确认入档）\u001b[0m\n                  \u001b[36m</small>\u001b[39m\n                  \u001b[36m<div\u001b[39m\n                    \u001b[33mclass\u001b[39m=\u001b[32m\"frozen-content\"\u001b[39m\n                  \u001b[36m>\u001b[39m\n                    \u001b[36m<p\u001b[39m\n                      \u001b[33mclass\u001b[39m=\u001b[32m\"live-stream-text\"\u001b[39m\n                    \u001b[36m>\u001b[39m\n                      \u001b[0m完整正文二\u001b[0m\n                    \u001b[36m</p>\u001b[39m\n                  \u001b[36m</div>\u001b[39m\n                \u001b[36m</article>\u001b[39m\n              \u001b[36m</div>\u001b[39m\n              \u001b[36m<details\u001b[39m\n                \u001b[33mclass\u001b[39m=\u001b[32m\"activity-details\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[36m<summary>\u001b[39m\n                  \u001b[0m活动详情\u001b[0m\n                \u001b[36m</summary>\u001b[39m\n                \u001b[36m<ol\u001b[39m\n                  \u001b[33maria-label\u001b[39m=\u001b[32m\"活动事件\"\u001b[39m\n                  \u001b[33mclass\u001b[39m=\u001b[32m\"activity-list\"\u001b[39m\n                \u001b[36m>\u001b[39m\n                  \u001b[36m<li\u001b[39m\n                    \u001b[33mclass\u001b[39m=\u001b[32m\"activity-row\"\u001b[39m\n                  \u001b[36m>\u001b[39m\n                    \u001b[36m<span\u001b[39m\n                      \u001b[33mclass\u001b[39m=\u001b[32m\"row-title\"\u001b[39m\n                    \u001b[36m>\u001b[39m\n                      \u001b[0m#\u001b[0m\n                      \u001b[0m3\u001b[0m\n                      \u001b[0m \u001b[0m\n                      \u001b[0m日志修复\u001b[0m\n                    \u001b[36m</span>\u001b[39m\n                  \u001b[36m</li>\u001b[39m\n                \u001b[36m</ol>\u001b[39m\n              \u001b[36m</details>\u001b[39m\n            \u001b[36m</section>\u001b[39m\n          \u001b[36m</div>\u001b[39m\n          \u001b[36m<section\u001b[39m\n            \u001b[33maria-label\u001b[39m=\u001b[32m\"写消息：b.jsonl\"\u001b[39m\n            \u001b[33mclass\u001b[39m=\u001b[32m\"write-composer\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[36m<label>\u001b[39m\n              \u001b[0m写入消息\u001b[0m\n              \u001b[36m<textarea\u001b[39m\n                \u001b[33maria-label\u001b[39m=\u001b[32m\"写入消息内容\"\u001b[39m\n                \u001b[33mplaceholder\u001b[39m=\u001b[32m\"继续这段对话…\"\u001b[39m\n                \u001b[33mrows\u001b[39m=\u001b[32m\"3\"\u001b[39m\n              \u001b[36m/>\u001b[39m\n            \u001b[36m</label>\u001b[39m\n            \u001b[36m<div\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"write-actions\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[36m<button\u001b[39m\n                \u001b[33mdisabled\u001b[39m=\u001b[32m\"\"\u001b[39m\n                \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[0m发送\u001b[0m\n              \u001b[36m</button>\u001b[39m\n              \u001b[36m<button\u001b[39m\n                \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[0m停止\u001b[0m\n              \u001b[36m</button>\u001b[39m\n              \u001b[36m<span\u001b[39m\n                \u001b[33maria-live\u001b[39m=\u001b[32m\"polite\"\u001b[39m\n                \u001b[33mrole\u001b[39m=\u001b[32m\"status\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[0m可发送\u001b[0m\n              \u001b[36m</span>\u001b[39m\n            \u001b[36m</div>\u001b[39m\n            \u001b[36m<details\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"resume-demo\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[36m<summary>\u001b[39m\n                \u001b[0m高级诊断\u001b[0m\n              \u001b[36m</summary>\u001b[39m\n              \u001b[36m<div\u001b[39m\n                \u001b[33mclass\u001b[39m=\u001b[32m\"resume-fields\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[36m<label>\u001b[39m\n                  \u001b[0m意图标识\u001b[0m\n                  \u001b[36m<input\u001b[39m\n                    \u001b[33maria-label\u001b[39m=\u001b[32m\"恢复重发意图标识\"\u001b[39m\n                    \u001b[33mplaceholder\u001b[39m=\u001b[32m\"如 i-1\"\u001b[39m\n                    \u001b[33mtype\u001b[39m=\u001b[32m\"text\"\u001b[39m\n                    \u001b[33mvalue\u001b[39m=\u001b[32m\"\"\u001b[39m\n                  \u001b[36m/>\u001b[39m\n                \u001b[36m</label>\u001b[39m\n                \u001b[36m<label>\u001b[39m\n                  \u001b[0m进程代次\u001b[0m\n                  \u001b[36m<input\u001b[39m\n                    \u001b[33maria-label\u001b[39m=\u001b[32m\"恢复重发进程代次\"\u001b[39m\n                    \u001b[33mmin\u001b[39m=\u001b[32m\"1\"\u001b[39m\n                    \u001b[33mstep\u001b[39m=\u001b[32m\"1\"\u001b[39m\n                    \u001b[33mtype\u001b[39m=\u001b[32m\"number\"\u001b[39m\n                    \u001b[33mvalue\u001b[39m=\u001b[32m\"1\"\u001b[39m\n                  \u001b[36m/>\u001b[39m\n                \u001b[36m</label>\u001b[39m\n                \u001b[36m<button\u001b[39m\n                  \u001b[33mdisabled\u001b[39m=\u001b[32m\"\"\u001b[39m\n                  \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n                \u001b[36m>\u001b[39m\n                  \u001b[0m恢复重发\u001b[0m\n                \u001b[36m</button>\u001b[39m\n              \u001b[36m</div>\u001b[39m\n            \u001b[36m</details>\u001b[39m\n          \u001b[36m</section>\u001b[39m\n        \u001b[36m</main>\u001b[39m\n      \u001b[36m</div>\u001b[39m\n    \u001b[36m</div>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n\u001b[36m</body>\u001b[39m\n    at Object.getElementError (/home/yyj/ai/repos/pi-agent-ui/node_modules/@testing-library/dom/dist/config.js:37:19)\n    at getElementError (/home/yyj/ai/repos/pi-agent-ui/node_modules/@testing-library/dom/dist/query-helpers.js:20:35)\n    at getMultipleElementsFoundError (/home/yyj/ai/repos/pi-agent-ui/node_modules/@testing-library/dom/dist/query-helpers.js:23:10)\n    at /home/yyj/ai/repos/pi-agent-ui/node_modules/@testing-library/dom/dist/query-helpers.js:55:13\n    at /home/yyj/ai/repos/pi-agent-ui/node_modules/@testing-library/dom/dist/query-helpers.js:95:19\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/r1-real-app.test.ts:146:69\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M22-message-activity-mixed.diff",
+      "restored": {
+        "apps/web/src/components/session-detail.tsx": "a6ede7e28ef9b646a1a14a6acc9a310030340a890d5a0ec702f52f328257f305"
+      }
+    },
+    {
+      "name": "M23-scroll-always-bottom",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "browser",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "真浏览器向上阅读不抢滚动",
+          "message": "file:///tmp/ui-r1-mutation-ldwdymty/tests/browser/ui-r1-capture.mjs:112\n      if (readerTop > 1) throw new Error(`向上阅读被直播抢回底部：${readerTop}`);\n                               ^\n\nError: 向上阅读被直播抢回底部：21411\n    at file:///tmp/ui-r1-mutation-ldwdymty/tests/browser/ui-r1-capture.mjs:112:32\n    at runNextTicks (node:internal/process/task_queues:65:5)\n    at process.processImmediate (node:internal/timers:472:9)\n\nNode.js v24.18.0\n"
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M23-scroll-always-bottom.diff",
+      "restored": {
+        "apps/web/src/real-app.tsx": "b407a9d846e6ab7b665287cf423a92ddd88c8b9fd217223846b229e6ce0bd504"
+      }
+    },
+    {
+      "name": "M24-Strict-destroys-owner",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "r1-real-app.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "R1 真 AppRoot+三客户端首链 真实 main 的 StrictMode 重挂探测不销毁状态 owner，首字与首帧保持",
+          "messages": [
+            "AssertionError: expected '' to be 'Strict 首字' // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/r1-real-app.test.ts:69:28\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3257:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3876:64"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M24-Strict-destroys-owner.diff",
+      "restored": {
+        "apps/web/src/ws/use-conversation-lifetime.ts": "a28499034a7b4d007de2a1e3dd188147fd82893590f57ccc782c10fda1d121d8"
+      }
+    },
+    {
+      "name": "M25-unmount-leaks-wait-timer",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "r1-lifetime.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "Strict 探测不销毁；真卸载物理清 timer；卸载后迟到回执零刷新",
+          "messages": [
+            "AssertionError: expected 1 to be +0 // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/r1-lifetime.test.ts:22:30\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M25-unmount-leaks-wait-timer.diff",
+      "restored": {
+        "apps/web/src/ws/use-conversation-lifetime.ts": "a28499034a7b4d007de2a1e3dd188147fd82893590f57ccc782c10fda1d121d8"
+      }
+    },
+    {
+      "name": "M26-screenreader-every-token",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "r1-live-handoff.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "v6 每个 final 独立、不因历史增量或文本配对删除 读屏不逐 token：正文 live=off，状态只在生成开始或 final 计数变化播报",
+          "messages": [
+            "AssertionError: expected 'polite' to be 'off' // Object.is equality\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/r1-live-handoff.test.ts:45:69\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M26-screenreader-every-token.diff",
+      "restored": {
+        "apps/web/src/components/live-stream.tsx": "4e0f6dd7a4a9a0ec31b68cfd210bc0fbceeef1fb595e34ce493756cd12d0bc01"
+      }
+    },
+    {
+      "name": "M27-held-enter-sends",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "r1-real-app.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "R1 真 AppRoot+三客户端首链 Enter/Shift+Enter/IME：真 composer composing/229 零发送",
+          "messages": [
+            "AssertionError: expected [ { t: 'prompt', …(3) } ] to have a length of +0 but got 1\n    at Proxy.<anonymous> (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/index.m3L2HgmY.js:2137:20)\n    at Proxy.<anonymous> (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/index.m3L2HgmY.js:1934:14)\n    at Proxy.methodWrapper (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/chai/index.js:1700:25)\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/r1-real-app.test.ts:84:73\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M27-held-enter-sends.diff",
+      "restored": {
+        "apps/web/src/components/write-composer.tsx": "097e08969dbfc9ea52fa34741f548dbfacf0b660ffdf272b3274d7114fbe03f6"
+      }
+    },
+    {
+      "name": "M28-stop-result-hidden",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "r1-real-app.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "R1 真 AppRoot+三客户端首链 真实 managed composer 保留停止结算与失败：prompt/stop 并行，停止不清残稿，不隐藏失败",
+          "messages": [
+            "TestingLibraryElementError: Unable to find an element with the text: 停止超时：进程未在期限内退出. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.\n\nIgnored nodes: comments, script, style\n\u001b[36m<body>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<div\u001b[39m\n      \u001b[33mclass\u001b[39m=\u001b[32m\"app real-app\"\u001b[39m\n      \u001b[33mdata-view\u001b[39m=\u001b[32m\"session\"\u001b[39m\n    \u001b[36m>\u001b[39m\n      \u001b[36m<header\u001b[39m\n        \u001b[33mclass\u001b[39m=\u001b[32m\"topbar\"\u001b[39m\n      \u001b[36m>\u001b[39m\n        \u001b[36m<strong>\u001b[39m\n          \u001b[36m<span\u001b[39m\n            \u001b[33mclass\u001b[39m=\u001b[32m\"brand\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[0mπ\u001b[0m\n          \u001b[36m</span>\u001b[39m\n          \u001b[0m \u001b[0m\n          \u001b[36m<span>\u001b[39m\n            \u001b[0mpi agent\u001b[0m\n          \u001b[36m</span>\u001b[39m\n        \u001b[36m</strong>\u001b[39m\n        \u001b[36m<div\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"topbar-actions\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[36m<div\u001b[39m\n            \u001b[33mclass\u001b[39m=\u001b[32m\"health-control\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[36m<button\u001b[39m\n              \u001b[33maria-expanded\u001b[39m=\u001b[32m\"false\"\u001b[39m\n              \u001b[33maria-haspopup\u001b[39m=\u001b[32m\"dialog\"\u001b[39m\n              \u001b[33maria-label\u001b[39m=\u001b[32m\"连接状态：全部已连接\"\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"health-dot health-ok\"\u001b[39m\n              \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[36m<span\u001b[39m\n                \u001b[33maria-hidden\u001b[39m=\u001b[32m\"true\"\u001b[39m\n                \u001b[33mclass\u001b[39m=\u001b[32m\"health-indicator\"\u001b[39m\n              \u001b[36m/>\u001b[39m\n              \u001b[36m<span>\u001b[39m\n                \u001b[0m全部已连接\u001b[0m\n              \u001b[36m</span>\u001b[39m\n            \u001b[36m</button>\u001b[39m\n          \u001b[36m</div>\u001b[39m\n          \u001b[36m<div\u001b[39m\n            \u001b[33maria-label\u001b[39m=\u001b[32m\"主题\"\u001b[39m\n            \u001b[33mclass\u001b[39m=\u001b[32m\"theme-toggle\"\u001b[39m\n            \u001b[33mrole\u001b[39m=\u001b[32m\"group\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[36m<button\u001b[39m\n              \u001b[33maria-pressed\u001b[39m=\u001b[32m\"false\"\u001b[39m\n              \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[0m亮色\u001b[0m\n            \u001b[36m</button>\u001b[39m\n            \u001b[36m<button\u001b[39m\n              \u001b[33maria-pressed\u001b[39m=\u001b[32m\"false\"\u001b[39m\n              \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[0m暗色\u001b[0m\n            \u001b[36m</button>\u001b[39m\n            \u001b[36m<button\u001b[39m\n              \u001b[33maria-pressed\u001b[39m=\u001b[32m\"true\"\u001b[39m\n              \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[0m跟随系统\u001b[0m\n            \u001b[36m</button>\u001b[39m\n          \u001b[36m</div>\u001b[39m\n        \u001b[36m</div>\u001b[39m\n      \u001b[36m</header>\u001b[39m\n      \u001b[36m<div\u001b[39m\n        \u001b[33mclass\u001b[39m=\u001b[32m\"workspace two-col\"\u001b[39m\n      \u001b[36m>\u001b[39m\n        \u001b[36m<nav\u001b[39m\n          \u001b[33maria-label\u001b[39m=\u001b[32m\"会话列表\"\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"session-panel\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[36m<div\u001b[39m\n            \u001b[33mclass\u001b[39m=\u001b[32m\"panel-heading\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[36m<h1>\u001b[39m\n              \u001b[0m会话\u001b[0m\n            \u001b[36m</h1>\u001b[39m\n            \u001b[36m<div\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"panel-actions\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[36m<button\u001b[39m\n                \u001b[33mclass\u001b[39m=\u001b[32m\"refresh\"\u001b[39m\n                \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[0m刷新\u001b[0m\n              \u001b[36m</button>\u001b[39m\n              \u001b[36m<button\u001b[39m\n                \u001b[33mclass\u001b[39m=\u001b[32m\"new-session-btn\"\u001b[39m\n                \u001b[33mdisabled\u001b[39m=\u001b[32m\"\"\u001b[39m\n                \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[0m＋新对话\u001b[0m\n              \u001b[36m</button>\u001b[39m\n            \u001b[36m</div>\u001b[39m\n          \u001b[36m</div>\u001b[39m\n          \u001b[36m<section\u001b[39m\n            \u001b[33maria-label\u001b[39m=\u001b[32m\"会话列表区\"\u001b[39m\n            \u001b[33mclass\u001b[39m=\u001b[32m\"session-list-region\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[36m<ul\u001b[39m\n              \u001b[33maria-label\u001b[39m=\u001b[32m\"会话列表\"\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"session-list\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[36m<li\u001b[39m\n                \u001b[33mclass\u001b[39m=\u001b[32m\"session-group\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[36m<h3>\u001b[39m\n                  \u001b[0m今天\u001b[0m\n                \u001b[36m</h3>\u001b[39m\n                \u001b[36m<ul>\u001b[39m\n                  \u001b[36m<li>\u001b[39m\n                    \u001b[36m<button\u001b[39m\n                      \u001b[33maria-current\u001b[39m=\u001b[32m\"page\"\u001b[39m\n                      \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n                    \u001b[36m>\u001b[39m\n                      \u001b[36m<span\u001b[39m\n                        \u001b[33mclass\u001b[39m=\u001b[32m\"row-title\"\u001b[39m\n                      \u001b[36m>\u001b[39m\n                        \u001b[0m已有对话 B\u001b[0m\n                      \u001b[36m</span>\u001b[39m\n                      \u001b[36m<small>\u001b[39m\n                        \u001b[0m2\u001b[0m\n                        \u001b[0m 条消息\u001b[0m\n                      \u001b[36m</small>\u001b[39m\n                    \u001b[36m</button>\u001b[39m\n                  \u001b[36m</li>\u001b[39m\n                \u001b[36m</ul>\u001b[39m\n              \u001b[36m</li>\u001b[39m\n            \u001b[36m</ul>\u001b[39m\n            \u001b[36m<div\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"list-pagination\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[36m<small>\u001b[39m\n                \u001b[0m已载 \u001b[0m\n                \u001b[0m1\u001b[0m\n                \u001b[0m / 共 \u001b[0m\n                \u001b[0m1\u001b[0m\n              \u001b[36m</small>\u001b[39m\n            \u001b[36m</div>\u001b[39m\n          \u001b[36m</section>\u001b[39m\n        \u001b[36m</nav>\u001b[39m\n        \u001b[36m<main\u001b[39m\n          \u001b[33maria-label\u001b[39m=\u001b[32m\"当前会话\"\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"conversation \"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[36m<header\u001b[39m\n            \u001b[33mclass\u001b[39m=\u001b[32m\"conversation-header\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[36m<button\u001b[39m\n              \u001b[33maria-label\u001b[39m=\u001b[32m\"会话列表\"\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"back-to-list\"\u001b[39m\n              \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[0m← \u001b[0m\n              \u001b[36m<span>\u001b[39m\n                \u001b[0m会话\u001b[0m\n              \u001b[36m</span>\u001b[39m\n            \u001b[36m</button>\u001b[39m\n            \u001b[36m<div\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"conversation-heading\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[36m<h2\u001b[39m\n                \u001b[33mtabindex\u001b[39m=\u001b[32m\"-1\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[0m已有对话 B\u001b[0m\n              \u001b[36m</h2>\u001b[39m\n              \u001b[36m<small>\u001b[39m\n                \u001b[0m空闲\u001b[0m\n              \u001b[36m</small>\u001b[39m\n            \u001b[36m</div>\u001b[39m\n            \u001b[36m<button\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"new-model-conversation\"\u001b[39m\n              \u001b[33mdisabled\u001b[39m=\u001b[32m\"\"\u001b[39m\n              \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[0m换模型开新对话\u001b[0m\n            \u001b[36m</button>\u001b[39m\n          \u001b[36m</header>\u001b[39m\n          \u001b[36m<div\u001b[39m\n            \u001b[33mclass\u001b[39m=\u001b[32m\"conversation-body\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[36m<section\u001b[39m\n              \u001b[33maria-label\u001b[39m=\u001b[32m\"会话详情\"\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"session-detail\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[36m<header>\u001b[39m\n                \u001b[36m<h2>\u001b[39m\n                  \u001b[0m已有对话 B\u001b[0m\n                \u001b[36m</h2>\u001b[39m\n                \u001b[36m<small>\u001b[39m\n                  \u001b[0m进程运行中·就绪\u001b[0m\n                  \u001b[0m · \u001b[0m\n                  \u001b[0m空闲\u001b[0m\n                \u001b[36m</small>\u001b[39m\n              \u001b[36m</header>\u001b[39m\n              \u001b[36m<ol\u001b[39m\n                \u001b[33maria-label\u001b[39m=\u001b[32m\"历史事件\"\u001b[39m\n                \u001b[33mclass\u001b[39m=\u001b[32m\"history-list\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[36m<li\u001b[39m\n                  \u001b[33mclass\u001b[39m=\u001b[32m\"chat-message chat-assistant\"\u001b[39m\n                \u001b[36m>\u001b[39m\n                  \u001b[36m<small\u001b[39m\n                    \u001b[33mclass\u001b[39m=\u001b[32m\"message-author\"\u001b[39m\n                  \u001b[36m>\u001b[39m\n                    \u001b[0mpi\u001b[0m\n                  \u001b[36m</small>\u001b[39m\n                  \u001b[36m<p\u001b[39m\n                    \u001b[33mclass\u001b[39m=\u001b[32m\"chat-preview\"\u001b[39m\n                  \u001b[36m>\u001b[39m\n                    \u001b[0m真实历史正文\u001b[0m\n                  \u001b[36m</p>\u001b[39m\n                \u001b[36m</li>\u001b[39m\n              \u001b[36m</ol>\u001b[39m\n            \u001b[36m</section>\u001b[39m\n          \u001b[36m</div>\u001b[39m\n          \u001b[36m<section\u001b[39m\n            \u001b[33maria-label\u001b[39m=\u001b[32m\"写消息：b.jsonl\"\u001b[39m\n            \u001b[33mclass\u001b[39m=\u001b[32m\"write-composer\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[36m<label>\u001b[39m\n              \u001b[0m写入消息\u001b[0m\n              \u001b[36m<textarea\u001b[39m\n                \u001b[33maria-label\u001b[39m=\u001b[32m\"写入消息内容\"\u001b[39m\n                \u001b[33mplaceholder\u001b[39m=\u001b[32m\"继续这段对话…\"\u001b[39m\n                \u001b[33mrows\u001b[39m=\u001b[32m\"3\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[0mv2 残稿\u001b[0m\n              \u001b[36m</textarea>\u001b[39m\n            \u001b[36m</label>\u001b[39m\n            \u001b[36m<div\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"write-actions\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[36m<button\u001b[39m\n                \u001b[33mdisabled\u001b[39m=\u001b[32m\"\"\u001b[39m\n                \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[0m发送\u001b[0m\n              \u001b[36m</button>\u001b[39m\n              \u001b[36m<button\u001b[39m\n                \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[0m停止\u001b[0m\n              \u001b[36m</button>\u001b[39m\n              \u001b[36m<span\u001b[39m\n                \u001b[33maria-live\u001b[39m=\u001b[32m\"polite\"\u001b[39m\n                \u001b[33mrole\u001b[39m=\u001b[32m\"status\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[0m发送中…\u001b[0m\n              \u001b[36m</span>\u001b[39m\n            \u001b[36m</div>\u001b[39m\n            \u001b[36m<details\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"resume-demo\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[36m<summary>\u001b[39m\n                \u001b[0m高级诊断\u001b[0m\n              \u001b[36m</summary>\u001b[39m\n              \u001b[36m<div\u001b[39m\n                \u001b[33mclass\u001b[39m=\u001b[32m\"resume-fields\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[36m<label>\u001b[39m\n                  \u001b[0m意图标识\u001b[0m\n                  \u001b[36m<input\u001b[39m\n                    \u001b[33maria-label\u001b[39m=\u001b[32m\"恢复重发意图标识\"\u001b[39m\n                    \u001b[33mplaceholder\u001b[39m=\u001b[32m\"如 i-1\"\u001b[39m\n                    \u001b[33mtype\u001b[39m=\u001b[32m\"text\"\u001b[39m\n                    \u001b[33mvalue\u001b[39m=\u001b[32m\"\"\u001b[39m\n                  \u001b[36m/>\u001b[39m\n                \u001b[36m</label>\u001b[39m\n                \u001b[36m<label>\u001b[39m\n                  \u001b[0m进程代次\u001b[0m\n                  \u001b[36m<input\u001b[39m\n                    \u001b[33maria-label\u001b[39m=\u001b[32m\"恢复重发进程代次\"\u001b[39m\n                    \u001b[33mmin\u001b[39m=\u001b[32m\"1\"\u001b[39m\n                    \u001b[33mstep\u001b[39m=\u001b[32m\"1\"\u001b[39m\n                    \u001b[33mtype\u001b[39m=\u001b[32m\"number\"\u001b[39m\n                    \u001b[33mvalue\u001b[39m=\u001b[32m\"1\"\u001b[39m\n                  \u001b[36m/>\u001b[39m\n                \u001b[36m</label>\u001b[39m\n                \u001b[36m<button\u001b[39m\n                  \u001b[33mdisabled\u001b[39m=\u001b[32m\"\"\u001b[39m\n                  \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n                \u001b[36m>\u001b[39m\n                  \u001b[0m恢复重发\u001b[0m\n                \u001b[36m</button>\u001b[39m\n              \u001b[36m</div>\u001b[39m\n            \u001b[36m</details>\u001b[39m\n          \u001b[36m</section>\u001b[39m\n        \u001b[36m</main>\u001b[39m\n      \u001b[36m</div>\u001b[39m\n    \u001b[36m</div>\u001b[39m\n  \u001b[36m</div>\u001b[39m\n\u001b[36m</body>\u001b[39m\n    at Object.getElementError (/home/yyj/ai/repos/pi-agent-ui/node_modules/@testing-library/dom/dist/config.js:37:19)\n    at /home/yyj/ai/repos/pi-agent-ui/node_modules/@testing-library/dom/dist/query-helpers.js:76:38\n    at /home/yyj/ai/repos/pi-agent-ui/node_modules/@testing-library/dom/dist/query-helpers.js:52:17\n    at /home/yyj/ai/repos/pi-agent-ui/node_modules/@testing-library/dom/dist/query-helpers.js:95:19\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/r1-real-app.test.ts:159:19\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M28-stop-result-hidden.diff",
+      "restored": {
+        "apps/web/src/components/write-composer.tsx": "097e08969dbfc9ea52fa34741f548dbfacf0b660ffdf272b3274d7114fbe03f6"
+      }
+    },
+    {
+      "name": "M29-stop-error-hidden",
+      "baseline": "496b1430716502af2a45ac04005095c932f64fef",
+      "test": "r1-real-app.test.ts",
+      "timezone": null,
+      "exit": 1,
+      "killed": true,
+      "failed": [
+        {
+          "fullName": "R1 真 AppRoot+三客户端首链 真实 managed composer 保留停止结算与失败：prompt/stop 并行，停止不清残稿，不隐藏失败",
+          "messages": [
+            "AssertionError: expected '未入队：写宿主忙；草稿已保留，可显式重试。' to contain '4402'\n    at /tmp/ui-r1-mutation-ldwdymty/tests/unit/web/r1-real-app.test.ts:162:107\n    at file:///home/yyj/ai/repos/pi-agent-ui/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+          ]
+        }
+      ],
+      "patch": "/tmp/ui-r1-evidence/mutations-final/M29-stop-error-hidden.diff",
+      "restored": {
+        "apps/web/src/components/write-composer.tsx": "097e08969dbfc9ea52fa34741f548dbfacf0b660ffdf272b3274d7114fbe03f6"
+      }
+    }
+  ]
+}

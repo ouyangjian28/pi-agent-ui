@@ -1,0 +1,11 @@
+--- a/apps/web/src/real-app.tsx
++++ b/apps/web/src/real-app.tsx
+@@ -225,7 +225,7 @@
+   const subSnap = useSyncExternalStore(clients.subscribeClient.subscribe, clients.subscribeClient.getSnapshot);
+   const writeSnap = useSyncExternalStore(clients.writeClient.subscribe, clients.writeClient.getSnapshot);
+   const ui = useSyncExternalStore(owner.subscribe, owner.getSnapshot);
+-  const file = ui.activeFile;
++  const file = ui.view.kind === "list" ? null : ui.activeFile;
+   // 唯一订阅 owner：隐藏/返回不改变 file，本钩子只在真换目标或 client 时清旧。
+   const detail = useSessionDetail(clients.subscribeClient, file);
+   const isNew = ui.view.kind === "draft" || file === null;

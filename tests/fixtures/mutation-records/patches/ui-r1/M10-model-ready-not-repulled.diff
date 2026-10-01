@@ -1,0 +1,11 @@
+--- a/apps/web/src/components/model-picker.tsx
++++ b/apps/web/src/components/model-picker.tsx
+@@ -10,7 +10,7 @@
+ export function ModelPicker({ source, choice, freeText, onConfigure }: { source: ModelSource; choice: string; freeText: string; onConfigure: (choice: string, freeText: string) => void }) {
+   const snapshot = useSyncExternalStore(source.subscribe, source.getSnapshot);
+   const models = snapshot.models;
+-  useEffect(() => { source.requestModels(); source.requestRoots(); }, [source, snapshot.state]);
++  useEffect(() => { source.requestModels(); source.requestRoots(); }, [source]);
+   const custom = freeText.trim();
+   const selected = custom || choice;
+   const legal = isSendableModel(effectiveModel(choice, freeText));

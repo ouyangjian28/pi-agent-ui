@@ -1,0 +1,14 @@
+--- a/apps/web/src/ws/use-conversation-lifetime.ts
++++ b/apps/web/src/ws/use-conversation-lifetime.ts
+@@ -5,9 +5,7 @@
+ export function useConversationLifetime(owner: ConversationState): void {
+   const epoch = useRef(0);
+   useEffect(() => {
+-    const lease = ++epoch.current;
+-    return () => queueMicrotask(() => {
+-      if (epoch.current === lease) owner.dispose();
+-    });
++    epoch.current += 1;
++    return () => owner.dispose();
+   }, [owner]);
+ }

@@ -1,0 +1,11 @@
+--- a/apps/web/src/components/write-composer.tsx
++++ b/apps/web/src/components/write-composer.tsx
+@@ -227,7 +227,7 @@
+       {!editor && view.notReady !== null ? (
+         <NotReadyBanner info={view.notReady} onRetry={canSend ? onSend : undefined} />
+       ) : null}
+-      {view.lastResult !== null && (!editor || (view.lastResult.ok && (view.lastResult.kind === "stop" || view.lastResult.outcome.kind === "launched"))) ? (
++      {view.lastResult !== null && (!editor || (view.lastResult.ok && (view.lastResult.kind === "prompt" && view.lastResult.outcome.kind === "launched"))) ? (
+         <p role="status">{editor && view.lastResult.kind === "prompt" ? "消息已受理，等待回复。" : lastResultText(view.lastResult)}</p>
+       ) : null}
+       <details className="resume-demo" hidden={editor?.isNew === true}>

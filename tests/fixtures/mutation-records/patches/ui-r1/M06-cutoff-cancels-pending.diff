@@ -1,0 +1,11 @@
+--- a/apps/web/src/ws/conversation-state.ts
++++ b/apps/web/src/ws/conversation-state.ts
+@@ -160,7 +160,7 @@
+       this.timers.delete(op.id);
+       const current = this.slot(id);
+       if (current?.operation?.id === op.id && current.operation.pending) {
+-        this.put({ ...current, phase: "settled-unknown", result: { status: "unknown", message: "等待已截止，但原请求仍在途，可能已受理；不会自动补发。" } });
++        this.put({ ...current, phase: "settled-unknown", operation: { ...current.operation, pending: false }, result: { status: "unknown", message: "等待已截止，但原请求仍在途，可能已受理；不会自动补发。" } });
+       }
+     }, this.waitMs));
+     let request: Promise<WriteSendOutcomeDTO>;

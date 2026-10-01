@@ -1,0 +1,11 @@
+--- a/apps/web/src/ws/session-groups.ts
++++ b/apps/web/src/ws/session-groups.ts
+@@ -2,7 +2,7 @@
+ export const SESSION_GROUPS = ["今天", "昨天", "过去 7 天", "更早"] as const;
+ export function groupSessions(sessions: readonly SessionSummaryDTO[], now = new Date()): { label: typeof SESSION_GROUPS[number]; sessions: SessionSummaryDTO[] }[] {
+   const day = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+-  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).getTime();
++  const yesterday = day - 86_400_000;
+   const week = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7).getTime();
+   const groups = SESSION_GROUPS.map((label) => ({ label, sessions: [] as SessionSummaryDTO[] }));
+   const sorted = [...sessions].sort((a, b) => (b.lastActiveMs ?? -Infinity) - (a.lastActiveMs ?? -Infinity) || a.file.localeCompare(b.file));

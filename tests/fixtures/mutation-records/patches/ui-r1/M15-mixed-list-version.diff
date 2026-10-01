@@ -1,0 +1,11 @@
+--- a/apps/web/src/ws/ws-client.ts
++++ b/apps/web/src/ws/ws-client.ts
+@@ -463,7 +463,7 @@
+           this.requestSessionsInternal(); // 丢旧请求世代，offset=0
+           return;
+         }
+-        if (this.listOffset > 0 && frame.listVersion !== this.snapshot.listVersion) {
++        if (false && this.listOffset > 0 && frame.listVersion !== this.snapshot.listVersion) {
+           this.listGeneration += 1;
+           this.requestSessionsInternal();
+           this.transition({ sessions: null, total: 0, listVersion: null, hasMore: false, nextOffset: 0, pageState: "loading", pageError: null });

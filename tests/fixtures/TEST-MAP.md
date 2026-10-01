@@ -1477,3 +1477,28 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - 测试：real-app.test 重连三例（断线→1s 后重建→握手→提示消失+二次断线归零杀点「第 1 次/约 1 秒后」；认证失败 1008→35s 零重建——timer 计数不作断言面：fake timers 下 React scheduler 环境噪音恒挂 1 个 timer；手动立即重连同 tick 重建）；4401 判定=握手期 close 1008（§5.3；serverClose(4401) 不映射 auth-failed）。全仓 1821 绿双稳+tsc 0。
 - 变异三连真杀（基线 9797674 先 commit）：MU-UXE-1 删退避调度→断线重建例红；MU-UXE-2 authFailed 不排除→认证例红；MU-UXE-3 恢复不归零→首跑存活→补二次断线杀点例→复注入红。
 - 未入本批（已立案下一批）：历史会话贯通（~/.pi/agent/sessions 分组子目录树 vs 单层裸名 FILE_RE+file 契约全链=P0 安全面大改，走设计门）。
+
+## UI-R1 核心闭环（设计授权 2026-10-11；作者完工，待独立验收）
+
+- 唯一设计=`designs/ui-rework-v6.md`；授权基线 `4e7d397`，最终代码/变异基线 `496b1430716502af2a45ac04005095c932f64fef`。旧账本原文完整保留，以下仅追加，不改旧状态。
+- 作者回归：103 test files passed / 5 existing skipped；1876 tests passed / 24 existing skipped，exit 0。没有新增 skip、没有放宽断言；替换的旧布局断言按真实新入口迁移。web/server/protocol 包级 tsc 0；根段 exit 2/111 条，与授权前基线逐行完全一致、新增 0。根 tsconfig 不含 unit/web，关键新增文件另行主动 LSP 0 诊断；不宣称根类型全绿。
+
+| 改面与直接断言 | 用例文件（tests/unit/web/） | 必杀点 |
+|---|---|---|
+| 页面/草稿/操作分域；发送前零订阅；版本清稿；迟到 ACK 不抢 B/list；残稿只转移一次；五域结果；UI 截止保留协议 pending | conversation-state.test.ts；r1-real-app.test.ts | M01–M06 |
+| autoFile/模型保留值/恢复清单外合法值；发送前记偏好；ready 后拉清单；已有会话仅开新对话 | new-session.test.ts；r1-real-app.test.ts | M07–M10 |
+| HealthDot 三档明细；部分连接不能显示全绿；手机返回/断点保订阅、composer 节点保留 | health-dot.test.ts；r1-real-app.test.ts | M11–M12 |
+| 真 onKeyDown IME 零 prompt；长按 Enter 零重复发送 | r1-real-app.test.ts；真实浏览器 | M13、M27 |
+| raw 回帧长度推进游标；列表版本/世代不混页；本地自然日 DST；加载更多真发帧及第51条出现 | r1-list.test.ts；r1-real-app.test.ts | M14–M17、M21 |
+| history 增量/计数/同文不删未确认 final；逐 final 独立保留；真 SubscribeClient 接正文；消息与活动分层 | r1-live-handoff.test.ts；r1-real-app.test.ts | M18–M20、M22 |
+| 真 DOM 阅读滚动不抢贴底；返回/断点零业务帧；390×420 控件可命中 | tests/browser/ui-r1-capture.mjs（真 AppRoot→RealApp，本地假 socket） | M23 |
+| 真 StrictMode 不销毁 owner；真卸载清 timer 且旧回执零副作用；直播正文不逐 token 播报 | r1-real-app.test.ts；r1-lifetime.test.ts；r1-live-handoff.test.ts | M24–M26 |
+| managed composer 显示 stop 截止与受控错误；prompt/stop 并行、不清残稿、不回显远端错误正文 | r1-real-app.test.ts | M28–M29 |
+
+- 窄变异：`tests/browser/ui-r1-mutate.py` 在已提交基线的独立 archive 副本逐例注入，先唯一锚预检/`git apply --check`，再实际跑测试；29/29 真红，裸 exit 1，各例失败名/消息及还原 SHA 入 `tests/fixtures/run-records/ui-r1/mutations-manifest.json`。29 个可应用补丁在 `tests/fixtures/mutation-records/patches/ui-r1/`；原施工树未注入。作者逐个将还原 SHA 对照 `git show 496b143:<path>`。M04 是两层共同撤除的组合故障，不冒称各层独立可杀；M23 构建成功后真浏览器因阅读被拉到 21411 抛错，不把构建失败/超时冒充杀死。
+- 严格入口首红保留=`tests/fixtures/run-records/ui-r1/strictmode-first-red.log`；修复后同路径转绿，未删 StrictMode 测试或用快照替身绕过。
+- 截图/行为：`tests/browser/ui-r1-capture.mjs`；390/1280 × 明/暗 × 8 状态共32图，加短视口1图=33；page errors 0、水平溢出 0；manifest 绑定实际 sourceCommit/buildId/入口、demo=false、fakeSocket=true、productionTokenUsed=false。短视口是模拟，非真手机软键盘实证。
+- 最终部署：`assets/index-B8u0pu9k.js`，SHA256 `60f69b1c3269fd807e2e426be3fcf9fa39225a2f2b762ba9e79ec2ef4cfa38b6`；`tests/browser/ui-r1-publish.py` 先临时副本预演，再 frontend-dist-only 发布。旧资源保留、index 原子切回旧构建并核验字节、最后回候选；零服务重启/零认证请求/零业务会话文件触碰。部署 manifest 与 release 日志/浏览器 manifest/截图归档在 `tests/fixtures/run-records/ui-r1/`。
+- 日期口径：设计/交接标签为2026-10-11，工具运行时 createdAt 为2026-09-30；保留原始时间，不伪造同日运行。
+- 已知边界：真手机/生产会话连续性待 owner 独立检查；服务端/共享契约/协议包/冻结 WS 文档零改动。作者自查不替代 GLM 全量/窄变异复验、Kimi交叉审≥85及looker视觉审；根类型债不是本批修复范围。
+

@@ -1,0 +1,14 @@
+--- a/apps/web/src/components/live-stream.tsx
++++ b/apps/web/src/components/live-stream.tsx
+@@ -32,9 +32,10 @@
+       }
+     }
+     count.current = liveEvents.length; prior.current = liveEvents;
++    if (_historyEvents.some((event) => event.kind === "message" && event.role === "assistant")) frozen.current = [];
+     pending.current = { text: state.current.finalText === null ? liveTextOf(state.current) : "", thinking: state.current.finalText === null ? thinkingTextOf(state.current) : "", replies: [...frozen.current] };
+     if (frame.current === null) frame.current = schedule(() => { frame.current = null; setDisplay(pending.current); });
+-  }, [liveEvents, generationKey]); // 历史数组/计数/正文相同均不是清理或配对依据
++  }, [liveEvents, generationKey, _historyEvents]); // 历史数组/计数/正文相同均不是清理或配对依据
+   useEffect(() => () => { if (frame.current !== null) cancel(frame.current); }, []);
+   if (display.text === "" && display.thinking === "" && display.replies.length === 0) return null;
+   return <div className="live-stream" aria-live="off" aria-label="直播正文">

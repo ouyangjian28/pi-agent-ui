@@ -1,0 +1,11 @@
+--- a/apps/web/src/ws/draft-model.ts
++++ b/apps/web/src/ws/draft-model.ts
+@@ -2,7 +2,7 @@
+ export const MODEL_DEFAULT = "__default__";
+ export const LAST_MODEL_KEY = "piagent-last-model";
+ export function isPersistableModel(value: string): boolean {
+-  return value === MODEL_DEFAULT || (!value.startsWith("__") && LIMITS.modelPattern.test(value));
++  return value === MODEL_DEFAULT || (LIMITS.modelPattern.test(value));
+ }
+ export function readLastModel(): string | null {
+   try { const value = window.localStorage.getItem(LAST_MODEL_KEY); return value !== null && isPersistableModel(value) ? value : null; }

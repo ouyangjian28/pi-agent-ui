@@ -1,0 +1,11 @@
+--- a/apps/web/src/components/write-composer.tsx
++++ b/apps/web/src/components/write-composer.tsx
+@@ -219,7 +219,7 @@
+           {phaseText}
+         </span>
+       </div>
+-      {view.errorMessage !== null && ((!editor && result?.status !== "unknown") || (editor && (view.lastResult?.kind === "stop" || view.lastResumeResult?.ok === false))) ? (
++      {view.errorMessage !== null && ((!editor && result?.status !== "unknown") || false) ? (
+         <p className="banner" role="alert">
+           {view.errorMessage}
+         </p>

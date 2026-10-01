@@ -1,0 +1,11 @@
+--- a/apps/web/src/ws/draft-model.ts
++++ b/apps/web/src/ws/draft-model.ts
+@@ -5,7 +5,7 @@
+   return value === MODEL_DEFAULT || (!value.startsWith("__") && LIMITS.modelPattern.test(value));
+ }
+ export function readLastModel(): string | null {
+-  try { const value = window.localStorage.getItem(LAST_MODEL_KEY); return value !== null && isPersistableModel(value) ? value : null; }
++  try { const value = window.localStorage.getItem(LAST_MODEL_KEY); return value !== null && isPersistableModel(value) ? null : null; }
+   catch { return null; }
+ }
+ export function writeLastModel(value: string): void {

@@ -1,0 +1,11 @@
+{
+  "baseline": "4e7d397",
+  "baselineCount": 111,
+  "candidateCount": 111,
+  "identicalDiagnostics": true,
+  "addedDiagnostics": [],
+  "removedDiagnostics": [],
+  "baselineExit": 2,
+  "candidateExit": 2,
+  "webTestsExcludedByRootConfig": true
+}
