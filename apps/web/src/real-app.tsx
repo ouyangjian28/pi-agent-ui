@@ -8,7 +8,7 @@ import "./real-app-hybrid.css";
 import { WriteComposer } from "./components/write-composer";
 import { HealthDot } from "./components/health-dot";
 import { ConversationHeader } from "./components/conversation-header";
-import { ConversationState } from "./ws/conversation-state";
+import { ConversationState, authenticatedAttachmentUploader } from "./ws/conversation-state";
 import {
   autoFile,
   readLastModel,
@@ -57,7 +57,8 @@ export function RealApp({ createSocket }: RealAppProps) {
   });
   const [reconnectUi, setReconnectUi] = useState<{ attempts: number; nextInMs: number } | null>(null);
   const clientsRef = React.useRef<AppClients | null>(null);
-  const [owner] = useState(() => new ConversationState(() => clientsRef.current?.wsClient.requestSessions()));
+  const uploadTokenRef = React.useRef(token); uploadTokenRef.current = token;
+  const [owner] = useState(() => new ConversationState(() => clientsRef.current?.wsClient.requestSessions(), undefined, authenticatedAttachmentUploader(() => uploadTokenRef.current)));
   useConversationLifetime(owner);
   // B1：当前连接目标为跨源（dev 覆盖）时为真——拒绝面接管（不拨线+明白提示）
   const [untrustedTarget, setUntrustedTarget] = useState(false);
