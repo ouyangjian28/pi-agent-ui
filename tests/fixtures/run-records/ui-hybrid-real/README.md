@@ -15,4 +15,12 @@
 - `verified-baseline-tests.log`：1876 pass / 24 既有 opt-in skip；`verified-baseline-build.log`：web 构建和 server 类型构建 exit 0；三包类型、实际候选 RPC、服务器/协议/冻结文档零差分在同任务通过（RPC 日志 `verified-baseline-rpc.log`）。这才解除此前正式接线前阻塞，不删除或改写前次红灯。
 - 后续正式界面从 `40841ee` 开始；搜索与真实视口驱动 `2618498`，字体断言 `d582902`，视觉收口 `8c30ff4`。本小节是 UI 开工前基线，不把它冒充上述正式界面的复验结果。
 
+## 正式壳视觉收口复验（2026-10-01）
+
+- 代码 `8c30ff4115bb0d8abf6db55f900c57b57b2ead67`；`b98d4d287` 最终 exit 0，1879 pass/24 原有 opt-in skip，build 与 web/server/protocol 三包 tsc 均 0。原始日志 gzip 与可读日志 `final-*.log` 成对保存。
+- `final-capture/manifest.json` 为原始 manifest；路径 `.pi/hybrid-real/final-capture/` 原样保留，其各图片现在也可在本目录 `final-capture/` 用同一 basename 找到。64 个真实视口图（360/390/1280/1440 × 明暗 × 8 场景）+1 个短视口图=65图；65 条 manifest 记录为 64 场景+1 行为摘要。零横溢/页面异常，首链与正文、模型载入/错误、pending、streaming、unknown 等均为真实 RealApp 配本地假 socket。
+- 读者上翻不抢、跨断点/手机返回 composer DOM 与草稿保留、业务帧差 0、390×420 唯一输入/发送命中、IME 不误发；字体计算值是 UI 字体而非旧祖先 mono。`font-red.log` 为修前新增硬断言真实红灯，不是注入变异的冒名记录。焦点收口仅 CSS，外框焦点仍在。
+- `final-archive.json` 含 source/task/文件 SHA256 与实际 HTML、JS bundle 分别标注的 SHA256。bundle=`assets/index-wY-1O2Cc.js`；资产 hash 不是伪装部署证据。截图与行为不能当真手机软键盘、实际 pi 业务、独立审核或用户体验通过。
+- 服务器业务/协议/冻结文档相对原 R1 基线零差分；升级依赖与测试替身修正另有边界。正式 pi 应用桥接、窄变异、独立交叉/视觉审和用户试用尚未完成，不申请最终上线门。
+
 这些均为本地合成测试，不使用生产认证、生产会话或付费提供商；不是正式 UI/真机/独立验收。

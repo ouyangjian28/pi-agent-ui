@@ -1518,3 +1518,18 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - 原 RealApp/共享 ConversationState/冻结协议/服务端业务未改，日常服务/全局 pi 未切换；SDK 启动 PATH 与 handled 等应用兼容风险尚须正式接线阶段验证。新增两条独立脚本不冒称已计入 1876 Vitest 用例。
 - 本阶段未做新增窄变异、独立交叉审或生产部署；用户体验未验收，不申请正式 UI 完工门。
 
+## UI-HYBRID 正式壳与已加载搜索（2026-10-01；pi 应用真链仍另验）
+
+- 基线竞态修复 `225d5f5`：CW3/CW6 真实存活 cat launcher；精确 cause 与在途销毁断言不放宽。任务 b0085de5f：8×11 文件复验+1876 全套/24 原有 opt-in、构建/三包类型/RPC/业务及冻结文件零差分通过；红灯与复验均归档，不用单例 pass 遮盖原红灯。
+- 正式壳 `40841ee`、新用例/视口驱动 `2618498`、字体断言 `d582902`、视觉修正 `8c30ff4`。最终任务 b98d4d287 exit 0：104 文件/1879 测试 pass，5 文件/24 原有 opt-in skip 不变；build 与三包 tsc 0。根历史 111 类型诊断分账，不称根全绿。
+
+| 检查对象 | 重放入口 | 关键断言 |
+|---|---|---|
+| 已加载会话筛选 | `npm exec vitest -- run tests/unit/web/ui-hybrid-search.test.ts` | 真 WsClient/假 socket；标题/文件筛选不发额外帧，保留选中；no-match 不伪装库空，提示非全库；offset=2 分页继续筛选 |
+| 正式入口/实际视口 | `npm run build` → `node tests/browser/ui-hybrid-capture.mjs <output>` | AppRoot→RealApp、demo=false；360/390/1280/1440×明暗×8 场景、fullPage=false、横溢硬断言；既有滚动/草稿/DOM/零副作用/未知结果/IME/点击断言保留 |
+| 阅读字体回归 | 同一真实浏览器驱动 | 计算字体不可为祖先 mono；修前 font-red.log 真红，修后所有正文及直播正文为 UI 字体。不是变异报告 |
+
+- 65 图及 manifest、final 日志/原始 gzip、独立 HTML/JS hash 与 source/task 索引：`tests/fixtures/run-records/ui-hybrid-real/`。原 manifest 的 .pi 图片路径保留；耐久镜像 `final-capture/` 同名文件和 final-archive.json 提供对应关系。
+- 服务器业务/协议/冻结文档不变，升级依赖和原测试替身修正另记；没有复制样板假状态到正式入口。实际工具 LiveEvent 仅通用进度，未捏造具名工具卡或更改冻结数据。
+- 当前 UI 证据是本地假 socket；应用真实连接本地 pi 0.99.2、新窄变异、独立交叉/视觉审、真手机和用户试用仍未完成；未部署日常服务。
+

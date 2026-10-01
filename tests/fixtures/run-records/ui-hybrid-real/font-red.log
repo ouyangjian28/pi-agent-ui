@@ -1,0 +1,8 @@
+file:///home/yyj/ai/repos/pi-agent-ui-hybrid/tests/browser/ui-hybrid-capture.mjs:296
+          throw new Error(`Chat inherited legacy monospace font: ${measurements.chatFonts.join(" | ")}`);
+                ^
+
+Error: Chat inherited legacy monospace font: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace | ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace
+    at file:///home/yyj/ai/repos/pi-agent-ui-hybrid/tests/browser/ui-hybrid-capture.mjs:296:17
+
+Node.js v24.18.0
