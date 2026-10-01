@@ -1,6 +1,7 @@
 // 3c-3：composition 写侧接线受控测试（CW1-CW9）。
 // 真链=composition→gateway→RpcWriteHost→session-registry→RpcSession→PiProcessHost→真实子进程；
-// 进程用 /bin/cat（回声不答 readiness 探针→确定性 readiness-timeout；无 LLM、无 PI_E2E 门）。
+// CW3/CW6 以受控 launcher 忽略 pi 参数后 exec /bin/cat：保持存活、回声但不答探针。
+// 其他直接 /bin/cat 的用例只依赖启动失败/退出，不把不认识 --mode 而早退的 cat 冒称探针超时。无 LLM。
 // 真正的 readiness 成功+真 pi 写/停链路归 tests/integration/ws-write-e2e.test.ts（PI_E2E=1）。
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, chmod, writeFile } from "node:fs/promises";
@@ -39,7 +40,14 @@ async function start(cfg: Record<string, unknown>): Promise<PiAgentUiServer> {
   return s;
 }
 
-/** 受控写链：piBin=/bin/cat（探针回声≠response→readiness 超时确定性触发）。 */
+/** 真实存活且不答探针的子进程；仅精确超时/在途销毁用例使用，不修改生产启动参数。 */
+async function waitingCatBin(dir: string): Promise<string> {
+  const bin = join(dir, "echo-without-pi-args.sh");
+  await writeFile(bin, "#!/bin/sh\nprintf '%s\\n' 'controlled-readiness-wait' >&2\nexec /bin/cat\n", { mode: 0o700 });
+  return bin;
+}
+
+/** 真实子进程失败链：直接 cat 不支持 pi 参数；CW3/CW6 另用存活 launcher。 */
 const CAT_WRITE = {
   sessionFor: (f: string) => `${f}.session`,
   piBin: "/bin/cat",
@@ -86,14 +94,15 @@ describe("3c-3 composition 写侧接线", () => {
 
   it("CW3 真链失败面：prompt→cat 回声不答探针→not-ready(cause=readiness-timeout)+write-ack；审计含 spawn/registry/readiness 链", async () => {
     const { dir, cfg, audits } = await mkCfg({ write: CAT_WRITE });
+    // /bin/cat --mode rpc 会早退；这不能作为“存活却未答探针”的超时替身。
+    cfg.write = { ...CAT_WRITE, piBin: await waitingCatBin(dir) };
     const s = await start(cfg);
     const c = await connect(s.port);
     try {
       c.ws.send(JSON.stringify({ t: "prompt", requestId: "r1", file: "s1.jsonl", text: "hi" }));
       const ack = await c.next("write-ack", (f) => f.requestId === "r1");
-      // M-OPS v1.4：真链 stderr 面（cat 不认识 --mode 参数→usage 报错）→detail 附带（三路 readiness-timeout 之一）
-      expect(ack.outcome).toMatchObject({ kind: "not-ready", cause: "readiness-timeout" });
-      expect(typeof (ack.outcome as { detail?: string }).detail).toBe("string");
+      // 精确验证存活但未答探针的超时，不放宽成 timeout/exit 二选一；诊断也必须来自本例。
+      expect(ack.outcome).toMatchObject({ kind: "not-ready", cause: "readiness-timeout", detail: expect.stringContaining("controlled-readiness-wait") });
       await new Promise<void>((res) => { const iv = setInterval(() => { if (audits.some((l) => l.includes("session-registry created"))) { clearInterval(iv); res(); } }, 20); setTimeout(() => { clearInterval(iv); res(); }, 3_000); });
       expect(audits.some((l) => l.includes("session-registry created") && l.includes("s1.jsonl"))).toBe(true);
       expect(audits.some((l) => l.includes("readiness"))).toBe(true);
@@ -138,11 +147,20 @@ describe("3c-3 composition 写侧接线", () => {
   });
 
   it("CW6 dispose 在途：readiness 等待期 server.dispose()→resolve 有限时间内+审计含 registry disposed（统一销毁面）", async () => {
-    const { cfg, audits } = await mkCfg({ write: { ...CAT_WRITE, readinessTimeoutMs: 60_000 } }); // 长窗：必在等待期 dispose
+    const { dir, cfg, audits } = await mkCfg({ write: { ...CAT_WRITE, readinessTimeoutMs: 60_000 } });
+    let spawned = false;
+    cfg.write = { ...CAT_WRITE, readinessTimeoutMs: 60_000, piBin: await waitingCatBin(dir), onSpawned: () => { spawned = true; } };
     const s = await start(cfg);
     const c = await connect(s.port);
     c.ws.send(JSON.stringify({ t: "prompt", requestId: "r1", file: "s1.jsonl", text: "hi" }));
-    await new Promise((r) => setTimeout(r, 150)); // 让链路走到 readiness 等待
+    // 真实 spawn 观测回调已到（readiness 在同一 spawn 回调中登记），且尚无退出；不是 idle dispose。
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => { clearInterval(poll); reject(new Error("CW6 子进程未进入存活等待")); }, 3_000);
+      const poll = setInterval(() => {
+        if (spawned) { clearInterval(poll); clearTimeout(timeout); resolve(); }
+      }, 10);
+    });
+    expect(audits.some((line) => line.includes("process-host exit"))).toBe(false);
     const t0 = Date.now();
     await s.dispose();
     expect(Date.now() - t0).toBeLessThan(15_000); // 退出确认预算内（SIGTERM 链杀 cat）
