@@ -187,7 +187,19 @@ try {
   const search = page.getByLabel("搜索已加载会话");
   await search.fill("owned-history.jsonl");
   await page.locator(".session-list button").click();
-  await until(() => page.locator(".session-list button[aria-current]").count(), "old conversation selected");
+  await until(
+    () =>
+      frames.some(
+        (f) =>
+          f.t === "snapshot" &&
+          f.page.some((event) => event.kind === "message" && event.textPreview?.text === "旧会话里的受控内容"),
+      ),
+    "old conversation successfully subscribed, not just selected",
+  );
+  await until(
+    () => page.locator(".history-list").getByText("旧会话里的受控内容", { exact: true }).isVisible(),
+    "old conversation content actually rendered",
+  );
   await search.fill(first.file);
   await page.locator(".session-list button").click();
   await until(
@@ -223,6 +235,7 @@ try {
     `Actual process stop not confirmed: ${JSON.stringify(stop.outcome)}`,
   );
   assert(pageErrors.length === 0 && browserBlocked.length === 0, "Browser errors or external requests");
+  assert(!frames.some((f) => f.t === "error"), "Server protocol error hidden by UI selection state");
   const transcriptRows = (await readFile(join(transcripts, first.file), "utf8"))
     .split("\n")
     .filter(Boolean)
@@ -232,6 +245,10 @@ try {
     transcriptRows.some((row) => row.type === "message" && row.message?.role === "assistant"),
     "Actual pi transcript has no assistant message",
   );
+  const ownedTranscripts = {};
+  for (const file of await readdir(transcripts))
+    if (file.endsWith(".jsonl")) ownedTranscripts[file] = await readFile(join(transcripts, file), "utf8");
+  await writeFile(join(out, "owned-transcripts.json"), JSON.stringify(ownedTranscripts, null, 2) + "\n");
   result = {
     runtime: actualVersion,
     sourceCommit: execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(),

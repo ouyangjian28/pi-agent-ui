@@ -65,7 +65,12 @@ with tempfile.TemporaryDirectory(prefix='pi099-real-app-') as home:
     (agent / 'settings.json').write_text(json.dumps({'defaultProvider': 'ui-upgrade-test', 'defaultModel': 'fixture', 'defaultThinkingLevel': 'off'}))
     timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
     (root / 'transcripts/owned-history.jsonl').write_text(json.dumps({'type': 'session', 'version': 3,
-        'id': 'owned-history', 'timestamp': timestamp, 'cwd': str(root / 'workspace')}) + '\n')
+        'id': 'owned-history', 'timestamp': timestamp, 'cwd': str(root / 'workspace')}) + '\n' +
+        json.dumps({'type': 'message', 'id': 'feed0001', 'parentId': None, 'timestamp': timestamp,
+                    'message': {'role': 'user', 'content': [{'type': 'text', 'text': '旧会话里的受控内容'}],
+                                'timestamp': int(datetime.datetime.now().timestamp() * 1000)}}) + '\n')
+    # Valid dual-tree fixture: an old transcript also has an existing journal source.
+    (root / 'journal/owned-history.jsonl').write_text('')
     env = {'PATH': '/home/yyj/.nvm/versions/node/v24.18.0/bin:/usr/bin:/bin', 'HOME': home,
            'TMPDIR': home, 'PI_CODING_AGENT_DIR': str(agent), 'PI_OFFLINE': '1', 'LANG': 'C.UTF-8',
            'NO_COLOR': '1', 'PI099_FIXTURE_ROOT': home, 'PI099_OUTPUT_DIR': str(OUT),
