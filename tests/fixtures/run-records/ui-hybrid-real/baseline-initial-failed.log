@@ -1,0 +1,262 @@
+
+> pi-agent-ui-monorepo@0.0.0 test
+> vitest run
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.1 [39m[90m/home/yyj/ai/repos/pi-agent-ui-hybrid[39m
+
+ [32m✓[39m [30m[45m integration [49m[39m tests/integration/pi-e2e.test.ts [2m([22m[2m11 tests[22m[2m | [22m[33m7 skipped[39m[2m)[22m[32m 3[2mms[22m[39m
+[main:err] (node:1464323) ExperimentalWarning: Transform Types is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[main] 2026-10-01T04:41:52.212Z composition listening host=127.0.0.1 port=33979 origins=2 roots=3
+[main] 2026-10-01T04:41:52.212Z main ready url=http://127.0.0.1:33979 origins=http://127.0.0.1:33979,http://localhost:33979 roots=/tmp/prod-smoke-iEmusZ/proj/sessions/pi,/tmp/prod-smoke-iEmusZ/proj/sessions,/tmp/prod-smoke-iEmusZ/proj write=on journalRoot=/tmp/prod-smoke-iEmusZ/proj/sessions transcriptsRoot=/tmp/prod-smoke-iEmusZ/proj/sessions/pi piBin=/home/yyj/ai/repos/pi-agent-ui-hybrid/tests/fixtures/mops-fake-pi.mjs
+[main] 2026-10-01T04:41:52.226Z upgrade-accepted conn=t-1 origin=http://127.0.0.1:33979 clientIp=127.0.0.1 remote=127.0.0.1 proxied=false tls=false
+2026-10-01T04:41:52.227Z conn-open id=s-a9da52406c4016b8b15299d3e9c24606 origin=http://127.0.0.1:33979 loopback=true tls=false conns=1
+[main] 2026-10-01T04:41:52.257Z get-roots conn=s-a9da52406c4016b8b15299d3e9c24606 count=3
+ [2m[90m↓[39m[22m [30m[45m integration [49m[39m tests/integration/d1-live-e2e.test.ts [2m([22m[2m1 test[22m[2m | [22m[33m1 skipped[39m[2m)[22m
+[main] 2026-10-01T04:41:52.293Z session-registry created file=/tmp/prod-smoke-iEmusZ/proj/sessions/smoke.jsonl session=/tmp/prod-smoke-iEmusZ/proj/sessions/pi/smoke.jsonl
+[main] 2026-10-01T04:41:52.298Z rpc-session sess-49907bf5e5c6 supervisor 2026-10-01T04:41:52.298Z process-supervisor process-spawned generation=1
+[main] 2026-10-01T04:41:52.316Z guarded-writer ready file=/tmp/prod-smoke-iEmusZ/proj/sessions/smoke.jsonl epoch=1 bootId=aac1f451-95c1-4cde-a144-1e00191809e8 byteEnd=105
+ [2m[90m↓[39m[22m [30m[45m integration [49m[39m tests/integration/composed-e2e.test.ts [2m([22m[2m4 tests[22m[2m | [22m[33m4 skipped[39m[2m)[22m
+[main] 2026-10-01T04:41:52.332Z rpc-session sess-49907bf5e5c6 rpc-session ready generation=1
+[main] 2026-10-01T04:41:52.344Z rpc-session sess-49907bf5e5c6 supervisor 2026-10-01T04:41:52.344Z process-supervisor stdin-written intentId=i-1 commandId=1 generation=1
+[main] 2026-10-01T04:41:52.345Z write-frame conn=s-a9da52406c4016b8b15299d3e9c24606 t=prompt file=smoke.jsonl outcome=launched
+[main] 2026-10-01T04:41:52.363Z conn-transport-closed id=s-a9da52406c4016b8b15299d3e9c24606
+[main] 2026-10-01T04:41:52.366Z upgrade-accepted conn=t-2 origin=http://127.0.0.1:33979 clientIp=127.0.0.1 remote=127.0.0.1 proxied=false tls=false
+[main] 2026-10-01T04:41:52.366Z conn-open id=s-a52b855119a519534abfaa51b8c9a3d7 origin=http://127.0.0.1:33979 loopback=true tls=false conns=1
+ [2m[90m↓[39m[22m [30m[45m integration [49m[39m tests/integration/m-sec-e2e.test.ts [2m([22m[2m3 tests[22m[2m | [22m[33m3 skipped[39m[2m)[22m
+[main] 2026-10-01T04:41:52.419Z upgrade-accepted conn=t-3 origin=http://127.0.0.1:33979 clientIp=127.0.0.1 remote=127.0.0.1 proxied=false tls=false
+2026-10-01T04:41:52.419Z conn-open id=s-7293b8d41c45714aa6728f11b3820100 origin=http://127.0.0.1:33979 loopback=true tls=false conns=2
+[main] 2026-10-01T04:41:52.419Z conn-transport-closed id=s-a52b855119a519534abfaa51b8c9a3d7
+[main] 2026-10-01T04:41:52.445Z session-registry created file=/tmp/prod-smoke-iEmusZ/proj/sessions/..audit.jsonl session=/tmp/prod-smoke-iEmusZ/proj/sessions/pi/..audit.jsonl
+[main] 2026-10-01T04:41:52.449Z rpc-session sess-9a9362e4090b supervisor 2026-10-01T04:41:52.449Z process-supervisor process-spawned generation=1
+[main] 2026-10-01T04:41:52.456Z guarded-writer ready file=/tmp/prod-smoke-iEmusZ/proj/sessions/..audit.jsonl epoch=1 bootId=aac1f451-95c1-4cde-a144-1e00191809e8 byteEnd=105
+[main] 2026-10-01T04:41:52.474Z rpc-session sess-9a9362e4090b rpc-session ready generation=1
+ [2m[90m↓[39m[22m [30m[45m integration [49m[39m tests/integration/p02-assembly-e2e.test.ts [2m([22m[2m4 tests[22m[2m | [22m[33m4 skipped[39m[2m)[22m
+[main] 2026-10-01T04:41:52.487Z rpc-session sess-9a9362e4090b supervisor 2026-10-01T04:41:52.487Z process-supervisor stdin-written intentId=i-1 commandId=1 generation=1
+[main] 2026-10-01T04:41:52.487Z write-frame conn=s-7293b8d41c45714aa6728f11b3820100 t=prompt file=..audit.jsonl outcome=launched
+ [32m✓[39m [30m[45m integration [49m[39m tests/integration/login-e2e.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 194[2mms[22m[39m
+[main] 2026-10-01T04:41:52.497Z main signal=SIGTERM disposing
+[main] 2026-10-01T04:41:52.497Z conn-close id=s-7293b8d41c45714aa6728f11b3820100 code=1000 reason=server-shutdown
+ [2m[90m↓[39m[22m [30m[45m integration [49m[39m tests/integration/ws-write-e2e.test.ts [2m([22m[2m4 tests[22m[2m | [22m[33m4 skipped[39m[2m)[22m
+[main] 2026-10-01T04:41:52.524Z ws-transport disposed remaining=0
+[main] 2026-10-01T04:41:52.524Z process-host stop handle=proc-2 signal=SIGTERM
+[main] 2026-10-01T04:41:52.525Z rpc-session sess-9a9362e4090b supervisor 2026-10-01T04:41:52.525Z process-supervisor process-stop signal=SIGTERM generation=1
+[main] 2026-10-01T04:41:52.527Z process-host exit handle=proc-2 code=null signal=SIGTERM
+[main] 2026-10-01T04:41:52.528Z rpc-session sess-9a9362e4090b coordinator generation-retired generation=1 clearedCommands=1 clearedEvents=0 droppedSettled=false releasedPendingTimeout=false
+[main] 2026-10-01T04:41:52.528Z rpc-session sess-9a9362e4090b supervisor 2026-10-01T04:41:52.528Z process-supervisor generation-retired reason=handover generation=1 clearedCommands=1 clearedEvents=0 gateClosed=true
+[main] 2026-10-01T04:41:52.528Z rpc-session sess-9a9362e4090b supervisor 2026-10-01T04:41:52.528Z process-supervisor process-retired generation=1
+[main] 2026-10-01T04:41:52.528Z process-host stop handle=proc-1 signal=SIGTERM
+[main] 2026-10-01T04:41:52.528Z rpc-session sess-49907bf5e5c6 supervisor 2026-10-01T04:41:52.528Z process-supervisor process-stop signal=SIGTERM generation=1
+[main] 2026-10-01T04:41:52.531Z process-host exit handle=proc-1 code=null signal=SIGTERM
+[main] 2026-10-01T04:41:52.531Z rpc-session sess-49907bf5e5c6 coordinator generation-retired generation=1 clearedCommands=1 clearedEvents=0 droppedSettled=false releasedPendingTimeout=false
+[main] 2026-10-01T04:41:52.531Z rpc-session sess-49907bf5e5c6 supervisor 2026-10-01T04:41:52.531Z process-supervisor generation-retired reason=handover generation=1 clearedCommands=1 clearedEvents=0 gateClosed=true
+[main] 2026-10-01T04:41:52.531Z rpc-session sess-49907bf5e5c6 supervisor 2026-10-01T04:41:52.531Z process-supervisor process-retired generation=1
+[main] 2026-10-01T04:41:52.531Z session-registry disposed
+[main] 2026-10-01T04:41:52.532Z composition disposed
+[main] 2026-10-01T04:41:52.532Z main disposed
+ [32m✓[39m [30m[45m integration [49m[39m tests/integration/prod-smoke.test.ts [2m([22m[2m7 tests[22m[2m)[22m[33m 614[2mms[22m[39m
+ [32m✓[39m [30m[45m integration [49m[39m tests/integration/recovery-real.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 281[2mms[22m[39m
+ [32m✓[39m [30m[45m integration [49m[39m tests/integration/login-body-flow.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 462[2mms[22m[39m
+ [32m✓[39m [30m[45m integration [49m[39m tests/integration/ui-passthrough-e2e.test.ts [2m([22m[2m9 tests[22m[2m | [22m[33m1 skipped[39m[2m)[22m[33m 723[2mms[22m[39m
+ [32m✓[39m [30m[45m integration [49m[39m tests/integration/d4-entry-e2e.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 922[2mms[22m[39m
+ [32m✓[39m [30m[45m integration [49m[39m tests/integration/m-ops-e2e.test.ts [2m([22m[2m7 tests[22m[2m)[22m[33m 1541[2mms[22m[39m
+   [32m✓[39m M-OPS E2E（真 composition+假 pi） [2m(7)[22m
+     [33m[2m✓[22m[39m 腿3c：timeout 模式+小 readiness 超时→not-ready{cause:readiness-timeout}[33m 537[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/app.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 1005[2mms[22m[39m
+   [32m✓[39m 双布局壳与导航 [2m(8)[22m
+     [33m[2m✓[22m[39m 桌面呈现三栏；窄屏只呈现一级且动态响应断点[33m 301[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/ws-gateway.test.ts [2m([22m[2m111 tests[22m[2m)[22m[33m 1373[2mms[22m[39m
+ [31m❯[39m [30m[42m unit [49m[39m tests/unit/server/composition-write.test.ts [2m([22m[2m11 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 925[2mms[22m[39m
+   [31m❯[39m 3c-3 composition 写侧接线 [2m(11)[22m
+     [32m✓[39m CW1 writeHost 与 write 同供 → 拒启（接线歧义门）[32m 10[2mms[22m[39m
+     [32m✓[39m CW2 write.sessionFor 缺失 → 拒启（写侧无从落地）[32m 1[2mms[22m[39m
+[31m     [31m×[31m CW3 真链失败面：prompt→cat 回声不答探针→not-ready(cause=readiness-timeout)+write-ack；审计含 spawn/registry/readiness 链[39m[32m 80[2mms[22m[39m
+     [32m✓[39m CW4 会话缓存：两次 prompt 同 file→registry 恰建一次（audit 计数）[32m 262[2mms[22m[39m
+     [32m✓[39m CW5 stop on idle 会话：write-stop-ack {kind:no-process}（不伪造进程死活）[32m 62[2mms[22m[39m
+     [32m✓[39m CW6 dispose 在途：readiness 等待期 server.dispose()→resolve 有限时间内+审计含 registry disposed（统一销毁面）[32m 191[2mms[22m[39m
+     [32m✓[39m CW7 statusFor 真源接线：订阅快照 status.process.phase=idle（未构造会话）+sessionId 确定性派生[32m 51[2mms[22m[39m
+     [32m✓[39m CW8 statusFor 构造后：prompt 退役后快照 process.phase∈{idle,running,stopping}+bg known（注册表观测面贯通）[32m 62[2mms[22m[39m
+     [32m✓[39m CW9 dispose 审计序：session-registry disposed 先于 composition disposed（统一销毁挂在收尾链）[32m 49[2mms[22m[39m
+     [32m✓[39m CW10 越界 file 照旧 4404（写侧接线不放宽读侧授权域）：prompt file=/etc/hosts.jsonl[32m 49[2mms[22m[39m
+     [32m✓[39m CW11（20b B2）onSpawned 观测面：spawn 即时回调 file+handle+generation（身份在 spawn 时记录，非事后反推）[32m 106[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/login-route.test.ts [2m([22m[2m37 tests[22m[2m)[22m[33m 1286[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/ws-gateway-entry.test.ts [2m([22m[2m16 tests[22m[2m)[22m[33m 2022[2mms[22m[39m
+   [32m✓[39m D4 批② W-d4-g：reason 六值出口 [2m(7)[22m
+     [33m[2m✓[22m[39m g9 oversized·源一：行超 1MiB 硬读限→oversized（readLineAt 口径）[33m 1123[2mms[22m[39m
+     [33m[2m✓[22m[39m g10 触顶流废弃：装载 20_001 行>maxEventsPerStream→订阅被拒+订阅面清空——后续 entry-get→not-subscribed（index-evicted 为纵深防御位：closeSubscriptionsFor 同步删 subs，正常时序必先落 not-subscribed；audit 落 index-over-budget）[33m 816[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/rpc-session.test.ts [2m([22m[2m40 tests[22m[2m)[22m[33m 2220[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/composition.test.ts [2m([22m[2m16 tests[22m[2m)[22m[33m 2213[2mms[22m[39m
+   [32m✓[39m 3b-3① composition [2m(16)[22m
+     [33m[2m✓[22m[39m R-03 生产流身份随机：两实例首流不同 id；跨实例 cursor → 4404 拒绝[33m 1390[2mms[22m[39m
+     [33m[2m✓[22m[39m Y-05 tokenPollMs 轮询真实生效：无手动 reload，写新 token 文件后旧 token 自动失效[33m 346[2mms[22m[39m
+     [33m[2m✓[22m[39m reloadTokens：写新 token 文件→轮换生效（旧 token 拒新 hello）[33m 305[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/use-write.test.ts [2m([22m[2m33 tests[22m[2m)[22m[33m 726[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/static-serve.test.ts [2m([22m[2m20 tests[22m[2m)[22m[33m 2579[2mms[22m[39m
+   [32m✓[39m ⑤B SM：main.ts CLI 冒烟 [2m(5)[22m
+     [33m[2m✓[22m[39m SM1 --help → 用法文本+退出 0[33m 307[2mms[22m[39m
+     [33m[2m✓[22m[39m SM2 缺 token-file → 退出 1+必填提示[33m 337[2mms[22m[39m
+     [33m[2m✓[22m[39m SM3 非法 port（0/越界/非整数）→ 退出 1+端口门提示（真 token/真 root：排际 token/root 门先触发偷换杀点）[33m 927[2mms[22m[39m
+     [33m[2m✓[22m[39m SM4 root 不存在 → 退出 1+目录提示[33m 362[2mms[22m[39m
+     [33m[2m✓[22m[39m SM5 全参数起服→ready 审计行→SIGTERM 优雅退出 0（静态托管真跑）[33m 406[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/history-source.test.ts [2m([22m[2m75 tests[22m[2m)[22m[33m 929[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/guarded-journal-writer.test.ts [2m([22m[2m17 tests[22m[2m)[22m[33m 794[2mms[22m[39m
+   [32m✓[39m r2 根修：生命周期队列（GPT r1 审 R1/R2/R3 杀点） [2m(5)[22m
+     [33m[2m✓[22m[39m R3 装配 I/O 异常不杀进程（无 append 消费者）：子进程实跑 exit=0+后续 append 恒拒[33m 431[2mms[22m[39m
+ [32m✓[39m [30m[45m integration [49m[39m tests/integration/ws-transport.net.test.ts [2m([22m[2m36 tests[22m[2m)[22m[33m 3368[2mms[22m[39m
+   [32m✓[39m 3b-1 真网络：⑤真 send 回调+清理 [2m(11)[22m
+     [33m[2m✓[22m[39m 客户端暂停读 → done 不兑现（绑定真实 flush 非立即返回）；恢复读 → done 兑现[33m 860[2mms[22m[39m
+   [32m✓[39m 3b-1 真网络：⑥token 三态（真 TokenAuthority 组合） [2m(4)[22m
+     [33m[2m✓[22m[39m R6/3b-1 per-IP 认证失败限速+退避（真网络）：达限→封锁内正确令牌也拒；过期→恢复[33m 327[2mms[22m[39m
+   [32m✓[39m 3b-1 真网络：⑦关闭竞态+无句柄悬挂 [2m(5)[22m
+     [33m[2m✓[22m[39m R02/3b-1 普通 GET → 404 应答（自建 server 管未升级连接）；不读不关的裸 socket 不挂 dispose（整体有界）[33m 305[2mms[22m[39m
+     [33m[2m✓[22m[39m R02/3b-1 接收器自启关闭同截止：真暂停读的客户端在 closeHandshakeMs 内被 terminate（服务端终局时延）[33m 410[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/repair-tail.test.ts [2m([22m[2m45 tests[22m[2m)[22m[33m 831[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/token-gate.test.ts [2m([22m[2m27 tests[22m[2m)[22m[33m 769[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/reduced-motion.browser.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 563[2mms[22m[39m
+   [32m✓[39m B2 减动效浏览器实测（真实 Chromium 计算样式，亮/暗分档挂根） [2m(1)[22m
+     [33m[2m✓[22m[39m reduce 偏好下亮/暗两档（:root[data-theme]）四元素 animationName=none 且 transitionDuration=0s[33m 558[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/real-app.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 1104[2mms[22m[39m
+   [32m✓[39m 真模式 smoke：token 门→列表→详情→写面 [2m(2)[22m
+     [33m[2m✓[22m[39m URL token 进门→三件套握手→列表渲染→点选订阅→快照到达→写面发送全链[33m 498[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/r1-real-app.test.ts [2m([22m[2m12 tests[22m[2m)[22m[33m 2819[2mms[22m[39m
+   [32m✓[39m R1 真 AppRoot+三客户端首链 [2m(12)[22m
+     [33m[2m✓[22m[39m 欢迎首字不重挂；默认在线帧缺 model/cwd；launched→真实列表新行/正文→第二条同 file[33m 323[2mms[22m[39m
+     [33m[2m✓[22m[39m 列表第51条真实可见、点选正确 file；partial 与累计数量可发现[33m 614[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/recovery-evidence-source.test.ts [2m([22m[2m46 tests[22m[2m)[22m[33m 506[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/r1-live-handoff.test.ts [2m([22m[2m7 tests[22m[2m)[22m[33m 767[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/mux-b2.test.ts [2m([22m[2m12 tests[22m[2m)[22m[33m 614[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/live-stream-view.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 678[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/adjudicate.test.ts [2m([22m[2m31 tests[22m[2m)[22m[33m 470[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/new-session.test.ts [2m([22m[2m22 tests[22m[2m)[22m[33m 1121[2mms[22m[39m
+   [32m✓[39m M-OPS NewSession [2m(8)[22m
+     [33m[2m✓[22m[39m 批3：无文件名输入框；首条消息空→创建钮禁用；创建→file=auto- 格式（model 不携带）[33m 307[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/use-session-detail.test.ts [2m([22m[2m36 tests[22m[2m)[22m[33m 635[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/write-client.test.ts [2m([22m[2m61 tests[22m[2m)[22m[33m 494[2mms[22m[39m
+   [32m✓[39m G6 composer 写挂面（真实链） [2m(3)[22m
+     [33m[2m✓[22m[39m 发送中：发送键禁用+状态行呈现「发送中…」+停止键保持可用；ack 后恢复并清空草稿、结果文案呈现[33m 337[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/contracts-sanitizer.test.ts [2m([22m[2m67 tests[22m[2m)[22m[32m 294[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/ui-dialog.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 628[2mms[22m[39m
+   [32m✓[39m UiDialog 四方法渲染与答案构造 [2m(8)[22m
+     [33m[2m✓[22m[39m select：选项逐个渲染为按钮，点击答案 value 必为 options 其一[33m 356[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/session-detail-expand.test.ts [2m([22m[2m6 tests[22m[2m)[22m[33m 525[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/subscription-engine.test.ts [2m([22m[2m45 tests[22m[2m)[22m[32m 280[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/theme.test.ts [2m([22m[2m18 tests[22m[2m)[22m[33m 468[2mms[22m[39m
+ [32m✓[39m [30m[45m integration [49m[39m tests/integration/real-fs.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 5235[2mms[22m[39m
+   [32m✓[39m 3b-3② real-fs：真实 OS 文件时序（真 tmpdir+真 fs.watch+真 reader） [2m(13)[22m
+     [33m[2m✓[22m[39m RF2 撕裂尾跨写补全：半行不发布，补全+换行后恰一次发布（session 面）[33m 561[2mms[22m[39m
+     [33m[2m✓[22m[39m RF3 rename-over 同字节：不换流（fingerprint 短路）+重挂后新追加仍达（watch 重建）[33m 477[2mms[22m[39m
+     [33m[2m✓[22m[39m RF4 rename-over 改写：在订连接收 4409（invalid-stream 真路径）；重订得新 streamId[33m 322[2mms[22m[39m
+     [33m[2m✓[22m[39m RF9 句柄票据收口：全退订后盘面追加静默（观察代理零泄漏）+再订可恢复[33m 713[2mms[22m[39m
+     [33m[2m✓[22m[39m RF12 指纹字段与源字节对拍（Y-04）：装载/追加/换流三态下索引指纹=源文件 SHA-256 全 64hex[33m 636[2mms[22m[39m
+     [33m[2m✓[22m[39m RF13 撕裂尾指纹语义（Y-04 钉死）：未成完整行不编入→索引指纹停旧值；补全后跟进到全量 SHA-256[33m 739[2mms[22m[39m
+     [33m[2m✓[22m[39m RF14 非前缀重建路指纹字段（Y-04）：直驱 syncIndex 非前缀分支→重建后指纹=新源字节 SHA-256（真指纹三路统一之重建路）[33m 307[2mms[22m[39m
+     [33m[2m✓[22m[39m RF11 3b3c：恢复期大批量续编（session 首装 1100 行）→既有 live 引擎同步排水不被积压门误杀[33m 671[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/mux-b1.test.ts [2m([22m[2m22 tests[22m[2m)[22m[33m 449[2mms[22m[39m
+   [32m✓[39m M-UX 批1修复 P2-02：CSPRNG 来源约束+同 file 不换名 [2m(2)[22m
+     [33m[2m✓[22m[39m B2 组件级（批3）：固定 CSPRNG+冻结时钟→自动名确定性；两次创建同名不换名（无文件名输入框）[33m 381[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/write-composer.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 315[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/rpc-session-model.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 246[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/session-registry.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 192[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/session-list.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 142[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/writer-oath.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 84[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/resume-authority.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 211[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/dual-history-source.test.ts [2m([22m[2m34 tests[22m[2m)[22m[32m 171[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/process-host.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 85[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/ws-support.test.ts [2m([22m[2m37 tests[22m[2m)[22m[32m 164[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/session-list.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 238[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/ws-gateway-ui.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 58[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/evidence-migration.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 79[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/not-ready-banner.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 254[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/ws-gateway-write-resume.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 50[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/recover.test.ts [2m([22m[2m36 tests[22m[2m)[22m[32m 43[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/sha256.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/ws-gateway-models.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 57[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/entry-read.test.ts [2m([22m[2m21 tests[22m[2m)[22m[32m 22[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/ws-gateway-write.test.ts [2m([22m[2m26 tests[22m[2m)[22m[32m 91[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/file-durability.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 32[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/process-supervisor.test.ts [2m([22m[2m34 tests[22m[2m)[22m[32m 38[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/projection-frames.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 33[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/rpc-session-ui.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/recovery.two-pass.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/health-dot.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 249[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/rpc-write-host.test.ts [2m([22m[2m26 tests[22m[2m)[22m[32m 19[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/conversation-state.test.ts [2m([22m[2m27 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/history-projection.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/dispatch-coordinator.test.ts [2m([22m[2m37 tests[22m[2m)[22m[32m 27[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/live-aggregator.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/r2.regressions.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/session-projection.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/idle-reaper.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/read-index.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/r4.regressions.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/turn-gate.test.ts [2m([22m[2m28 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/command-channel.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/subscribe-client.test.ts [2m([22m[2m95 tests[22m[2m)[22m[32m 54[2mms[22m[39m
+ [32m✓[39m [30m[45m integration [49m[39m tests/integration/pi-child.smoke.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 6587[2mms[22m[39m
+   [32m✓[39m pi 子进程事件泵（集成冒烟） [2m(1)[22m
+     [33m[2m✓[22m[39m spawn pi -p →stdout JSONL 事件流→退出[33m 6586[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/r1-list.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/b-face.regressions.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/r3.regressions.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/writer-authority.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/live-stream.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m [30m[45m integration [49m[39m tests/integration/real-ws.test.ts [2m([22m[2m7 tests[22m[2m)[22m[33m 6389[2mms[22m[39m
+   [32m✓[39m 3b-3③ real-ws：真实传输+慢客户端矩阵 [2m(7)[22m
+     [33m[2m✓[22m[39m RW1 快/慢并存：慢客户端卡分页→订阅级 4431（retryable=false 只关订阅）；快客户端全量不受影响；慢客户端 cursor 续读恢复[33m 1038[2mms[22m[39m
+     [33m[2m✓[22m[39m RW2 停读套接字同负载对照（R-01 修复后语义）：pause+1.2MB 突发→零误杀；resume→全量恰一次；连接存活[33m 1819[2mms[22m[39m
+     [33m[2m✓[22m[39m RW6 快客户端单突发（R-01 反例 P-FAST 复现）：正常读+6750 行单突发→全量恰一次零错[33m 1264[2mms[22m[39m
+     [33m[2m✓[22m[39m RW7 恢复期大批量续编（真传输）：journal-only 订阅期 session 落盘 8000 行→B 订阅触发批量续编→A 全量恰一次（R-01 syncIndex 路）[33m 1364[2mms[22m[39m
+     [33m[2m✓[22m[39m RW5 断开竞态：A 硬断（不退订）→B 共享观察不受扰，续投恰一次；服务端连接清理有审计[33m 819[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/contracts-validate.test.ts [2m([22m[2m24 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/e2e-evidence-helpers.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 24[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/entry-read-line.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/ws-client.test.ts [2m([22m[2m34 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/contracts-v14.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/r1-lifetime.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 29[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/model-listing.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/session-attribution.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/notification.monotonic.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/line-pump.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/safe-open.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/identity-gate.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/pi-child-pumps.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/read-index-dual.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/n18b.evidence.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/command-dedup.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/web/app-clients.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+[90mstdout[2m | tests/integration/real-fs-budget.test.ts[2m > [22m[2m3b-3④ 预算容量（真盘体量；组合层无合计门——单文件/单流/流池三门）[2m > [22m[2mBG5 内存峰值披露（口径=单 20k 事件流满载；非生产 RSS 断言）：heapUsed<384MiB 快照记录
+[22m[39m[BG5] heapUsed=77.7MiB rss=281.6MiB external=11.7MiB
+
+ [32m✓[39m [30m[45m integration [49m[39m tests/integration/real-fs-budget.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 10997[2mms[22m[39m
+   [32m✓[39m 3b-3④ 预算容量（真盘体量；组合层无合计门——单文件/单流/流池三门） [2m(5)[22m
+     [33m[2m✓[22m[39m BG1 双源同池 20k 触顶状态机：journal 19,998+session 3=20,001 越界→订阅 4402；宽容换流后新流再触顶→仍 4402；额度已用第三订→registry 拒建（审计 index-over-budget-get）[33m 6330[2mms[22m[39m
+     [33m[2m✓[22m[39m BG2 恰在预算内（20,000）不触顶：双源 19,997+3=20,000 恰好放行，快照正常[33m 1527[2mms[22m[39m
+     [33m[2m✓[22m[39m BG4 流池 LRU 32：33 文件装载挤出最旧→旧文件重订=新 streamId（流身份丢失）；当前流数不超 32[33m 1170[2mms[22m[39m
+     [33m[2m✓[22m[39m BG5 内存峰值披露（口径=单 20k 事件流满载；非生产 RSS 断言）：heapUsed<384MiB 快照记录[33m 1738[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m tests/unit/server/composition-write.test.ts[2m > [22m3c-3 composition 写侧接线[2m > [22mCW3 真链失败面：prompt→cat 回声不答探针→not-ready(cause=readiness-timeout)+write-ack；审计含 spawn/registry/readiness 链
+[31m[1mAssertionError[22m: expected { kind: 'not-ready', …(2) } to match object { kind: 'not-ready', …(1) }
+(1 matching property omitted from actual)[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  {[22m
+[32m-   "cause": "readiness-timeout",[39m
+[31m+   "cause": "spawn-exited",[39m
+[2m    "kind": "not-ready",[22m
+[2m  }[22m
+
+[36m [2m❯[22m tests/unit/server/composition-write.test.ts:[2m95:27[22m[39m
+
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m102 passed[39m[22m[2m | [22m[33m5 skipped[39m[90m (108)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m1875 passed[39m[22m[2m | [22m[33m24 skipped[39m[90m (1900)[39m
+[2m   Start at [22m 12:41:51
+[2m   Duration [22m 11.65s[2m (tests 72%, environment 12%, transform 9%, import 7%, worker 1%)[22m
