@@ -2,7 +2,7 @@
 import json, pathlib, queue, subprocess, tempfile, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-REPO = pathlib.Path('/home/yyj/ai/repos/pi-agent-ui-hybrid')
+REPO = pathlib.Path(__file__).resolve().parents[2]
 with tempfile.TemporaryDirectory(prefix='pi099-controlled-') as home:
     root = pathlib.Path(home)
     fixture = root / 'owned-fixture.txt'
@@ -48,6 +48,8 @@ with tempfile.TemporaryDirectory(prefix='pi099-controlled-') as home:
     extension.write_text("export default function(pi) { pi.registerCommand('owned-handled', { description: 'Controlled non-model command', handler: async (_args, ctx) => { ctx.ui.notify('owned handled', 'info'); } }); }\n")
     env = {'PATH': '/home/yyj/.nvm/versions/node/v24.18.0/bin:/usr/bin:/bin', 'HOME': home, 'TMPDIR': home,
            'PI_CODING_AGENT_DIR': str(agent), 'PI_OFFLINE': '1', 'LANG': 'C.UTF-8'}
+    actual_version = subprocess.check_output([str(REPO / 'node_modules/.bin/pi'), '--version'], cwd=home, env=env, timeout=20).decode().strip()
+    assert actual_version == '0.99.2', f'Expected actual local pi 0.99.2, got {actual_version}'
     process = subprocess.Popen([str(REPO / 'node_modules/.bin/pi'), '--mode', 'rpc', '--no-session', '--offline',
         '--no-approve', '--no-extensions', '--no-context-files', '--no-skills', '--no-themes', '--no-prompt-templates',
         '--tools', 'read', '-e', str(extension), '--provider', 'ui-upgrade-test', '--model', 'fixture'],
@@ -103,7 +105,7 @@ with tempfile.TemporaryDirectory(prefix='pi099-controlled-') as home:
         process.stdin.close()
         exit_code = process.wait(timeout=10)
         assert exit_code == 0
-        result = {'runtime': '0.99.2', 'isolation': 'temporary HOME/agentDir/cwd; allowlisted env; only controlled loopback provider',
+        result = {'runtime': actual_version, 'isolation': 'temporary HOME/agentDir/cwd; allowlisted env; only controlled loopback provider',
             'checks': ['text delta/final/agent_settled', 'real read tool on owned temporary fixture', 'toolCallId correlation',
                        'explicit extension under --no-extensions', 'handled prompt disposition', 'EOF exit zero'],
             'providerRequests': len(requests), 'exitCode': exit_code, 'stderrLines': len(stderr),
