@@ -1,12 +1,6 @@
-import { WRITE_TEXT_MAX_BYTES, isAttachmentIds, isUploadedAttachment, type UploadedAttachmentDTO } from "@pi-agent-ui/protocol";
+import { WRITE_TEXT_MAX_BYTES, isAttachmentIds, isPromptAttachmentSnapshot, type PromptAttachmentSnapshot, type UploadedAttachmentDTO } from "@pi-agent-ui/protocol";
 import type { AttachmentStore } from "../http/attachment-store.ts";
 
-/** 内部耐久快照；不可由WS客户端指定身份/对象描述。 */
-export interface PromptAttachmentSnapshot {
-  readonly owner: string;
-  readonly sourceText: string;
-  readonly objects: readonly UploadedAttachmentDTO[];
-}
 export interface PreparedAttachmentPrompt {
   readonly rawText: string;
   readonly hashes: readonly string[];
@@ -18,15 +12,6 @@ export class PromptAttachmentError extends Error {
 }
 type Source = Pick<AttachmentStore, "resolve">;
 
-function validSnapshot(value: unknown): value is PromptAttachmentSnapshot {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
-  const v = value as Record<string, unknown>;
-  return Object.keys(v).length === 3 && Object.keys(v).every((k) => ["owner", "sourceText", "objects"].includes(k))
-    && typeof v.owner === "string" && /^[0-9a-f]{64}$/.test(v.owner)
-    && typeof v.sourceText === "string" && Buffer.byteLength(v.sourceText, "utf8") <= WRITE_TEXT_MAX_BYTES
-    && Array.isArray(v.objects) && v.objects.length > 0 && v.objects.every(isUploadedAttachment)
-    && isAttachmentIds(v.objects.map((item: UploadedAttachmentDTO) => item.id));
-}
 function sameObject(a: UploadedAttachmentDTO, b: UploadedAttachmentDTO): boolean {
   return a.id === b.id && a.sha256 === b.sha256 && a.name === b.name && a.kind === b.kind && a.mimeType === b.mimeType && a.size === b.size;
 }
@@ -55,7 +40,7 @@ export async function preparePromptAttachments(source: Source, owner: string, id
 
 /** 恢复必须核实原完整对象/文本/重复次数，不把展开后的文本再次展开或降成无图。 */
 export async function restorePromptAttachments(source: Source, owner: string, snapshot: unknown, expectedText: string, expectedHashes: readonly string[]): Promise<PreparedAttachmentPrompt> {
-  if (!validSnapshot(snapshot) || snapshot.owner !== owner) throw new PromptAttachmentError();
+  if (!isPromptAttachmentSnapshot(snapshot) || snapshot.owner !== owner) throw new PromptAttachmentError();
   const prepared = await preparePromptAttachments(source, owner, snapshot.objects.map((item) => item.id), snapshot.sourceText);
   if (prepared.rawText !== expectedText || prepared.hashes.length !== expectedHashes.length || prepared.hashes.some((hash, i) => hash !== expectedHashes[i])
     || prepared.snapshot.objects.some((item, i) => !sameObject(item, snapshot.objects[i]!))) throw new PromptAttachmentError();

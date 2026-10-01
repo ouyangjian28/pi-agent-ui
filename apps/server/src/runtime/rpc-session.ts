@@ -27,11 +27,22 @@ import {
   LIMITS,
   isThinkingLevel,
   type ComposerPromptOptions,
+  type ComposerPromptSnapshot,
+  isComposerPromptSnapshot,
+  isAttachmentIds,
 } from "@pi-agent-ui/protocol";
 import { IdleReaper, MapRegistry } from "./idle-reaper.ts";
 import { readFileSync, writeFileSync } from "node:fs";
 import { RpcSettingsChannel, SettingsRpcError } from "./rpc-settings-channel.ts";
 import { prepareComposerSettings } from "./composer-settings.ts";
+import type { AttachmentStore } from "../http/attachment-store.ts";
+import { preparePromptAttachments, restorePromptAttachments, type PreparedAttachmentPrompt } from "./prompt-attachments.ts";
+
+/** 仅网关/恢复权威注入；不可接受来自WS的身份或快照。 */
+export interface SessionComposerOptions extends ComposerPromptOptions {
+  readonly principal?: string;
+  readonly replay?: { readonly rawText: string; readonly attachments: readonly string[]; readonly composer: ComposerPromptSnapshot };
+}
 
 export interface RpcSessionOpts {
   /**
@@ -56,6 +67,8 @@ export interface RpcSessionOpts {
   readonly host: ProcessHostPort;
   /** 耐久端口（生产=FileDurability）。 */
   readonly durability: DurabilityPort;
+  readonly attachmentSource?: () => AttachmentStore | null;
+  readonly attachmentAuthorized?: (principal: string) => boolean;
   readonly responseTimeoutMs?: number;
   readonly turnTimeoutMs?: number;
   readonly readinessTimeoutMs?: number;
@@ -731,19 +744,34 @@ export class RpcSession {
    * 可选期望代次（早拒：入口快照活代≠期望→invalidated；零窗口权威点在 supervisor.submitTurn
    * 同步比对层——两层把关，早拒层为省协调器记账的快路径）。model=M-OPS（v1.4）可选模型 id
    * （undefined=不改会话模型；显式值须由本代真实RPC确认后再落偏好、发送，暖进程也立即生效）。 */
-  async send(message: string, expectedGeneration?: number, model?: string, options: ComposerPromptOptions = {}): Promise<SessionSendResult> {
+  async send(message: string, expectedGeneration?: number, model?: string, options: SessionComposerOptions = {}): Promise<SessionSendResult> {
     if (this.disposeP !== null) return { kind: "not-ready", cause: "disposed" };
     if (this.sending) return { kind: "busy" };
     const gs = this.gate.getState();
     if (gs.kind !== "idle" && gs.kind !== "closed") return { kind: "busy" };
-    if (options.attachments !== undefined && options.attachments.length !== 0) return { kind: "not-ready", cause: "attachments-not-wired" };
+    if (options.attachments !== undefined && !isAttachmentIds(options.attachments)) return { kind: "not-ready", cause: "attachments-invalid" };
+    if (options.replay !== undefined && !isComposerPromptSnapshot(options.replay.composer)) return { kind: "not-ready", cause: "attachments-invalid" };
     if (options.thinkingLevel !== undefined && !isThinkingLevel(options.thinkingLevel)) return { kind: "not-ready", cause: "settings-malformed" };
     this.sending = true; // synchronous lease covers startup/configuration/journal/stdin
-    try { return await this.sendPrepared(message, expectedGeneration, model, options); }
-    finally { this.sending = false; }
+    try {
+      let prepared: PreparedAttachmentPrompt | undefined;
+      const replay = options.replay;
+      if (replay?.composer.attachments !== undefined || (options.attachments?.length ?? 0) > 0) {
+        const source = this.opts.attachmentSource?.();
+        const principal = options.principal;
+        if (source == null || principal === undefined || this.opts.attachmentAuthorized?.(principal) !== true) return { kind: "not-ready", cause: "attachments-unavailable" };
+        try {
+          prepared = replay?.composer.attachments !== undefined
+            ? await restorePromptAttachments(source, principal, replay.composer.attachments, replay.rawText, replay.attachments)
+            : await preparePromptAttachments(source, principal, options.attachments!, message);
+        } catch { return { kind: "not-ready", cause: "attachments-unavailable", detail: "附件缺失、已删除或内容改变；本条未发送，草稿应保留。" }; }
+      }
+      return await this.sendPrepared(prepared?.rawText ?? message, expectedGeneration, replay?.composer.model ?? model,
+        replay === undefined ? options : { ...options, thinkingLevel: replay.composer.thinkingLevel }, prepared);
+    } finally { this.sending = false; }
   }
 
-  private async sendPrepared(message: string, expectedGeneration: number | undefined, model: string | undefined, options: ComposerPromptOptions): Promise<SessionSendResult> {
+  private async sendPrepared(message: string, expectedGeneration: number | undefined, model: string | undefined, options: SessionComposerOptions, prepared?: PreparedAttachmentPrompt): Promise<SessionSendResult> {
     let st = this.supervisor.getState();
     // 切片5①：闲置回收后无进程——send=明确申请执行，冷启动拉起（查看不拉起；原会话文件+readiness）
     if (st.phase === "idle") {
@@ -769,13 +797,18 @@ export class RpcSession {
     if (gen === null || st.phase !== "running" || this.readyGeneration !== gen) return { kind: "not-ready", cause: "not-running" };
     if (expectedGeneration !== undefined && gen !== expectedGeneration) return { kind: "invalidated", stage: "first-byte" }; // r3c 早拒
     if (this.settings.isUncertain(gen)) return { kind: "not-ready", cause: "settings-uncertain" };
-    if (model !== undefined || options.thinkingLevel !== undefined) {
+    let composer: ComposerPromptSnapshot | undefined;
+    if (model !== undefined || options.thinkingLevel !== undefined || prepared !== undefined) {
       this.preparingSettings = true;
       try {
         const confirmed = await prepareComposerSettings(this.settings, gen, {
           ...(model !== undefined ? { model } : {}),
           ...(options.thinkingLevel !== undefined ? { thinkingLevel: options.thinkingLevel } : {}),
+          ...((prepared?.images.length ?? 0) > 0 ? { requireImage: true } : {}),
         }, () => this.disposeP === null && this.gate.getState().kind === "idle" && this.supervisor.getState().generation === gen && this.supervisor.getState().phase === "running");
+        if ((prepared?.images.length ?? 0) > 0 && !confirmed.model.imageInput) return { kind: "not-ready", cause: "attachments-model-unsupported", detail: "当前模型不支持图片；请选择支持图片的模型，草稿应保留。" };
+        composer = { version: 1, model: confirmed.model.id, thinkingLevel: confirmed.thinkingLevel,
+          ...(prepared === undefined ? {} : { attachments: prepared.snapshot }) };
         // Recheck identity BEFORE preference persistence; stale/busy requests change no sidecar.
         const current = this.supervisor.getState();
         if (current.generation !== gen || current.phase !== "running" || this.disposeP !== null) return { kind: "invalidated", stage: "first-byte" };
@@ -792,11 +825,23 @@ export class RpcSession {
         return { kind: "not-ready", cause: `settings-${code}`, detail: "模型或思考强度未确认，本条消息未发送；草稿应保留。" };
       } finally { this.preparingSettings = false; }
     }
+    if (composer !== undefined && !isComposerPromptSnapshot(composer)) return { kind: "not-ready", cause: "settings-malformed" };
+    if (prepared !== undefined) {
+      const source = this.opts.attachmentSource?.();
+      const principal = options.principal;
+      if (source == null || principal === undefined || this.opts.attachmentAuthorized?.(principal) !== true) return { kind: "not-ready", cause: "attachments-unavailable" };
+      try { await source.pin(principal, prepared.snapshot.objects.map((item) => item.id)); }
+      catch { return { kind: "not-ready", cause: "attachments-unavailable", detail: "附件未能耐久固定；本条未发送，草稿应保留。" }; }
+      if (this.opts.attachmentAuthorized?.(principal) !== true) return { kind: "not-ready", cause: "attachments-unavailable" };
+    }
+    const latest = this.supervisor.getState();
+    if (latest.generation !== gen || latest.phase !== "running" || this.disposeP !== null) return { kind: "invalidated", stage: "first-byte" };
     const commandId = (this.cmdSeq += 1);
     const intentId = `i-${(this.intentSeq += 1)}`;
-    const mk = matchKeyOf(message, [], this.takeOrdinal(message));
-    const payload: EnqueuePayload = { kind: "prompt", rawText: message, attachments: [], sentAt: new Date().toISOString() };
-    const stdinText = `${JSON.stringify({ id: `c${commandId}`, type: "prompt", message })}\n`;
+    const hashes = prepared?.hashes ?? [];
+    const mk = matchKeyOf(message, hashes, this.takeOrdinal(message, hashes));
+    const payload: EnqueuePayload = { kind: composer === undefined ? "prompt" : "prompt-configured", rawText: message, attachments: hashes, sentAt: new Date().toISOString(), ...(composer === undefined ? {} : { composer }) };
+    const stdinText = `${JSON.stringify({ id: `c${commandId}`, type: "prompt", message, ...(prepared === undefined || prepared.images.length === 0 ? {} : { images: prepared.images }) })}\n`;
     return this.supervisor.submitTurn(
       { intentId, sessionId: this.opts.sessionId, leafId: `leaf-${commandId}`, matchKey: mk, payload },
       commandId,
@@ -805,8 +850,8 @@ export class RpcSession {
     );
   }
 
-  private takeOrdinal(message: string): number {
-    const key = matchKeyOf(message, [], 0); // 序号按（hash+附件）组：先算 0 号键取组身份
+  private takeOrdinal(message: string, hashes: readonly string[]): number {
+    const key = matchKeyOf(message, hashes, 0); // 序号按（hash+附件）组：先算 0 号键取组身份
     const groupKey = `${key.textHash}|${key.attachmentIdentity}`;
     const n = this.ordinals.get(groupKey) ?? 0;
     this.ordinals.set(groupKey, n + 1);

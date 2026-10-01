@@ -549,6 +549,49 @@
     display: none;
   }
 }
+.app.real-app.hybrid-ui .composer-attach {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 44px;
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+}
+.app.real-app.hybrid-ui .composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.app.real-app.hybrid-ui .composer-attachments li {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid currentColor;
+  border-radius: 20px;
+  font-size: 13px;
+}
+.app.real-app.hybrid-ui .composer-attachments span { overflow-wrap: anywhere; }
+.app.real-app.hybrid-ui .composer-attachments button {
+  flex: 0 0 36px;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+@media (max-width: 767px) {
+  .app.real-app.hybrid-ui .composer-attachments button { min-height: 44px; }
+}
 @media (prefers-reduced-motion: reduce) {
   .app.real-app.hybrid-ui *,
   .app.real-app.hybrid-ui *::before,

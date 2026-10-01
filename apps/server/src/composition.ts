@@ -31,6 +31,8 @@ import { logicalNameWithinRoots, resolveWithinRoots } from "./ws/safe-open.ts";
 import type { WriteHostPort } from "./ws/write-host.ts";
 import { createStaticHandler } from "./ws/static-serve.ts";
 import { createLoginRoute, newSessionSecret } from "./http/login-route.ts";
+import { AttachmentStore } from "./http/attachment-store.ts";
+import { createAttachmentRoute } from "./http/attachment-route.ts";
 import { createServer, type Server as HttpServer } from "node:http";
 import { ModelsListingService } from "./ws/model-listing.ts";
 import { isAbsolute, join, relative, resolve } from "node:path";
@@ -219,7 +221,7 @@ export function makeResumeAuthority(deps: {
       // 授权在则 intents 必含该 id（resendKeys 从 intents 派生）；缺=证据不完整（防御 null，非身份错）
       return {
         report: { resendAuthorized: [...got.report.resendAuthorized], resumeBlocked: got.report.resumeBlocked },
-        payload: rec === undefined ? null : { rawText: rec.payload.rawText },
+        payload: rec === undefined ? null : rec.payload,
       };
     },
   };
@@ -258,6 +260,7 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
   const writerBootId = randomUUID();
   const guardedWriters = createGuardedJournalWriterFactory({ bootId: writerBootId, audit: (l) => audit(l) });
   let registry: SessionRegistry | null = null;
+  let attachmentStore: AttachmentStore | null = null;
   // D1 直播面接线状态：per-file 聚合器+late-bound 广播槽（gateway 创建后回填）。
   const liveAggregators = new Map<string, LiveAggregator>();
   let liveSink: ((file: string, ev: LiveContentEvent) => void) | null = null;
@@ -288,6 +291,8 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     });
     registry = createSessionRegistry({
       host,
+      attachmentSource: () => attachmentStore,
+      attachmentAuthorized: (principal) => tokens.hasDigestHex(principal),
       ...(config.write.extraPiArgs !== undefined ? { extraPiArgs: config.write.extraPiArgs } : {}),
       sessionFor: config.write.sessionFor,
       durabilityFor: (file: string) => guardedWriters.writerFor(file), // P0-2 r1：守卫壳统一接管两写入口（FF-P02-2）
@@ -429,10 +434,16 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
       ...(config.trustedProxies !== undefined ? { trustedProxies: config.trustedProxies } : {}), // r1-B1：同一可信代理派生
     })
     : null;
+  if (login !== null && registry !== null) attachmentStore = await AttachmentStore.open(join(layout?.journalRoot ?? config.roots[0]!, ".attachments"));
+  const attachments = login !== null && attachmentStore !== null ? createAttachmentRoute({
+    store: attachmentStore, sessionIdentityOf: login.sessionIdentityOf, allowedOrigins: config.allowedOrigins, audit,
+    ...(config.trustedProxies === undefined ? {} : { trustedProxies: config.trustedProxies }),
+  }) : null;
   const staticHandler = config.staticDir !== undefined ? createStaticHandler(config.staticDir, audit) : null;
   const httpServer: HttpServer | null = staticHandler !== null
     ? createServer((req, res) => {
       if (login !== null && login.handle(req, res)) return;
+      if (attachments !== null && attachments.handle(req, res)) return;
       staticHandler(req, res);
     })
     : null;
@@ -524,7 +535,8 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
         offConn(); // 停新连接接入
         if (pollTimer !== null) { clearInterval(pollTimer); pollTimer = null; }
         if (config.registerSighup === true) process.off("SIGHUP", onSighup);
-        gateway.dispose(); // 应用层告别（1000 server-shutdown）+观察器全解绑（DH 句柄归零）
+        gateway.dispose();
+      attachments?.dispose(); // 应用层告别（1000 server-shutdown）+观察器全解绑（DH 句柄归零）
         // P2-4（K3 审）：D1 聚合器收口——撤 pending 定时器+清 Map+断 liveSink（≤80ms 晚到 flush 不再广播）
         liveSink = null;
         for (const agg of liveAggregators.values()) agg.dispose();
@@ -539,7 +551,8 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
             httpServer.closeAllConnections();
           });
         }
-        if (registry !== null) await registry.dispose(); // 3c-3：写侧统一销毁（全量 stop+dispose；网关先告别再杀进程）
+        if (registry !== null) await registry.dispose();
+      if (attachmentStore !== null) await attachmentStore.close(); // 3c-3：写侧统一销毁（全量 stop+dispose；网关先告别再杀进程）
         await guardedWriters.dispose(); // P0-2 r1：写面已静止后释放全部 writer 锁（FF-P02-3；释放失败=audit 残锁可接受）
         tokens.dispose();
         audit("composition disposed");

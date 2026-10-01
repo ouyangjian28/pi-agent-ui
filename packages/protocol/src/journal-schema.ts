@@ -6,11 +6,13 @@
 // 校验语义与既有恢复侧逐字一致（迁移而非新设计）；s4g 裁量②口径保留：
 // generation/commandId=安全整数且≥1；ordinal=安全整数且≥0。
 
+import { isComposerPromptSnapshot } from "./composer-input.ts";
 export type UnknownRecord = Record<string, unknown>;
 
 /** 意图 kind 白名单（enqueue.payload.kind）。 */
 export const INTENT_KINDS: readonly string[] = [
   "prompt",
+  "prompt-configured",
   "steer",
   "followUp",
   "abort",
@@ -60,6 +62,12 @@ export function journalLineSchemaError(obj: UnknownRecord): string | null {
       if (!Array.isArray(pr["attachments"]) || !pr["attachments"].every((a) => typeof a === "string"))
         return "嵌套非法 payload.attachments";
       if (typeof pr["sentAt"] !== "string") return "嵌套非法 payload.sentAt";
+      if (pr["kind"] === "prompt-configured") {
+        if (!isComposerPromptSnapshot(pr["composer"])) return "嵌套非法 payload.composer";
+        const expected = pr["composer"].attachments?.objects.filter((item) => item.kind === "image").map((item) => item.sha256.slice(0, 12)) ?? [];
+        const hashes = pr["attachments"] as string[];
+        if (hashes.length !== expected.length || hashes.some((hash, i) => hash !== expected[i])) return "附件身份与快照不一致";
+      } else if (Object.hasOwn(pr, "composer")) return "配置快照须使用prompt-configured（旧读者必须拒绝）";
       return null;
     }
     case "sending":

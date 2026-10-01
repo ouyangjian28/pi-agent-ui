@@ -27,6 +27,7 @@
 
 // 同仓惯例：绕开 barrel 直引自包含 contracts 模块（浏览器安全、零 Node 依赖）。
 // LIMITS/WRITE_TEXT_MAX_BYTES 为值导入（filePattern/字节上限冻结源，避免本地复制漂移）。
+import { isAttachmentIds } from "@pi-agent-ui/protocol/src/composer-input";
 import { LIMITS, WRITE_TEXT_MAX_BYTES } from "@pi-agent-ui/protocol/src/contracts";
 import type {
   ClientFrame,
@@ -468,7 +469,7 @@ export class WriteClient {
       return Promise.reject(new WriteSendError("local-invalid", "文件名非法，无法发送"));
     }
     if (kind === "prompt") {
-      if (text === undefined || text.length === 0) {
+      if (text === undefined || (text.length === 0 && !(options?.attachments?.length))) {
         return Promise.reject(new WriteSendError("local-invalid", "消息内容为空，无法发送"));
       }
       if (utf8Bytes(text) > WRITE_TEXT_MAX_BYTES) {
@@ -477,9 +478,8 @@ export class WriteClient {
       if (options?.thinkingLevel !== undefined && !["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(options.thinkingLevel)) {
         return Promise.reject(new WriteSendError("local-invalid", "思考级别非法，未发送"));
       }
-      // Attachment wiring is separate: never quietly turn an image request into text-only.
-      if (options?.attachments?.length) {
-        return Promise.reject(new WriteSendError("local-invalid", "附件发送通道尚未接通，未发送"));
+      if (options?.attachments !== undefined && !isAttachmentIds(options.attachments)) {
+        return Promise.reject(new WriteSendError("local-invalid", "附件引用非法，未发送"));
       }
       // v1.4（M-OPS）：可选 model 域本地预校验（LIMITS.modelPattern 精确 id；服务端同判 4404）。
       // undefined=不改会话模型；空串/越字符集/超长一律本地拒（零帧成本）。
@@ -513,6 +513,7 @@ export class WriteClient {
             ...(model === undefined ? {} : { model }),
             ...(cwd === undefined ? {} : { cwd }),
             ...(options?.thinkingLevel === undefined ? {} : { thinkingLevel: options.thinkingLevel }),
+            ...(options?.attachments === undefined ? {} : { attachments: [...options.attachments] }),
           });
         } else {
           this.emit({ t: "stop", requestId, file });

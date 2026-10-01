@@ -464,6 +464,8 @@ function ConnectedApp({
                 const id = ensureDraft();
                 if (id) owner.configureThinking(id, level);
               },
+              onUpload: (files) => { const id = ensureDraft(); if (id) void owner.upload(id, files); },
+              onRemoveAttachment: (attachmentId) => { if (slot) owner.removeAttachment(slot.id, attachmentId); },
               onCancel: () => owner.back(),
               onViewTarget: () => {
                 if (slot && allowLeave()) owner.open(slot.file);

@@ -8,19 +8,19 @@
 // - 生产实现=RpcSession 注册表适配（3c-2 接线：file→懒建 RpcSession，journalPath=file，
 //   sessionFile=sessionFor(file)）；本片（3c-1）网关侧只依赖此接口，测试用假宿主。
 // - 不在本层：并发队列化（宿主自决——RpcSession TurnGate 已有轮次串行语义）、statusFor 映射。
-import type { ComposerPromptOptions } from "@pi-agent-ui/protocol";
+import type { SessionComposerOptions } from "../runtime/rpc-session.ts";
 import type { WriteSendOutcomeDTO, WriteStopOutcomeDTO, WriteResumeOutcomeDTO } from "@pi-agent-ui/protocol";
 
 export interface WriteHostPort {
   /** 发一轮用户消息（prompt 帧）。generation=v1.1 可选进程代次（提供则身份门校验活代匹配）；
    *  model=v1.4（M-OPS）会话级模型；cwd=v1.5（批A）可选项目目录（仅冷启动建会话时采纳——
    *  pi 进程工作目录与 journal 树分离；网关已验授权域；会话寿命内固定，后续帧不同 cwd 被忽略）。 */
-  sendPrompt(file: string, text: string, generation?: number, model?: string, cwd?: string, options?: ComposerPromptOptions): Promise<WriteSendOutcomeDTO>;
+  sendPrompt(file: string, text: string, generation?: number, model?: string, cwd?: string, options?: SessionComposerOptions): Promise<WriteSendOutcomeDTO>;
   /** 停止会话进程（stop 帧）。 */
   stop(file: string): Promise<WriteStopOutcomeDTO>;
   /** v1.1 恢复意图重发（resume 帧）。身份门四校验（恢复数据在场/未阻断/授权/代次）在宿主面；
    * 拒绝→identity-rejected（零副作用）；通过→r3b 执行面：payload 读回→执行点复核→send 接线，
    * 结果=launched/busy/…（与 prompt 面同构）或 execution-failed（载荷缺失）。signal=r3c 连接级
    * 取消信号（断连→读链排队取消/步骤间停读；不中断 send 执行本身——发送后归 TurnGate 语义）。 */
-  resume(file: string, intentId: string, generation: number, signal?: AbortSignal): Promise<WriteResumeOutcomeDTO>;
+  resume(file: string, intentId: string, generation: number, signal?: AbortSignal, principal?: string): Promise<WriteResumeOutcomeDTO>;
 }

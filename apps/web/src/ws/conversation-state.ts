@@ -1,6 +1,14 @@
 // R1 v6 §3.1：页面、活动订阅目标、编辑槽与发送事实分立。
 // 本层不解释 WS 帧，不自动发送/停止/回答；回执从真 WriteClient 的 Promise 进入。
-import type { ThinkingLevel } from "@pi-agent-ui/protocol/src/composer-input";
+import { isUploadedAttachment, ATTACHMENT_MAX_COUNT, ATTACHMENT_TOTAL_MAX_BYTES, type ThinkingLevel, type UploadedAttachmentDTO } from "@pi-agent-ui/protocol/src/composer-input";
+
+async function uploadAttachment(file: File, signal: AbortSignal): Promise<UploadedAttachmentDTO> {
+  const response = await fetch("/api/attachments", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/octet-stream", "X-Attachment-Name": encodeURIComponent(file.name) }, body: file, signal });
+  if (!response.ok) throw new Error("附件上传失败；请检查类型、大小和登录状态后重试。");
+  const value: unknown = await response.json();
+  if (value === null || typeof value !== "object" || !("attachment" in value) || !("ok" in value) || value.ok !== true || !isUploadedAttachment(value.attachment)) throw new Error("附件上传回执无效；未加入消息。");
+  return value.attachment;
+}
 import type { WriteSendOutcomeDTO } from "@pi-agent-ui/protocol/src/contracts";
 import { WriteSendError, type WriteClientSurface } from "./write-client";
 
@@ -43,6 +51,9 @@ export interface EditorSlot {
   readonly modelChoice: string;
   readonly freeText: string;
   readonly thinkingLevel: ThinkingLevel | null;
+  readonly attachments: readonly UploadedAttachmentDTO[];
+  readonly uploading: boolean;
+  readonly uploadError: string | null;
   readonly phase: DraftPhase;
   readonly result: SendResult | null;
   readonly operation: SendOperation | null;
@@ -66,7 +77,8 @@ export class ConversationState {
   private seq = 0;
   private draftSeq = 0;
   private disposed = false;
-  constructor(private readonly refresh: () => void = () => {}, private readonly waitMs = WAIT_MS) {}
+  private readonly uploads = new Map<string, AbortController>();
+  constructor(private readonly refresh: () => void = () => {}, private readonly waitMs = WAIT_MS, private readonly uploader = uploadAttachment) {}
   readonly getSnapshot = (): ConversationSnapshot => this.snapshot;
   readonly subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -83,7 +95,7 @@ export class ConversationState {
     this.publish({ [key]: new Map(this.snapshot[key]).set(slot.id, slot) });
   }
   private blank(id: string, file: string, isNew: boolean, modelChoice = "__default__"): EditorSlot {
-    return { id, file, isNew, text: "", version: 0, modelChoice, freeText: "", thinkingLevel: null, phase: "editing", result: null, operation: null, transferred: false };
+    return { id, file, isNew, text: "", version: 0, modelChoice, freeText: "", thinkingLevel: null, attachments: [], uploading: false, uploadError: null, phase: "editing", result: null, operation: null, transferred: false };
   }
   setClient(client: WriteClientSurface | null): void {
     if (this.currentClient === client) return;
@@ -116,11 +128,40 @@ export class ConversationState {
     const slot = this.slot(id);
     if (slot) this.put({ ...slot, thinkingLevel, version: slot.version + 1 });
   }
+  async upload(id: string, files: readonly File[]): Promise<void> {
+    const slot = this.slot(id);
+    if (this.disposed || !slot || slot.uploading || slot.operation?.pending || files.length === 0) return;
+    if (slot.attachments.length + files.length > ATTACHMENT_MAX_COUNT) { this.put({ ...slot, uploadError: "每条最多8个附件。" }); return; }
+    const controller = new AbortController(); this.uploads.set(id, controller);
+    const deadline = setTimeout(() => controller.abort(), 30_000);
+    this.put({ ...slot, uploading: true, uploadError: null });
+    try {
+      for (const file of files) {
+        if (controller.signal.aborted) throw new Error("cancelled");
+        const item = await this.uploader(file, controller.signal);
+        const current = this.slot(id);
+        if (this.disposed || !current || this.uploads.get(id) !== controller) return;
+        if (!isUploadedAttachment(item) || current.attachments.reduce((sum, entry) => sum + entry.size, item.size) > ATTACHMENT_TOTAL_MAX_BYTES) throw new Error("limit");
+        this.put({ ...current, attachments: [...current.attachments, item], version: current.version + 1 });
+      }
+    } catch {
+      const current = this.slot(id); if (current && !this.disposed) this.put({ ...current, uploadError: "附件上传未完成；已成功的附件保留，未成功的不会发送。仅支持PNG/JPEG与UTF-8文本/代码，图片≤10MiB、文本≤48KiB。" });
+    } finally {
+      clearTimeout(deadline); if (this.uploads.get(id) === controller) this.uploads.delete(id);
+      const current = this.slot(id); if (current && !this.disposed) this.put({ ...current, uploading: false });
+    }
+  }
+  removeAttachment(id: string, attachmentId: string): void {
+    const slot = this.slot(id); if (!slot || slot.operation?.pending) return;
+    this.put({ ...slot, attachments: slot.attachments.filter((item) => item.id !== attachmentId), version: slot.version + 1, uploadError: null });
+    // 未提交对象可删；已固定对象由服务端拒删，不能因UI移除破坏恢复。
+    void fetch(`/api/attachments/${attachmentId}`, { method: "DELETE", credentials: "same-origin" }).catch(() => {});
+  }
   back(): void {
     const view = this.snapshot.view;
     if (view.kind === "draft") {
       const slot = this.snapshot.drafts.get(view.id);
-      if (slot?.phase === "editing" && slot.operation === null) {
+      if (slot?.phase === "editing" && slot.operation === null && !slot.uploading && slot.attachments.length === 0) {
         const drafts = new Map(this.snapshot.drafts); drafts.delete(view.id); this.publish({ drafts });
       } else if (slot?.phase === "sending") this.put({ ...slot, phase: "in-flight-away" });
     }
@@ -133,7 +174,7 @@ export class ConversationState {
     for (const draft of this.snapshot.drafts.values()) {
       if (draft.file !== file || draft.phase !== "settled-launched" || draft.transferred) continue;
       const session = this.snapshot.sessions.get(id)!;
-      if (session.version === 0 && session.text === "") this.put({ ...session, text: draft.text, version: draft.version, modelChoice: draft.modelChoice, freeText: draft.freeText, thinkingLevel: draft.thinkingLevel });
+      if (session.version === 0 && session.text === "") this.put({ ...session, text: draft.text, version: draft.version, modelChoice: draft.modelChoice, freeText: draft.freeText, thinkingLevel: draft.thinkingLevel, attachments: draft.attachments });
       this.put({ ...draft, transferred: true });
     }
     this.publish({ view: { kind: "session", file }, activeFile: file });
@@ -159,6 +200,7 @@ export class ConversationState {
     if (!this.canRetry(id, confirmed) || (slot.operation?.pending && slot.operation.client === client)) {
       return Promise.resolve({ status: "local", kind: "in-flight", message: "原操作尚在途；请先查看结果，必要时确认风险并重连后再发。" });
     }
+    if (slot.uploading) return Promise.resolve({ status: "local", kind: "in-flight", message: "附件正在上传，未发送。" });
     const wasReady = client.getSnapshot().connState === "ready";
     const op: SendOperation = { id: ++this.seq, client, version: slot.version, text: slot.text, pending: true };
     this.put({ ...slot, operation: op, phase: "sending", result: null });
@@ -171,9 +213,12 @@ export class ConversationState {
     }, this.waitMs));
     let request: Promise<WriteSendOutcomeDTO>;
     try {
-      request = slot.thinkingLevel === null
+      request = slot.thinkingLevel === null && slot.attachments.length === 0
         ? client.sendPrompt(slot.file, slot.text, model)
-        : client.sendPrompt(slot.file, slot.text, model, undefined, { thinkingLevel: slot.thinkingLevel });
+        : client.sendPrompt(slot.file, slot.text, model, undefined, {
+          ...(slot.thinkingLevel === null ? {} : { thinkingLevel: slot.thinkingLevel }),
+          ...(slot.attachments.length === 0 ? {} : { attachments: slot.attachments.map((item) => item.id) }),
+        });
     }
     catch (error) { request = Promise.reject(error); }
     return request.then(classifySend, (error: unknown) => classifySendError(error, wasReady)).then((result) => {
@@ -186,7 +231,7 @@ export class ConversationState {
       const phase = result.status === "launched" ? "settled-launched" : result.status === "unknown" ? "settled-unknown" : "settled-rejected";
       // 清稿门（三元）：版本不是文本相等；重连后旧 client 不清稿。
       const clear = result.status === "launched" && op.client === this.currentClient && current.version === op.version;
-      this.put({ ...current, text: clear ? "" : current.text, phase, result, operation: { ...op, pending: false } });
+      this.put({ ...current, text: clear ? "" : current.text, attachments: clear ? [] : current.attachments, phase, result, operation: { ...op, pending: false } });
       const view = this.snapshot.view;
       // 导航门独立：B/list 不抢页；恢复中的 D 正常进 A。
       if (slot.isNew && result.status === "launched" && view.kind === "draft" && view.id === id) this.open(slot.file);
@@ -195,6 +240,7 @@ export class ConversationState {
   }
   dispose(): void {
     this.disposed = true;
+    for (const controller of this.uploads.values()) controller.abort(); this.uploads.clear();
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear(); this.listeners.clear();
   }

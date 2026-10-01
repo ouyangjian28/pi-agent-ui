@@ -103,12 +103,15 @@ export interface ManagedEditor {
   readonly onEdit: (text: string) => void;
   readonly onConfigure: (choice: string, freeText: string) => void;
   readonly onThinking?: (level: ThinkingLevel | null) => void;
+  readonly onUpload?: (files: readonly File[]) => void;
+  readonly onRemoveAttachment?: (id: string) => void;
   readonly onSend: (confirmed: boolean) => Promise<SendResult>;
   readonly onViewTarget: () => void;
   readonly onCancel: () => void;
 }
 export function WriteComposer({ client, file, editor }: { client: WriteClientSurface; file: string | null; editor?: ManagedEditor }) {
   const { view, send, stop, resume } = useWrite(client, file);
+  const fileInput = useRef<HTMLInputElement>(null);
   const [localText, setText] = useState("");
   const text = editor ? (editor.slot?.text ?? "") : localText;
   const [sendResult, setSendResult] = useState<SendResult | null>(null);
@@ -133,7 +136,7 @@ export function WriteComposer({ client, file, editor }: { client: WriteClientSur
 
   const model = editor ? effectiveModel(editor.slot?.modelChoice ?? editor.defaultChoice ?? MODEL_DEFAULT, editor.slot?.freeText ?? "") : undefined;
   const pending = editor ? (editor.slot?.operation?.pending === true && editor.slot.operation.client === client) : view.sending;
-  const canSend = (editor?.isNew || file !== null) && view.ready && !pending && !view.stopping && text.trim().length > 0 && isSendableModel(model);
+  const canSend = (editor?.isNew || file !== null) && view.ready && !pending && !view.stopping && (text.trim().length > 0 || (editor?.slot?.attachments.length ?? 0) > 0) && !editor?.slot?.uploading && isSendableModel(model);
   const canStop = file !== null && view.ready && !view.stopping;
   const generationNum = Number(resumeGeneration);
   const canResume =
@@ -193,6 +196,9 @@ export function WriteComposer({ client, file, editor }: { client: WriteClientSur
       {result?.status === "rejected" && result.outcome.kind !== "not-ready" && <p className="banner" role="alert">{promptOutcomeText(result.outcome)}；草稿已保留，可显式重试。</p>}
       {editor && result?.status === "local" && <p className="banner" role="alert">{result.message}</p>}
       {editor && result?.status === "rejected" && result.outcome.kind === "not-ready" && <><NotReadyBanner info={{ cause: result.outcome.cause ?? null, detail: result.outcome.detail ?? null }} onRetry={canSend ? onSend : undefined} onSwitchModel={() => editor.onConfigure(editor.slot?.modelChoice ?? MODEL_DEFAULT, "")} />{model === undefined && <p role="note">重试将不指定模型；本会话此前绑定的模型设置不会被重置，以服务端实际为准</p>}</>}
+      {editor?.slot?.uploadError && <p role="alert" className="banner">{editor.slot.uploadError}</p>}
+      {editor?.slot?.uploading && <p role="status">附件上传中，暂不能发送…</p>}
+      {(editor?.slot?.attachments.length ?? 0) > 0 && <ul className="composer-attachments" aria-label="随下一条消息发送的附件">{editor!.slot!.attachments.map((item) => <li key={item.id}><span>{item.kind === "image" ? "▧" : "⌘"} {item.name}</span><button type="button" aria-label={`移除附件 ${item.name}`} disabled={pending} onClick={() => editor?.onRemoveAttachment?.(item.id)}>×</button></li>)}</ul>}
       <div className="composer-box">
       <label className="composer-message">
         <span className="composer-label">{editor?.isNew ? "首条消息" : "写入消息"}</span>
@@ -210,6 +216,7 @@ export function WriteComposer({ client, file, editor }: { client: WriteClientSur
         />
       </label>
       <div className="write-actions composer-controls">
+        {editor?.onUpload && <><input ref={fileInput} type="file" hidden multiple accept=".png,.jpg,.jpeg,.txt,.md,.ts,.tsx,.js,.jsx,.json,.py,.yaml,.yml,.sh,.css,.html,.csv,.log" onChange={(event) => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ""; if (files.length) editor.onUpload?.(files); }} /><button type="button" className="composer-attach" aria-label="添加图片或文本代码附件" title="PNG/JPEG图片、UTF-8文本或代码" disabled={pending || editor.slot?.uploading || !view.ready} onClick={() => fileInput.current?.click()}><svg aria-hidden="true" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="m8 13 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9a2 2 0 0 1 3 3l-8 8" /></svg></button></>}
         {editor && <ModelPicker source={editor.source} choice={editor.slot?.modelChoice ?? editor.defaultChoice ?? MODEL_DEFAULT} freeText={editor.slot?.freeText ?? ""} onConfigure={editor.onConfigure} />}
         {editor?.onThinking && <label className="thinking-picker" title="用于下一条消息；以模型实际能力为准，不支持时保留草稿并拒绝发送。">
           <span>思考</span>

@@ -20,6 +20,32 @@ export interface UploadedAttachmentDTO {
   readonly size: number;
   readonly sha256: string;
 }
+export interface PromptAttachmentSnapshot {
+  readonly owner: string;
+  readonly sourceText: string;
+  readonly objects: readonly UploadedAttachmentDTO[];
+}
+export interface ComposerPromptSnapshot {
+  readonly version: 1;
+  readonly model: string;
+  readonly thinkingLevel: ThinkingLevel;
+  readonly attachments?: PromptAttachmentSnapshot;
+}
+export function isPromptAttachmentSnapshot(value: unknown): value is PromptAttachmentSnapshot {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const v = value as Record<string, unknown>;
+  return Object.keys(v).length === 3 && Object.keys(v).every((k) => ["owner", "sourceText", "objects"].includes(k))
+    && typeof v.owner === "string" && /^[0-9a-f]{64}$/.test(v.owner) && typeof v.sourceText === "string" && new TextEncoder().encode(v.sourceText).length <= 65536
+    && Array.isArray(v.objects) && v.objects.length > 0 && v.objects.every(isUploadedAttachment)
+    && isAttachmentIds(v.objects.map((item: UploadedAttachmentDTO) => item.id));
+}
+export function isComposerPromptSnapshot(value: unknown): value is ComposerPromptSnapshot {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const v = value as Record<string, unknown>;
+  return Object.keys(v).every((k) => ["version", "model", "thinkingLevel", "attachments"].includes(k))
+    && v.version === 1 && typeof v.model === "string" && v.model.length > 0 && v.model.length <= 160 && !/[\s\x00-\x1f]/.test(v.model)
+    && isThinkingLevel(v.thinkingLevel) && (!Object.hasOwn(v, "attachments") || isPromptAttachmentSnapshot(v.attachments));
+}
 export function isThinkingLevel(value: unknown): value is ThinkingLevel {
   return typeof value === "string" && (THINKING_LEVELS as readonly string[]).includes(value);
 }

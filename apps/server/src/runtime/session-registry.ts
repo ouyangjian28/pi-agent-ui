@@ -10,7 +10,7 @@
 //   句柄：巡检 timer/耐久/回收器），串行执行保审计确定性；幂等；dispose 后 sessionFor 拒绝。
 import { FileDurability } from "./file-durability.ts";
 import { RpcSession } from "./rpc-session.ts";
-import type { UiAsk, UiNoteEvent } from "./rpc-session.ts";
+import type { RpcSessionOpts, UiAsk, UiNoteEvent } from "./rpc-session.ts";
 import { sha256Hex12 } from "@pi-agent-ui/protocol";
 import type { DurabilityPort, ProcessHandle, ProcessHostPort, SessionStatus, UiClosedReason } from "@pi-agent-ui/protocol";
 import { isAbsolute } from "node:path";
@@ -18,6 +18,8 @@ import { isAbsolute } from "node:path";
 export interface SessionRegistryOpts {
   /** 进程宿主（生产=PiProcessHost；测试=受控替身）。 */
   readonly host: ProcessHostPort;
+  readonly attachmentSource?: RpcSessionOpts["attachmentSource"];
+  readonly attachmentAuthorized?: RpcSessionOpts["attachmentAuthorized"];
   /** journal 绝对路径 → 会话文件绝对路径（必填；相对/空=配置错误抛错）。 */
   readonly sessionFor: (file: string) => string;
   /** 耐久工厂（默认=FileDurability(file)；测试注入替身）。 */
@@ -123,6 +125,8 @@ export function createSessionRegistry(opts: SessionRegistryOpts): SessionRegistr
         sessionFile,
         sessionId: sessionIdOf(file),
         host: opts.host,
+        ...(opts.attachmentSource === undefined ? {} : { attachmentSource: opts.attachmentSource }),
+        ...(opts.attachmentAuthorized === undefined ? {} : { attachmentAuthorized: opts.attachmentAuthorized }),
         durability: opts.durabilityFor?.(file) ?? new FileDurability(file),
         ...(cwd !== undefined ? { cwd } : {}), // v1.5（批A）：首建采纳的项目目录（undefined=继承服务进程）
         ...(opts.responseTimeoutMs !== undefined ? { responseTimeoutMs: opts.responseTimeoutMs } : {}),

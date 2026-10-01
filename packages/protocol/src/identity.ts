@@ -14,6 +14,7 @@ export interface EntryIdentity {
 /** 意图种类：入对账面（产生 user entry）vs 不入对账（效果=状态推导，§5.5 意图两类分治）。 */
 export type IntentKind =
   | "prompt"
+  | "prompt-configured" // 有配置/附件耐久快照；旧schema不认识该kind，拒绝恢复而非丢参数/图片。
   | "steer"
   | "followUp" // 入对账面（被消费后与 prompt 同形落 user entry，D10）
   | "abort"
@@ -23,7 +24,7 @@ export type IntentKind =
   | "queueOp"; // 不入对账（无 user entry；回执=RPC response/状态变迁）
 
 export function intentEntersReconciliation(kind: IntentKind): boolean {
-  return kind === "prompt" || kind === "steer" || kind === "followUp";
+  return kind === "prompt" || kind === "prompt-configured" || kind === "steer" || kind === "followUp";
 }
 
 /** 附件身份=sha256 前 12 hex；多重集合（保重复次数，三审定界冻结）。 */

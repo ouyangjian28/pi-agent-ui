@@ -12,15 +12,15 @@
 //   （W9 已锁路径）；不吞错不造 kind（编造 outcome 比异常更危险）。
 // - 两层契约（与 write-host.ts:3-4 端口注统一）：可预期业务结果→outcome kind；内部异常→剥离重抛→4402。
 // - 不在本层：RpcSession 实例构造（composition 接线）、statusFor 映射、并发队列（TurnGate 已有）。
-import type { ComposerPromptOptions } from "@pi-agent-ui/protocol";
+import { isComposerPromptSnapshot, type EnqueuePayload } from "@pi-agent-ui/protocol";
 import type { WriteSendOutcomeDTO, WriteStopOutcomeDTO, WriteResumeOutcomeDTO, RetireOutcome } from "@pi-agent-ui/protocol";
-import type { SessionSendResult } from "../runtime/rpc-session.ts";
+import type { SessionSendResult, SessionComposerOptions } from "../runtime/rpc-session.ts";
 import type { WriteHostPort } from "./write-host.ts";
 import { ComputeGateQueueTimeout } from "./compute-semaphore.ts";
 
 /** 编码面所需的最小会话形状（结构化依赖：测试可替身，不锁 RpcSession 类）。 */
 export interface RpcLikeSession {
-  send(message: string, expectedGeneration?: number, model?: string, options?: ComposerPromptOptions): Promise<SessionSendResult>; // r3c：期望代次断言（live=null 冷启动面传 undefined）；model=M-OPS v1.4 会话级模型记忆
+  send(message: string, expectedGeneration?: number, model?: string, options?: SessionComposerOptions): Promise<SessionSendResult>; // r3c：期望代次断言（live=null 冷启动面传 undefined）；model=M-OPS v1.4 会话级模型记忆
   stop(): Promise<RetireOutcome>;
 }
 
@@ -49,10 +49,10 @@ export interface ResumeAuthority {
    * （语义同 reportFor）。 */
   executeFor(file: string, intentId: string, signal?: AbortSignal): {
     readonly report: { readonly resendAuthorized: readonly string[]; readonly resumeBlocked: boolean };
-    readonly payload: { readonly rawText: string } | null;
+    readonly payload: ({ readonly rawText: string } & Partial<EnqueuePayload>) | null;
   } | null | Promise<{
     readonly report: { readonly resendAuthorized: readonly string[]; readonly resumeBlocked: boolean };
-    readonly payload: { readonly rawText: string } | null;
+    readonly payload: ({ readonly rawText: string } & Partial<EnqueuePayload>) | null;
   } | null>;
 }
 
@@ -130,7 +130,7 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
     return creating;
   };
   return {
-    async sendPrompt(file: string, text: string, generation?: number, model?: string, cwd?: string, options?: ComposerPromptOptions): Promise<WriteSendOutcomeDTO> {
+    async sendPrompt(file: string, text: string, generation?: number, model?: string, cwd?: string, options?: SessionComposerOptions): Promise<WriteSendOutcomeDTO> {
       try {
         // v1.1 帧身份门（prompt 面）：客户端携带代次≠当前活代→恒拒（零副作用：不触 sessionFor/send）
         let liveGen: number | null = null; // r3c：门验过的活代传给 send（期望代次断言收窗；live=null 冷启动放行）
@@ -174,7 +174,7 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
         throw stripped("stop");
       }
     },
-    async resume(file: string, intentId: string, generation: number, signal?: AbortSignal): Promise<WriteResumeOutcomeDTO> {
+    async resume(file: string, intentId: string, generation: number, signal?: AbortSignal, principal?: string): Promise<WriteResumeOutcomeDTO> {
       // v1.1 身份门（r3a）：校验序=恢复数据在场→未阻断→授权→代次；任何拒绝=零副作用（不触 sessionFor）。
       // 执行面（r3b）：门序通过→executeFor 执行点读（同快照出复核+载荷）→generationFor 重查→send。
       const authority = opts.resumeAuthority;
@@ -257,7 +257,13 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
       // r3c：send 期望代次=执行点重查活代 live2（≠null 时断言收窗；live2=null=无活进程冷启动拉起，
       // 无断言放行——与门序⑥「live=null 放行至执行面」语义同源，非回归）。
       try {
-        const raw = await (await sessionOf(file)).send(exec.payload.rawText, live2 ?? undefined);
+        const p = exec.payload;
+        if ((p.attachments?.length ?? 0) > 0 && p.composer?.attachments === undefined) return { kind: "execution-failed", cause: "payload-unavailable" };
+        if (p.kind === "prompt-configured" && !isComposerPromptSnapshot(p.composer)) return { kind: "execution-failed", cause: "payload-unavailable" };
+        const session = await sessionOf(file);
+        const raw = p.composer === undefined
+          ? await session.send(p.rawText, live2 ?? undefined)
+          : await session.send(p.rawText, live2 ?? undefined, p.composer.model, { replay: { rawText: p.rawText, attachments: p.attachments ?? [], composer: p.composer }, ...(principal === undefined ? {} : { principal }) });
         const g = gateFailedDetail(raw);
         if (g !== null) auditSafe(() => g);
         if (raw.kind === "launched") {

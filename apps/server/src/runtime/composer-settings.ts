@@ -35,7 +35,7 @@ function idleState(value: unknown): { model: ComposerModel | null; thinkingLevel
 export async function prepareComposerSettings(
   channel: RpcSettingsChannel,
   generation: number,
-  requested: { readonly model?: string; readonly thinkingLevel?: ThinkingLevel },
+  requested: { readonly model?: string; readonly thinkingLevel?: ThinkingLevel; readonly requireImage?: boolean },
   isIdle: () => boolean,
 ): Promise<ConfirmedComposerSettings> {
   let mutated = false;
@@ -49,14 +49,15 @@ export async function prepareComposerSettings(
       if (!Array.isArray(listing.models) || listing.models.length > 2048) throw new SettingsRpcError("malformed");
       const models = listing.models.map(modelOf);
       selected = models.find(model => model.id === requested.model) ?? null;
-      if (selected === null) throw new SettingsRpcError("rejected");
+      if (selected === null) { const aliases = models.filter(model => model.modelId === requested.model); if (aliases.length === 1) selected = aliases[0]!; }
+      if (selected === null || (requested.requireImage === true && !selected.imageInput)) throw new SettingsRpcError("rejected");
       current = await state(); // reread pi busy facts immediately before mutation
       guard(); mutated = true;
       const result = modelOf(await channel.request(generation, { type: "set_model", provider: selected.provider, modelId: selected.modelId }));
       if (result.id !== selected.id) throw new SettingsRpcError("malformed");
       current = await state();
     }
-    if (selected === null || current.model?.id !== selected.id) throw new SettingsRpcError("rejected");
+    if (selected === null || current.model?.id !== selected.id || (requested.requireImage === true && !selected.imageInput)) throw new SettingsRpcError("rejected");
     guard(); const response = object(await channel.request(generation, { type: "get_available_thinking_levels" }));
     if (!Array.isArray(response.levels) || response.levels.length === 0 || response.levels.length > 7 || !response.levels.every(isThinkingLevel) || new Set(response.levels).size !== response.levels.length) throw new SettingsRpcError("malformed");
     const levels: ThinkingLevel[] = response.levels;

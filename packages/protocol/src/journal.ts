@@ -2,6 +2,7 @@
 // journal=append-only+逐行 fsync，永不 rename。
 
 import type { AttachmentId, EntryIdentity, IntentId, IntentKind, IntentMatchKey, SessionId } from "./identity.ts";
+import type { ComposerPromptSnapshot } from "./composer-input.ts";
 
 /** 附件明细（enqueue 行携带原始 hash 前缀；匹配用多重集身份由 identity.ts 派生）。 */
 export interface EnqueuePayload {
@@ -9,6 +10,7 @@ export interface EnqueuePayload {
   readonly rawText: string;
   readonly attachments: readonly AttachmentId[];
   readonly sentAt: string; // ISO8601
+  readonly composer?: ComposerPromptSnapshot; // prompt-configured的有界原配置/附件快照，不包含base64或凭据。
 }
 
 /** 账本行类型判别（三标记制：written→sending→stdin 首字节；自动补发唯一判据=sending 标记不存在）。 */
