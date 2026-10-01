@@ -1,6 +1,6 @@
 // M-OPS E2E（m-ops-e2e）：真 composition+真 WebSocket+假 pi（tests/fixtures/mops-fake-pi.mjs）。
-// 无真 pi 依赖常跑（M-OPS 面全是 spawn 参数/进程生命周期外围行为，不依赖真 pi RPC 语义回环；
-// 真 pi 探针往返已有 pi-child.smoke 覆盖）。设计=docs/m-ops-design.md v2 §5。
+// 无真 pi 依赖常跑：原spawn/生命周期与0.99形状的受控配置确认回环；不冒称真实pi切参链。
+// 真 pi 探针往返已有 pi-child.smoke 覆盖。设计=docs/m-ops-design.md v2 §5。
 // 腿：1  get-models ok（假 pi list 模式→models-list 回帧解析 provider/model 两列）
 //     1b listfail→models-list 空表+cause（不 close 主连接）
 //     2  ready 模式 prompt{model}→write-ack launched+argv 尾追 --model 断言+sidecar `<file>.session.model` 落盘
@@ -10,7 +10,7 @@
 //     4  未配 piBin→get-models 4405（modelsListing 不接线=天然拒）
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { chmod, mkdir, mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import WebSocket from "ws";
@@ -37,7 +37,7 @@ const until = async (pred: () => boolean, what: string, ms = 10_000): Promise<vo
 };
 
 interface Rig {
-  server: PiAgentUiServer; ws: WebSocket; frames: Frame[]; argvFile: string; sessionAbs: string;
+  server: PiAgentUiServer; ws: WebSocket; frames: Frame[]; argvFile: string; rpcFile: string; sessionAbs: string;
   dispose(): Promise<void>;
 }
 
@@ -51,11 +51,14 @@ async function makeRig(mode: string | null, opts: { readinessTimeoutMs?: number;
   await chmod(tokenFile, 0o600);
   await writeFile(join(dir, FILE), "", "utf8"); // journal 事实源（空文件放行——d4 教训）
   const argvFile = join(dir, "argv.log");
+  const rpcFile = join(dir, "rpc.log");
   const sessionAbs = join(dir, "sessions", `${FILE}.session`);
   const prevMode = process.env.MOPS_FAKE_PI_MODE;
   const prevArgv = process.env.MOPS_ARGV_FILE;
+  const prevRpc = process.env.MOPS_RPC_FILE;
   if (mode !== null) process.env.MOPS_FAKE_PI_MODE = mode;
   process.env.MOPS_ARGV_FILE = argvFile;
+  process.env.MOPS_RPC_FILE = rpcFile;
   const restoreEnv = (): void => {
     if (mode !== null) {
       if (prevMode === undefined) delete process.env.MOPS_FAKE_PI_MODE;
@@ -63,6 +66,8 @@ async function makeRig(mode: string | null, opts: { readinessTimeoutMs?: number;
     }
     if (prevArgv === undefined) delete process.env.MOPS_ARGV_FILE;
     else process.env.MOPS_ARGV_FILE = prevArgv;
+    if (prevRpc === undefined) delete process.env.MOPS_RPC_FILE;
+    else process.env.MOPS_RPC_FILE = prevRpc;
   };
   const server = await startServer({
     tokenFile,
@@ -87,7 +92,7 @@ async function makeRig(mode: string | null, opts: { readinessTimeoutMs?: number;
   ws.send(JSON.stringify({ t: "hello", protocolVersion: 1, token: TOKEN }));
   await until(() => frames.some((f) => f.t === "welcome"), "welcome");
   return {
-    server, ws, frames, argvFile, sessionAbs,
+    server, ws, frames, argvFile, rpcFile, sessionAbs,
     dispose: async () => {
       try { ws.close(); } catch { /* 已关 */ }
       await server.dispose().catch(() => {});
@@ -108,6 +113,21 @@ const prompt = (rig: Rig, rid: string, model?: string): Promise<Frame | undefine
   return until(() => rig.frames.some((f) => f.t === "write-ack" && f.requestId === rid), `write-ack ${rid}`)
     .then(() => rig.frames.find((f) => f.t === "write-ack" && f.requestId === rid));
 };
+
+interface RpcObservation {
+  msg: { type: string; id?: string; provider?: string; modelId?: string; message?: string };
+  state: { model: { provider: string; id: string }; thinkingLevel: string };
+  pid: number;
+}
+const observations = (rig: Rig): RpcObservation[] => existsSync(rig.rpcFile)
+  ? readFileSync(rig.rpcFile, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line) as RpcObservation)
+  : [];
+async function expectOnlyWriterRegistration(rig: Rig): Promise<void> {
+  // Cold bootstrap durably registers its writer; that is NOT a user intent/prompt.
+  const rows = (await readFile(join(dirname(rig.argvFile), FILE), "utf8")).trim().split("\n").filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>);
+  expect(rows.map(row => row.t)).toEqual(["writer"]);
+  expect(rows[0]).toMatchObject({ epoch: 1, bootId: expect.any(String), at: expect.any(String) });
+}
 
 describe("M-OPS E2E（真 composition+假 pi）", () => {
   it("腿1：get-models ok——假 pi list 模式→models-list 回帧解析 provider/model", async () => {
@@ -157,6 +177,43 @@ describe("M-OPS E2E（真 composition+假 pi）", () => {
       const sidecar = `${rig.sessionAbs}.model`;
       await until(() => existsSync(sidecar), "sidecar 落盘");
       expect((await readFile(sidecar, "utf8")).trim()).toBe("kimi-coding/k3");
+      await until(() => observations(rig).some(item => item.msg.type === "prompt"), "pi实际收到prompt");
+      const records = observations(rig);
+      const configured = records.filter(item => item.msg.id?.startsWith("cfg-"));
+      expect(configured.map(item => item.msg.type)).toEqual(["get_state", "get_available_thinking_levels", "get_state"]);
+      const sent = records.findIndex(item => item.msg.type === "prompt");
+      expect(sent).toBeGreaterThan(records.indexOf(configured.at(-1)!));
+      expect(records[sent]?.msg).toMatchObject({ id: "c1", type: "prompt", message: "hi" });
+      expect(records[sent]?.state.model).toMatchObject({ provider: "kimi-coding", id: "k3" });
+      expect(new Set(records.map(item => item.pid)).size).toBe(1);
+    } finally { await rig.dispose(); }
+  }, 20_000);
+
+  it("腿2b：配置success但缺实际状态→明确拒绝、无prompt/sidecar/意图", async () => {
+    const rig = await makeRig("ready-no-facts");
+    try {
+      const ack = await prompt(rig, "missing-facts", "kimi-coding/k3");
+      expect(ack?.outcome).toMatchObject({ kind: "not-ready", cause: "settings-malformed" });
+      const records = observations(rig);
+      expect(records.filter(item => item.msg.id?.startsWith("cfg-")).map(item => item.msg.type)).toEqual(["get_state"]);
+      expect(records.some(item => item.msg.type === "prompt")).toBe(false);
+      expect(existsSync(`${rig.sessionAbs}.model`)).toBe(false);
+      await expectOnlyWriterRegistration(rig);
+    } finally { await rig.dispose(); }
+  }, 20_000);
+
+  it("腿2c：set_model成功但实际模型不变→明确拒绝、无prompt/sidecar/意图", async () => {
+    const rig = await makeRig("ready-model-mismatch");
+    try {
+      const ack = await prompt(rig, "model-mismatch", "kimi-coding/k3");
+      expect(ack?.outcome).toMatchObject({ kind: "not-ready", cause: "settings-rejected" });
+      const records = observations(rig);
+      const setter = records.find(item => item.msg.type === "set_model");
+      expect(setter?.msg).toMatchObject({ provider: "kimi-coding", modelId: "k3" });
+      expect(records.filter(item => item.msg.id?.startsWith("cfg-")).map(item => item.msg.type)).toEqual(["get_state", "get_available_models", "get_state", "set_model", "get_state"]);
+      expect(records.some(item => item.msg.type === "prompt")).toBe(false);
+      expect(existsSync(`${rig.sessionAbs}.model`)).toBe(false);
+      await expectOnlyWriterRegistration(rig);
     } finally { await rig.dispose(); }
   }, 20_000);
 
