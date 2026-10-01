@@ -1560,3 +1560,20 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - 实际0.99.2模型/思考切换单独用 `python3 tests/fixtures/pi099-next-settings.py`，真实RpcSession/ProcessHost/自有loopback请求；此段归档时任务be8443478在跑，不能称已通过。该链即使通过也不证明主应用DTO/前端菜单/附件已接。
 - 附件HTTP主注册、同字节发送/恢复、owner/client、图示输入框、窄变异、独立/用户/实机仍待。日常服务、全局pi、生产认证不动。
 
+## 输入区主应用作者检查（2026-10-02；阶段未完成）
+
+证据=`tests/fixtures/run-records/composer-stage/`；原字节gzip复原/hash由归档脚本逐文件核实。源码52620aa主接线、9cbf491冷源有界重装、aaa85fe真实帧origin脚本修正、e134851回归修正、6f7845f web构建配置、0d65a41手机可读布局。以下仅指定版本/范围的作者结果，不能覆盖之后新增菜单能力接线，也不是独立/用户验收。
+
+| 检查 | 脚本/证据 | 结果与限制 |
+| --- | --- | --- |
+| 实际应用图片与代码/冷暖参数 | `tests/fixtures/composer-real-app.py`；`tests/browser/composer-real-bridge.mjs`；verification/native原帧/审计/转录 | 真AppRoot/生产组合根/实际pi0.99.2/自有loopback提供商：fixture低+PNG原字节→同暖代fixture-alt高+UTF-8代码；无生产认证/付费模型，不冒称视觉模型效果；Node护栏不是OS沙箱 |
+| 首回复持久主正文 | 三次native-app-persisted-rerun日志、最终native日志 | settled后history原帧+`.history-list .chat-assistant`正文、无刷新/导航；旧瞬时正文pass与kind/origin脚本失败全部保留，不用于冒充通过 |
+| 冷建文件边界 | `tests/unit/server/composer-session-join.test.ts`及既有dual-source | 5新反例及旧保护过，仅写模式最多2×250ms；默认只读/永久缺源/journal失败/dispose不重开仍诚实；无前端自动重订 |
+| owner/恢复与原字节 | `tests/unit/server/prompt-attachments.test.ts`；owner/恢复转交相关用例 | 同字节/owner/漂移/重复次序拒绝、晚ACK/未知保新稿、上传中禁止发等受控检查；不是实际未知意图跨重启UI恢复 |
+| 原基线回归与配置 | verification/logs/final-default-rerun、final-build-ts-fix、mobile-readable-build、final-root-tsc | e134851默认2026通过/24原opt-in跳过，未增skip；6f/0d build及protocol/server/web tsc通过；根tsc exit2/111历史债，未宣称根全绿/逐诊断完全同基线；Vite发射、web noEmit允许显式.ts导入、strict保留 |
+| 可读手机真入口 | verification/native/20261001T212504375173Z图片/结果 | 390与320模型宽>=80px、字体>=12px、选中文字非空、发送右侧、无横溢；390单行/320两行；作者实际看图。旧几何pass但模型22px空白不算视觉通过；不是实机键盘/UX验收 |
+| 7窄consumer故障 | `tests/browser/composer-mutate.py`；mutations/result.json及8日志 | gitarchive已commit基线e13485197fc587a8a24e5ec2d3cf1329ed457c2d green，真实公共protocol复制别名；7/7断言红：改图片字节、错owner、漂移、重复数序、固定可删、晚ACK清新文件、上传中可发。源未改、非导入/编译红；不等于decoder/配置/transport/整应用恢复覆盖 |
+| 真实失败保留 | verification/logs及失败native文件夹 | pin/remove曾两方fulfilled；回归曾2012绿/7红/31skip（额外7为beforeAll失败阻断，不是新增skip）；直接Node.ts进口修正、legacy rawText恢复形状与已授权去返回旧断言修正后2026/24。web TS5097、native假kind、手机空框亦保留 |
+
+**未完成需求**：思考菜单仍通用枚举。Runtime实际能力拒绝已有，但UI按模型禁选/提示尚未接，不能标本阶段完成。实际未知意图跨重启UI恢复、独立审、用户试用、真机键盘分别待证。日常服务/全局pi未动；后续同范围菜单接线必须另记源版本与复验，旧2026/7-fault不能自动覆盖。
+

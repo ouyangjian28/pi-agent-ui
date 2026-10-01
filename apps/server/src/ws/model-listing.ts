@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import type { ThinkingLevel } from "@pi-agent-ui/protocol";
 
 /** M-OPS 模型清单服务（docs/m-ops-design.md §3）：数据源=`pi --list-models` 固定列表格。
  *  解析=表头列偏移定位+`\s{2,}` 切分+列数校验（K3 设计审 P3-3：非脆弱固定列宽）。
@@ -10,6 +11,7 @@ export interface ModelEntry {
   readonly id: string;
   readonly context?: string;
   readonly thinking?: string;
+  readonly thinkingLevels?: readonly ThinkingLevel[];
 }
 
 /** 解析结果：ok 或失败原因（cause 透传 models-list 帧）。 */
@@ -60,6 +62,7 @@ export class ModelsListingService {
       readonly cacheTtlMs?: number;
       readonly now?: () => number;
       readonly spawnImpl?: typeof spawnListModels;
+      readonly enrichThinkingLevels?: (models: readonly ModelEntry[]) => Promise<readonly ModelEntry[]>;
     },
   ) {}
 
@@ -68,11 +71,16 @@ export class ModelsListingService {
     const now = this.opts.now?.() ?? Date.now();
     if (this.cache !== null && now - this.cachedAt < ttl) return this.cache;
     if (this.inflight !== null) return this.inflight;
-    const run = (this.opts.spawnImpl ?? spawnListModels)(this.opts.piBin).then((r) => {
-      this.cache = r;
+    const run = (this.opts.spawnImpl ?? spawnListModels)(this.opts.piBin).then(async (r) => {
+      let enriched = r;
+      if (r.ok && this.opts.enrichThinkingLevels) {
+        try { enriched = { ok: true, models: await this.opts.enrichThinkingLevels(r.models) }; }
+        catch { /* Unknown capabilities must not erase the existing model list. */ }
+      }
+      this.cache = enriched;
       this.cachedAt = now;
       this.inflight = null;
-      return r;
+      return enriched;
     }, (e: unknown) => {
       const cause = e instanceof Error ? e.message : String(e);
       const r: ModelsParseResult = { ok: false, cause: `pi --list-models 执行失败：${cause}`.slice(0, 200) };

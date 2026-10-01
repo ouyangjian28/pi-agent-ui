@@ -364,6 +364,9 @@ export interface ModelInfoDTO {
   readonly id: string;
   readonly context?: string;
   readonly thinking?: string;
+  /** UI-HYBRID: same-version SDK catalog support, not current session settings.
+   * Omitted => unknown; never infer levels from the legacy yes/no column. */
+  readonly thinkingLevels?: readonly ThinkingLevel[];
 }
 
 /** v1.4：S→C 模型清单响应。失败→空表+cause（不新设错误码——K3 核实闭码面不涉）。 */

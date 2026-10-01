@@ -35,6 +35,7 @@ import { AttachmentStore } from "./http/attachment-store.ts";
 import { createAttachmentRoute } from "./http/attachment-route.ts";
 import { createServer, type Server as HttpServer } from "node:http";
 import { ModelsListingService } from "./ws/model-listing.ts";
+import { enrichThinkingLevels } from "./ws/models-thinking.ts";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
 export interface ServerConfig {
@@ -421,7 +422,7 @@ export async function startServer(config: ServerConfig): Promise<PiAgentUiServer
     ...(config.sessionFor !== undefined ? { entryAbsFor: (file: string) => config.sessionFor!(file) } : {}),
     ...(config.thinkingVisible === true ? { thinkingVisible: true } : {}),
     // M-OPS（v1.4）：模型清单服务（pi --list-models 缓存 10min；未配 piBin=不接线→get-models 4405 拒）
-    ...(config.write?.piBin !== undefined ? { modelsListing: new ModelsListingService({ piBin: config.write.piBin }) } : {}),
+    ...(config.write?.piBin !== undefined ? { modelsListing: new ModelsListingService({ piBin: config.write.piBin, enrichThinkingLevels: enrichThinkingLevels.bind(null, config.write.piBin) }) } : {}),
     audit,
   });
 

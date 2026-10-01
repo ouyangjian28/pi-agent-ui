@@ -21,7 +21,8 @@
 //   一律不清空当前草稿。
 
 import React, { useEffect, useRef, useState } from "react";
-import { isThinkingLevel, type ThinkingLevel } from "@pi-agent-ui/protocol/src/composer-input";
+import type { ThinkingLevel } from "@pi-agent-ui/protocol/src/composer-input";
+import { ThinkingPicker } from "./thinking-picker";
 import { useWrite } from "../ws/use-write";
 import { NotReadyBanner } from "./not-ready-banner";
 import { ModelPicker, type ModelSource } from "./model-picker";
@@ -218,19 +219,7 @@ export function WriteComposer({ client, file, editor }: { client: WriteClientSur
       <div className="write-actions composer-controls">
         {editor?.onUpload && <><input ref={fileInput} type="file" hidden multiple accept=".png,.jpg,.jpeg,.txt,.md,.ts,.tsx,.js,.jsx,.json,.py,.yaml,.yml,.sh,.css,.html,.csv,.log" onChange={(event) => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ""; if (files.length) editor.onUpload?.(files); }} /><button type="button" className="composer-attach" aria-label="添加图片或文本代码附件" title="PNG/JPEG图片、UTF-8文本或代码" disabled={pending || editor.slot?.uploading || !view.ready} onClick={() => fileInput.current?.click()}><svg aria-hidden="true" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="m8 13 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9a2 2 0 0 1 3 3l-8 8" /></svg></button></>}
         {editor && <ModelPicker source={editor.source} choice={editor.slot?.modelChoice ?? editor.defaultChoice ?? MODEL_DEFAULT} freeText={editor.slot?.freeText ?? ""} onConfigure={editor.onConfigure} />}
-        {editor?.onThinking && <label className="thinking-picker" title="用于下一条消息；以模型实际能力为准，不支持时保留草稿并拒绝发送。">
-          <span>思考</span>
-          <select aria-label="下一条思考级别" value={editor.slot?.thinkingLevel ?? ""} onChange={(event) => {
-            const value = event.target.value;
-            if (value === "") editor.onThinking?.(null);
-            else if (isThinkingLevel(value)) editor.onThinking?.(value);
-          }}>
-            <option value="">默认</option>
-            <option value="off">关闭</option><option value="minimal">最少</option>
-            <option value="low">低</option><option value="medium">中</option>
-            <option value="high">高</option><option value="xhigh">很高</option><option value="max">最高</option>
-          </select>
-        </label>}
+        {editor?.onThinking && <ThinkingPicker source={editor.source} choice={editor.slot?.modelChoice ?? editor.defaultChoice ?? MODEL_DEFAULT} freeText={editor.slot?.freeText ?? ""} level={editor.slot?.thinkingLevel ?? null} onChange={editor.onThinking} />}
         <span className="composer-spacer" />
         <button className="composer-stop" type="button" onClick={() => void stop()} disabled={!canStop || editor?.isNew === true} hidden={editor?.isNew === true} aria-label="停止">
           <span aria-hidden="true">■</span>

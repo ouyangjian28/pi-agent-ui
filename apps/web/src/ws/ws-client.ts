@@ -10,6 +10,7 @@
 // 直接从自包含的 contracts 模块引类型（绕开 barrel：index.ts 会拉入 NodeNext 风格 .ts 扩展 import，
 // 与 apps/web Bundler 解析不兼容；contracts.ts 零 import 无副作用）。
 import type { ClientFrame, ErrorCode, ModelInfoDTO, ServerFrame, SessionSummaryDTO } from "@pi-agent-ui/protocol/src/contracts";
+import { isThinkingLevel, THINKING_LEVELS } from "@pi-agent-ui/protocol/src/composer-input";
 
 /** 本客户端允许发送的帧（§5.1 六客户端帧的只读子集+v1.5 get-roots；写类 t 在类型层即不可达）。 */
 type OutgoingFrame = Extract<ClientFrame, { readonly t: "hello" } | { readonly t: "list-sessions" } | { readonly t: "get-models" } | { readonly t: "get-roots" }>;
@@ -131,6 +132,9 @@ function isModelInfo(v: unknown): v is ModelInfoDTO {
   if (!isPlainObject(v) || !isString(v.provider) || !isString(v.id)) return false;
   if (v.context !== undefined && !isString(v.context)) return false;
   if (v.thinking !== undefined && !isString(v.thinking)) return false;
+  if (v.thinkingLevels !== undefined && (!Array.isArray(v.thinkingLevels)
+    || v.thinkingLevels.length > THINKING_LEVELS.length || !v.thinkingLevels.every(isThinkingLevel)
+    || new Set(v.thinkingLevels).size !== v.thinkingLevels.length)) return false;
   return true;
 }
 
