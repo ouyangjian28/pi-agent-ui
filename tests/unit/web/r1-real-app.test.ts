@@ -45,6 +45,28 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 describe("R1 真 AppRoot+三客户端首链", () => {
+  it("紧凑单框无局部返回但保主导航；冷暖下一条思考按owner快照发出且保同DOM", async () => {
+    start();
+    const composer = document.querySelector(".write-composer")!;
+    expect(composer.querySelectorAll("textarea")).toHaveLength(1);
+    expect(within(composer as HTMLElement).queryByRole("button", { name: "返回列表" })).toBeNull();
+    expect(screen.getByRole("button", { name: "会话列表" })).toBeTruthy();
+    const textarea = screen.getByLabelText("首条消息") as HTMLTextAreaElement;
+    fireEvent.change(screen.getByLabelText("下一条思考级别"), { target: { value: "high" } });
+    fireEvent.change(textarea, { target: { value: "首条带思考" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" }));
+    const first = Socket.all[2]!.sent.filter(frame => frame.t === "prompt").at(-1)!;
+    expect(first).toMatchObject({ thinkingLevel: "high", text: "首条带思考" });
+    await ack(first, { kind: "launched", intentId: "i-thinking", commandId: 1 });
+    snapshot(String(first.file));
+    expect(screen.getByLabelText("写入消息内容")).toBe(textarea);
+    expect((screen.getByLabelText("下一条思考级别") as HTMLSelectElement).value).toBe("high");
+    expect(within(composer as HTMLElement).getByLabelText("模型选择")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("下一条思考级别"), { target: { value: "low" } });
+    fireEvent.change(textarea, { target: { value: "暖会话带思考" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(Socket.all[2]!.sent.filter(frame => frame.t === "prompt").at(-1)).toMatchObject({ file: first.file, thinkingLevel: "low", text: "暖会话带思考" });
+  });
   it("欢迎首字不重挂；默认在线帧缺 model/cwd；launched→真实列表新行/正文→第二条同 file", async () => {
     start(); const textarea = screen.getByLabelText("首条消息") as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: "第一句话" } }); expect(screen.getByLabelText("首条消息")).toBe(textarea);
@@ -99,7 +121,7 @@ describe("R1 真 AppRoot+三客户端首链", () => {
   it("在途编辑→返回→选 B→A launched，保 B 三域；恢复 A 残稿仅一次", async () => {
     start(); const { textarea, frame } = firstSend(); fireEvent.change(textarea, { target: { value: "v2" } });
     expect((screen.getByRole("button", { name: "＋新对话" }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "返回列表" })); fireEvent.click(screen.getByRole("button", { name: /已有对话 B/ })); snapshot("b.jsonl");
+    fireEvent.click(screen.getByRole("button", { name: "会话列表" })); fireEvent.click(screen.getByRole("button", { name: /已有对话 B/ })); snapshot("b.jsonl");
     fireEvent.change(screen.getByLabelText("写入消息内容"), { target: { value: "B 稿" } });
     const before = Socket.all[1]!.sent.length; await ack(frame, { kind: "launched", intentId: "i-1", commandId: 1 });
     expect(Socket.all[1]!.sent).toHaveLength(before); expect((screen.getByLabelText("写入消息内容") as HTMLTextAreaElement).value).toBe("B 稿");
@@ -110,7 +132,7 @@ describe("R1 真 AppRoot+三客户端首链", () => {
     fireEvent.click(screen.getByRole("button", { name: /打开已受理对话/ })); expect((screen.getByLabelText("写入消息内容") as HTMLTextAreaElement).value).toBe("A 后续稿");
   });
   it.each(["busy", "4402"])("B 下 %s：分类与全文恢复，4402 ready+人工二发先确认", async (kind) => {
-    start(); const { frame } = firstSend(); fireEvent.click(screen.getByRole("button", { name: "返回列表" })); fireEvent.click(screen.getByRole("button", { name: /已有对话 B/ })); snapshot("b.jsonl");
+    start(); const { frame } = firstSend(); fireEvent.click(screen.getByRole("button", { name: "会话列表" })); fireEvent.click(screen.getByRole("button", { name: /已有对话 B/ })); snapshot("b.jsonl");
     const before = Socket.all[1]!.sent.length;
     if (kind === "busy") await ack(frame, { kind: "busy" }); else await act(async () => { Socket.all[2]!.receive({ t: "error", requestId: frame.requestId, code: 4402, retryable: true, message: "never display" }); await Promise.resolve(); });
     expect(Socket.all[1]!.sent).toHaveLength(before); expect(screen.getByText(/真实历史正文/)).toBeTruthy();
