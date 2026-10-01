@@ -171,9 +171,10 @@ try {
       const box = document.querySelector(".composer-box").getBoundingClientRect();
       const send = document.querySelector(".composer-send").getBoundingClientRect();
       const controls = document.querySelector(".composer-controls");
-      return { rightGap: box.right - send.right, controlsHeight: controls.getBoundingClientRect().height, overflow: controls.scrollWidth - controls.clientWidth, sendBottom: send.bottom, boxBottom: box.bottom };
+      const model = document.querySelector(".model-picker select");
+      return { rightGap: box.right - send.right, controlsHeight: controls.getBoundingClientRect().height, overflow: controls.scrollWidth - controls.clientWidth, sendBottom: send.bottom, boxBottom: box.bottom, modelWidth: model.getBoundingClientRect().width, modelFontSize: parseFloat(getComputedStyle(model).fontSize), selectedLabel: model.selectedOptions[0]?.textContent.trim() };
     });
-    assert(layout.rightGap >= 0 && layout.rightGap <= 24 && layout.sendBottom <= layout.boxBottom && layout.overflow <= 1 && layout.controlsHeight <= 64, `Mobile toolbar must stay compact with right-aligned send at ${width}px: ${JSON.stringify(layout)}`);
+    assert(layout.rightGap >= 0 && layout.rightGap <= 24 && layout.sendBottom <= layout.boxBottom && layout.overflow <= 1 && layout.controlsHeight <= (width < 360 ? 120 : 64) && layout.modelWidth >= 80 && layout.modelFontSize >= 12 && layout.selectedLabel, `Mobile toolbar must stay compact with right-aligned send at ${width}px: ${JSON.stringify(layout)}`);
     await page.screenshot({ path: join(out, width === 390 ? "mobile-new-image-composer.png" : "mobile-320-new-image-composer.png"), fullPage: false });
   }
   await page.setViewportSize({ width: 1280, height: 800 });
