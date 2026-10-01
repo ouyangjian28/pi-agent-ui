@@ -24,6 +24,8 @@ export class AttachmentStore {
   private readonly objects = new Map<string,StoredMetadata>();
   private closed = false;
   private readonly pinned = new Set<string>();
+  // 同对象固定/删除在第一个await之前互斥；不能成功固定后仍被已进入的删除抹掉。
+  private readonly mutating = new Set<string>();
   private activeOperations = 0;
   private collecting = false;
   private drained: (()=>void) | undefined;
@@ -117,12 +119,20 @@ export class AttachmentStore {
   }
   /** 必须在意图入journal之前固定对象；未知/重启恢复不可被普通待发送清理删掉。 */
   pin(principal: string, ids: readonly string[]): Promise<void> { return this.operation(async()=>{
-    await this.resolveNow(principal,ids);
-    for (const id of ids) if (!this.pinned.has(id)) { await this.directory.writeExclusive(id+".pin",Buffer.from("1")); this.pinned.add(id); }
+    this.checkPrincipal(principal); if (!isAttachmentIds(ids)) throw new AttachmentStorageError();
+    const unique=[...new Set(ids)];
+    if (unique.some((id)=>this.mutating.has(id))) throw new AttachmentStorageError();
+    for (const id of unique) this.mutating.add(id);
+    try {
+      await this.resolveNow(principal,ids);
+      for (const id of unique) if (!this.pinned.has(id)) { await this.directory.writeExclusive(id+".pin",Buffer.from("1")); this.pinned.add(id); }
+    } finally { for (const id of unique) this.mutating.delete(id); }
   }); }
   remove(principal: string, id: string): Promise<void> { return this.operation(async()=>{
-    this.checkPrincipal(principal); const m=this.objects.get(id); if (m===undefined || m.principal!==principal || this.pinned.has(id)) throw new AttachmentStorageError();
-    await this.directory.remove(id+".json"); await this.directory.remove(id+".blob"); this.objects.delete(id);
+    this.checkPrincipal(principal); const m=this.objects.get(id); if (m===undefined || m.principal!==principal || this.pinned.has(id) || this.mutating.has(id)) throw new AttachmentStorageError();
+    this.mutating.add(id);
+    try { await this.directory.remove(id+".json"); await this.directory.remove(id+".blob"); this.objects.delete(id); }
+    finally { this.mutating.delete(id); }
   }); }
   close(): Promise<void> {
     this.closePromise ??= (async()=>{
