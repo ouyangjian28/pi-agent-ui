@@ -285,6 +285,26 @@
 .app.real-app.hybrid-ui .live-stream {
   position: relative;
 }
+.app.real-app.hybrid-ui .retained-reply {
+  margin: 10px 0;
+  padding: 10px 14px;
+  border: 1px dashed var(--hy-border);
+  border-radius: 10px;
+  background: var(--hy-panel);
+}
+.app.real-app.hybrid-ui .retained-reply .message-author {
+  display: block;
+  margin-bottom: 4px;
+}
+.app.real-app.hybrid-ui .retained-reply .frozen-summary {
+  background: transparent;
+  padding: 6px 0;
+  font-family: inherit;
+  overflow-wrap: anywhere;
+}
+.app.real-app.hybrid-ui .retained-reply .frozen-content[hidden] {
+  display: none;
+}
 .app.real-app.hybrid-ui .message-author {
   font-size: 11px;
   color: var(--hy-muted);

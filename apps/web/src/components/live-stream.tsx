@@ -72,7 +72,7 @@ export function LiveStreamView({
           id: ++serial.current,
           text: event.text,
           thinking: thinkingTextOf(state.current),
-          collapsed: false,
+          collapsed: true, // 完整副本保留，默认作为可展开的次级内容；不建立历史配对
         });
       }
     }
@@ -105,8 +105,8 @@ export function LiveStreamView({
       {display.replies.map((reply) => {
         const expanded = !reply.collapsed || opened.has(reply.id);
         return (
-          <article className="live-final chat-message chat-assistant" key={reply.id}>
-            <small className="message-author">pi · 已生成（未确认入档）</small>
+          <article className="live-final retained-reply" key={reply.id}>
+            <small className="message-author" title="未与历史记录做对应校验；保留独立来源，不代表二次回复。">实时回复副本 · 未确认入档关联</small>
             {reply.collapsed && (
               <button
                 type="button"
@@ -125,8 +125,7 @@ export function LiveStreamView({
                 {reply.text.length > 40 ? "…" : ""}
               </button>
             )}
-            {expanded && (
-              <div className="frozen-content">
+              <div className="frozen-content" hidden={!expanded}>
                 <p className="live-stream-text">{reply.text || "（空正文）"}</p>
                 {reply.thinking && (
                   <details>
@@ -135,7 +134,6 @@ export function LiveStreamView({
                   </details>
                 )}
               </div>
-            )}
           </article>
         );
       })}
