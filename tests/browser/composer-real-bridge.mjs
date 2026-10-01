@@ -180,10 +180,12 @@ try {
     scripts: Array.from(document.scripts).map((script) => script.src),
   }));
   await writeFile(join(out, "thinking-menu-dom.json"), JSON.stringify(menuDiagnostic, null, 2));
-  assert(await page.locator('select[aria-label="下一条思考级别"] option[value="low"]').isDisabled(), "Default pi identity must not guess thinking capabilities");
+  // isDisabled retargets label-wrapped options to the enabled select.
+  // Check each option's native property, never weaken capability predicates.
+  assert(await page.locator('select[aria-label="下一条思考级别"] option[value="low"]').evaluate((option) => option.disabled), "Default pi identity must not guess thinking capabilities");
   await page.getByLabel("模型选择").selectOption("ui-upgrade-test/fixture");
-  assert(!(await page.locator('select[aria-label="下一条思考级别"] option[value="low"]').isDisabled()), "Supported low thinking unavailable in real menu");
-  assert(await page.locator('select[aria-label="下一条思考级别"] option[value="max"]').isDisabled(), "Unsupported max still selectable in real menu");
+  assert(!(await page.locator('select[aria-label="下一条思考级别"] option[value="low"]').evaluate((option) => option.disabled)), "Supported low thinking unavailable in real menu");
+  assert(await page.locator('select[aria-label="下一条思考级别"] option[value="max"]').evaluate((option) => option.disabled), "Unsupported max still selectable in real menu");
   await page.getByLabel("首条消息").fill("第一次受控消息");
   await page.getByLabel("下一条思考级别").selectOption("low");
   await page.locator('.write-composer input[type="file"]').setInputFiles(join(root, "image.png"));
@@ -285,7 +287,7 @@ try {
   assert(configured[1].payload.composer.model === "ui-upgrade-test/fixture-alt" && configured[1].payload.composer.thinkingLevel === "high", "Effective existing settings not journaled");
   await textarea.fill("不支持的等级应保留草稿");
   const unsupportedOption = page.locator('select[aria-label="下一条思考级别"] option[value="max"]');
-  assert(await unsupportedOption.isDisabled() && (await unsupportedOption.textContent()).includes("此模型不支持"), "Unsupported option must be disabled with explanation");
+  assert(await unsupportedOption.evaluate((option) => option.disabled) && (await unsupportedOption.textContent()).includes("此模型不支持"), "Unsupported option must be disabled with explanation");
   // Bypass only the now-correct UI menu to keep the original server negative gate.
   // Uses its real authenticated native write socket and production DTO/host/RPC.
   await page.evaluate(({ file }) => {
