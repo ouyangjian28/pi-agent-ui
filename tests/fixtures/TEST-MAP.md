@@ -1502,3 +1502,19 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - 日期口径：设计/交接标签为2026-10-11，工具运行时 createdAt 为2026-09-30；保留原始时间，不伪造同日运行。
 - 已知边界：真手机/生产会话连续性待 owner 独立检查；服务端/共享契约/协议包/冻结 WS 文档零改动。作者自查不替代 GLM 全量/窄变异复验、Kimi交叉审≥85及looker视觉审；根类型债不是本批修复范围。
 
+## UI-HYBRID 独立 pi 升级与可点击样板（2026-10-01；不是正式 UI 完工）
+
+- 用户新拍板 supersede 旧视觉基线：最新稳定 pi 优先，OpenChamber 整体骨架/pi-web-ui 聊天动态；电脑优先，手机可用，用户先试再扩展。旧 R1 测试/证据原文不改。
+- 版本：server dependency exact 0.99.2（71fb0e4），全工作区锁补全 361e862；实际本地 CLI 的版本断言来自下述独立受控 probe，未偷用全局旧 pi。
+
+| 检查对象 | 可重放入口/证据 | 断言与边界 |
+|---|---|---|
+| 实际 pi RPC（提供商为本地受控 SSE 替身） | `python3 tests/fixtures/pi-099-controlled-rpc.py`；`tests/fixtures/run-records/pi-099-upgrade/` | assert 本地 CLI 0.99.2；隔离 HOME/agentDir/cwd/env，实际文本 delta/final/settled、实际 read 自有临时文件、工具身份关联、显式扩展 handled、EOF exit 0。不是应用适配层/真实提供商/权限全集验收 |
+| 离线可点击 HTML 的真浏览器交互 | `node scripts/build-ui-hybrid-preview.mjs` → `node tests/browser/ui-hybrid-preview.mjs`；`designs/previews/hybrid-core/checks.json` | 草稿保留/新建空会话/发送停止演示/运行归属；手机导航主面互斥、控件≥44px、减少动态效果 live animation=none；无横溢/输入区在实际视口；零 HTTP/provider 请求/零 page exceptions。是模拟样板，不是 RealApp |
+| 原应用回归不退化 | 默认 `env -u PI_E2E npm test`；`tests/fixtures/run-records/ui-hybrid-preview/regression.log` | 103 文件/1876 测试通过，5 文件/24 原有真实模型 opt-in skip 不变；没有新增 skip/放宽断言；不把原应用绿算新正式 UI 接线验收 |
+| 构建/类型 | 同目录 build.log；升级批日志与 root-typecheck.log | build、protocol/server/web 包 tsc 0；样板最终 build/web tsc 0、source eslint/LSP clean。根 tsc exit 2/111 为历史数量一致，未宣称逐条同一或根全绿 |
+
+- 最终样板/截图候选 356f4fb，7 图 fullPage=false：1440×900 明暗/过程展开/空会话，390×844 聊天/列表，390×560 短视口。短视口不是真机键盘。加入完整 React MIT 许可的最终 HTML 另行重跑浏览器通过。
+- 原 RealApp/共享 ConversationState/冻结协议/服务端业务未改，日常服务/全局 pi 未切换；SDK 启动 PATH 与 handled 等应用兼容风险尚须正式接线阶段验证。新增两条独立脚本不冒称已计入 1876 Vitest 用例。
+- 本阶段未做新增窄变异、独立交叉审或生产部署；用户体验未验收，不申请正式 UI 完工门。
+
