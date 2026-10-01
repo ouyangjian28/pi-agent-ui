@@ -21,6 +21,7 @@ const sent = [];
 const responses = [];
 const checks = [];
 let spawns = 0;
+const ownedChildren = [];
 let failure;
 let session;
 const assert = (value, message) => { if (!value) throw new Error(message); };
@@ -42,7 +43,12 @@ async function settled(intent) {
 const host = {
   spawn(args, handlers, cwd) {
     spawns++;
-    return actual.spawn(args, { ...handlers, onEvent(event) {
+    let finish;
+    const exit = new Promise(resolve => { finish = resolve; });
+    const handle = actual.spawn(args, { ...handlers, onExit(...facts) {
+      finish();
+      handlers.onExit(...facts);
+    }, onEvent(event) {
       if (event.type === 'response' && event.id?.startsWith('cfg-')) {
         const data = event.data;
         responses.push({ id: event.id, command: event.command, success: event.success,
@@ -52,6 +58,8 @@ const host = {
       }
       handlers.onEvent(event);
     } }, cwd);
+    ownedChildren.push({ handle, exit });
+    return handle;
   },
   writeStdin(handle, text) { sent.push(JSON.parse(text)); return actual.writeStdin(handle, text); },
   closeStdin(handle) { actual.closeStdin(handle); },
@@ -89,9 +97,29 @@ try {
 } catch (error) {
   failure = error;
 } finally {
+  // RpcSession.dispose deliberately releases resources, not its warm process.
+  // Retire only this fixture's owned children and observe real exit; do not force success/exit.
+  const waitExit = async (child, ms) => {
+    let timer;
+    try {
+      return await Promise.race([child.exit.then(() => true), new Promise(resolve => { timer = setTimeout(() => resolve(false), ms); })]);
+    } finally { clearTimeout(timer); }
+  };
+  try {
+    for (const child of ownedChildren) {
+      actual.closeStdin(child.handle);
+      if (!await waitExit(child, 2000)) {
+        actual.stop(child.handle, 'SIGTERM');
+        if (!await waitExit(child, 1000)) {
+          actual.stop(child.handle, 'SIGKILL');
+          assert(await waitExit(child, 1000), 'Owned pi cleanup did not observe real exit');
+        }
+      }
+    }
+  } catch (error) { failure ??= error; }
   await session?.dispose();
   await compiler.close();
-  await writeFile(join(out, 'runtime-result.json'), JSON.stringify({ version, spawns, checks, sent, responses, passed: !failure,
+  await writeFile(join(out, 'runtime-result.json'), JSON.stringify({ version, spawns, checks, sent, responses, cleanupObservedExit: !failure, passed: !failure,
     failure: failure ? String(failure) : undefined, scope: 'internal real runtime; not browser/DTO attachment wiring' }, null, 2) + '\n');
 }
 if (failure) throw failure;
