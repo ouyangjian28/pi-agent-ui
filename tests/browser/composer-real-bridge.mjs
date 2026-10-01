@@ -53,6 +53,7 @@ const frames = [];
 const pageErrors = [];
 const browserBlocked = [];
 let browser;
+let page;
 let server;
 let failure;
 let result;
@@ -134,7 +135,7 @@ try {
     } else await route.continue();
   });
   await context.addInitScript((value) => localStorage.setItem("pi-agent-ui.token", value), token);
-  const page = await context.newPage();
+  page = await context.newPage();
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("websocket", (socket) => {
     assert(new URL(socket.url()).hostname === "127.0.0.1", "Non-loopback browser socket");
@@ -331,6 +332,10 @@ try {
   const journalData = {};
   for (const file of await readdir(journals)) if (file.endsWith(".jsonl")) journalData[file] = await journal(file);
   await writeFile(join(out, "journals.json"), JSON.stringify(journalData, null, 2) + "\n");
+  const transcriptData = {};
+  for (const name of await readdir(transcripts)) if (name.endsWith(".jsonl")) transcriptData[name] = await readFile(join(transcripts, name), "utf8");
+  await writeFile(join(out, "owned-transcripts.json"), JSON.stringify(transcriptData, null, 2) + "\n");
+  await page?.screenshot({ path: join(out, "last-page.png"), fullPage: false }).catch(() => {});
   await browser?.close();
   await server?.dispose();
   await compiler.close();
