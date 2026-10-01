@@ -280,6 +280,11 @@
 .app.real-app.hybrid-ui .chat-assistant {
   background: transparent;
 }
+/* The absolute screen-reader status must stay in the internal chat scrollport,
+   not acquire the document as its containing block after a long history. */
+.app.real-app.hybrid-ui .live-stream {
+  position: relative;
+}
 .app.real-app.hybrid-ui .message-author {
   font-size: 11px;
   color: var(--hy-muted);
