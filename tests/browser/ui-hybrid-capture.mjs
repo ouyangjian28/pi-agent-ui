@@ -383,6 +383,20 @@ try {
         if (after !== before) throw new Error("可见性导航产生业务退订/作答/停止帧");
         await page.setViewportSize({ width: 390, height: 420 });
         await page.getByLabel("写入消息内容").click();
+        const shortLayout = await page.evaluate(() => ({
+          documentScrollY: scrollY,
+          documentScrollHeight: document.scrollingElement.scrollHeight,
+          viewportHeight: innerHeight,
+          headerTop: document.querySelector(".topbar").getBoundingClientRect().top,
+        }));
+        if (
+          shortLayout.documentScrollY !== 0 ||
+          shortLayout.headerTop < 0 ||
+          shortLayout.documentScrollHeight > shortLayout.viewportHeight + 1
+        )
+          throw new Error(
+            `Short viewport root document escaped internal history scroll: ${JSON.stringify(shortLayout)}`,
+          );
         const hit = await page.getByRole("button", { name: "发送", exact: true }).evaluate((el) => {
           const r = el.getBoundingClientRect();
           return (
@@ -405,6 +419,7 @@ try {
           readerTop,
           viewport: "390×420（缩短视口模拟，不冒充真手机软键盘）",
           composerPreserved: preserved,
+          shortLayout,
           businessFrameDelta: after - before,
           sendHit: hit,
           imePromptCount: 0,
