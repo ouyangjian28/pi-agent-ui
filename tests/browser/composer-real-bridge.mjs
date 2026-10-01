@@ -177,7 +177,7 @@ try {
     "actual pi final one",
   );
   await settled(first.file, first.outcome.intentId);
-  await until(() => frames.some((frame) => (frame.t === "snapshot" ? frame.page : frame.t === "events" && frame.kind === "history" ? frame.events : [])?.some((event) => event.kind === "message" && event.textPreview?.text === "受控应用正文 ✓ 第1轮")), "first persisted reply in history without navigation or refresh");
+  await until(() => frames.some((frame) => (frame.t === "snapshot" ? frame.page : frame.t === "events" && frame.origin === "history" ? frame.events : [])?.some((event) => event.kind === "message" && event.textPreview?.text === "受控应用正文 ✓ 第1轮")), "first persisted reply in history without navigation or refresh");
   await until(
     () => page.locator(".history-list .chat-assistant").filter({ hasText: "受控应用正文 ✓ 第1轮" }).count(),
     "first persisted reply rendered after settled",
