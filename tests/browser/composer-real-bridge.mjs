@@ -239,11 +239,11 @@ try {
     "second reply rendered",
   );
   await settled(second.file, second.outcome.intentId);
-  assert(first.outcome.generation === second.outcome.generation, "Existing model switch replaced warm runtime generation");
   assert(await page.locator('.composer-attachments li').count() === 0, "Launched attachment draft was not cleared");
   const durable = await journal(second.file);
   const configured = durable.filter((row) => row.t === "enqueue");
-  assert(configured.length === 2 && configured.every((row) => row.payload.kind === "configured-prompt" && row.payload.composer.version === 1), "Composer intent snapshot missing");
+  assert(configured.length === 2 && configured.every((row) => row.payload.kind === "prompt-configured" && row.payload.composer.version === 1), "Composer intent snapshot missing");
+  assert(Number.isSafeInteger(configured[0].generation) && configured[0].generation > 0 && configured[0].generation === configured[1].generation, "Existing model switch replaced warm runtime generation or generation evidence absent");
   assert(configured[0].payload.composer.attachments.objects[0].name === "image.png" && configured[1].payload.composer.attachments.objects[0].name === "code.ts", "Original uploaded objects not retained for recovery");
   assert(configured[1].payload.composer.model === "ui-upgrade-test/fixture-alt" && configured[1].payload.composer.thinkingLevel === "high", "Effective existing settings not journaled");
   await textarea.fill("不支持的等级应保留草稿");
