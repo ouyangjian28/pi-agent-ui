@@ -373,7 +373,7 @@ function Preview() {
                       key={`${session.id}-activity-${i}`}
                       running={session.running && i === session.messages.length - 1}
                       progress={session.progress}
-                      stopped={m.stopped}
+                      stopped={m.stopped === true}
                     />
                   )}
                   <div className="message-text">
