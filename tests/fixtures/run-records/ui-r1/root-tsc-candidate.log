@@ -201,4 +201,3 @@ tests/unit/subscription-engine.test.ts(777,23): error TS2352: Conversion of type
   Type '{ readonly t: "events"; readonly subscriptionId: string; readonly origin: "live"; readonly liveSeq: number; readonly refSeq: null; readonly events: readonly LiveEvent[]; }' is not comparable to type '{ events: { kind: string; delta?: string; }[]; }'.
     Types of property 'events' are incompatible.
       The type 'readonly LiveEvent[]' is 'readonly' and cannot be assigned to the mutable type '{ kind: string; delta?: string; }[]'.
-ROOT_TSC_EXIT=2
