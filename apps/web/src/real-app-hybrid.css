@@ -1,6 +1,7 @@
 /* UI-HYBRID: approved OpenChamber-like shell, existing real clients/owner.
    Only the real-app namespace consumes these tokens; no mock data or remote assets. */
 :root {
+  --hy-font: Inter, "Noto Sans CJK SC", system-ui, sans-serif;
   --hy-bg: #fcfcfa;
   --hy-side: #f3f3f0;
   --hy-panel: #ffffff;
@@ -52,11 +53,7 @@
   grid-template-rows: 72px minmax(0, 1fr);
   background: var(--hy-bg);
   color: var(--hy-text);
-  font:
-    14px/1.6 Inter,
-    system-ui,
-    "Noto Sans CJK SC",
-    sans-serif;
+  font: 14px/1.6 var(--hy-font);
 }
 .app.real-app.hybrid-ui .workspace.two-col {
   display: contents;
@@ -266,7 +263,7 @@
   padding: 24px 28px 40px;
 }
 .app.real-app.hybrid-ui .chat-message {
-  font-family: inherit;
+  font-family: var(--hy-font);
   font-size: 15px;
   line-height: 1.85;
   border: 0;
@@ -340,8 +337,12 @@
 .app.real-app.hybrid-ui .welcome-mark {
   font-size: 42px;
 }
+.app.real-app.hybrid-ui .write-composer:focus-within textarea {
+  box-shadow: none;
+  animation: none;
+}
 .app.real-app.hybrid-ui .write-composer textarea {
-  font-family: inherit;
+  font-family: var(--hy-font);
   font-size: 15px;
   min-height: 80px;
 }
