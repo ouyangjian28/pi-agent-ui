@@ -1534,3 +1534,16 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - 当前 UI 证据是本地假 socket；应用真实连接本地 pi 0.99.2、新窄变异、独立交叉/视觉审、真手机和用户试用仍未完成；未部署日常服务。
 - **后续截图自查发现漏检**：8c30ff4 短屏输入聚焦后全页滚动把导航带出屏幕（root scrollHeight=38570/scrollY=187/headerTop=-187）。原发送命中断言不证明整体可用；9250834 加 root/header/文档高度约束，在旧 UI 真红，7842c0b 仅 CSS 为无障碍直播状态设内部 containing block，不删状态/不强制滚动归零。`run-records/ui-hybrid-real/root-scroll/` 保存红灯及边界；完整任务 ba1d5ff80 exit 0：定向/1879+24/build/三包类型/65记录均过，聚焦后 documentScrollY=0、scrollHeight=viewportHeight=420、headerTop=0，源 7842c0b。root-scroll/capture、日志/原始 gzip、result.json 含耐久对应与 SHA256；人工读修后短屏图确认导航在顶部、空白漂移消除。不是新窄变异，不冒充独立视觉或实机键盘 PASS；真 pi 应用链与用户试用仍另验。
 
+## UI-HYBRID 实际 pi 核心链与已授权只读登记修正（2026-10-01）
+
+| 检查对象 | 重放/耐久证据 | 判据与边界 |
+|---|---|---|
+| 真浏览器→应用→本地0.99.2 | `python3 tests/fixtures/pi099-real-app.py`；`run-records/pi099-real-app/strict-switch/` | native WS、真实组合根/进程/RPC、仅模型loopback替身；模型清单/首条/delta-final/耐久顺序/成功旧订阅且原文可见/切回草稿+DOM/第二轮/stop；8项过、两模型请求、零协议错误。不是付费提供商/CLI默认配置/真机/恢复全集 |
+| 正常 writer 不误报损坏 | `tests/unit/history-projection.test.ts`；`run-records/pi099-real-app/writer-fixed/verification/` | 新16例先3红/33绿，三行识别后36全绿；保留行/cursor、不将写权epoch变成回合generation、真unknown与坏字段仍保留；schema/写入/恢复/DTO不改 |
+| 四类副本窄变异 | `python3 tests/browser/writer-projection-mutate.py`；同目录 `copy-only-mutations/` | 提交基线36绿，删识别3红/绕schema13红/epoch冒充回合2红/unknown冒充settled2红；显式公开导入alias绑副本，原源码不改；不冒称全恢复/全部UI变异 |
+| 修正后的实际界面与投影 | `run-records/pi099-real-app/writer-fixed/` | bbc4527ec exit0，cfbdc05基线；默认1895通过/24原skip、build/三包类型0、真实链9项（新增浏览器及投影无损坏误报）。临时HOME/agentDir/cwd/env、护栏自检，非OS沙箱；没有生产认证 |
+| 副本/回执展示层 | `r1-live-handoff.test.ts`、`r1-real-app.test.ts`、`live-stream-view.test.ts` | 两新谓词先真红；32定向绿。未配对final独立保留，默认辅助收折可完整打开；相同/空正文不删，主显示仅新增量且旧hidden节点仍在；launched只说提交，不伪造等待/执行成功。最终全套/65视口/真实链b34cae323未返回，不标完工 |
+
+- 原首轮启动器缺esbuild、旧夹具缺D导致4402及过弱选择态断言均留在 `run-records/pi099-real-app/first-loader-failure/`、`first-mechanical/`；严格结果不能抹掉前次失败。日志原字节gzip+可读EOF规范化，archive.json逐件hash。
+- 独立交叉/视觉/用户试用/真手机未过，日常服务未替换；旧根111类型债分账，不写全仓全绿。
+
