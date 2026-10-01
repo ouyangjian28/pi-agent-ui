@@ -451,7 +451,7 @@ describe("M-OPS 模型清单面（get-models/models-list）", () => {
     expect(client.getSnapshot().models.items[0]?.thinkingLevels).toEqual(["off", "high"]);
     expect(client.getSnapshot().models.status).toBe("ok"); client.close();
   });
-  it.each([null, "high", ["unknown"], ["off", "off"], Array(8).fill("high"), [1]])("malformed thinking levels %j do not change the snapshot or emit notifications", (thinkingLevels) => {
+  it.each([null, "high", ["unknown"], ["off", "off"], Array(8).fill("high"), [1]].map((value) => ({ value })))("malformed thinking levels $value do not change the snapshot or emit notifications", ({ value: thinkingLevels }) => {
     const { client, ws } = setup(); handshake(ws); client.requestModels();
     const requestId = (ws.sentFrames().at(-1) as { requestId: string }).requestId;
     const before = client.getSnapshot(); const listener = vi.fn(); client.subscribe(listener);

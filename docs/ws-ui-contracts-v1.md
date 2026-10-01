@@ -477,3 +477,12 @@ type ServerFrame =
   - **write-ack not-ready.detail?**：启动失败 stderr 尾行（≤500 字符+strip 控制字符；per-generation stderr ring buffer——onStderr 现状生产面未接线，本批新捕获面顺手落审计）。错误源三路=spawn-failed/spawn-exited/readiness-timeout（kind 五值不变；错模型真腿=spawn-exited 实测：spawn 即退 exit=1+stderr 单行含模型名）。**明文政策显式裁决**：write-composer「服务端自由文本永不入 DOM」姿态有意变更（知情价值>泄露风险；React 转义+strip+本机自用；M-DEPLOY 多用户面前须再评——docs/m-ops-design.md §4）。
 - 新建会话（§2 面）：file 名 `ops-YYYYMMDD-HHmmss.jsonl`（同秒冲突=并入同会话，声明可接受）；新建态不发 subscribe（时序=写先行，4402=引导文案非错误）；实际落 roots[0]（resolveWithinRoots 相对名恒命中）。
 - 测试=tests/unit/contracts-v14.test.ts（V1-V7 纯校验面）+后端批（清单解析/sidecar 优先序/尾追序/detail 净化）+E2E N1-N3（docs/m-ops-design.md §5；N3 断言写死 spawn-exited 路）。
+
+### §10.4 紧凑输入区增量（v1.7/1.8/1.9；历史正文不改写）
+
+- 用户已授权真实图片/UTF-8代码附件与已有会话下一条模型/思考级别；仅此边界允许新增服务端/协议接线。§10.3的“仅下次冷启动”是v1.4历史口径；新写服务使用独立配置RPC命名域、空闲准备租约、实际能力查询及设置后二次核实，实现下一条生效。不成功、不确定均不写用户意图；实际pi是最终权威。
+- `prompt.thinkingLevel?` 为 `off|minimal|low|medium|high|xhigh|max`；`prompt.attachments?` 为8个以内的已上传不透明引用，不经WS发大base64。附件上传由同源HTTP、当前登录身份/撤销复核与小引用绑定。服务端在enqueue前固定原字节，journal `prompt-configured`保存v1配置快照；恢复重新核实身份、完整元数据、哈希、重复次数与顺序。缺对象/漂移不得退为纯文本。旧journal解析器拒绝未知种类，不依赖忽略新字段来降级；journal版本号仍3。
+- **v1.9只读模型提示**：`models-list.models[]`新增可选 `thinkingLevels?: readonly ThinkingLevel[]`。至多7个、不重复、仅已知枚举；省略表示能力未知，`thinking:"yes"/"no"`绝不是级别表。原requestId/帧t/握手major=1/预算/闭合错误码不变；旧响应没有该字段仍可读，旧客户端忽略额外提示。坏字段整帧忽略，不污染前端快照。
+- 提示来源：配置piBin的`--version`须严格等于本候选SDK版本0.99.2（2s/1024B输出门），随后同版本公开`ModelRuntime`与`getSupportedThinkingLevels`只读解析目录。禁模型网络刷新、不读取/修改认证、失败/版本不一致/未知模型均省略提示。清单10min缓存与单在途共享不变；它不是活会话状态，也不调用会话setter。
+- UI只允许默认及明确支持的级别；不支持/未知选项禁用并解释。模型切换不静默夹低已有选择，草稿保留；完整id或唯一短名才匹配提示，歧义/默认pi身份/未列自定义均未知。真实RPC发送前再次能力确认，前端提示不能绕过后端拒绝。
+- 证据面：`tests/unit/web/{thinking-picker,ws-client}.test.ts`、`tests/unit/server/{models-thinking,model-listing}.test.ts`及`tests/browser/composer-real-bridge.mjs`。真实桥保留原服务端不支持max反例：UI禁选后由同一个真实已认证native WS直接提交非法业务配置，仍须零新增enqueue/提供商请求；不是删除负例。具体通过记录见TEST-MAP；本段不宣称独立验收或真机键盘通过。

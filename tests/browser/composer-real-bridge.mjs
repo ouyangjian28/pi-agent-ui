@@ -134,7 +134,17 @@ try {
       await route.abort();
     } else await route.continue();
   });
-  await context.addInitScript((value) => localStorage.setItem("pi-agent-ui.token", value), token);
+  await context.addInitScript((value) => {
+    localStorage.setItem("pi-agent-ui.token", value);
+    // Observe an actual authenticated browser WS, never substitute its transport.
+    const NativeWebSocket = window.WebSocket;
+    window.WebSocket = class extends NativeWebSocket {
+      send(data) {
+        try { if (JSON.parse(data).t === "prompt") window.__composerWriteSocket = this; } catch {}
+        super.send(data);
+      }
+    };
+  }, token);
   page = await context.newPage();
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("websocket", (socket) => {
@@ -158,7 +168,12 @@ try {
     ),
     "Actual model listing did not reach browser",
   );
+  const catalogModel = frames.find((f) => f.t === "models-list" && f.models?.some((m) => m.provider === "ui-upgrade-test" && m.id === "fixture"))?.models.find((m) => m.provider === "ui-upgrade-test" && m.id === "fixture");
+  assert(catalogModel?.thinkingLevels?.includes("low") && catalogModel.thinkingLevels.includes("high") && !catalogModel.thinkingLevels.includes("max"), "Same-version public SDK capability metadata missing or fabricated");
+  assert(await page.locator('select[aria-label="下一条思考级别"] option[value="low"]').isDisabled(), "Default pi identity must not guess thinking capabilities");
   await page.getByLabel("模型选择").selectOption("ui-upgrade-test/fixture");
+  assert(!(await page.locator('select[aria-label="下一条思考级别"] option[value="low"]').isDisabled()), "Supported low thinking unavailable in real menu");
+  assert(await page.locator('select[aria-label="下一条思考级别"] option[value="max"]').isDisabled(), "Unsupported max still selectable in real menu");
   await page.getByLabel("首条消息").fill("第一次受控消息");
   await page.getByLabel("下一条思考级别").selectOption("low");
   await page.locator('.write-composer input[type="file"]').setInputFiles(join(root, "image.png"));
@@ -259,8 +274,15 @@ try {
   assert(configured[0].payload.composer.attachments.objects[0].name === "image.png" && configured[1].payload.composer.attachments.objects[0].name === "code.ts", "Original uploaded objects not retained for recovery");
   assert(configured[1].payload.composer.model === "ui-upgrade-test/fixture-alt" && configured[1].payload.composer.thinkingLevel === "high", "Effective existing settings not journaled");
   await textarea.fill("不支持的等级应保留草稿");
-  await page.getByLabel("下一条思考级别").selectOption("max");
-  await page.getByRole("button", { name: "发送", exact: true }).click();
+  const unsupportedOption = page.locator('select[aria-label="下一条思考级别"] option[value="max"]');
+  assert(await unsupportedOption.isDisabled() && (await unsupportedOption.textContent()).includes("此模型不支持"), "Unsupported option must be disabled with explanation");
+  // Bypass only the now-correct UI menu to keep the original server negative gate.
+  // Uses its real authenticated native write socket and production DTO/host/RPC.
+  await page.evaluate(({ file }) => {
+    const socket = window.__composerWriteSocket;
+    if (!socket || socket.readyState !== WebSocket.OPEN) throw new Error("Actual write socket not available");
+    socket.send(JSON.stringify({ t: "prompt", requestId: "unsupported-native-direct", file, text: "不支持的等级应保留草稿", model: "ui-upgrade-test/fixture-alt", thinkingLevel: "max" }));
+  }, { file: second.file });
   await until(() => frames.filter((f) => f.t === "write-ack").length === 3, "unsupported level rejected");
   const rejected = frames.filter((f) => f.t === "write-ack")[2];
   assert(rejected.outcome.kind === "not-ready" && rejected.outcome.cause === "settings-rejected", "Unsupported level incorrectly launched");
