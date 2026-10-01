@@ -13,6 +13,7 @@ async function setup(version = VERSION) {
   vi.stubEnv("PI_CODING_AGENT_DIR", dir);
   const data = JSON.stringify({ providers: { controlled: { api: "openai-completions", baseUrl: "http://127.0.0.1:9/v1", apiKey: "synthetic-test-not-auth", models: [
     { id: "reasoner", name: "Local catalog only", reasoning: true, thinkingLevelMap: { off: "none", low: "low", high: "high" }, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 32000, maxTokens: 512 },
+    { id: "restricted", name: "Explicitly restricted", reasoning: true, thinkingLevelMap: { off: "none", minimal: null, low: "low", medium: null, high: "high", xhigh: null, max: null }, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 32000, maxTokens: 512 },
     { id: "plain", name: "No reasoning", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 32000, maxTokens: 512 },
   ] } } });
   await writeFile(join(dir, "models.json"), data);
@@ -21,10 +22,11 @@ async function setup(version = VERSION) {
 describe("same-version read-only public SDK thinking catalog", () => {
   it("uses real public SDK model metadata (not yes/no), preserving unknown identity and configuration bytes", async () => {
     const { pi, dir, data } = await setup();
-    const entries = [{ provider: "controlled", id: "reasoner", thinking: "yes" }, { provider: "controlled", id: "plain", thinking: "no" }, { provider: "controlled", id: "unknown", thinking: "yes" }];
+    const entries = [{ provider: "controlled", id: "reasoner", thinking: "yes" }, { provider: "controlled", id: "plain", thinking: "no" }, { provider: "controlled", id: "restricted", thinking: "yes" }, { provider: "controlled", id: "unknown", thinking: "yes" }];
     const result = await enrichThinkingLevels(pi, entries);
-    expect(result[0]?.thinkingLevels).toEqual(["off", "low", "high"]);
-    expect(result[1]?.thinkingLevels).toEqual(["off"]); expect(result[2]).toEqual(entries[2]);
+    // Missing map keys retain SDK defaults; null explicitly disables a level.
+    expect(result[0]?.thinkingLevels).toEqual(["off", "minimal", "low", "medium", "high"]);
+    expect(result[1]?.thinkingLevels).toEqual(["off"]); expect(result[2]?.thinkingLevels).toEqual(["off", "low", "high"]); expect(result[3]).toEqual(entries[3]);
     expect(await readFile(join(dir, "models.json"), "utf8")).toBe(data);
     await expect(readFile(join(dir, "auth.json"))).rejects.toMatchObject({ code: "ENOENT" });
   });
