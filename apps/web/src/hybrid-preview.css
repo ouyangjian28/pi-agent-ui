@@ -662,6 +662,19 @@ button svg {
   }
 }
 @media (max-width: 760px) {
+  .icon-button,
+  .activity-toggle,
+  .send-button,
+  .stop-button,
+  .model-label select,
+  .sidebar-bottom button,
+  .project-selector select {
+    min-height: 44px;
+  }
+  .icon-button,
+  .send-button {
+    min-width: 44px;
+  }
   .preview {
     display: block;
   }

@@ -162,6 +162,7 @@ function Preview() {
   const timers = useRef(new Map<number, ReturnType<typeof setInterval>>());
   const input = useRef<HTMLTextAreaElement>(null);
   const transcript = useRef<HTMLDivElement>(null);
+  const followStream = useRef(true);
   const session = sessions.find((s) => s.id === selected)!;
   const visible = sessions.filter((s) => s.project === project && s.title.toLowerCase().includes(query.toLowerCase()));
   const update = (id: number, fn: (s: Conversation) => Conversation) =>
@@ -173,8 +174,12 @@ function Preview() {
     [],
   );
   useEffect(() => {
+    followStream.current = true;
     if (transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight;
   }, [selected, session.messages.length]);
+  useEffect(() => {
+    if (followStream.current && transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight;
+  }, [session.progress]);
   function choose(id: number) {
     setSelected(id);
     setMobileList(false);
@@ -333,7 +338,15 @@ function Preview() {
           </span>
         </header>
         <div className="preview-notice">可点击样板 · 全部为模拟数据 · 不接模型和日常会话</div>
-        <div className="transcript" ref={transcript} aria-label="会话消息">
+        <div
+          className="transcript"
+          ref={transcript}
+          aria-label="会话消息"
+          onScroll={(e) => {
+            const element = e.currentTarget;
+            followStream.current = element.scrollHeight - element.scrollTop - element.clientHeight < 64;
+          }}
+        >
           <div className="reading-column">
             {session.messages.length === 0 ? (
               <div className="welcome">
