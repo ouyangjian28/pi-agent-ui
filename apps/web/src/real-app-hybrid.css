@@ -286,6 +286,7 @@
   position: relative;
 }
 .app.real-app.hybrid-ui .retained-reply {
+  font-family: var(--hy-font);
   margin: 10px 0;
   padding: 10px 14px;
   border: 1px dashed var(--hy-border);
