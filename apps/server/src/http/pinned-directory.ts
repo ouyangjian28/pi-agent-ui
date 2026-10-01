@@ -4,7 +4,7 @@ import { isAbsolute, resolve } from "node:path";
 import { readBounded } from "../ws/safe-open.ts";
 
 const DIRECTORY_FLAGS = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
-const KEY = /^[0-9a-f]{32}\.(blob|json)$/;
+const KEY = /^[0-9a-f]{32}\.(blob|json|pin)$/;
 export class AttachmentStorageError extends Error {
   constructor() { super("附件存储不可用或内容已改变；文件未发送。"); this.name = "AttachmentStorageError"; }
 }
