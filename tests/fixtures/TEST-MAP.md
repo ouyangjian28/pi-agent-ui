@@ -1542,7 +1542,7 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 | 正常 writer 不误报损坏 | `tests/unit/history-projection.test.ts`；`run-records/pi099-real-app/writer-fixed/verification/` | 新16例先3红/33绿，三行识别后36全绿；保留行/cursor、不将写权epoch变成回合generation、真unknown与坏字段仍保留；schema/写入/恢复/DTO不改 |
 | 四类副本窄变异 | `python3 tests/browser/writer-projection-mutate.py`；同目录 `copy-only-mutations/` | 提交基线36绿，删识别3红/绕schema13红/epoch冒充回合2红/unknown冒充settled2红；显式公开导入alias绑副本，原源码不改；不冒称全恢复/全部UI变异 |
 | 修正后的实际界面与投影 | `run-records/pi099-real-app/writer-fixed/` | bbc4527ec exit0，cfbdc05基线；默认1895通过/24原skip、build/三包类型0、真实链9项（新增浏览器及投影无损坏误报）。临时HOME/agentDir/cwd/env、护栏自检，非OS沙箱；没有生产认证 |
-| 副本/回执展示层 | `r1-live-handoff.test.ts`、`r1-real-app.test.ts`、`live-stream-view.test.ts` | 两新谓词先真红；32定向绿。未配对final独立保留，默认辅助收折可完整打开；相同/空正文不删，主显示仅新增量且旧hidden节点仍在；launched只说提交，不伪造等待/执行成功。最终全套/65视口/真实链b34cae323未返回，不标完工 |
+| 副本/回执展示层 | `r1-live-handoff.test.ts`、`r1-real-app.test.ts`、`live-stream-view.test.ts` | 两新谓词先真红；32定向绿。未配对final独立保留，默认辅助收折可完整打开；相同/空正文不删，主显示仅新增量且旧hidden节点仍在；launched只说提交，不伪造等待/执行成功。b34cae323在1897默认/24原skip与构建/三包类型后，捕获等待旧标签`pi · 已生成`超时；完整视口未过、此任务真实链未跑。ca7bf61更新标签并增加真实收折/全文/独立主显示判据，b2dd049ad重跑中，不标完工 |
 
 - 原首轮启动器缺esbuild、旧夹具缺D导致4402及过弱选择态断言均留在 `run-records/pi099-real-app/first-loader-failure/`、`first-mechanical/`；严格结果不能抹掉前次失败。日志原字节gzip+可读EOF规范化，archive.json逐件hash。
 - 独立交叉/视觉/用户试用/真手机未过，日常服务未替换；旧根111类型债分账，不写全仓全绿。
