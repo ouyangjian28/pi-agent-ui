@@ -7,7 +7,11 @@ import type { ScanRow } from "@pi-agent-ui/protocol";
 
 function enqueueLine(n: number, text = `msg-${n}`, ordinal = n): string {
   return JSON.stringify({
-    t: "enqueue", intentId: `i-${n}`, sessionId: "s", generation: n, leafId: `L${n}`,
+    t: "enqueue",
+    intentId: `i-${n}`,
+    sessionId: "s",
+    generation: n,
+    leafId: `L${n}`,
     matchKey: { textHash: `h${n}`, attachmentIdentity: "", ordinal },
     payload: { kind: "prompt", rawText: text, attachments: [], sentAt: "123" },
   });
@@ -16,7 +20,12 @@ function simple(t: string, extra: Record<string, unknown> = {}): string {
   return JSON.stringify({ t, ...extra });
 }
 function consumedLine(id = "i"): string {
-  return JSON.stringify({ t: "consumed", intentId: id, anchorEntryId: "e", intervalEnd: { entryId: "e2", lengthHash: "lh" } });
+  return JSON.stringify({
+    t: "consumed",
+    intentId: id,
+    anchorEntryId: "e",
+    intervalEnd: { entryId: "e2", lengthHash: "lh" },
+  });
 }
 function clearLine(): string {
   return JSON.stringify({ t: "clear", sessionId: "s", cleared: ["a", "b", "c"] });
@@ -30,25 +39,100 @@ describe("journalToScanRows（3b-2a 投影；R5 严格 schema）", () => {
     expect(r.source).toBe("journal");
     expect(r.locator).toBe("1");
     expect(r.raw).toBe(enqueueLine(1, "hello", 7));
-    expect(r.event).toMatchObject({ kind: "turn-enqueued", preview: { text: "hello", truncated: false }, ordinal: 7, generation: 1, intentId: "i-1", seq: 0, ts: null });
+    expect(r.event).toMatchObject({
+      kind: "turn-enqueued",
+      preview: { text: "hello", truncated: false },
+      ordinal: 7,
+      generation: 1,
+      intentId: "i-1",
+      seq: 0,
+      ts: null,
+    });
+  });
+
+  it("合法 writer 元数据保留为既有辅助行，不冒充损坏/回合/发送结论", () => {
+    const raw = simple("writer", { epoch: 2, bootId: "fixture-boot", at: "2026-10-01T07:00:00Z" });
+    expect(journalToScanRows(`${raw}\n`)).toEqual([
+      {
+        source: "journal",
+        locator: "1",
+        raw,
+        event: { seq: 0, ts: null, generation: null, intentId: null, kind: "unknown-line" },
+      },
+    ]);
+  });
+
+  it("writer 不删行/不串回合身份，真结果未知仍保留原裁决", () => {
+    const raw = [
+      enqueueLine(7),
+      simple("writer", { epoch: 2, bootId: "fixture-boot", at: "x" }),
+      simple("unknown", { intentId: "i-7", reason: "not-confirmed" }),
+      simple("sending", { intentId: "i-8" }),
+    ];
+    const rows = journalToScanRows(raw.join("\n") + "\n");
+    expect(rows.map((r) => r.locator)).toEqual(["1", "2", "3", "4"]);
+    expect(rows.map((r) => r.raw)).toEqual(raw);
+    expect(rows.map((r) => r.event.kind)).toEqual(["turn-enqueued", "unknown-line", "verdict-unknown", "sending"]);
+    expect(rows[1]?.event).toMatchObject({ generation: null, intentId: null });
+    expect(rows[2]?.event).toMatchObject({ intentId: "i-7", kind: "verdict-unknown" });
+  });
+
+  it("writer 撕裂尾仍不提前发布，换行补全才有完整辅助行", () => {
+    const raw = simple("writer", { epoch: 1, bootId: "fixture-boot", at: "x" });
+    expect(journalToScanRows(raw)).toEqual([]);
+    expect(journalToScanRows(`${raw}\n`)[0]?.event.kind).toBe("unknown-line");
+  });
+
+  it.each([
+    { epoch: 0 },
+    { epoch: -1 },
+    { epoch: 1.5 },
+    { epoch: Number.MAX_SAFE_INTEGER + 1 },
+    { epoch: "1" },
+    { epoch: undefined },
+    { bootId: "" },
+    { bootId: 1 },
+    { bootId: undefined },
+    { at: "" },
+    { at: 1 },
+    { at: undefined },
+    { t: "writer-next" },
+  ])("坏 writer/未来行仍严格 corrupt %#", (invalid) => {
+    const raw = JSON.stringify({ t: "writer", epoch: 1, bootId: "fixture-boot", at: "x", ...invalid });
+    expect(journalToScanRows(`${raw}\n`)).toEqual([
+      {
+        source: "journal",
+        locator: "1",
+        raw,
+        event: { seq: 0, ts: null, generation: null, intentId: null, kind: "journal-corrupt" },
+      },
+    ]);
   });
 
   it("完整行集合各 kind 映射（sending/engaged/consumed/cancelled/delivered/settled/unknown/response-timeout/clear）", () => {
-    const text = [
-      simple("sending", { intentId: "i" }),
-      simple("engaged", { intentId: "i" }),
-      consumedLine(),
-      simple("cancelled", { intentId: "i" }),
-      simple("delivered", { intentId: "i" }),
-      simple("settled", { intentId: "i" }),
-      simple("unknown", { intentId: "i", reason: "x" }),
-      simple("response-timeout", { intentId: "i", generation: 1, commandId: 42 }),
-      clearLine(),
-    ].join("\n") + "\n";
+    const text =
+      [
+        simple("sending", { intentId: "i" }),
+        simple("engaged", { intentId: "i" }),
+        consumedLine(),
+        simple("cancelled", { intentId: "i" }),
+        simple("delivered", { intentId: "i" }),
+        simple("settled", { intentId: "i" }),
+        simple("unknown", { intentId: "i", reason: "x" }),
+        simple("response-timeout", { intentId: "i", generation: 1, commandId: 42 }),
+        clearLine(),
+      ].join("\n") + "\n";
     const kinds = journalToScanRows(text).map((r) => r.event.kind);
     expect(kinds).toEqual([
-      "sending", "turn-engaged", "turn-consumed", "turn-cancelled",
-      "verdict-delivered", "verdict-settled", "verdict-unknown", "response-timeout", "clear",
+      "sending",
+      "turn-engaged",
+      "turn-consumed",
+      "turn-cancelled",
+      "verdict-delivered",
+      "verdict-settled",
+      "verdict-unknown",
+      "response-timeout",
+      "clear",
     ]);
   });
 
@@ -68,7 +152,8 @@ describe("journalToScanRows（3b-2a 投影；R5 严格 schema）", () => {
   });
 
   it("坏完整行分型：JSON 解析失败/非对象/null/缺 t/未知 t→journal-corrupt", () => {
-    const text = ["not-json", "123", "null", JSON.stringify({ x: 1 }), JSON.stringify({ t: "from-the-future" })].join("\n") + "\n";
+    const text =
+      ["not-json", "123", "null", JSON.stringify({ x: 1 }), JSON.stringify({ t: "from-the-future" })].join("\n") + "\n";
     const rows = journalToScanRows(text);
     expect(rows).toHaveLength(5);
     expect(rows.every((r) => r.event.kind === "journal-corrupt")).toBe(true);
@@ -80,15 +165,38 @@ describe("journalToScanRows（3b-2a 投影；R5 严格 schema）", () => {
   it("R5/P1：schema 非法行→journal-corrupt 不抛错（严格校验与恢复侧同权威）", () => {
     const bad = [
       // P1 原：payload.rawText 非字符串（旧宽松解析抛 TypeError）
-      JSON.stringify({ t: "enqueue", intentId: "i", sessionId: "s", generation: 1, leafId: "L", matchKey: { textHash: "h", attachmentIdentity: "", ordinal: 0 }, payload: { kind: "prompt", rawText: 123, attachments: [], sentAt: "x" } }),
+      JSON.stringify({
+        t: "enqueue",
+        intentId: "i",
+        sessionId: "s",
+        generation: 1,
+        leafId: "L",
+        matchKey: { textHash: "h", attachmentIdentity: "", ordinal: 0 },
+        payload: { kind: "prompt", rawText: 123, attachments: [], sentAt: "x" },
+      }),
       // P1b 原：sending intentId 非字符串（流入事件）
       simple("sending", { intentId: {} }),
       // enqueue 缺 payload/matchKey/leafId 等必需字段
       simple("enqueue", { intentId: "i", sessionId: "s", generation: 1 }),
       // generation 非法（0=小于 1）
-      simple("enqueue", { intentId: "i", sessionId: "s", generation: 0, leafId: "L", matchKey: { textHash: "h", attachmentIdentity: "", ordinal: 0 }, payload: { kind: "prompt", rawText: "x", attachments: [], sentAt: "1" } }),
+      simple("enqueue", {
+        intentId: "i",
+        sessionId: "s",
+        generation: 0,
+        leafId: "L",
+        matchKey: { textHash: "h", attachmentIdentity: "", ordinal: 0 },
+        payload: { kind: "prompt", rawText: "x", attachments: [], sentAt: "1" },
+      }),
       // payload.kind 不在白名单
-      JSON.stringify({ t: "enqueue", intentId: "i", sessionId: "s", generation: 1, leafId: "L", matchKey: { textHash: "h", attachmentIdentity: "", ordinal: 0 }, payload: { kind: "user", rawText: "x", attachments: [], sentAt: "1" } }),
+      JSON.stringify({
+        t: "enqueue",
+        intentId: "i",
+        sessionId: "s",
+        generation: 1,
+        leafId: "L",
+        matchKey: { textHash: "h", attachmentIdentity: "", ordinal: 0 },
+        payload: { kind: "user", rawText: "x", attachments: [], sentAt: "1" },
+      }),
       // consumed intervalEnd 非对象
       simple("consumed", { intentId: "i", anchorEntryId: "e", intervalEnd: 5 }),
       // clear 缺 sessionId / cleared 非数组
@@ -100,9 +208,25 @@ describe("journalToScanRows（3b-2a 投影；R5 严格 schema）", () => {
       // unknown 缺 reason
       simple("unknown", { intentId: "i" }),
       // matchKey.ordinal 负数
-      JSON.stringify({ t: "enqueue", intentId: "i", sessionId: "s", generation: 1, leafId: "L", matchKey: { textHash: "h", attachmentIdentity: "", ordinal: -1 }, payload: { kind: "prompt", rawText: "x", attachments: [], sentAt: "1" } }),
+      JSON.stringify({
+        t: "enqueue",
+        intentId: "i",
+        sessionId: "s",
+        generation: 1,
+        leafId: "L",
+        matchKey: { textHash: "h", attachmentIdentity: "", ordinal: -1 },
+        payload: { kind: "prompt", rawText: "x", attachments: [], sentAt: "1" },
+      }),
       // attachments 元素非字符串
-      JSON.stringify({ t: "enqueue", intentId: "i", sessionId: "s", generation: 1, leafId: "L", matchKey: { textHash: "h", attachmentIdentity: "", ordinal: 0 }, payload: { kind: "prompt", rawText: "x", attachments: [1], sentAt: "1" } }),
+      JSON.stringify({
+        t: "enqueue",
+        intentId: "i",
+        sessionId: "s",
+        generation: 1,
+        leafId: "L",
+        matchKey: { textHash: "h", attachmentIdentity: "", ordinal: 0 },
+        payload: { kind: "prompt", rawText: "x", attachments: [1], sentAt: "1" },
+      }),
     ];
     const rows = journalToScanRows(bad.join("\n") + "\n");
     expect(rows).toHaveLength(bad.length);
@@ -200,7 +324,17 @@ describe("journalToScanRows（3b-2a 投影；R5 严格 schema）", () => {
     it("enqueue/response-timeout 的 generation=已验证字段→照常投影（正控制）", () => {
       const rows = journalToScanRows(
         jline('{"t":"response-timeout","intentId":"i","generation":3,"commandId":2}') +
-        jline(JSON.stringify({ t: "enqueue", intentId: "i2", sessionId: "s", generation: 4, leafId: "l", matchKey: { textHash: "h", attachmentIdentity: "a", ordinal: 0 }, payload: { kind: "prompt", rawText: "x", attachments: [], sentAt: "1" } })),
+          jline(
+            JSON.stringify({
+              t: "enqueue",
+              intentId: "i2",
+              sessionId: "s",
+              generation: 4,
+              leafId: "l",
+              matchKey: { textHash: "h", attachmentIdentity: "a", ordinal: 0 },
+              payload: { kind: "prompt", rawText: "x", attachments: [], sentAt: "1" },
+            }),
+          ),
       );
       expect(rows[0]!.event.generation).toBe(3);
       expect((rows[0]!.event as { commandId?: number }).commandId).toBe(2);
@@ -208,4 +342,3 @@ describe("journalToScanRows（3b-2a 投影；R5 严格 schema）", () => {
     });
   });
 });
-
