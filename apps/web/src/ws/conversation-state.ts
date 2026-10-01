@@ -1,5 +1,6 @@
 // R1 v6 §3.1：页面、活动订阅目标、编辑槽与发送事实分立。
 // 本层不解释 WS 帧，不自动发送/停止/回答；回执从真 WriteClient 的 Promise 进入。
+import type { ThinkingLevel } from "@pi-agent-ui/protocol/src/composer-input";
 import type { WriteSendOutcomeDTO } from "@pi-agent-ui/protocol/src/contracts";
 import { WriteSendError, type WriteClientSurface } from "./write-client";
 
@@ -41,6 +42,7 @@ export interface EditorSlot {
   readonly version: number;
   readonly modelChoice: string;
   readonly freeText: string;
+  readonly thinkingLevel: ThinkingLevel | null;
   readonly phase: DraftPhase;
   readonly result: SendResult | null;
   readonly operation: SendOperation | null;
@@ -81,7 +83,7 @@ export class ConversationState {
     this.publish({ [key]: new Map(this.snapshot[key]).set(slot.id, slot) });
   }
   private blank(id: string, file: string, isNew: boolean, modelChoice = "__default__"): EditorSlot {
-    return { id, file, isNew, text: "", version: 0, modelChoice, freeText: "", phase: "editing", result: null, operation: null, transferred: false };
+    return { id, file, isNew, text: "", version: 0, modelChoice, freeText: "", thinkingLevel: null, phase: "editing", result: null, operation: null, transferred: false };
   }
   setClient(client: WriteClientSurface | null): void {
     if (this.currentClient === client) return;
@@ -108,7 +110,11 @@ export class ConversationState {
   }
   configure(id: string, modelChoice: string, freeText: string): void {
     const slot = this.slot(id);
-    if (slot) this.put({ ...slot, modelChoice, freeText });
+    if (slot) this.put({ ...slot, modelChoice, freeText, version: slot.version + 1 });
+  }
+  configureThinking(id: string, thinkingLevel: ThinkingLevel | null): void {
+    const slot = this.slot(id);
+    if (slot) this.put({ ...slot, thinkingLevel, version: slot.version + 1 });
   }
   back(): void {
     const view = this.snapshot.view;
@@ -127,7 +133,7 @@ export class ConversationState {
     for (const draft of this.snapshot.drafts.values()) {
       if (draft.file !== file || draft.phase !== "settled-launched" || draft.transferred) continue;
       const session = this.snapshot.sessions.get(id)!;
-      if (session.version === 0 && session.text === "") this.put({ ...session, text: draft.text, version: draft.version });
+      if (session.version === 0 && session.text === "") this.put({ ...session, text: draft.text, version: draft.version, modelChoice: draft.modelChoice, freeText: draft.freeText, thinkingLevel: draft.thinkingLevel });
       this.put({ ...draft, transferred: true });
     }
     this.publish({ view: { kind: "session", file }, activeFile: file });
@@ -164,7 +170,11 @@ export class ConversationState {
       }
     }, this.waitMs));
     let request: Promise<WriteSendOutcomeDTO>;
-    try { request = client.sendPrompt(slot.file, slot.text, model); }
+    try {
+      request = slot.thinkingLevel === null
+        ? client.sendPrompt(slot.file, slot.text, model)
+        : client.sendPrompt(slot.file, slot.text, model, undefined, { thinkingLevel: slot.thinkingLevel });
+    }
     catch (error) { request = Promise.reject(error); }
     return request.then(classifySend, (error: unknown) => classifySendError(error, wasReady)).then((result) => {
       const timer = this.timers.get(op.id); if (timer !== undefined) clearTimeout(timer); this.timers.delete(op.id);

@@ -21,6 +21,7 @@
 //   一律不清空当前草稿。
 
 import React, { useEffect, useRef, useState } from "react";
+import { isThinkingLevel, type ThinkingLevel } from "@pi-agent-ui/protocol/src/composer-input";
 import { useWrite } from "../ws/use-write";
 import { NotReadyBanner } from "./not-ready-banner";
 import { ModelPicker, type ModelSource } from "./model-picker";
@@ -101,6 +102,7 @@ export interface ManagedEditor {
   readonly defaultChoice?: string;
   readonly onEdit: (text: string) => void;
   readonly onConfigure: (choice: string, freeText: string) => void;
+  readonly onThinking?: (level: ThinkingLevel | null) => void;
   readonly onSend: (confirmed: boolean) => Promise<SendResult>;
   readonly onViewTarget: () => void;
   readonly onCancel: () => void;
@@ -129,7 +131,7 @@ export function WriteComposer({ client, file, editor }: { client: WriteClientSur
   const identityRef = useRef({ client, file });
   identityRef.current = { client, file };
 
-  const model = editor?.isNew ? effectiveModel(editor.slot?.modelChoice ?? editor.defaultChoice ?? MODEL_DEFAULT, editor.slot?.freeText ?? "") : undefined;
+  const model = editor ? effectiveModel(editor.slot?.modelChoice ?? editor.defaultChoice ?? MODEL_DEFAULT, editor.slot?.freeText ?? "") : undefined;
   const pending = editor ? (editor.slot?.operation?.pending === true && editor.slot.operation.client === client) : view.sending;
   const canSend = (editor?.isNew || file !== null) && view.ready && !pending && !view.stopping && text.trim().length > 0 && isSendableModel(model);
   const canStop = file !== null && view.ready && !view.stopping;
@@ -191,9 +193,9 @@ export function WriteComposer({ client, file, editor }: { client: WriteClientSur
       {result?.status === "rejected" && result.outcome.kind !== "not-ready" && <p className="banner" role="alert">{promptOutcomeText(result.outcome)}；草稿已保留，可显式重试。</p>}
       {editor && result?.status === "local" && <p className="banner" role="alert">{result.message}</p>}
       {editor && result?.status === "rejected" && result.outcome.kind === "not-ready" && <><NotReadyBanner info={{ cause: result.outcome.cause ?? null, detail: result.outcome.detail ?? null }} onRetry={canSend ? onSend : undefined} onSwitchModel={() => editor.onConfigure(editor.slot?.modelChoice ?? MODEL_DEFAULT, "")} />{model === undefined && <p role="note">重试将不指定模型；本会话此前绑定的模型设置不会被重置，以服务端实际为准</p>}</>}
-      {editor?.isNew && <ModelPicker source={editor.source} choice={editor.slot?.modelChoice ?? editor.defaultChoice ?? MODEL_DEFAULT} freeText={editor.slot?.freeText ?? ""} onConfigure={editor.onConfigure} />}
-      <label>
-        {editor?.isNew ? "首条消息" : "写入消息"}
+      <div className="composer-box">
+      <label className="composer-message">
+        <span className="composer-label">{editor?.isNew ? "首条消息" : "写入消息"}</span>
         <textarea
           value={text}
           onChange={(event) => onChange(event.target.value)}
@@ -207,18 +209,31 @@ export function WriteComposer({ client, file, editor }: { client: WriteClientSur
           }}
         />
       </label>
-      <div className="write-actions">
-        <button type="button" onClick={onSend} disabled={!canSend}>
-          {editor?.isNew ? (pending ? "发送中…" : "发送并开始对话") : "发送"}
+      <div className="write-actions composer-controls">
+        {editor && <ModelPicker source={editor.source} choice={editor.slot?.modelChoice ?? editor.defaultChoice ?? MODEL_DEFAULT} freeText={editor.slot?.freeText ?? ""} onConfigure={editor.onConfigure} />}
+        {editor?.onThinking && <label className="thinking-picker" title="用于下一条消息；以模型实际能力为准，不支持时保留草稿并拒绝发送。">
+          <span>思考</span>
+          <select aria-label="下一条思考级别" value={editor.slot?.thinkingLevel ?? ""} onChange={(event) => {
+            const value = event.target.value;
+            if (value === "") editor.onThinking?.(null);
+            else if (isThinkingLevel(value)) editor.onThinking?.(value);
+          }}>
+            <option value="">默认</option>
+            <option value="off">关闭</option><option value="minimal">最少</option>
+            <option value="low">低</option><option value="medium">中</option>
+            <option value="high">高</option><option value="xhigh">很高</option><option value="max">最高</option>
+          </select>
+        </label>}
+        <span className="composer-spacer" />
+        <button className="composer-stop" type="button" onClick={() => void stop()} disabled={!canStop || editor?.isNew === true} hidden={editor?.isNew === true} aria-label="停止">
+          <span aria-hidden="true">■</span>
         </button>
-        {editor?.isNew ? <button type="button" onClick={editor.onCancel}>返回列表</button> : null}
-        <button type="button" onClick={() => void stop()} disabled={!canStop || editor?.isNew === true} hidden={editor?.isNew === true}>
-          停止
+        <button className="composer-send" type="button" onClick={onSend} disabled={!canSend} aria-label={editor?.isNew ? (pending ? "发送中…" : "发送并开始对话") : "发送"}>
+          <svg aria-hidden="true" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
         </button>
-        <span role="status" aria-live="polite">
-          {phaseText}
-        </span>
       </div>
+      </div>
+      <span className="composer-status" role="status" aria-live="polite">{phaseText}</span>
       {view.errorMessage !== null && ((!editor && result?.status !== "unknown") || (editor && (view.lastResult?.kind === "stop" || view.lastResumeResult?.ok === false))) ? (
         <p className="banner" role="alert">
           {view.errorMessage}

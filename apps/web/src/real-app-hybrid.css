@@ -336,10 +336,12 @@
 .app.real-app.hybrid-ui .write-composer {
   width: calc(100% - 56px);
   max-width: 794px;
-  padding: 14px 18px;
+  padding: 0;
   margin: 8px auto max(22px, env(safe-area-inset-bottom));
-  border-radius: 14px;
-  background: var(--hy-panel);
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  background: transparent;
   box-shadow: none;
   max-height: 60dvh;
 }
@@ -363,23 +365,68 @@
 .app.real-app.hybrid-ui .welcome-mark {
   font-size: 42px;
 }
-.app.real-app.hybrid-ui .write-composer:focus-within textarea {
-  box-shadow: none;
-  animation: none;
+.app.real-app.hybrid-ui .composer-box {
+  border: 1px solid color-mix(in srgb, var(--hy-accent) 45%, var(--hy-panel));
+  border-radius: 22px;
+  background: var(--hy-panel);
+  overflow: visible;
+  box-shadow: 0 3px 12px rgb(0 0 0 / 4%);
 }
-.app.real-app.hybrid-ui .write-composer textarea {
-  font-family: var(--hy-font);
-  font-size: 15px;
-  min-height: 80px;
-}
-.app.real-app.hybrid-ui .write-actions > button:first-child {
-  background: var(--hy-accent);
+.app.real-app.hybrid-ui .composer-box:focus-within {
   border-color: var(--hy-accent);
-  color: var(--hy-panel);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--hy-accent) 13%, transparent);
 }
-.app.real-app.hybrid-ui .model-picker select {
-  background: var(--hy-side);
+.app.real-app.hybrid-ui .composer-message { display: block; margin: 0; }
+.app.real-app.hybrid-ui .composer-label {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
 }
+.app.real-app.hybrid-ui .write-composer textarea,
+.app.real-app.hybrid-ui .write-composer:focus-within textarea {
+  display: block; width: 100%; min-height: 88px; max-height: 28dvh;
+  padding: 16px 18px 10px; border: 0; border-radius: 22px 22px 0 0;
+  background: transparent; outline: none; box-shadow: none; animation: none;
+  font-family: var(--hy-font); font-size: 16px; line-height: 1.5; resize: vertical;
+}
+.app.real-app.hybrid-ui .composer-controls {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin: 0 12px; padding: 8px 0 10px;
+  border-top: 1px solid color-mix(in srgb, var(--hy-accent) 12%, var(--hy-panel));
+}
+.app.real-app.hybrid-ui .composer-controls .model-picker {
+  display: flex; align-items: center; gap: 6px; margin: 0; padding: 0;
+  min-width: 0; max-width: 100%; border: 0;
+}
+.app.real-app.hybrid-ui .composer-controls .model-picker > label { font-size: 0; margin: 0; }
+.app.real-app.hybrid-ui .composer-controls select {
+  width: auto; min-height: 40px; max-width: min(32vw, 280px); margin: 0;
+  padding: 6px 10px; font: 14px var(--hy-font); color: inherit;
+  background: var(--hy-side); border-radius: 10px;
+}
+.app.real-app.hybrid-ui .composer-controls .custom-model { position: relative; }
+.app.real-app.hybrid-ui .composer-controls .custom-model > summary {
+  min-height: 40px; width: 24px; font-size: 0; display: grid; place-items: center;
+}
+.app.real-app.hybrid-ui .composer-controls .custom-model > summary::after { content: "⋯"; font-size: 20px; }
+.app.real-app.hybrid-ui .composer-controls .custom-model > label {
+  position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 3;
+  width: min(260px, 66vw); padding: 12px; border-radius: 12px; background: var(--hy-side);
+  box-shadow: 0 4px 20px rgb(0 0 0 / 12%);
+}
+.app.real-app.hybrid-ui .thinking-picker { display: flex; align-items: center; gap: 4px; margin: 0; font-size: 13px; }
+.app.real-app.hybrid-ui .thinking-picker select { max-width: 90px; }
+.app.real-app.hybrid-ui .composer-spacer { flex: 1; }
+.app.real-app.hybrid-ui .composer-controls .composer-send,
+.app.real-app.hybrid-ui .composer-controls .composer-stop {
+  display: grid; place-items: center; flex: none; width: 44px; height: 44px;
+  padding: 0; border-radius: 50%;
+}
+.app.real-app.hybrid-ui .composer-controls .composer-send {
+  color: white; background: var(--hy-accent); border-color: var(--hy-accent);
+}
+.app.real-app.hybrid-ui .composer-controls .composer-send:disabled { opacity: .4; }
+.app.real-app.hybrid-ui .composer-controls .composer-stop[hidden] { display: none; }
+.app.real-app.hybrid-ui .composer-status { display: block; margin: 6px 12px 0; font-size: 11px; opacity: .7; }
 .app.real-app.hybrid-ui .live-generating .message-author::before {
   content: "";
   display: inline-block;
@@ -472,7 +519,7 @@
   }
   .app.real-app.hybrid-ui .write-composer {
     width: calc(100% - 24px);
-    padding: 10px 12px;
+    padding: 0;
     margin: 4px auto max(12px, env(safe-area-inset-bottom));
     max-height: 65dvh;
   }

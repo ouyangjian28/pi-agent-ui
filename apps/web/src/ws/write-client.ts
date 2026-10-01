@@ -352,8 +352,8 @@ export class WriteClient {
    *   仅会话首次 prompt 采纳（会话寿命内 cwd 固定，后续携带被服务端忽略）；undefined=帧不携 cwd 键。
    * 不排队：未就绪/预校验失败即受控拒绝，由用户显式重发（无自动重发）。
    */
-  sendPrompt(file: string, text: string, model?: string, cwd?: string): Promise<WriteSendOutcomeDTO> {
-    return this.launch("prompt", file, text, model, cwd) as Promise<WriteSendOutcomeDTO>;
+  sendPrompt(file: string, text: string, model?: string, cwd?: string, options?: import("@pi-agent-ui/protocol/src/composer-input").ComposerPromptOptions): Promise<WriteSendOutcomeDTO> {
+    return this.launch("prompt", file, text, model, cwd, options) as Promise<WriteSendOutcomeDTO>;
   }
 
   /** 发送 stop（§B16：stop{requestId,file}→write-stop-ack{outcome}）。与同 file 在途 prompt 可并行。 */
@@ -457,7 +457,7 @@ export class WriteClient {
   }
 
   /** prompt/stop 共用派发：本地预校验（锚点④）→占位→发帧；resolve/reject 经在途表按 requestId 结算。 */
-  private launch(kind: "prompt" | "stop", file: string, text?: string, model?: string, cwd?: string): Promise<unknown> {
+  private launch(kind: "prompt" | "stop", file: string, text?: string, model?: string, cwd?: string, options?: import("@pi-agent-ui/protocol/src/composer-input").ComposerPromptOptions): Promise<unknown> {
     if (this.stopped) {
       return Promise.reject(new WriteSendError("closed", "写连接已关闭，请求未完成"));
     }
@@ -473,6 +473,13 @@ export class WriteClient {
       }
       if (utf8Bytes(text) > WRITE_TEXT_MAX_BYTES) {
         return Promise.reject(new WriteSendError("local-invalid", `消息超出 ${WRITE_TEXT_MAX_BYTES / 1024}KiB 字节上限，未发送`));
+      }
+      if (options?.thinkingLevel !== undefined && !["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(options.thinkingLevel)) {
+        return Promise.reject(new WriteSendError("local-invalid", "思考级别非法，未发送"));
+      }
+      // Attachment wiring is separate: never quietly turn an image request into text-only.
+      if (options?.attachments?.length) {
+        return Promise.reject(new WriteSendError("local-invalid", "附件发送通道尚未接通，未发送"));
       }
       // v1.4（M-OPS）：可选 model 域本地预校验（LIMITS.modelPattern 精确 id；服务端同判 4404）。
       // undefined=不改会话模型；空串/越字符集/超长一律本地拒（零帧成本）。
@@ -505,6 +512,7 @@ export class WriteClient {
             text: text as string,
             ...(model === undefined ? {} : { model }),
             ...(cwd === undefined ? {} : { cwd }),
+            ...(options?.thinkingLevel === undefined ? {} : { thinkingLevel: options.thinkingLevel }),
           });
         } else {
           this.emit({ t: "stop", requestId, file });

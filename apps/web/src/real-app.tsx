@@ -460,13 +460,17 @@ function ConnectedApp({
                 const id = ensureDraft();
                 if (id) owner.configure(id, choice, text);
               },
+              onThinking: (level) => {
+                const id = ensureDraft();
+                if (id) owner.configureThinking(id, level);
+              },
               onCancel: () => owner.back(),
               onViewTarget: () => {
                 if (slot && allowLeave()) owner.open(slot.file);
               },
               onSend: (confirmed) => {
                 if (!slot) return Promise.resolve({ status: "local", kind: "local-invalid", message: "请输入消息。" });
-                const model = isNew ? effectiveModel(slot.modelChoice, slot.freeText) : undefined;
+                const model = effectiveModel(slot.modelChoice, slot.freeText);
                 if (isNew) writeLastModel(model ?? MODEL_DEFAULT);
                 return owner.send(slot.id, model, confirmed);
               },
