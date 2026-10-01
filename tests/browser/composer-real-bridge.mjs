@@ -170,6 +170,16 @@ try {
   );
   const catalogModel = frames.find((f) => f.t === "models-list" && f.models?.some((m) => m.provider === "ui-upgrade-test" && m.id === "fixture"))?.models.find((m) => m.provider === "ui-upgrade-test" && m.id === "fixture");
   assert(catalogModel?.thinkingLevels?.includes("low") && catalogModel.thinkingLevels.includes("high") && !catalogModel.thinkingLevels.includes("max"), "Same-version public SDK capability metadata missing or fabricated");
+  const menuDiagnostic = await page.evaluate(() => ({
+    model: document.querySelector('select[aria-label="模型选择"]')?.value,
+    custom: document.querySelector('input[aria-label="模型 id 直达"]')?.value,
+    menus: Array.from(document.querySelectorAll('select[aria-label="下一条思考级别"]')).map((select) => ({
+      title: select.parentElement.title, html: select.outerHTML,
+      options: Array.from(select.options).map((option) => ({ value: option.value, disabled: option.disabled, attr: option.getAttribute('disabled') })),
+    })),
+    scripts: Array.from(document.scripts).map((script) => script.src),
+  }));
+  await writeFile(join(out, "thinking-menu-dom.json"), JSON.stringify(menuDiagnostic, null, 2));
   assert(await page.locator('select[aria-label="下一条思考级别"] option[value="low"]').isDisabled(), "Default pi identity must not guess thinking capabilities");
   await page.getByLabel("模型选择").selectOption("ui-upgrade-test/fixture");
   assert(!(await page.locator('select[aria-label="下一条思考级别"] option[value="low"]').isDisabled()), "Supported low thinking unavailable in real menu");
