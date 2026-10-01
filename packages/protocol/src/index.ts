@@ -10,6 +10,7 @@ export * from "./turn-gate.ts";
 export * from "./dispatch-coordinator.ts";
 export * from "./process-supervisor.ts";
 export * from "./contracts.ts";
+export * from "./composer-input.ts";
 export * from "./sanitizer.ts";
 export * from "./history-projection.ts";
 export * from "./read-index.ts";
