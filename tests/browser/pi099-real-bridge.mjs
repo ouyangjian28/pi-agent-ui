@@ -176,6 +176,7 @@ try {
     liveEvents().some((e) => e.kind === "message-delta" && e.part === "text" && e.delta),
     "Actual incremental text absent",
   );
+  assert(!(await page.getByText("会话日志存在损坏").count()), "Valid first conversation falsely reported corrupt");
   await page.screenshot({ path: join(out, "desktop-first-response.png"), fullPage: false });
 
   const textarea = page.getByLabel("写入消息内容");
@@ -200,6 +201,7 @@ try {
     () => page.locator(".history-list").getByText("旧会话里的受控内容", { exact: true }).isVisible(),
     "old conversation content actually rendered",
   );
+  assert(!(await page.getByText("会话日志存在损坏").count()), "Valid old conversation falsely reported corrupt");
   await search.fill(first.file);
   await page.locator(".session-list button").click();
   await until(
@@ -236,6 +238,8 @@ try {
   );
   assert(pageErrors.length === 0 && browserBlocked.length === 0, "Browser errors or external requests");
   assert(!frames.some((f) => f.t === "error"), "Server protocol error hidden by UI selection state");
+  const projected = frames.flatMap((f) => (f.t === "snapshot" ? f.page : f.t === "events" ? f.events : []));
+  assert(!projected.some((event) => event.kind === "journal-corrupt"), "Valid fixture journal projected as corrupt");
   const transcriptRows = (await readFile(join(transcripts, first.file), "utf8"))
     .split("\n")
     .filter(Boolean)
@@ -255,6 +259,9 @@ try {
     applicationSourceSha256: createHash("sha256")
       .update(await readFile(source))
       .digest("hex"),
+    readProjectionSourceSha256: createHash("sha256")
+      .update(await readFile(join(repo, "packages/protocol/src/history-projection.ts")))
+      .digest("hex"),
     checks: [
       "real browser model listing",
       "new model-selected first conversation",
@@ -264,6 +271,7 @@ try {
       "same-session second turn",
       "actual process stop confirmation",
       "owned workspace and real persisted assistant transcript",
+      "valid writer metadata is not falsely reported corrupt in browser or projection",
     ],
     policy: {
       realApp: true,
