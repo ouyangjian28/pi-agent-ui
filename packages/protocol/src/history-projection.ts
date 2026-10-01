@@ -42,6 +42,9 @@ function projectLine(raw: string, lineNo: number): ScanRow {
   }
   const j = parsed as JournalLine;
   switch (j.t) {
+    case "writer":
+      // 已通过共用 schema 的登记元数据；写权 epoch 不冒充回合 generation，也不改变任何裁决。
+      return { source: "journal", locator, raw, event: { ...evBase(null, null), kind: "unknown-line" } };
     case "enqueue":
       return { source: "journal", locator, raw, event: { ...evBase(j.generation, j.intentId), kind: "turn-enqueued", preview: sanitizeText(j.payload?.rawText ?? "", HISTORY_PREVIEW_LIMIT), ordinal: j.matchKey?.ordinal ?? 0 } };
     case "sending":
