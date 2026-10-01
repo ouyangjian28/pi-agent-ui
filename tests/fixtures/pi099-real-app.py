@@ -27,7 +27,7 @@ with tempfile.TemporaryDirectory(prefix='pi099-real-app-') as home:
         (root / name).mkdir()
 
     class Provider(BaseHTTPRequestHandler):
-        def log_message(self, *args):
+        def log_message(self, format: str, *args: object) -> None:
             pass
 
         def do_POST(self):
@@ -92,7 +92,7 @@ with tempfile.TemporaryDirectory(prefix='pi099-real-app-') as home:
         (OUT / 'provider-result.json').write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
         print('Artifacts:', OUT)
         print(json.dumps(result, ensure_ascii=False))
-        assert run.returncode == 0, 'application bridge failed; inspect .pi/upgrade-checks/app-bridge/run.log'
+        assert run.returncode == 0, f'application bridge failed; inspect {OUT / "run.log"}'
         assert len(requests) == 2 and not errors and not network_attempts, 'unexpected provider/network activity'
     finally:
         provider.shutdown()

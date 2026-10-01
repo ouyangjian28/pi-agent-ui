@@ -1,13 +1,12 @@
 // Actual AppRoot/RealApp -> real application assembly -> real local pi.
 // No WebSocket replacement, no UI business-state injection, no production auth.
-import { build } from "esbuild";
+import { createServer as createViteServer } from "vite";
 import { chromium } from "playwright";
 import { randomBytes, createHash } from "node:crypto";
 import { createServer as createTcpServer } from "node:net";
 import { execFileSync } from "node:child_process";
 import { mkdir, writeFile, readFile, readdir } from "node:fs/promises";
 import { resolve, join, basename, relative } from "node:path";
-import { pathToFileURL } from "node:url";
 
 const repo = resolve(import.meta.dirname, "../..");
 const root = process.env.PI099_FIXTURE_ROOT;
@@ -24,19 +23,18 @@ await mkdir(out, { recursive: true });
 const piBin = join(repo, "node_modules/.bin/pi");
 const actualVersion = execFileSync(piBin, ["--version"], { encoding: "utf8" }).trim();
 if (actualVersion !== "0.99.2") throw new Error(`Actual candidate runtime drift: ${actualVersion}`);
-const bundle = join(out, "application.mjs");
-await build({
-  absWorkingDir: repo,
-  entryPoints: [join(repo, "apps/server/src/composition.ts")],
-  outfile: bundle,
-  bundle: true,
-  platform: "node",
-  format: "esm",
-  target: "node24",
-  external: ["ws"],
-  logLevel: "silent",
+const source = join(repo, "apps/server/src/composition.ts");
+// Public Vite SSR API, as used by this project's existing TS test toolchain.
+// No new dependency, no dev HTTP/HMR listener, no backend source adaptation.
+const compiler = await createViteServer({
+  root: repo,
+  configFile: false,
+  cacheDir: join(out, "vite-cache"),
+  server: { middlewareMode: true, hmr: false, watch: null },
+  ssr: { noExternal: ["@pi-agent-ui/protocol"] },
+  logLevel: "error",
 });
-const { startServer } = await import(pathToFileURL(bundle).href);
+const { startServer } = await compiler.ssrLoadModule(source);
 const reservation = createTcpServer();
 await new Promise((done, fail) => {
   reservation.once("error", fail);
@@ -237,8 +235,8 @@ try {
   result = {
     runtime: actualVersion,
     sourceCommit: execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
-    applicationBundleSha256: createHash("sha256")
-      .update(await readFile(bundle))
+    applicationSourceSha256: createHash("sha256")
+      .update(await readFile(source))
       .digest("hex"),
     checks: [
       "real browser model listing",
@@ -278,6 +276,7 @@ try {
   await writeFile(join(out, "journals.json"), JSON.stringify(journalData, null, 2) + "\n");
   await browser?.close();
   await server?.dispose();
+  await compiler.close();
 }
 if (failure) throw failure;
 console.log(JSON.stringify(result));
