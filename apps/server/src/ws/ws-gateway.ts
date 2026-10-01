@@ -473,7 +473,9 @@ export class WsGateway {
           cwdKey = rp;
         } catch { this.errFrame(st, 4404, "cwd 目录不存在", rid); return; }
       }
-      const outcome = await this.opts.writeHost!.sendPrompt(abs, frame.text, frame.generation, frame.model, cwdKey); // v1.1：可选代次透传身份门；v1.4（M-OPS）：model 会话级模型；v1.5（批A）：cwd 首建项目目录（v1.6：传 realpath 身份）
+      const outcome = frame.thinkingLevel === undefined
+        ? await this.opts.writeHost!.sendPrompt(abs, frame.text, frame.generation, frame.model, cwdKey)
+        : await this.opts.writeHost!.sendPrompt(abs, frame.text, frame.generation, frame.model, cwdKey, { thinkingLevel: frame.thinkingLevel }); // v1.1：可选代次透传身份门；v1.4（M-OPS）：model 会话级模型；v1.5（批A）：cwd 首建项目目录（v1.6：传 realpath 身份）
       this.audit(`write-frame conn=${st.id} t=prompt file=${file} outcome=${outcome.kind}`);
       this.enqueue(st, { t: "write-ack", requestId: rid, file, outcome });
     } catch (e: unknown) {

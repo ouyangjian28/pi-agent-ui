@@ -1,6 +1,7 @@
 // ②WS/UI 只读面共享契约 v1.2 — 类型与运行时校验单源（c3 冻结门第 4 步）。
 // 零 node 依赖（浏览器安全）。语义权威=docs/ws-ui-contracts-v1.md；语义变更=协议版本+1 双方审记。
 // 注意：TS1024——interface 方法签名禁 readonly 前缀。
+import { isThinkingLevel, type ThinkingLevel } from "./composer-input.js";
 
 // ---------------------------------------------------------------------------
 // 限额常量（§5.7 逐字段表；contracts.ts=冻结源）
@@ -611,7 +612,7 @@ export const WRITE_TEXT_MAX_BYTES = 65_536;
 
 export type WriteClientFrame =
   | { readonly t: "stop"; readonly requestId: string; readonly file: string }
-  | { readonly t: "prompt"; readonly requestId: string; readonly file: string; readonly text: string; readonly generation?: number; readonly model?: string; readonly cwd?: string } // v1.1 帧身份：可选进程代次（提供则宿主身份门校验活代匹配——v1 客户端缺省跳过）；v1.4（M-OPS）可选模型 id（spawn 尾追 --model 恒胜（禁集拒启：extraPiArgs 携 --model）+sidecar 持久化，优先级 prompt.model>sidecar>pi 默认，docs/m-ops-design.md §3）；v1.5（批A）可选 cwd 绝对路径（pi 进程工作目录=项目目录，与 journal 树分离；网关校验在授权 roots 内；仅首次冷启动生效——会话寿命内 cwd 固定）
+  | { readonly t: "prompt"; readonly requestId: string; readonly file: string; readonly text: string; readonly generation?: number; readonly model?: string; readonly cwd?: string; readonly thinkingLevel?: ThinkingLevel } // v1.7 下一条思考级别：可选、真实能力/确认由宿主复核；v1.1 帧身份：可选进程代次（提供则宿主身份门校验活代匹配——v1 客户端缺省跳过）；v1.4（M-OPS）可选模型 id（spawn 尾追 --model 恒胜（禁集拒启：extraPiArgs 携 --model）+sidecar 持久化，优先级 prompt.model>sidecar>pi 默认，docs/m-ops-design.md §3）；v1.5（批A）可选 cwd 绝对路径（pi 进程工作目录=项目目录，与 journal 树分离；网关校验在授权 roots 内；仅首次冷启动生效——会话寿命内 cwd 固定）
   | { readonly t: "resume"; readonly requestId: string; readonly file: string; readonly intentId: string; readonly generation: number }; // v1.1：恢复意图重发（身份门四校验：恢复数据在场/未阻断/授权/代次）
 
 export type WriteFrameCheck =
@@ -630,8 +631,8 @@ export function validateWriteFrame(raw: unknown): WriteFrameCheck {
     // v1.1：generation 为可选域——先从探测副本剥除，再走四字段集合等值（v1 帧仍严格原形）。
     // v1.4（M-OPS）：model 同式可选域（精确 id 非 glob；非空校验走 LIMITS.modelPattern）。
     // v1.5（批A）：cwd 同式可选域（绝对路径字符串；根内校验在网关——契约层只验形状）。
-    const probe: Record<string, unknown> = has(obj, "generation") || has(obj, "model") || has(obj, "cwd") ? { ...obj } : obj;
-    if (probe !== obj) { delete probe["generation"]; delete probe["model"]; delete probe["cwd"]; }
+    const probe: Record<string, unknown> = has(obj, "generation") || has(obj, "model") || has(obj, "cwd") || has(obj, "thinkingLevel") ? { ...obj } : obj;
+    if (probe !== obj) { delete probe["generation"]; delete probe["model"]; delete probe["cwd"]; delete probe["thinkingLevel"]; }
     const r0 = exactWrite(probe, ["t", "requestId", "file", "text"]); if (r0) return r0;
     const rid = ridWrite(obj); if (typeof rid !== "string") return rid;
     const file = fileWrite(obj); if (typeof file !== "string") return file;
@@ -656,10 +657,16 @@ export function validateWriteFrame(raw: unknown): WriteFrameCheck {
       if (typeof c !== "string" || c.length === 0 || !c.startsWith("/")) return badWrite(4404, "cwd 非法（须绝对路径）");
       cwd = c;
     }
-    const extras: { generation?: number; model?: string; cwd?: string } = {};
+    let thinkingLevel: ThinkingLevel | undefined;
+    if (has(obj, "thinkingLevel")) {
+      if (!isThinkingLevel(obj["thinkingLevel"])) return badWrite(4404, "thinkingLevel 非法");
+      thinkingLevel = obj["thinkingLevel"];
+    }
+    const extras: { generation?: number; model?: string; cwd?: string; thinkingLevel?: ThinkingLevel } = {};
     if (generation !== undefined) extras.generation = generation;
     if (model !== undefined) extras.model = model;
     if (cwd !== undefined) extras.cwd = cwd;
+    if (thinkingLevel !== undefined) extras.thinkingLevel = thinkingLevel;
     return okFrame(Object.keys(extras).length === 0 ? { t: "prompt", requestId: rid, file, text } : { t: "prompt", requestId: rid, file, text, ...extras });
   }
   if (t === "resume") {

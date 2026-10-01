@@ -12,6 +12,7 @@
 //   （W9 已锁路径）；不吞错不造 kind（编造 outcome 比异常更危险）。
 // - 两层契约（与 write-host.ts:3-4 端口注统一）：可预期业务结果→outcome kind；内部异常→剥离重抛→4402。
 // - 不在本层：RpcSession 实例构造（composition 接线）、statusFor 映射、并发队列（TurnGate 已有）。
+import type { ComposerPromptOptions } from "@pi-agent-ui/protocol";
 import type { WriteSendOutcomeDTO, WriteStopOutcomeDTO, WriteResumeOutcomeDTO, RetireOutcome } from "@pi-agent-ui/protocol";
 import type { SessionSendResult } from "../runtime/rpc-session.ts";
 import type { WriteHostPort } from "./write-host.ts";
@@ -19,7 +20,7 @@ import { ComputeGateQueueTimeout } from "./compute-semaphore.ts";
 
 /** 编码面所需的最小会话形状（结构化依赖：测试可替身，不锁 RpcSession 类）。 */
 export interface RpcLikeSession {
-  send(message: string, expectedGeneration?: number, model?: string): Promise<SessionSendResult>; // r3c：期望代次断言（live=null 冷启动面传 undefined）；model=M-OPS v1.4 会话级模型记忆
+  send(message: string, expectedGeneration?: number, model?: string, options?: ComposerPromptOptions): Promise<SessionSendResult>; // r3c：期望代次断言（live=null 冷启动面传 undefined）；model=M-OPS v1.4 会话级模型记忆
   stop(): Promise<RetireOutcome>;
 }
 
@@ -129,7 +130,7 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
     return creating;
   };
   return {
-    async sendPrompt(file: string, text: string, generation?: number, model?: string, cwd?: string): Promise<WriteSendOutcomeDTO> {
+    async sendPrompt(file: string, text: string, generation?: number, model?: string, cwd?: string, options?: ComposerPromptOptions): Promise<WriteSendOutcomeDTO> {
       try {
         // v1.1 帧身份门（prompt 面）：客户端携带代次≠当前活代→恒拒（零副作用：不触 sessionFor/send）
         let liveGen: number | null = null; // r3c：门验过的活代传给 send（期望代次断言收窗；live=null 冷启动放行）
@@ -146,7 +147,10 @@ export function createRpcWriteHost(opts: RpcWriteHostOpts): WriteHostPort {
             return { kind: "identity-rejected", cause: "generation-mismatch" };
           }
         }
-        const raw = await (await sessionOf(file, cwd)).send(text, liveGen ?? undefined, model); // r3c：期望代次=门验活代（null=无断言，冷启动拉起兼容）；model=M-OPS v1.4 会话级模型记忆；cwd=v1.5 首建项目目录
+        const session = await sessionOf(file, cwd);
+        const raw = options === undefined
+          ? await session.send(text, liveGen ?? undefined, model)
+          : await session.send(text, liveGen ?? undefined, model, options); // r3c：期望代次=门验活代（null=无断言，冷启动拉起兼容）；model=M-OPS v1.4 会话级模型记忆；cwd=v1.5 首建项目目录
         const g = gateFailedDetail(raw);
         if (g !== null) auditSafe(() => g);
         return encodeSendOutcome(raw);
