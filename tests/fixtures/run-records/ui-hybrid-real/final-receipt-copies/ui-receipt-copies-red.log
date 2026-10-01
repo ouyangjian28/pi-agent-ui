@@ -1,0 +1,393 @@
+
+ RUN  v5.0.1 /home/yyj/ai/repos/pi-agent-ui-hybrid
+
+ ❯ |unit| tests/unit/web/r1-live-handoff.test.ts (8 tests | 1 failed) 569ms
+   ❯ v6 每个 final 独立、不因历史增量或文本配对删除 (8)
+     × 混合壳副本是可折叠辅助内容，不伪装第二份主回复；相同/空正文仍独立可读 48ms
+ ❯ |unit| tests/unit/web/r1-real-app.test.ts (13 tests | 1 failed) 1587ms
+   ❯ R1 真 AppRoot+三客户端首链 (13)
+     × managed launched 回执只表示提交，不在回复已落历史/idle 后仍声称等待或执行成功 88ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |unit| tests/unit/web/r1-live-handoff.test.ts > v6 每个 final 独立、不因历史增量或文本配对删除 > 混合壳副本是可折叠辅助内容，不伪装第二份主回复；相同/空正文仍独立可读
+AssertionError: expected <article …(1)>…(2)</article>
+…(3) to have a length of +0 but got 4
+
+- Expected
++ Received
+
+- 0
++ 4
+
+ ❯ tests/unit/web/r1-live-handoff.test.ts:21:69
+     19|     const live = texts.map(final);
+     20|     const r = render(React.createElement(LiveStreamView, props(live)))…
+     21|     expect(document.querySelectorAll(".live-final.chat-assistant")).to…
+       |                                                                     ^
+     22|     const bodies = Array.from(document.querySelectorAll<HTMLElement>("…
+     23|     expect(bodies).toHaveLength(4); expect(bodies.every((body) => body…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |unit| tests/unit/web/r1-real-app.test.ts > R1 真 AppRoot+三客户端首链 > managed launched 回执只表示提交，不在回复已落历史/idle 后仍声称等待或执行成功
+TestingLibraryElementError: Unable to find an element with the text: 消息已提交。. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"app real-app hybrid-ui"[39m
+      [33mdata-view[39m=[32m"session"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"topbar"[39m
+      [36m>[39m
+        [36m<header[39m
+          [33mclass[39m=[32m"conversation-header"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"会话列表"[39m
+            [33mclass[39m=[32m"back-to-list"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [0m← [0m
+            [36m<span>[39m
+              [0m会话[0m
+            [36m</span>[39m
+          [36m</button>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"conversation-heading"[39m
+          [36m>[39m
+            [36m<h2[39m
+              [33mtabindex[39m=[32m"-1"[39m
+            [36m>[39m
+              [0m已有对话 B[0m
+            [36m</h2>[39m
+            [36m<small>[39m
+              [0m空闲[0m
+            [36m</small>[39m
+          [36m</div>[39m
+          [36m<button[39m
+            [33maria-label[39m=[32m"换模型开新对话"[39m
+            [33mclass[39m=[32m"new-model-conversation"[39m
+            [33mtype[39m=[32m"button"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"model-new-full"[39m
+            [36m>[39m
+              [0m换模型开新对话[0m
+            [36m</span>[39m
+            [36m<span[39m
+              [33maria-hidden[39m=[32m"true"[39m
+              [33mclass[39m=[32m"model-new-short"[39m
+            [36m>[39m
+              [0m换模型[0m
+            [36m</span>[39m
+          [36m</button>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"conversation-tools"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"health-control"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33maria-expanded[39m=[32m"false"[39m
+                [33maria-haspopup[39m=[32m"dialog"[39m
+                [33maria-label[39m=[32m"连接状态：全部已连接"[39m
+                [33mclass[39m=[32m"health-dot health-ok"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"health-indicator"[39m
+                [36m/>[39m
+                [36m<span>[39m
+                  [0m全部已连接[0m
+                [36m</span>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+            [36m<details[39m
+              [33mclass[39m=[32m"theme-menu"[39m
+            [36m>[39m
+              [36m<summary>[39m
+                [0m外观[0m
+              [36m</summary>[39m
+              [36m<div[39m
+                [33maria-label[39m=[32m"主题"[39m
+                [33mclass[39m=[32m"theme-toggle"[39m
+                [33mrole[39m=[32m"group"[39m
+              [36m>[39m
+                [36m<button[39m
+                  [33maria-pressed[39m=[32m"false"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [0m亮色[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33maria-pressed[39m=[32m"false"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [0m暗色[0m
+                [36m</button>[39m
+                [36m<button[39m
+                  [33maria-pressed[39m=[32m"true"[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [0m跟随系统[0m
+                [36m</button>[39m
+              [36m</div>[39m
+            [36m</details>[39m
+          [36m</div>[39m
+        [36m</header>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"workspace two-col"[39m
+      [36m>[39m
+        [36m<nav[39m
+          [33maria-label[39m=[32m"会话列表"[39m
+          [33mclass[39m=[32m"session-panel"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"workspace-brand"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33maria-hidden[39m=[32m"true"[39m
+            [36m>[39m
+              [0mπ[0m
+            [36m</span>[39m
+            [36m<strong>[39m
+              [0mpi [0m
+              [36m<small>[39m
+                [0mworkspace[0m
+              [36m</small>[39m
+            [36m</strong>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"panel-heading"[39m
+          [36m>[39m
+            [36m<h1>[39m
+              [0m你的会话[0m
+            [36m</h1>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"panel-actions"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"refresh"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m刷新[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"new-session-btn"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m＋新对话[0m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+          [36m<section[39m
+            [33maria-label[39m=[32m"会话列表区"[39m
+            [33mclass[39m=[32m"session-list-region"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"session-search"[39m
+            [36m>[39m
+              [36m<input[39m
+                [33maria-describedby[39m=[32m"_r_1_"[39m
+                [33maria-label[39m=[32m"搜索已加载会话"[39m
+                [33mplaceholder[39m=[32m"搜索已加载会话…"[39m
+                [33mtype[39m=[32m"search"[39m
+                [33mvalue[39m=[32m""[39m
+              [36m/>[39m
+              [36m<small[39m
+                [33mid[39m=[32m"_r_1_"[39m
+              [36m>[39m
+                [0m仅搜索已加载的 [0m
+                [0m1[0m
+                [0m 条，不是全库搜索[0m
+              [36m</small>[39m
+            [36m</div>[39m
+            [36m<ul[39m
+              [33maria-label[39m=[32m"会话列表"[39m
+              [33mclass[39m=[32m"session-list"[39m
+            [36m>[39m
+              [36m<li[39m
+                [33mclass[39m=[32m"session-group"[39m
+              [36m>[39m
+                [36m<h3>[39m
+                  [0m今天[0m
+                [36m</h3>[39m
+                [36m<ul>[39m
+                  [36m<li>[39m
+                    [36m<button[39m
+                      [33maria-current[39m=[32m"page"[39m
+                      [33mtype[39m=[32m"button"[39m
+                    [36m>[39m
+                      [36m<span[39m
+                        [33mclass[39m=[32m"row-title"[39m
+                      [36m>[39m
+                        [0m已有对话 B[0m
+                      [36m</span>[39m
+                      [36m<small>[39m
+                        [0m2[0m
+                        [0m 条消息[0m
+                      [36m</small>[39m
+                    [36m</button>[39m
+                  [36m</li>[39m
+                [36m</ul>[39m
+              [36m</li>[39m
+            [36m</ul>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"list-pagination"[39m
+            [36m>[39m
+              [36m<small>[39m
+                [0m已载 [0m
+                [0m1[0m
+                [0m / 共 [0m
+                [0m1[0m
+              [36m</small>[39m
+            [36m</div>[39m
+          [36m</section>[39m
+        [36m</nav>[39m
+        [36m<main[39m
+          [33maria-label[39m=[32m"当前会话"[39m
+          [33mclass[39m=[32m"conversation "[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"conversation-body"[39m
+          [36m>[39m
+            [36m<section[39m
+              [33maria-label[39m=[32m"会话详情"[39m
+              [33mclass[39m=[32m"session-detail"[39m
+            [36m>[39m
+              [36m<header>[39m
+                [36m<h2>[39m
+                  [0m已有对话 B[0m
+                [36m</h2>[39m
+                [36m<small>[39m
+                  [0m进程运行中·就绪[0m
+                  [0m · [0m
+                  [0m空闲[0m
+                [36m</small>[39m
+              [36m</header>[39m
+              [36m<ol[39m
+                [33maria-label[39m=[32m"历史事件"[39m
+                [33mclass[39m=[32m"history-list"[39m
+              [36m>[39m
+                [36m<li[39m
+                  [33mclass[39m=[32m"chat-message chat-assistant"[39m
+                [36m>[39m
+                  [36m<small[39m
+                    [33mclass[39m=[32m"message-author"[39m
+                  [36m>[39m
+                    [0mpi[0m
+                  [36m</small>[39m
+                  [36m<p[39m
+                    [33mclass[39m=[32m"chat-preview"[39m
+                  [36m>[39m
+                    [0m真实历史正文[0m
+                  [36m</p>[39m
+                [36m</li>[39m
+              [36m</ol>[39m
+            [36m</section>[39m
+          [36m</div>[39m
+          [36m<section[39m
+            [33maria-label[39m=[32m"写消息：b.jsonl"[39m
+            [33mclass[39m=[32m"write-composer"[39m
+          [36m>[39m
+            [36m<label>[39m
+              [0m写入消息[0m
+              [36m<textarea[39m
+                [33maria-label[39m=[32m"写入消息内容"[39m
+                [33mplaceholder[39m=[32m"继续这段对话…"[39m
+                [33mrows[39m=[32m"3"[39m
+              [36m/>[39m
+            [36m</label>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"write-actions"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mdisabled[39m=[32m""[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m发送[0m
+              [36m</button>[39m
+              [36m<button[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0m停止[0m
+              [36m</button>[39m
+              [36m<span[39m
+                [33maria-live[39m=[32m"polite"[39m
+                [33mrole[39m=[32m"status"[39m
+              [36m>[39m
+                [0m可发送[0m
+              [36m</span>[39m
+            [36m</div>[39m
+            [36m<p[39m
+              [33mrole[39m=[32m"status"[39m
+            [36m>[39m
+              [0m消息已受理，等待回复。[0m
+            [36m</p>[39m
+            [36m<details[39m
+              [33mclass[39m=[32m"resume-demo"[39m
+            [36m>[39m
+              [36m<summary>[39m
+                [0m高级诊断[0m
+              [36m</summary>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"resume-fields"[39m
+              [36m>[39m
+                [36m<label>[39m
+                  [0m意图标识[0m
+                  [36m<input[39m
+                    [33maria-label[39m=[32m"恢复重发意图标识"[39m
+                    [33mplaceholder[39m=[32m"如 i-1"[39m
+                    [33mtype[39m=[32m"text"[39m
+                    [33mvalue[39m=[32m""[39m
+                  [36m/>[39m
+                [36m</label>[39m
+                [36m<label>[39m
+                  [0m进程代次[0m
+                  [36m<input[39m
+                    [33maria-label[39m=[32m"恢复重发进程代次"[39m
+                    [33mmin[39m=[32m"1"[39m
+                    [33mstep[39m=[32m"1"[39m
+                    [33mtype[39m=[32m"number"[39m
+                    [33mvalue[39m=[32m"1"[39m
+                  [36m/>[39m
+                [36m</label>[39m
+                [36m<button[39m
+                  [33mdisabled[39m=[32m""[39m
+                  [33mtype[39m=[32m"button"[39m
+                [36m>[39m
+                  [0m恢复重发[0m
+                [36m</button>[39m
+              [36m</div>[39m
+            [36m</details>[39m
+          [36m</section>[39m
+        [36m</main>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ Object.getElementError node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ tests/unit/web/r1-real-app.test.ts:70:19
+     68|     const frame = Socket.all[2]!.sent.at(-1)!;
+     69|     await ack(frame, { kind: "launched", intentId: "fixture-submit", c…
+     70|     expect(screen.getByText("消息已提交。")).toBeTruthy();
+       |                   ^
+     71|     expect(document.body.textContent).not.toContain("等待回复");
+     72|     expect(document.body.textContent).not.toContain("执行成功");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  2 failed | 19 passed (21)
+   Start at  16:50:26
+   Duration  2.24s (tests 68%, environment 19%, transform 8%, import 5%)

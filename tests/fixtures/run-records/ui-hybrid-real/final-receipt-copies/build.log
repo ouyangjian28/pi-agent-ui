@@ -1,0 +1,21 @@
+
+> pi-agent-ui-monorepo@0.0.0 build
+> npm run build -w apps/web -w apps/server
+
+
+> @pi-agent-ui/web@0.0.1 build
+> tsc --noEmit && vite build
+
+vite v8.3.1 building client environment for production...
+transforming...
+✓ 50 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.48 kB │ gzip:   0.32 kB
+dist/assets/index-BJjGvVz6.css   33.08 kB │ gzip:   6.58 kB
+dist/assets/index-afmjGeOu.js   351.90 kB │ gzip: 107.01 kB
+
+✓ built in 119ms
+
+> @pi-agent-ui/server@0.0.1 build
+> tsc -p . --noEmit

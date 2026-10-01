@@ -1,0 +1,8 @@
+
+ RUN  v5.0.1 /home/yyj/ai/repos/pi-agent-ui-hybrid
+
+
+ Test Files  3 passed (3)
+      Tests  32 passed (32)
+   Start at  16:56:43
+   Duration  2.06s (tests 64%, environment 23%, transform 7%, import 5%)
