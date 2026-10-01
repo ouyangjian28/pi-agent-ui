@@ -1577,3 +1577,18 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 
 **未完成需求**：思考菜单仍通用枚举。Runtime实际能力拒绝已有，但UI按模型禁选/提示尚未接，不能标本阶段完成。实际未知意图跨重启UI恢复、独立审、用户试用、真机键盘分别待证。日常服务/全局pi未动；后续同范围菜单接线必须另记源版本与复验，旧2026/7-fault不能自动覆盖。
 
+## 输入区能力菜单收口与阶段候选（2026-10-02；作者检查，非独立验收）
+
+上述未完菜单现已另行接通。源313200b/d35eeb0，公开SDK依赖dc9085f精确0.99.2；真实链96c749c、最终全回归df6cd0280e6c07c710c924c75152985c01939863。归档= `tests/fixtures/run-records/composer-stage/verification-thinking/manifest.json`，各日志/转录/帧/截图逐文件原字节gzip/hash核实；菜单故障另见`thinking-mutations/`。不改原批记录。
+
+| 检查 | 真实证据 | 结果与范围 |
+| --- | --- | --- |
+| 公开SDK能力/缓存/消费者/菜单 | models-thinking/model-listing/thinking-picker/ws-client 4文件；focused-sdk-fixed.log | 62通过；同版CLI严格version/2s1024B门、只读公开SDK元数据，未知保守；非reasoning仅off，稀疏map保SDK默认，显式null禁用；配置字节未改/auth.json不创建；严格已知唯一<=7枚举，非法模型响应不改变快照 |
+| 默认与当前模型菜单 | actual native thinking-menu-dom/result/frames | 默认pi身份不猜；选实际fixture后low/high可选、max禁选且解释，换暖模型仍按能力；不悄悄降用户已选级别；实际RPC仍最终确认 |
+| 真发送/后端强制负例 | native/20261001T231155798605Z；provider-result/journals/server-frames | 真实AppRoot/生产组合根/pi0.99.2收到fixture低+PNG原字节→同暖代fixture-alt高+UTF-8代码；同一个真实已认证WS直接max绕前端仍拒绝、无第三intent/提供商请求、稿保留；settled后history主正文无刷新/导航；390/320布局守卫及看图；不含付费提供商/生产token/真机键盘 |
+| 最新全回归/类型/构建 | final-default-fixture-fixed/final-package-types/final-root-types/final-build | df6cd02默认2044通过/24原opt-in skip；119文件通过/5原文件skip；protocol/server/web tsc0；构建通过且之后生产代码未变；根tsc exit2/111原债，新composer/capability路径无错误，非根全绿/逐诊断同基线证明 |
+| 5菜单消费层故障 | tests/browser/thinking-menu-mutate.py；thinking-mutations/result.json+6原字节日志 | 已commit1223edebf55c53ea12f2f5c73e406e0cd05ef036绿基线，gitarchive副本/public protocol复制别名；未知猜级别、旧选择静默降档、歧义短名选首、重复等级放行、错SDK版本提示5/5真断言红；不等于transport/auth/decoder/完整恢复变异 |
+| 错误测试与诊断留档 | verification-thinking/logs、失败native文件夹 | 首公开SDK预期错：61绿1红；更正/增加稀疏与null两反例，不改产品。label包select的option被Playwright isDisabled跟随至enabled select；原生disabled真实为true，改为原生属性检查且保留全部负例。最终全回归原旧fixture强选未知high而失败2043/1；补合法关联models-list及选模型，增加默认禁选/强改忽略/max禁选并保高/低/model/单DOM断言后2044/24 |
+
+**交付边界**：本批具备候选/报告/作者证据；独立GLM/Kimi/视觉、用户试用、真机键盘与完整真实未知意图UI跨重启恢复未通过，不宣称部署/根全绿/整项目完成。7附件故障与5菜单故障按各自版本/范围分账，不合称全应用12项故障覆盖。日常服务、全局pi、生产master未切；下一阶段须用户集中对齐。
+
