@@ -1,0 +1,23 @@
+{
+  "passed": true,
+  "checks": [
+    "standalone offline HTML",
+    "desktop/mobile no horizontal overflow",
+    "composer in actual viewport",
+    "per-session draft retention",
+    "new empty conversation",
+    "send/stop simulation",
+    "running state stays with its conversation",
+    "mobile navigation excludes hidden main",
+    "mobile controls at least 44px tall",
+    "reduced-motion removes live animation",
+    "light/dark layout",
+    "zero HTTP/provider requests",
+    "zero page exceptions"
+  ],
+  "screenshots": 7,
+  "limitations": [
+    "Prototype only; not RealApp or SDK business wiring.",
+    "Short viewport is simulated; no physical keyboard acceptance."
+  ]
+}

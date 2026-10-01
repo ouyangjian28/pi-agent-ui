@@ -1,0 +1,203 @@
+tests/integration/composed-e2e.test.ts(162,24): error TS2532: Object is possibly 'undefined'.
+tests/integration/composed-e2e.test.ts(170,80): error TS2345: Argument of type 'number | undefined' is not assignable to parameter of type 'number | bigint'.
+  Type 'undefined' is not assignable to type 'number | bigint'.
+tests/integration/d4-entry-e2e.test.ts(51,36): error TS2379: Argument of type '{ tokenFile: string; allowedOrigins: string[]; roots: string[]; scanDir: string; tokenPollMs: number; sessionFor: () => string; thinkingVisible: true | undefined; write: { sessionFor: () => string; piBin: string; }; audit: (l: string) => number; }' is not assignable to parameter of type 'ServerConfig' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'thinkingVisible' are incompatible.
+    Type 'boolean | undefined' is not assignable to type 'boolean'.
+      Type 'undefined' is not assignable to type 'boolean'.
+tests/integration/p02-assembly-e2e.test.ts(182,21): error TS18048: 'ack.outcome' is possibly 'undefined'.
+tests/integration/p02-assembly-e2e.test.ts(187,28): error TS2339: Property 'rawText' does not exist on type '{}'.
+tests/integration/p02-assembly-e2e.test.ts(202,23): error TS18047: 'l4' is possibly 'null'.
+tests/integration/real-fs-budget.test.ts(86,15): error TS2345: Argument of type 'FakeConn' is not assignable to parameter of type '{ send(data: string, cb?: ((err?: Error | null | undefined) => void) | undefined): void; close(code?: number | undefined, reason?: string | undefined): void; terminate(): void; readonly readyState: number; readonly bufferedAmount: number; }'.
+  Property 'bufferedAmount' is missing in type 'FakeConn' but required in type '{ send(data: string, cb?: ((err?: Error | null | undefined) => void) | undefined): void; close(code?: number | undefined, reason?: string | undefined): void; terminate(): void; readonly readyState: number; readonly bufferedAmount: number; }'.
+tests/integration/real-fs.test.ts(100,15): error TS2345: Argument of type 'FakeConn' is not assignable to parameter of type '{ send(data: string, cb?: ((err?: Error | null | undefined) => void) | undefined): void; close(code?: number | undefined, reason?: string | undefined): void; terminate(): void; readonly readyState: number; readonly bufferedAmount: number; }'.
+  Property 'bufferedAmount' is missing in type 'FakeConn' but required in type '{ send(data: string, cb?: ((err?: Error | null | undefined) => void) | undefined): void; close(code?: number | undefined, reason?: string | undefined): void; terminate(): void; readonly readyState: number; readonly bufferedAmount: number; }'.
+tests/integration/real-fs.test.ts(419,44): error TS2345: Argument of type 'readonly ScanRow[] | null' is not assignable to parameter of type 'readonly ScanRow[]'.
+  Type 'null' is not assignable to type 'readonly ScanRow[]'.
+tests/integration/real-ws.test.ts(98,19): error TS2353: Object literal may only specify known properties, and 'sp' does not exist in type 'Rig'.
+tests/integration/real-ws.test.ts(175,98): error TS2339: Property 'seq' does not exist on type '{ seq?: number; }[]'.
+tests/integration/real-ws.test.ts(175,132): error TS2339: Property 'seq' does not exist on type '{ seq?: number; }[]'.
+tests/integration/real-ws.test.ts(290,28): error TS2339: Property 'sp' does not exist on type 'Rig'.
+tests/integration/ws-transport.net.test.ts(54,5): error TS2353: Object literal may only specify known properties, and 'source' does not exist in type 'WsGatewayOpts'.
+tests/integration/ws-transport.net.test.ts(59,39): error TS2379: Argument of type '{ audit: (l: string) => number; sessionCookie?: { name: string; validate: (sid: string | null) => string | null; }; allowedOrigins: string[]; requireTlsOffLoopback: boolean; trustedProxies: string[]; closeHandshakeMs: number | undefined; disposeWaitMs: number | undefined; }' is not assignable to parameter of type 'WsServerAdapterOpts' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'closeHandshakeMs' are incompatible.
+    Type 'number | undefined' is not assignable to type 'number'.
+      Type 'undefined' is not assignable to type 'number'.
+tests/integration/ws-transport.net.test.ts(74,8): error TS2379: Argument of type '{ origin: string | undefined; loopback: boolean; tls: boolean; clientIp: string; sessionAuthed: boolean; sessionDigest: string | null; }' is not assignable to parameter of type 'ConnMeta' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'origin' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+tests/integration/ws-transport.net.test.ts(117,33): error TS2769: No overload matches this call.
+  Overload 1 of 3, '(address: string | URL, options?: ClientOptions | ClientRequestArgs | undefined): WebSocket', gave the following error.
+    Argument of type 'ClientOptions | ClientOptions[] | undefined' is not assignable to parameter of type 'ClientOptions | ClientRequestArgs | undefined'.
+      Type 'ClientOptions[]' is not assignable to type 'ClientOptions | ClientRequestArgs | undefined'.
+  Overload 2 of 3, '(address: string | URL, protocols?: string | string[] | undefined, options?: ClientOptions | ClientRequestArgs | undefined): WebSocket', gave the following error.
+    Argument of type 'ClientOptions | ClientOptions[] | undefined' is not assignable to parameter of type 'string | string[] | undefined'.
+      Type 'ClientOptions' is not assignable to type 'string | string[] | undefined'.
+tests/integration/ws-transport.net.test.ts(170,65): error TS2532: Object is possibly 'undefined'.
+tests/integration/ws-transport.net.test.ts(170,75): error TS2532: Object is possibly 'undefined'.
+tests/integration/ws-transport.net.test.ts(190,20): error TS2532: Object is possibly 'undefined'.
+tests/integration/ws-transport.net.test.ts(191,25): error TS2532: Object is possibly 'undefined'.
+tests/integration/ws-transport.net.test.ts(311,43): error TS2532: Object is possibly 'undefined'.
+tests/integration/ws-transport.net.test.ts(311,56): error TS2532: Object is possibly 'undefined'.
+tests/integration/ws-transport.net.test.ts(594,44): error TS18046: 'f' is of type 'unknown'.
+tests/integration/ws-transport.net.test.ts(596,44): error TS18046: 'f' is of type 'unknown'.
+tests/integration/ws-transport.net.test.ts(616,71): error TS2353: Object literal may only specify known properties, and 'source' does not exist in type 'WsGatewayOpts'.
+tests/integration/ws-transport.net.test.ts(619,164): error TS2379: Argument of type '{ origin: string | undefined; loopback: boolean; tls: boolean; clientIp: string; }' is not assignable to parameter of type 'ConnMeta' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'origin' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+tests/integration/ws-transport.net.test.ts(847,48): error TS2345: Argument of type 'null' is not assignable to parameter of type 'string'.
+tests/integration/ws-write-e2e.test.ts(102,93): error TS2532: Object is possibly 'undefined'.
+tests/integration/ws-write-e2e.test.ts(155,28): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+tests/integration/ws-write-e2e.test.ts(192,30): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+tests/integration/ws-write-e2e.test.ts(197,50): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+tests/integration/ws-write-e2e.test.ts(198,38): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+tests/integration/ws-write-e2e.test.ts(206,38): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+tests/unit/contracts-v14.test.ts(2,57): error TS2835: Relative import paths need explicit file extensions in ECMAScript imports when '--moduleResolution' is 'node16' or 'nodenext'. Did you mean '../../packages/protocol/src/contracts.js'?
+tests/unit/entry-read.test.ts(72,92): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(...items: ConcatArray<{ type: string; thinking: string; thinkingSignature: string; text?: never; } | { type: string; text: string; thinking?: never; thinkingSignature?: never; }>[]): ({ ...; } | { ...; })[]', gave the following error.
+    Object literal may only specify known properties, and 'id' does not exist in type '{ type: string; thinking: string; thinkingSignature: string; text?: never; } | { type: string; text: string; thinking?: never; thinkingSignature?: never; }'.
+  Overload 2 of 2, '(...items: ({ type: string; thinking: string; thinkingSignature: string; text?: never; } | { type: string; text: string; thinking?: never; thinkingSignature?: never; } | ConcatArray<{ type: string; thinking: string; thinkingSignature: string; text?: never; } | { ...; }>)[]): ({ ...; } | { ...; })[]', gave the following error.
+    Object literal may only specify known properties, and 'id' does not exist in type '{ type: string; thinking: string; thinkingSignature: string; text?: never; } | { type: string; text: string; thinking?: never; thinkingSignature?: never; }'.
+tests/unit/entry-read.test.ts(168,14): error TS2339: Property 'oversized' does not exist on type 'AssembleEntryResult'.
+  Property 'oversized' does not exist on type '{ readonly frame: EntryFrame; }'.
+tests/unit/entry-read.test.ts(169,11): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(170,16): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(171,16): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(172,16): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(173,16): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(174,35): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(180,12): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(181,14): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(182,28): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(183,29): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(184,14): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(185,14): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(186,18): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(188,33): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(197,12): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(198,14): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(199,14): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(202,15): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(207,12): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(208,22): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(208,40): error TS7006: Parameter 'b' implicitly has an 'any' type.
+tests/unit/entry-read.test.ts(210,14): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(215,12): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(216,33): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(224,14): error TS2339: Property 'oversized' does not exist on type 'AssembleEntryResult'.
+  Property 'oversized' does not exist on type '{ readonly frame: EntryFrame; }'.
+tests/unit/entry-read.test.ts(228,12): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(229,14): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/entry-read.test.ts(229,40): error TS2339: Property 'frame' does not exist on type 'AssembleEntryResult'.
+  Property 'frame' does not exist on type '{ readonly oversized: true; }'.
+tests/unit/server/adjudicate.test.ts(20,67): error TS2459: Module '"../../../apps/server/src/runtime/recovery-evidence-source.ts"' declares 'RecoveryEvidenceSnapshot' locally, but it is not exported.
+tests/unit/server/model-listing.test.ts(101,5): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+tests/unit/server/process-host.test.ts(59,7): error TS2322: Type '(bin: string, _args: string[], options?: { cwd?: string; }) => ChildProcessWithoutNullStreams' is not assignable to type '(bin: string, args: string[], opts: { stdio: "pipe"[]; detached: boolean; }) => ChildProcessWithoutNullStreams'.
+  Types of parameters 'options' and 'opts' are incompatible.
+    Type '{ stdio: "pipe"[]; detached: boolean; }' has no properties in common with type '{ cwd?: string; }'.
+tests/unit/server/process-host.test.ts(59,91): error TS2379: Argument of type '{ bin: string; cwd: string | undefined; }' is not assignable to parameter of type '{ bin: string; cwd?: string; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'cwd' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+tests/unit/server/process-host.test.ts(61,31): error TS2345: Argument of type 'undefined' is not assignable to parameter of type 'ProcessSpawnHandlers'.
+tests/unit/server/process-host.test.ts(62,10): error TS2554: Expected 2-3 arguments, but got 1.
+tests/unit/server/recovery-evidence-source.test.ts(1038,117): error TS2322: Type '(abs: string) => Promise<{ fh: FileHandle; size: number; }>' is not assignable to type '(abs: string) => Promise<FileHandle>'.
+  Type 'Promise<{ fh: FileHandle; size: number; }>' is not assignable to type 'Promise<FileHandle>'.
+    Type '{ fh: FileHandle; size: number; }' is missing the following properties from type 'FileHandle': fd, appendFile, chown, chmod, and 17 more.
+tests/unit/server/recovery-evidence-source.test.ts(1078,117): error TS2322: Type '(abs: string) => Promise<{ fh: FileHandle; size: number; }>' is not assignable to type '(abs: string) => Promise<FileHandle>'.
+  Type 'Promise<{ fh: FileHandle; size: number; }>' is not assignable to type 'Promise<FileHandle>'.
+    Type '{ fh: FileHandle; size: number; }' is missing the following properties from type 'FileHandle': fd, appendFile, chown, chmod, and 17 more.
+tests/unit/server/recovery-evidence-source.test.ts(1121,52): error TS2322: Type '(abs: string) => Promise<{ fh: FileHandle; size: number; }>' is not assignable to type '(abs: string) => Promise<FileHandle>'.
+  Type 'Promise<{ fh: FileHandle; size: number; }>' is not assignable to type 'Promise<FileHandle>'.
+    Type '{ fh: FileHandle; size: number; }' is missing the following properties from type 'FileHandle': fd, appendFile, chown, chmod, and 17 more.
+tests/unit/server/recovery-evidence-source.test.ts(1130,44): error TS2532: Object is possibly 'undefined'.
+tests/unit/server/repair-tail.test.ts(82,12): error TS2532: Object is possibly 'undefined'.
+tests/unit/server/repair-tail.test.ts(83,13): error TS2532: Object is possibly 'undefined'.
+tests/unit/server/repair-tail.test.ts(525,58): error TS7006: Parameter 'abs' implicitly has an 'any' type.
+tests/unit/server/repair-tail.test.ts(545,59): error TS7006: Parameter 'abs' implicitly has an 'any' type.
+tests/unit/server/repair-tail.test.ts(775,114): error TS2339: Property 'fragIntentId' does not exist on type '{ byteStart: number; byteEnd: number; removedSha256: string; startedAt: string; }'.
+tests/unit/server/repair-tail.test.ts(945,48): error TS2835: Relative import paths need explicit file extensions in ECMAScript imports when '--moduleResolution' is 'node16' or 'nodenext'. Did you mean '../../../apps/server/src/runtime/adjudicate-journal.js'?
+tests/unit/server/repair-tail.test.ts(953,49): error TS2835: Relative import paths need explicit file extensions in ECMAScript imports when '--moduleResolution' is 'node16' or 'nodenext'. Did you mean '../../../apps/server/src/runtime/recover.js'?
+tests/unit/server/repair-tail.test.ts(968,48): error TS2835: Relative import paths need explicit file extensions in ECMAScript imports when '--moduleResolution' is 'node16' or 'nodenext'. Did you mean '../../../apps/server/src/runtime/adjudicate-journal.js'?
+tests/unit/server/repair-tail.test.ts(971,49): error TS2835: Relative import paths need explicit file extensions in ECMAScript imports when '--moduleResolution' is 'node16' or 'nodenext'. Did you mean '../../../apps/server/src/runtime/recover.js'?
+tests/unit/server/repair-tail.test.ts(1044,49): error TS2835: Relative import paths need explicit file extensions in ECMAScript imports when '--moduleResolution' is 'node16' or 'nodenext'. Did you mean '../../../apps/server/src/runtime/recover.js'?
+tests/unit/server/repair-tail.test.ts(1076,49): error TS2835: Relative import paths need explicit file extensions in ECMAScript imports when '--moduleResolution' is 'node16' or 'nodenext'. Did you mean '../../../apps/server/src/runtime/recover.js'?
+tests/unit/server/rpc-session-model.test.ts(142,15): error TS2339: Property 'cause' does not exist on type 'SessionSendResult'.
+  Property 'cause' does not exist on type '{ kind: "launched"; key: TurnKey; }'.
+tests/unit/server/writer-oath.test.ts(159,16): error TS2339: Property 'reason' does not exist on type 'GuardVerdict'.
+  Property 'reason' does not exist on type '{ readonly ok: true; }'.
+tests/unit/server/ws-gateway-ui.test.ts(12,107): error TS2305: Module '"../../../apps/server/src/ws/ws-gateway.ts"' has no exported member 'ScanRowLike'.
+tests/unit/server/ws-gateway-ui.test.ts(82,28): error TS2379: Argument of type 'Partial<WsGatewayOpts>' is not assignable to parameter of type 'WsGatewayOpts' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Property 'tokens' is optional in type 'Partial<WsGatewayOpts>' but required in type 'WsGatewayOpts'.
+tests/unit/server/ws-gateway-ui.test.ts(95,15): error TS2345: Argument of type 'FakeConn' is not assignable to parameter of type '{ send(data: string, cb?: ((err?: Error | null | undefined) => void) | undefined): void; close(code?: number | undefined, reason?: string | undefined): void; terminate(): void; readonly readyState: number; readonly bufferedAmount: number; }'.
+  Property 'bufferedAmount' is missing in type 'FakeConn' but required in type '{ send(data: string, cb?: ((err?: Error | null | undefined) => void) | undefined): void; close(code?: number | undefined, reason?: string | undefined): void; terminate(): void; readonly readyState: number; readonly bufferedAmount: number; }'.
+tests/unit/server/ws-gateway-ui.test.ts(231,70): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+tests/unit/server/ws-gateway-ui.test.ts(263,53): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+tests/unit/server/ws-gateway-ui.test.ts(265,73): error TS2339: Property 'kind' does not exist on type 'UiAnswerPayloadGateway'.
+  Property 'kind' does not exist on type '{ readonly value: string; }'.
+tests/unit/server/ws-gateway-write-resume.test.ts(50,51): error TS2379: Argument of type '{ message: string; expectedGeneration: number | undefined; }' is not assignable to parameter of type '{ message: string; expectedGeneration?: number; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'expectedGeneration' are incompatible.
+    Type 'number | undefined' is not assignable to type 'number'.
+      Type 'undefined' is not assignable to type 'number'.
+tests/unit/server/ws-gateway-write-resume.test.ts(454,14): error TS18046: 'ack.outcome' is of type 'unknown'.
+tests/unit/server/ws-gateway-write-resume.test.ts(463,14): error TS18046: 'ack.outcome' is of type 'unknown'.
+tests/unit/server/ws-gateway-write-resume.test.ts(473,14): error TS2571: Object is of type 'unknown'.
+tests/unit/server/ws-gateway-write.test.ts(40,7): error TS2420: Class 'FakeWriteHost' incorrectly implements interface 'WriteHostPort'.
+  Property 'resume' is missing in type 'FakeWriteHost' but required in type 'WriteHostPort'.
+tests/unit/server/ws-gateway-write.test.ts(51,23): error TS2379: Argument of type '{ file: string; text: string; generation: number | undefined; model: string | undefined; cwd: string | undefined; }' is not assignable to parameter of type '{ file: string; text: string; generation?: number; model?: string; cwd?: string; }' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'generation' are incompatible.
+    Type 'number | undefined' is not assignable to type 'number'.
+      Type 'undefined' is not assignable to type 'number'.
+tests/unit/server/ws-gateway-write.test.ts(80,28): error TS2379: Argument of type '{ tokens: TokenAuthority; roots: readonly string[]; writeJournalFor?: (file: string) => string; journalRoot?: string; scanDir: string; allowedOrigins: readonly string[]; requireTlsOffLoopback?: boolean; ... 21 more ...; thinkingVisible?: boolean; }' is not assignable to parameter of type 'WsGatewayOpts' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Types of property 'writeHost' are incompatible.
+    Type 'WriteHostPort | FakeWriteHost' is not assignable to type 'WriteHostPort'.
+      Property 'resume' is missing in type 'FakeWriteHost' but required in type 'WriteHostPort'.
+tests/unit/server/ws-gateway.test.ts(1021,3): error TS2741: Property 'pendingRepair' is missing in type '{ version: 1; file: string; sessionId: string; lines: { t: "sending"; intentId: string; }[]; bad: never[]; attributedFragments: never[]; repaired: false; createdAt: number; }' but required in type 'RecoveryEvidenceSnapshot'.
+tests/unit/server/ws-gateway.test.ts(1237,9): error TS2741: Property 'pendingRepair' is missing in type '{ version: 1; file: string; sessionId: string; lines: JournalLine[]; bad: never[]; attributedFragments: never[]; repaired: false; createdAt: number; }' but required in type 'RecoveryEvidenceSnapshot'.
+tests/unit/server/ws-gateway.test.ts(1435,9): error TS2741: Property 'pendingRepair' is missing in type '{ version: 1; file: string; sessionId: string; lines: JournalLine[]; bad: never[]; attributedFragments: never[]; repaired: false; createdAt: number; }' but required in type 'RecoveryEvidenceSnapshot'.
+tests/unit/server/ws-gateway.test.ts(1470,9): error TS2741: Property 'pendingRepair' is missing in type '{ version: 1; file: string; sessionId: string; lines: JournalLine[]; bad: never[]; attributedFragments: never[]; repaired: false; createdAt: number; }' but required in type 'RecoveryEvidenceSnapshot'.
+tests/unit/server/ws-gateway.test.ts(3334,11): error TS2741: Property 'pendingRepair' is missing in type '{ version: 1; file: string; sessionId: string; lines: never[]; bad: never[]; attributedFragments: never[]; repaired: false; createdAt: number; }' but required in type 'RecoveryEvidenceSnapshot'.
+tests/unit/server/ws-gateway.test.ts(3384,9): error TS2741: Property 'pendingRepair' is missing in type '{ version: 1; file: string; sessionId: string; lines: JournalLine[]; bad: never[]; attributedFragments: never[]; repaired: false; createdAt: number; }' but required in type 'RecoveryEvidenceSnapshot'.
+tests/unit/server/ws-support.test.ts(430,21): error TS2550: Property 'isWellFormed' does not exist on type 'string'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2024' or later.
+tests/unit/subscription-engine.test.ts(766,57): error TS2352: Conversion of type '{ readonly t: "events"; readonly subscriptionId: string; readonly origin: "history"; readonly refSeq: number; readonly events: readonly HistoryEvent[]; } | { readonly t: "events"; ... 4 more ...; readonly events: readonly LiveEvent[]; }' to type '{ events?: unknown[]; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ readonly t: "events"; readonly subscriptionId: string; readonly origin: "live"; readonly liveSeq: number; readonly refSeq: null; readonly events: readonly LiveEvent[]; }' is not comparable to type '{ events?: unknown[]; }'.
+    Types of property 'events' are incompatible.
+      The type 'readonly LiveEvent[]' is 'readonly' and cannot be assigned to the mutable type 'unknown[]'.
+tests/unit/subscription-engine.test.ts(770,91): error TS2741: Property 'streamId' is missing in type '{ seq: number; }' but required in type 'EventCursor'.
+tests/unit/subscription-engine.test.ts(777,23): error TS2352: Conversion of type '{ readonly t: "events"; readonly subscriptionId: string; readonly origin: "history"; readonly refSeq: number; readonly events: readonly HistoryEvent[]; } | { readonly t: "events"; ... 4 more ...; readonly events: readonly LiveEvent[]; } | undefined' to type '{ events: { kind: string; delta?: string; }[]; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type '{ readonly t: "events"; readonly subscriptionId: string; readonly origin: "live"; readonly liveSeq: number; readonly refSeq: null; readonly events: readonly LiveEvent[]; }' is not comparable to type '{ events: { kind: string; delta?: string; }[]; }'.
+    Types of property 'events' are incompatible.
+      The type 'readonly LiveEvent[]' is 'readonly' and cannot be assigned to the mutable type '{ kind: string; delta?: string; }[]'.

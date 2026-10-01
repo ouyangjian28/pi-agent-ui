@@ -25,7 +25,7 @@
 
 ## 已验证与未验证
 
-初版浏览器交互检查通过：草稿保留、新建空会话、演示发送停止、状态归属、手机列表隐藏主面、深浅色、无横向溢出、输入区在实际视口、零 HTTP/提供商请求、无 page exception。补 44px 点击区/流式跟随后正在重跑最终检查；以本目录 `checks.json` 与最终截图为准，不把旧图算新代码证明。
+初版浏览器交互检查通过：草稿保留、新建空会话、演示发送停止、状态归属、手机列表隐藏主面、深浅色、无横向溢出、输入区在实际视口、零 HTTP/提供商请求、无 page exception。补 44px 点击区/流式跟随后最终复检通过；加入完整 React MIT 许可的可重放构建脚本后，又对最终 HTML 重跑截图和交互检查通过。最终证据为本目录 `checks.json` 与 7 张实际视口截图，不把旧图算新代码证明。
 
 截图使用 desktop 1440×900、mobile 390×844、short viewport 390×560，均 `fullPage=false`。短视口**不是真机键盘**。`tests/browser/ui-hybrid-preview.mjs` 可重放检查；这里的测试对象是这个离线样板，不是 RealApp，也不是 SDK 业务接线。
 
@@ -35,4 +35,4 @@ pi 0.99.2 独立候选另已通过 1876 默认回归、构建、三个包类型�
 
 先由用户看样板、试最常用的路径，确认整体方向与需要改的地方；再接回正式会话状态/发送/工具事件，并按真实业务链验收。SDK 兼容、代码检查和实际 UX 是不同判据，不能互相替代。
 
-React 的 MIT 许可保留在内联构建 JS；参照只取信息组织和交互思路，未复制 OpenChamber/pi-web-ui 的源码或运行时。
+重建：`node scripts/build-ui-hybrid-preview.mjs`；复检：`node tests/browser/ui-hybrid-preview.mjs`（需已有候选依赖和 Playwright 浏览器）。最终生成的 HTML 含完整 React MIT 许可文本，内联构建 JS 也保留版权声明；参照只取信息组织和交互思路，未复制 OpenChamber/pi-web-ui 的源码或运行时。
