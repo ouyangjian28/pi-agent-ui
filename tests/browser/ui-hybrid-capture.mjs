@@ -282,6 +282,7 @@ try {
         await page.screenshot({ path, fullPage: false });
         const measurements = await page.evaluate(() => ({
           overflowPx: document.documentElement.scrollWidth - innerWidth,
+          chatFonts: [...document.querySelectorAll(".chat-message")].map((el) => getComputedStyle(el).fontFamily),
           textareas: [...document.querySelectorAll("textarea")].map((el) => ({
             label: el.getAttribute("aria-label"),
             top: el.getBoundingClientRect().top,
@@ -291,6 +292,8 @@ try {
         }));
         if (measurements.overflowPx > 0)
           throw new Error(`Horizontal overflow ${width}/${theme}/${scene}: ${measurements.overflowPx}px`);
+        if (measurements.chatFonts.some((font) => /monospace|mono cjk/i.test(font)))
+          throw new Error(`Chat inherited legacy monospace font: ${measurements.chatFonts.join(" | ")}`);
         evidence.push({
           width,
           height: 800,
