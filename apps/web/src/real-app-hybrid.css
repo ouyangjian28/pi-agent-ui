@@ -527,6 +527,16 @@
     font-size: 16px;
     min-height: 80px;
   }
+  .app.real-app.hybrid-ui .composer-controls { flex-wrap: nowrap; gap: 6px; }
+  .app.real-app.hybrid-ui .composer-controls .model-picker { flex: 1; flex-wrap: nowrap; }
+  .app.real-app.hybrid-ui .composer-controls .model-picker > label { flex: 1; min-width: 0; }
+  .app.real-app.hybrid-ui .composer-controls .model-picker select { width: 100%; min-width: 0; max-width: 100%; }
+  .app.real-app.hybrid-ui .composer-controls .custom-model { flex: none; }
+  .app.real-app.hybrid-ui .thinking-picker { flex: none; font-size: 0; gap: 2px; }
+  .app.real-app.hybrid-ui .thinking-picker::before { content: "⚡"; font-size: 14px; }
+  .app.real-app.hybrid-ui .thinking-picker select { width: 56px; min-width: 56px; max-width: 56px; padding: 6px 4px; }
+  .app.real-app.hybrid-ui .composer-spacer { display: none; }
+  .app.real-app.hybrid-ui .composer-controls .composer-send { margin-left: auto; }
   .app.real-app.hybrid-ui .activity-details > summary,
   .app.real-app.hybrid-ui .entry-expand,
   .app.real-app.hybrid-ui .resume-demo > summary,

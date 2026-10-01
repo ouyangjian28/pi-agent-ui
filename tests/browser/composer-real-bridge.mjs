@@ -165,8 +165,17 @@ try {
   await page.getByRole("button", { name: "移除附件 image.png", exact: true }).waitFor();
   await page.getByRole("button", { name: "发送并开始对话", exact: true }).waitFor();
   await page.screenshot({ path: join(out, "desktop-new-image-composer.png"), fullPage: false });
-  await page.setViewportSize({ width: 390, height: 800 });
-  await page.screenshot({ path: join(out, "mobile-new-image-composer.png"), fullPage: false });
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 800 });
+    const layout = await page.evaluate(() => {
+      const box = document.querySelector(".composer-box").getBoundingClientRect();
+      const send = document.querySelector(".composer-send").getBoundingClientRect();
+      const controls = document.querySelector(".composer-controls");
+      return { rightGap: box.right - send.right, controlsHeight: controls.getBoundingClientRect().height, overflow: controls.scrollWidth - controls.clientWidth, sendBottom: send.bottom, boxBottom: box.bottom };
+    });
+    assert(layout.rightGap >= 0 && layout.rightGap <= 24 && layout.sendBottom <= layout.boxBottom && layout.overflow <= 1 && layout.controlsHeight <= 64, `Mobile toolbar must stay compact with right-aligned send at ${width}px: ${JSON.stringify(layout)}`);
+    await page.screenshot({ path: join(out, width === 390 ? "mobile-new-image-composer.png" : "mobile-320-new-image-composer.png"), fullPage: false });
+  }
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.getByRole("button", { name: "发送并开始对话", exact: true }).click();
   await until(() => frames.some((f) => f.t === "write-ack"), "first write ack");
