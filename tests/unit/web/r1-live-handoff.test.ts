@@ -14,6 +14,23 @@ function props(liveEvents: readonly LiveEvent[], historyEvents: readonly History
 function frozenTexts() { return Array.from(document.querySelectorAll(".live-final .live-stream-text"), (node) => node.textContent); }
 afterEach(cleanup);
 describe("v6 每个 final 独立、不因历史增量或文本配对删除", () => {
+  it("混合壳副本是可折叠辅助内容，不伪装第二份主回复；相同/空正文仍独立可读", async () => {
+    const texts = ["副本全文".repeat(20), "相同正文", "相同正文", ""];
+    const live = texts.map(final);
+    const r = render(React.createElement(LiveStreamView, props(live))); await flush();
+    expect(document.querySelectorAll(".live-final.chat-assistant")).toHaveLength(0);
+    const bodies = Array.from(document.querySelectorAll<HTMLElement>(".live-final .frozen-content"));
+    expect(bodies).toHaveLength(4); expect(bodies.every((body) => body.hidden)).toBe(true);
+    const toggles = screen.getAllByRole("button", { name: /已生成 ·/ });
+    toggles.forEach((toggle) => { expect(toggle.getAttribute("aria-expanded")).toBe("false"); fireEvent.click(toggle); });
+    expect(bodies.every((body) => !body.hidden)).toBe(true);
+    expect(frozenTexts()).toEqual([texts[0], texts[1], texts[2], "（空正文）"]);
+    r.rerender(React.createElement(LiveStreamView, props(live, texts.slice(0, 3).map((text, index) => history(index + 1, text))))); await flush();
+    expect(frozenTexts()).toEqual([texts[0], texts[1], texts[2], "（空正文）"]);
+    expect(document.querySelectorAll(".live-final")).toHaveLength(4); // 无文本/数量配对或删除
+    fireEvent.click(toggles[0]!); expect(bodies[0]!.hidden).toBe(true);
+    fireEvent.click(toggles[0]!); expect(bodies[0]!.textContent).toContain(texts[0]);
+  });
   it("连续 final/零 delta/同文本都独立定格，工具前后多个 assistant 不互相覆盖", async () => {
     const live = [final("工具前回复"), final("工具后回复"), final("工具后回复"), final("")];
     const r = render(React.createElement(LiveStreamView, props(live))); await flush();

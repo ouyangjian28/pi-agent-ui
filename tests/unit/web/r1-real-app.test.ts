@@ -61,6 +61,18 @@ describe("R1 真 AppRoot+三客户端首链", () => {
     fireEvent.change(textarea, { target: { value: "第二句话" } }); fireEvent.keyDown(textarea, { key: "Enter", code: "Enter" });
     expect(Socket.all[2]!.sent.filter((f) => f.t === "prompt")).toHaveLength(2); expect(Socket.all[2]!.sent.at(-1)).toMatchObject({ file: frame.file, text: "第二句话" });
   });
+  it("managed launched 回执只表示提交，不在回复已落历史/idle 后仍声称等待或执行成功", async () => {
+    start(); fireEvent.click(screen.getByRole("button", { name: /已有对话 B/ })); snapshot("b.jsonl");
+    const textarea = screen.getByLabelText("写入消息内容") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "继续" } }); fireEvent.click(screen.getByRole("button", { name: "发送", exact: true }));
+    const frame = Socket.all[2]!.sent.at(-1)!;
+    await ack(frame, { kind: "launched", intentId: "fixture-submit", commandId: 1 });
+    expect(screen.getByText("消息已提交。")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("等待回复");
+    expect(document.body.textContent).not.toContain("执行成功");
+    expect(textarea.value).toBe("");
+    expect(Socket.all[2]!.sent.filter((sent) => sent.t === "prompt")).toHaveLength(1);
+  });
   it("真实 main 的 StrictMode 重挂探测不销毁状态 owner，首字与首帧保持", () => {
     render(React.createElement(React.StrictMode, null, React.createElement(AppRoot, { createSocket: factory })));
     act(() => Socket.all.slice(-3).forEach((socket) => socket.open()));
