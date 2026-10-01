@@ -1,0 +1,62 @@
+{
+  "auto-20261001-145647-2e6240cc4892c2a3876dbe28bbf6b912.jsonl": [
+    {
+      "t": "writer",
+      "epoch": 1,
+      "bootId": "0560cc09-7a5e-4e2c-ab5a-1f30819d893f",
+      "at": "2026-10-01T06:56:47.839Z"
+    },
+    {
+      "t": "enqueue",
+      "intentId": "i-1",
+      "sessionId": "sess-20116e0d2194",
+      "leafId": "leaf-1",
+      "matchKey": {
+        "textHash": "12a7de0b",
+        "attachmentIdentity": "",
+        "ordinal": 0
+      },
+      "payload": {
+        "kind": "prompt",
+        "rawText": "第一次受控消息",
+        "attachments": [],
+        "sentAt": "2026-10-01T06:56:48.040Z"
+      },
+      "generation": 1
+    },
+    {
+      "t": "sending",
+      "intentId": "i-1"
+    },
+    {
+      "t": "settled",
+      "intentId": "i-1"
+    },
+    {
+      "t": "enqueue",
+      "intentId": "i-2",
+      "sessionId": "sess-20116e0d2194",
+      "leafId": "leaf-2",
+      "matchKey": {
+        "textHash": "f7f8769e",
+        "attachmentIdentity": "",
+        "ordinal": 0
+      },
+      "payload": {
+        "kind": "prompt",
+        "rawText": "继续受控对话",
+        "attachments": [],
+        "sentAt": "2026-10-01T06:56:49.229Z"
+      },
+      "generation": 1
+    },
+    {
+      "t": "sending",
+      "intentId": "i-2"
+    },
+    {
+      "t": "settled",
+      "intentId": "i-2"
+    }
+  ]
+}

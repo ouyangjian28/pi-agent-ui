@@ -13,4 +13,6 @@
 - `first-loader-failure/` 保存原日志和 provider-result。精确 `Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'esbuild' imported from .../tests/browser/pi099-real-bridge.mjs`。
 - 判断错误在启动器：项目 Vite 8 未提供我假设的 esbuild 包，尚未启动应用/聊天链；providerRequests=[]，外部活动0。护栏自检已过，不据此判断 SDK 不兼容。
 - 7e5df4e 改用已经安装的公共 Vite createServer/ssrLoadModule，关闭 dev HTTP/HMR/watch；不安装新依赖、不改产品后端。Python log_message override 类型错误同时修正；两变更文件主动 LSP error=0。
-- 当前同门槛复验 b0b3036ab，写本记录时待结果；没有把启动器修好当真实链已通过。
+- 后续 b0b3036ab exit 0，首轮记录在 `first-mechanical/`（hash+原始 gzip/可读日志/帧/截图/两次受控请求）。真实 SDK 双轮、耐久顺序和暖进程 confirmed-stop 已实测；但旧夹具缺 D，实际旧订阅返回 4402，原 selection 断言漏检；不能记录完整切换/UX 已过。
+- d74b758 增有效旧双树与实际旧原文、必须旧 snapshot 成功/正文可见且零 protocol error，严格任务 b0f3c980a 写本记录时待结果；原失败不覆盖。
+- 原截图另显示合法 writer 被投成损坏、两份正文副本同级、回执等待字样过时；均作为尚未收口的问题，不把真实收发通过冒充可用。用户已授权只读 writer 识别窄修正，保留真损坏/未知告警，不改写入/恢复/接口字段。

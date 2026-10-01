@@ -1,0 +1,30 @@
+{
+  "runtime": "0.99.2",
+  "sourceCommit": "7e5df4ef92a9ae47a28e021d8530db4fb501350b",
+  "applicationSourceSha256": "e4a5bb63d5449572a9d2e875b157eedc2d8e7155ed2b0770060e27c1fd47a8ff",
+  "checks": [
+    "real browser model listing",
+    "new model-selected first conversation",
+    "actual pi delta/final rendered",
+    "durable enqueue/sending/settled per intent",
+    "real subscription switch and draft/DOM restoration",
+    "same-session second turn",
+    "actual process stop confirmation",
+    "owned workspace and real persisted assistant transcript"
+  ],
+  "policy": {
+    "realApp": true,
+    "fakeSocket": false,
+    "realPi": true,
+    "loopbackMockProvider": true,
+    "productionTokenUsed": false,
+    "realPhoneKeyboardTested": false
+  },
+  "limits": [
+    "not paid provider/auth/billing",
+    "not real phone keyboard",
+    "not main CLI defaults or production deployment",
+    "safety startup flags are explicit fixture configuration",
+    "handled/queued slash commands, cancellation during streaming and recovery not tested here"
+  ]
+}

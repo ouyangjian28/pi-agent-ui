@@ -1,0 +1,22 @@
+{
+  "task": "b0b3036ab",
+  "terminalExitCode": 0,
+  "interpretation": "basic actual double turn and process stop proven, but old fixture subscription 4402 was missed by weak selection assertion; not full core/UX acceptance",
+  "screenshotSourcePrefix": ".pi/upgrade-checks/app-bridge/runs/20261001T065645957096Z/",
+  "durablePrefix": "tests/fixtures/run-records/pi099-real-app/first-mechanical/",
+  "sha256": {
+    "audits.log": "78e50c41ea9c63be2a8aa7e5969cbd7aff71984ece549df520d68b001df253f4",
+    "audits.log.gz": "3939d4a2b6fceb0bcb9267b0ac79948047deb2d3024551cf7ada81d701412ca6",
+    "desktop-first-response.png": "0171da9baeaf0bd186a1704529af42fe2a94af44ee6fd9cd2010f3b8ab122999",
+    "desktop-second-response.png": "8bcc3bfc42075acfffcf7398ec3297aae2b4e0086209a4adef7962d50e4186ce",
+    "journals.json": "c1a2b4a71589935cf9c2c1ceb5e1b2169383bd70b2614cb755e90531a94571d7",
+    "mobile-real-response.png": "7d605079874353e027124fcf9896c381e3c114aaa8610135b2c161621db4ddc3",
+    "provider-result.json": "ea40d6250eeb0a7bdb23f583bd7e3dbd614c0ed8e9d737b95af89ce72b0596c6",
+    "result.json": "dbe89793a26b9c02efedd1b8a53093004fc26c453eb54878d2025aea49acab6a",
+    "run.log": "b7d631367916e11551506fc5a662578c15cf6715f7a1034b23f190b41d5137db",
+    "run.log.gz": "6f922cb726ef12332d0f30752a586325a90979adcc0cb4f7945e85f3774c8d27",
+    "server-frames.json": "b6b0624bbdbb4401c90800845ad2ff8d114eb9b0102f792139ed82204ec48b6d",
+    "vite-cache/deps/_metadata.json": "a69cae16acac0231be0ebe2c85e643c462094005451769287908b20d5d6e7ea2",
+    "vite-cache/deps/package.json": "3ca9d4afd21425087cf31893b8f9f63c81b0b8408db5e343ca76e5f8aa26ab9a"
+  }
+}
