@@ -1,0 +1,44 @@
+{
+  "baselineCommit": "cfbdc05ce470edcd3b33512e4475640c915220e7",
+  "source": "packages/protocol/src/history-projection.ts",
+  "copiedPublicImportAlias": true,
+  "repositorySourceTouched": false,
+  "results": [
+    {
+      "fault": "baseline",
+      "exitCode": 0,
+      "failedAssertions": 0,
+      "validEvidence": true,
+      "copySourceSha256": "3bead39bd7e497b8515329f6f55a1a6379470e25b053882fbb5234b76ce0b482"
+    },
+    {
+      "fault": "remove-writer-recognition",
+      "exitCode": 1,
+      "failedAssertions": 3,
+      "validEvidence": true,
+      "copySourceSha256": "3d0c01beb66dcfd24f159c6e5bca9ab0e900f9aaebb41b1339af895e38478799"
+    },
+    {
+      "fault": "bypass-shared-schema",
+      "exitCode": 1,
+      "failedAssertions": 13,
+      "validEvidence": true,
+      "copySourceSha256": "5f36ec39d6cee6bdcd2ee6e45d468b069ff4339c91f7bf33f1cb3784a1192407"
+    },
+    {
+      "fault": "epoch-masquerades-as-generation",
+      "exitCode": 1,
+      "failedAssertions": 2,
+      "validEvidence": true,
+      "copySourceSha256": "7b206c43993863521a7043e9fe64da90610f8ed6b93547c798c79b124b144c1a"
+    },
+    {
+      "fault": "unknown-verdict-becomes-settled",
+      "exitCode": 1,
+      "failedAssertions": 2,
+      "validEvidence": true,
+      "copySourceSha256": "57342c10743ce2fc534e972a536bda5d92d53fb2b6fc12488e11704c063f7f0e"
+    }
+  ],
+  "limitation": "narrow pure projection faults, not recovery/writer/whole UI mutation acceptance"
+}

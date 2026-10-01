@@ -1,0 +1,9 @@
+
+ RUN  v5.0.1 /tmp/writer-projection-mutation-zn0ip6at/copy
+
+ ✓ tests/unit/history-projection.test.ts (36 tests) 12ms
+
+ Test Files  1 passed (1)
+      Tests  36 passed (36)
+   Start at  16:23:26
+   Duration  243ms (transform 72%, import 19%, tests 7%, worker 2%)

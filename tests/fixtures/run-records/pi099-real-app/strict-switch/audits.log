@@ -1,0 +1,75 @@
+composition listening host=127.0.0.1 port=36665 origins=1 roots=3
+static-hit path=/ bytes=481
+static-hit path=/assets/index-DLfHHT4f.css bytes=32609
+static-hit path=/assets/index--nkz6oi2.js bytes=351828
+upgrade-accepted conn=t-1 origin=http://127.0.0.1:36665 clientIp=127.0.0.1 remote=127.0.0.1 proxied=false tls=false
+conn-open id=s-7b2a80b0e8c65d309749b926c89ae022 origin=http://127.0.0.1:36665 loopback=true tls=false conns=1
+upgrade-accepted conn=t-2 origin=http://127.0.0.1:36665 clientIp=127.0.0.1 remote=127.0.0.1 proxied=false tls=false
+conn-open id=s-62eb724456b26383540096ba740e64f7 origin=http://127.0.0.1:36665 loopback=true tls=false conns=2
+upgrade-accepted conn=t-3 origin=http://127.0.0.1:36665 clientIp=127.0.0.1 remote=127.0.0.1 proxied=false tls=false
+conn-open id=s-295fd61c933b75ea69db094eccfe999c origin=http://127.0.0.1:36665 loopback=true tls=false conns=3
+get-roots conn=s-7b2a80b0e8c65d309749b926c89ae022 count=3
+get-models conn=s-7b2a80b0e8c65d309749b926c89ae022 ok=true count=1
+session-registry created file=/tmp/pi099-real-app-u3sxg7q2/journal/auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl session=/tmp/pi099-real-app-u3sxg7q2/transcripts/auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl
+rpc-session sess-a147c5a40da9 supervisor 2026-10-01T07:22:25.008Z process-supervisor process-spawned generation=1
+guarded-writer ready file=/tmp/pi099-real-app-u3sxg7q2/journal/auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl epoch=1 bootId=f769ec3d-affc-48e3-8074-810fe9a8f1ba byteEnd=105
+rpc-session sess-a147c5a40da9 rpc-session ready generation=1
+rpc-session sess-a147c5a40da9 supervisor 2026-10-01T07:22:25.205Z process-supervisor stdin-written intentId=i-1 commandId=1 generation=1
+write-frame conn=s-295fd61c933b75ea69db094eccfe999c t=prompt file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl outcome=launched
+1790839345211 dual-history journal-sub 1790839345211 history-source loaded file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl gen=1 rows=3 dirty=false
+1790839345211 dual-history journal-sub 1790839345211 history-source load-committed file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl rows=3 awaiting=1
+1790839345215 dual-history session-sub 1790839345215 history-source loaded file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl gen=1 rows=5 dirty=false
+1790839345215 dual-history session-sub 1790839345215 history-source load-committed file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl rows=5 awaiting=1
+index-fingerprint file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl journal=39cd6768b059 session=84e693d2057d
+1790839345216 dual-history journal-sub 1790839345216 history-source observed file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl awaiting=0
+1790839345216 dual-history session-sub 1790839345216 history-source observed file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl awaiting=0
+rpc-session sess-a147c5a40da9 coordinator settled-attribution-by-single-flight commandId=1
+index-fingerprint file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl journal=39cd6768b059 session=23d151197ffd
+1790839346130 dual-history session-sub 1790839346130 history-source rescan file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl why=notice rows=6 appended=1
+index-fingerprint file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl journal=a0d5862eab72 session=23d151197ffd
+1790839346130 dual-history journal-sub 1790839346130 history-source rescan file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl why=notice rows=4 appended=1
+1790839346249 dual-history journal-sub 1790839346249 history-source unobserved file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl
+1790839346249 dual-history journal-sub 1790839346249 history-source slot-reaped file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl
+1790839346249 dual-history session-sub 1790839346249 history-source unobserved file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl
+1790839346249 dual-history session-sub 1790839346249 history-source slot-reaped file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl
+unsubscribe conn=s-62eb724456b26383540096ba740e64f7 file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl
+1790839346250 dual-history journal-sub 1790839346250 history-source loaded file=owned-history.jsonl gen=2 rows=0 dirty=false
+1790839346250 dual-history journal-sub 1790839346250 history-source load-committed file=owned-history.jsonl rows=0 awaiting=1
+1790839346251 dual-history session-sub 1790839346251 history-source loaded file=owned-history.jsonl gen=2 rows=2 dirty=false
+1790839346251 dual-history session-sub 1790839346251 history-source load-committed file=owned-history.jsonl rows=2 awaiting=1
+index-fingerprint file=owned-history.jsonl journal=e3b0c44298fc session=4654d7909c6f
+1790839346252 dual-history journal-sub 1790839346252 history-source observed file=owned-history.jsonl awaiting=0
+1790839346252 dual-history session-sub 1790839346252 history-source observed file=owned-history.jsonl awaiting=0
+rpc-session sess-a147c5a40da9 idle-timer-start generation=1
+1790839346334 dual-history journal-sub 1790839346334 history-source unobserved file=owned-history.jsonl
+1790839346334 dual-history journal-sub 1790839346334 history-source slot-reaped file=owned-history.jsonl
+1790839346334 dual-history session-sub 1790839346334 history-source unobserved file=owned-history.jsonl
+1790839346334 dual-history session-sub 1790839346334 history-source slot-reaped file=owned-history.jsonl
+unsubscribe conn=s-62eb724456b26383540096ba740e64f7 file=owned-history.jsonl
+1790839346336 dual-history journal-sub 1790839346336 history-source loaded file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl gen=3 rows=4 dirty=false
+1790839346336 dual-history journal-sub 1790839346336 history-source load-committed file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl rows=4 awaiting=1
+1790839346338 dual-history session-sub 1790839346338 history-source loaded file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl gen=3 rows=6 dirty=false
+1790839346338 dual-history session-sub 1790839346338 history-source load-committed file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl rows=6 awaiting=1
+index-fingerprint file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl journal=a0d5862eab72 session=23d151197ffd
+1790839346339 dual-history journal-sub 1790839346339 history-source observed file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl awaiting=0
+1790839346339 dual-history session-sub 1790839346339 history-source observed file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl awaiting=0
+index-fingerprint file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl journal=c46fce22257a session=23d151197ffd
+1790839346385 dual-history journal-sub 1790839346385 history-source rescan file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl why=notice rows=5 appended=1
+index-fingerprint file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl journal=147ced1be50d session=23d151197ffd
+1790839346390 dual-history journal-sub 1790839346390 history-source rescan file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl why=notice rows=6 appended=1
+rpc-session sess-a147c5a40da9 supervisor 2026-10-01T07:22:26.391Z process-supervisor stdin-written intentId=i-2 commandId=2 generation=1
+write-frame conn=s-295fd61c933b75ea69db094eccfe999c t=prompt file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl outcome=launched
+index-fingerprint file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl journal=147ced1be50d session=b18c69d6eb02
+1790839346396 dual-history session-sub 1790839346396 history-source rescan file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl why=notice rows=7 appended=1
+rpc-session sess-a147c5a40da9 coordinator settled-attribution-by-single-flight commandId=2
+index-fingerprint file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl journal=912bedac1d55 session=b18c69d6eb02
+1790839347280 dual-history journal-sub 1790839347280 history-source rescan file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl why=notice rows=7 appended=1
+index-fingerprint file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl journal=912bedac1d55 session=330a61b6dff9
+1790839347281 dual-history session-sub 1790839347281 history-source rescan file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl why=notice rows=8 appended=1
+process-host stop handle=proc-1 signal=SIGTERM
+rpc-session sess-a147c5a40da9 supervisor 2026-10-01T07:22:27.414Z process-supervisor process-stop signal=SIGTERM generation=1
+process-host exit handle=proc-1 code=143 signal=null
+rpc-session sess-a147c5a40da9 coordinator generation-retired generation=1 clearedCommands=0 clearedEvents=0 no-op
+rpc-session sess-a147c5a40da9 supervisor 2026-10-01T07:22:27.423Z process-supervisor generation-retired reason=handover generation=1 clearedCommands=0 clearedEvents=0 gateClosed=false
+rpc-session sess-a147c5a40da9 supervisor 2026-10-01T07:22:27.423Z process-supervisor process-retired generation=1
+write-frame conn=s-295fd61c933b75ea69db094eccfe999c t=stop file=auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl outcome=confirmed

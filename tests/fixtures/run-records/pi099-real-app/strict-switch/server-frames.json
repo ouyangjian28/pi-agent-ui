@@ -1,0 +1,805 @@
+[
+  {
+    "t": "welcome",
+    "serverBootId": "boot-wrd4fq6m",
+    "serverBuildId": "pi-agent-ui/ws-gateway@3b",
+    "protocolVersion": 1
+  },
+  {
+    "t": "welcome",
+    "serverBootId": "boot-wrd4fq6m",
+    "serverBuildId": "pi-agent-ui/ws-gateway@3b",
+    "protocolVersion": 1
+  },
+  {
+    "t": "welcome",
+    "serverBootId": "boot-wrd4fq6m",
+    "serverBuildId": "pi-agent-ui/ws-gateway@3b",
+    "protocolVersion": 1
+  },
+  {
+    "t": "roots-list",
+    "requestId": "get-roots-1",
+    "roots": [
+      "/tmp/pi099-real-app-u3sxg7q2/transcripts",
+      "/tmp/pi099-real-app-u3sxg7q2/journal",
+      "/tmp/pi099-real-app-u3sxg7q2/workspace"
+    ],
+    "journalRoot": "/tmp/pi099-real-app-u3sxg7q2/journal"
+  },
+  {
+    "t": "sessions",
+    "requestId": "list-sessions-1",
+    "sessions": [
+      {
+        "sessionId": "owned-history",
+        "file": "owned-history.jsonl",
+        "title": {
+          "text": "旧会话里的受控内容",
+          "truncated": false
+        },
+        "lastActiveMs": 1790839343529,
+        "entryCount": 1,
+        "sizeBytes": 414,
+        "hasRecoveryNotice": false,
+        "listReliability": "full"
+      }
+    ],
+    "total": 1,
+    "offset": 0,
+    "hasMore": false,
+    "listVersion": 1,
+    "listReliability": "full"
+  },
+  {
+    "t": "models-list",
+    "requestId": "get-models-1",
+    "models": [
+      {
+        "provider": "ui-upgrade-test",
+        "id": "fixture",
+        "context": "128K",
+        "thinking": "no"
+      }
+    ]
+  },
+  {
+    "t": "write-ack",
+    "requestId": "wr-p-1",
+    "file": "auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl",
+    "outcome": {
+      "kind": "launched",
+      "intentId": "i-1",
+      "commandId": 1
+    }
+  },
+  {
+    "t": "sessions",
+    "requestId": "list-sessions-2",
+    "sessions": [
+      {
+        "sessionId": "owned-history",
+        "file": "owned-history.jsonl",
+        "title": {
+          "text": "旧会话里的受控内容",
+          "truncated": false
+        },
+        "lastActiveMs": 1790839343529,
+        "entryCount": 1,
+        "sizeBytes": 414,
+        "hasRecoveryNotice": false,
+        "listReliability": "full"
+      }
+    ],
+    "total": 1,
+    "offset": 0,
+    "hasMore": false,
+    "listVersion": 1,
+    "listReliability": "full"
+  },
+  {
+    "t": "snapshot",
+    "requestId": "sub-1",
+    "subscriptionId": "s-35164bb5c09e823918e3262f0eaa750c",
+    "streamId": "s-8e3e5b85d2573ec596821adabd9ab06c",
+    "snapshotId": "s-36e3ebed27c571c5d01e046f42148062",
+    "barrier": 8,
+    "status": {
+      "session": {
+        "sessionId": "sess-a147c5a40da9",
+        "file": "/tmp/pi099-real-app-u3sxg7q2/journal/auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl",
+        "adapterSessionId": null
+      },
+      "process": {
+        "phase": "running",
+        "generation": 1,
+        "lastStartResult": null,
+        "lastStopResult": null,
+        "ready": true
+      },
+      "turn": {
+        "state": "in-flight",
+        "intentId": "i-1"
+      },
+      "backgroundTasks": {
+        "availability": "known",
+        "activeCount": 0
+      },
+      "reap": {
+        "eligible": false,
+        "idleElapsedMs": null,
+        "idleRemainingMs": null,
+        "idleMs": 1800000
+      },
+      "recovery": {
+        "availability": "unavailable",
+        "resumeBlocked": null,
+        "diskBlocked": null,
+        "unknownEffectCount": null,
+        "unattributableFragments": null,
+        "intentsCount": null,
+        "settledCount": null,
+        "evidenceHash": null
+      },
+      "statusVersion": 0,
+      "serverTimeMs": 1790839345216
+    },
+    "page": [
+      {
+        "seq": 1,
+        "ts": null,
+        "generation": null,
+        "intentId": null,
+        "kind": "journal-corrupt"
+      },
+      {
+        "seq": 2,
+        "ts": null,
+        "generation": 1,
+        "intentId": "i-1",
+        "kind": "turn-enqueued",
+        "preview": {
+          "text": "第一次受控消息",
+          "truncated": false
+        },
+        "ordinal": 0
+      },
+      {
+        "seq": 3,
+        "ts": null,
+        "generation": null,
+        "intentId": "i-1",
+        "kind": "sending"
+      },
+      {
+        "seq": 4,
+        "ts": null,
+        "generation": null,
+        "intentId": null,
+        "kind": "unknown-line"
+      },
+      {
+        "seq": 5,
+        "ts": null,
+        "generation": null,
+        "intentId": null,
+        "kind": "unknown-line"
+      },
+      {
+        "seq": 6,
+        "ts": null,
+        "generation": null,
+        "intentId": null,
+        "kind": "unknown-line"
+      },
+      {
+        "seq": 7,
+        "ts": 1790839345208,
+        "generation": null,
+        "intentId": null,
+        "kind": "message",
+        "entryId": "c9063735",
+        "role": "system",
+        "blockCount": 1,
+        "final": true
+      },
+      {
+        "seq": 8,
+        "ts": 1790839345208,
+        "generation": 1,
+        "intentId": "i-1",
+        "kind": "message",
+        "entryId": "c9bc9b45",
+        "role": "user",
+        "textPreview": {
+          "text": "第一次受控消息",
+          "truncated": false
+        },
+        "blockCount": 1,
+        "final": true
+      }
+    ],
+    "historyNext": null,
+    "liveFrom": {
+      "streamId": "s-8e3e5b85d2573ec596821adabd9ab06c",
+      "seq": 9
+    },
+    "hasMore": false
+  },
+  {
+    "t": "events",
+    "subscriptionId": "s-35164bb5c09e823918e3262f0eaa750c",
+    "origin": "live",
+    "liveSeq": 1,
+    "refSeq": null,
+    "events": [
+      {
+        "kind": "message-delta",
+        "part": "text",
+        "contentIndex": 0,
+        "delta": "受控应用正文 "
+      }
+    ]
+  },
+  {
+    "t": "events",
+    "subscriptionId": "s-35164bb5c09e823918e3262f0eaa750c",
+    "origin": "live",
+    "liveSeq": 2,
+    "refSeq": null,
+    "events": [
+      {
+        "kind": "message-delta",
+        "part": "text",
+        "contentIndex": 0,
+        "delta": "✓ 第1轮"
+      }
+    ]
+  },
+  {
+    "t": "events",
+    "subscriptionId": "s-35164bb5c09e823918e3262f0eaa750c",
+    "origin": "live",
+    "liveSeq": 3,
+    "refSeq": null,
+    "events": [
+      {
+        "kind": "message-part-end",
+        "part": "text",
+        "contentIndex": 0
+      }
+    ]
+  },
+  {
+    "t": "events",
+    "subscriptionId": "s-35164bb5c09e823918e3262f0eaa750c",
+    "origin": "live",
+    "liveSeq": 4,
+    "refSeq": null,
+    "events": [
+      {
+        "kind": "message-final",
+        "role": "assistant",
+        "text": "受控应用正文 ✓ 第1轮"
+      }
+    ]
+  },
+  {
+    "t": "events",
+    "subscriptionId": "s-35164bb5c09e823918e3262f0eaa750c",
+    "origin": "history",
+    "refSeq": 9,
+    "events": [
+      {
+        "seq": 9,
+        "ts": 1790839346127,
+        "generation": null,
+        "intentId": null,
+        "kind": "message",
+        "entryId": "627a0d61",
+        "role": "assistant",
+        "textPreview": {
+          "text": "受控应用正文 ✓ 第1轮",
+          "truncated": false
+        },
+        "stopReason": "stop",
+        "blockCount": 1,
+        "final": true
+      }
+    ]
+  },
+  {
+    "t": "events",
+    "subscriptionId": "s-35164bb5c09e823918e3262f0eaa750c",
+    "origin": "history",
+    "refSeq": 10,
+    "events": [
+      {
+        "seq": 10,
+        "ts": null,
+        "generation": null,
+        "intentId": "i-1",
+        "kind": "verdict-settled"
+      }
+    ]
+  },
+  {
+    "t": "sessions",
+    "requestId": "list-sessions-3",
+    "sessions": [
+      {
+        "sessionId": "01a0f657-d00f-750c-a731-f2e9c12333d2",
+        "file": "auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl",
+        "title": {
+          "text": "第一次受控消息",
+          "truncated": false
+        },
+        "lastActiveMs": 1790839346127,
+        "entryCount": 5,
+        "sizeBytes": 3961,
+        "hasRecoveryNotice": false,
+        "listReliability": "full"
+      },
+      {
+        "sessionId": "owned-history",
+        "file": "owned-history.jsonl",
+        "title": {
+          "text": "旧会话里的受控内容",
+          "truncated": false
+        },
+        "lastActiveMs": 1790839343529,
+        "entryCount": 1,
+        "sizeBytes": 414,
+        "hasRecoveryNotice": false,
+        "listReliability": "full"
+      }
+    ],
+    "total": 2,
+    "offset": 0,
+    "hasMore": false,
+    "listVersion": 2,
+    "listReliability": "full"
+  },
+  {
+    "t": "snapshot",
+    "requestId": "sub-3",
+    "subscriptionId": "s-d6bc221dc5c9aca4c44ce96cbd438d1a",
+    "streamId": "s-1e796265025805954cde46b821d23416",
+    "snapshotId": "s-ddaeb177a587743c8062080c8dbc8605",
+    "barrier": 2,
+    "status": {
+      "session": {
+        "sessionId": "sess-5e4a1814b7f5",
+        "file": "/tmp/pi099-real-app-u3sxg7q2/journal/owned-history.jsonl",
+        "adapterSessionId": null
+      },
+      "process": {
+        "phase": "idle",
+        "generation": null,
+        "lastStartResult": null,
+        "lastStopResult": null,
+        "ready": false
+      },
+      "turn": {
+        "state": "idle"
+      },
+      "backgroundTasks": {
+        "availability": "unknown",
+        "activeCount": null
+      },
+      "reap": {
+        "eligible": false,
+        "idleElapsedMs": null,
+        "idleRemainingMs": null,
+        "idleMs": 1800000
+      },
+      "recovery": {
+        "availability": "unavailable",
+        "resumeBlocked": null,
+        "diskBlocked": null,
+        "unknownEffectCount": null,
+        "unattributableFragments": null,
+        "intentsCount": null,
+        "settledCount": null,
+        "evidenceHash": null
+      },
+      "statusVersion": 0,
+      "serverTimeMs": 1790839346251
+    },
+    "page": [
+      {
+        "seq": 1,
+        "ts": null,
+        "generation": null,
+        "intentId": null,
+        "kind": "unknown-line"
+      },
+      {
+        "seq": 2,
+        "ts": 1790839343529,
+        "generation": null,
+        "intentId": null,
+        "kind": "message",
+        "entryId": "feed0001",
+        "role": "user",
+        "textPreview": {
+          "text": "旧会话里的受控内容",
+          "truncated": false
+        },
+        "blockCount": 1,
+        "final": true
+      }
+    ],
+    "historyNext": null,
+    "liveFrom": {
+      "streamId": "s-1e796265025805954cde46b821d23416",
+      "seq": 3
+    },
+    "hasMore": false
+  },
+  {
+    "t": "snapshot",
+    "requestId": "sub-5",
+    "subscriptionId": "s-3a5ffdcf7c64f44f5e061bbe26150902",
+    "streamId": "s-8e3e5b85d2573ec596821adabd9ab06c",
+    "snapshotId": "s-c8de2d097fb5eaab1ac3223673ecf5b4",
+    "barrier": 10,
+    "status": {
+      "session": {
+        "sessionId": "sess-a147c5a40da9",
+        "file": "/tmp/pi099-real-app-u3sxg7q2/journal/auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl",
+        "adapterSessionId": null
+      },
+      "process": {
+        "phase": "running",
+        "generation": 1,
+        "lastStartResult": null,
+        "lastStopResult": null,
+        "ready": true
+      },
+      "turn": {
+        "state": "idle"
+      },
+      "backgroundTasks": {
+        "availability": "known",
+        "activeCount": 0
+      },
+      "reap": {
+        "eligible": true,
+        "idleElapsedMs": 85.41347799999994,
+        "idleRemainingMs": 1799914.586522,
+        "idleMs": 1800000
+      },
+      "recovery": {
+        "availability": "unavailable",
+        "resumeBlocked": null,
+        "diskBlocked": null,
+        "unknownEffectCount": null,
+        "unattributableFragments": null,
+        "intentsCount": null,
+        "settledCount": null,
+        "evidenceHash": null
+      },
+      "statusVersion": 0,
+      "serverTimeMs": 1790839346339
+    },
+    "page": [
+      {
+        "seq": 1,
+        "ts": null,
+        "generation": null,
+        "intentId": null,
+        "kind": "journal-corrupt"
+      },
+      {
+        "seq": 2,
+        "ts": null,
+        "generation": 1,
+        "intentId": "i-1",
+        "kind": "turn-enqueued",
+        "preview": {
+          "text": "第一次受控消息",
+          "truncated": false
+        },
+        "ordinal": 0
+      },
+      {
+        "seq": 3,
+        "ts": null,
+        "generation": null,
+        "intentId": "i-1",
+        "kind": "sending"
+      },
+      {
+        "seq": 4,
+        "ts": null,
+        "generation": null,
+        "intentId": null,
+        "kind": "unknown-line"
+      },
+      {
+        "seq": 5,
+        "ts": null,
+        "generation": null,
+        "intentId": null,
+        "kind": "unknown-line"
+      },
+      {
+        "seq": 6,
+        "ts": null,
+        "generation": null,
+        "intentId": null,
+        "kind": "unknown-line"
+      },
+      {
+        "seq": 7,
+        "ts": 1790839345208,
+        "generation": null,
+        "intentId": null,
+        "kind": "message",
+        "entryId": "c9063735",
+        "role": "system",
+        "blockCount": 1,
+        "final": true
+      },
+      {
+        "seq": 8,
+        "ts": 1790839345208,
+        "generation": 1,
+        "intentId": "i-1",
+        "kind": "message",
+        "entryId": "c9bc9b45",
+        "role": "user",
+        "textPreview": {
+          "text": "第一次受控消息",
+          "truncated": false
+        },
+        "blockCount": 1,
+        "final": true
+      },
+      {
+        "seq": 9,
+        "ts": 1790839346127,
+        "generation": null,
+        "intentId": null,
+        "kind": "message",
+        "entryId": "627a0d61",
+        "role": "assistant",
+        "textPreview": {
+          "text": "受控应用正文 ✓ 第1轮",
+          "truncated": false
+        },
+        "stopReason": "stop",
+        "blockCount": 1,
+        "final": true
+      },
+      {
+        "seq": 10,
+        "ts": null,
+        "generation": null,
+        "intentId": "i-1",
+        "kind": "verdict-settled"
+      }
+    ],
+    "historyNext": null,
+    "liveFrom": {
+      "streamId": "s-8e3e5b85d2573ec596821adabd9ab06c",
+      "seq": 11
+    },
+    "hasMore": false
+  },
+  {
+    "t": "events",
+    "subscriptionId": "s-3a5ffdcf7c64f44f5e061bbe26150902",
+    "origin": "history",
+    "refSeq": 11,
+    "events": [
+      {
+        "seq": 11,
+        "ts": null,
+        "generation": 1,
+        "intentId": "i-2",
+        "kind": "turn-enqueued",
+        "preview": {
+          "text": "继续受控对话",
+          "truncated": false
+        },
+        "ordinal": 0
+      }
+    ]
+  },
+  {
+    "t": "write-ack",
+    "requestId": "wr-p-2",
+    "file": "auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl",
+    "outcome": {
+      "kind": "launched",
+      "intentId": "i-2",
+      "commandId": 2
+    }
+  },
+  {
+    "t": "events",
+    "subscriptionId": "s-3a5ffdcf7c64f44f5e061bbe26150902",
+    "origin": "history",
+    "refSeq": 12,
+    "events": [
+      {
+        "seq": 12,
+        "ts": null,
+        "generation": null,
+        "intentId": "i-2",
+        "kind": "sending"
+      }
+    ]
+  },
+  {
+    "t": "events",
+    "subscriptionId": "s-3a5ffdcf7c64f44f5e061bbe26150902",
+    "origin": "history",
+    "refSeq": 13,
+    "events": [
+      {
+        "seq": 13,
+        "ts": 1790839346392,
+        "generation": 1,
+        "intentId": "i-2",
+        "kind": "message",
+        "entryId": "4f67fadd",
+        "role": "user",
+        "textPreview": {
+          "text": "继续受控对话",
+          "truncated": false
+        },
+        "blockCount": 1,
+        "final": true
+      }
+    ]
+  },
+  {
+    "t": "sessions",
+    "requestId": "list-sessions-4",
+    "sessions": [
+      {
+        "sessionId": "01a0f657-d00f-750c-a731-f2e9c12333d2",
+        "file": "auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl",
+        "title": {
+          "text": "第一次受控消息",
+          "truncated": false
+        },
+        "lastActiveMs": 1790839346392,
+        "entryCount": 6,
+        "sizeBytes": 4165,
+        "hasRecoveryNotice": false,
+        "listReliability": "full"
+      },
+      {
+        "sessionId": "owned-history",
+        "file": "owned-history.jsonl",
+        "title": {
+          "text": "旧会话里的受控内容",
+          "truncated": false
+        },
+        "lastActiveMs": 1790839343529,
+        "entryCount": 1,
+        "sizeBytes": 414,
+        "hasRecoveryNotice": false,
+        "listReliability": "full"
+      }
+    ],
+    "total": 2,
+    "offset": 0,
+    "hasMore": false,
+    "listVersion": 3,
+    "listReliability": "full"
+  },
+  {
+    "t": "events",
+    "subscriptionId": "s-3a5ffdcf7c64f44f5e061bbe26150902",
+    "origin": "live",
+    "liveSeq": 1,
+    "refSeq": null,
+    "events": [
+      {
+        "kind": "message-delta",
+        "part": "text",
+        "contentIndex": 0,
+        "delta": "受控应用正文 "
+      }
+    ]
+  },
+  {
+    "t": "events",
+    "subscriptionId": "s-3a5ffdcf7c64f44f5e061bbe26150902",
+    "origin": "live",
+    "liveSeq": 2,
+    "refSeq": null,
+    "events": [
+      {
+        "kind": "message-delta",
+        "part": "text",
+        "contentIndex": 0,
+        "delta": "✓ 第2轮"
+      }
+    ]
+  },
+  {
+    "t": "events",
+    "subscriptionId": "s-3a5ffdcf7c64f44f5e061bbe26150902",
+    "origin": "live",
+    "liveSeq": 3,
+    "refSeq": null,
+    "events": [
+      {
+        "kind": "message-part-end",
+        "part": "text",
+        "contentIndex": 0
+      }
+    ]
+  },
+  {
+    "t": "events",
+    "subscriptionId": "s-3a5ffdcf7c64f44f5e061bbe26150902",
+    "origin": "live",
+    "liveSeq": 4,
+    "refSeq": null,
+    "events": [
+      {
+        "kind": "message-final",
+        "role": "assistant",
+        "text": "受控应用正文 ✓ 第2轮"
+      }
+    ]
+  },
+  {
+    "t": "events",
+    "subscriptionId": "s-3a5ffdcf7c64f44f5e061bbe26150902",
+    "origin": "history",
+    "refSeq": 14,
+    "events": [
+      {
+        "seq": 14,
+        "ts": null,
+        "generation": null,
+        "intentId": "i-2",
+        "kind": "verdict-settled"
+      }
+    ]
+  },
+  {
+    "t": "events",
+    "subscriptionId": "s-3a5ffdcf7c64f44f5e061bbe26150902",
+    "origin": "history",
+    "refSeq": 15,
+    "events": [
+      {
+        "seq": 15,
+        "ts": 1790839347278,
+        "generation": null,
+        "intentId": null,
+        "kind": "message",
+        "entryId": "e0415f27",
+        "role": "assistant",
+        "textPreview": {
+          "text": "受控应用正文 ✓ 第2轮",
+          "truncated": false
+        },
+        "stopReason": "stop",
+        "blockCount": 1,
+        "final": true
+      }
+    ]
+  },
+  {
+    "t": "write-stop-ack",
+    "requestId": "wr-s-3",
+    "file": "auto-20261001-152224-69bf523bb282d77eeabdc0279557fe65.jsonl",
+    "outcome": {
+      "kind": "confirmed",
+      "exit": {
+        "code": 143,
+        "signal": null
+      }
+    }
+  }
+]

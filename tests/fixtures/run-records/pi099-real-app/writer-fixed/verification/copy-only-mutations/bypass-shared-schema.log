@@ -1,0 +1,425 @@
+
+ RUN  v5.0.1 /tmp/writer-projection-mutation-zn0ip6at/copy
+
+ ❯ tests/unit/history-projection.test.ts (36 tests | 13 failed) 29ms
+   ❯ journalToScanRows（3b-2a 投影；R5 严格 schema） (36)
+     ✓ enqueue→turn-enqueued（preview/ordinal/generation/intentId/locator 全链） 2ms
+     ✓ 合法 writer 元数据保留为既有辅助行，不冒充损坏/回合/发送结论 0ms
+     ✓ writer 不删行/不串回合身份，真结果未知仍保留原裁决 0ms
+     ✓ writer 撕裂尾仍不提前发布，换行补全才有完整辅助行 0ms
+     × 坏 writer/未来行仍严格 corrupt 0 5ms
+     × 坏 writer/未来行仍严格 corrupt 1 1ms
+     × 坏 writer/未来行仍严格 corrupt 2 1ms
+     × 坏 writer/未来行仍严格 corrupt 3 1ms
+     × 坏 writer/未来行仍严格 corrupt 4 1ms
+     × 坏 writer/未来行仍严格 corrupt 5 2ms
+     × 坏 writer/未来行仍严格 corrupt 6 1ms
+     × 坏 writer/未来行仍严格 corrupt 7 1ms
+     × 坏 writer/未来行仍严格 corrupt 8 1ms
+     × 坏 writer/未来行仍严格 corrupt 9 1ms
+     × 坏 writer/未来行仍严格 corrupt 10 1ms
+     × 坏 writer/未来行仍严格 corrupt 11 1ms
+     ✓ 坏 writer/未来行仍严格 corrupt 12 1ms
+     ✓ 完整行集合各 kind 映射（sending/engaged/consumed/cancelled/delivered/settled/unknown/response-timeout/clear） 1ms
+     ✓ 撕裂尾（无换行）不发布；补全换行后成行 0ms
+     ✓ 空文本=0 行；空行=journal-corrupt 占位（完整行不静默丢） 1ms
+     ✓ 坏完整行分型：JSON 解析失败/非对象/null/缺 t/未知 t→journal-corrupt 0ms
+     × R5/P1：schema 非法行→journal-corrupt 不抛错（严格校验与恢复侧同权威） 1ms
+     ✓ R5：未知行型不猜语义（未来版本行保守 corrupt） 0ms
+     ✓ 合法行容忍额外字段（前向兼容：多余键不判坏） 0ms
+     ✓ preview 截断到 HISTORY_PREVIEW_LIMIT（200） 1ms
+     ✓ 行号定位：坏行也占行号（locator 连续） 0ms
+     ✓ 跨行序完整性：100 行→100 行、locator 单调 3ms
+     ✓ 同文本不同两行=两行各自投影（去重归源 diff，不归投影） 0ms
+     ✓ sanitize 面：控制字符被剥后进 preview 0ms
+     ✓ baseEvent 只认行内字段（跨行不串扰） 0ms
+     ✓ R5 与恢复侧同权威：journalLineSchemaError 直接对照（同输入同判定） 1ms
+     ✓ 3b2c-B5 额外字段安全 null 投影 (5)
+       ✓ N7 精确输入：sending+generation 对象→kind=sending、generation=null（对象不逃入事件） 0ms
+       ✓ sending+generation 数组/字符串/负数/非安全整数→一律 null（不猜语义） 1ms
+       ✓ engaged/delivered/settled 带额外 generation→null（生命周期行不声明该字段） 0ms
+       ✓ clear+额外 intentId（错型对象）→事件 intentId=null（clear 不声明 intentId） 0ms
+       ✓ enqueue/response-timeout 的 generation=已验证字段→照常投影（正控制） 0ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 13 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 坏 writer/未来行仍严格 corrupt 0
+AssertionError: expected [ { source: 'journal', …(3) } ] to deeply equal [ { source: 'journal', …(3) } ]
+
+- Expected
++ Received
+
+@@ -1,11 +1,11 @@
+  [
+    {
+      "event": {
+        "generation": null,
+        "intentId": null,
+-       "kind": "journal-corrupt",
++       "kind": "unknown-line",
+        "seq": 0,
+        "ts": null,
+      },
+      "locator": "1",
+      "raw": "{\"t\":\"writer\",\"epoch\":0,\"bootId\":\"fixture-boot\",\"at\":\"x\"}",
+
+ ❯ tests/unit/history-projection.test.ts:102:43
+    100|   ])("坏 writer/未来行仍严格 corrupt %#", (invalid) => {
+    101|     const raw = JSON.stringify({ t: "writer", epoch: 1, bootId: "fixtu…
+    102|     expect(journalToScanRows(`${raw}\n`)).toEqual([
+       |                                           ^
+    103|       {
+    104|         source: "journal",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/13]⎯
+
+ FAIL  tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 坏 writer/未来行仍严格 corrupt 1
+AssertionError: expected [ { source: 'journal', …(3) } ] to deeply equal [ { source: 'journal', …(3) } ]
+
+- Expected
++ Received
+
+@@ -1,11 +1,11 @@
+  [
+    {
+      "event": {
+        "generation": null,
+        "intentId": null,
+-       "kind": "journal-corrupt",
++       "kind": "unknown-line",
+        "seq": 0,
+        "ts": null,
+      },
+      "locator": "1",
+      "raw": "{\"t\":\"writer\",\"epoch\":-1,\"bootId\":\"fixture-boot\",\"at\":\"x\"}",
+
+ ❯ tests/unit/history-projection.test.ts:102:43
+    100|   ])("坏 writer/未来行仍严格 corrupt %#", (invalid) => {
+    101|     const raw = JSON.stringify({ t: "writer", epoch: 1, bootId: "fixtu…
+    102|     expect(journalToScanRows(`${raw}\n`)).toEqual([
+       |                                           ^
+    103|       {
+    104|         source: "journal",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/13]⎯
+
+ FAIL  tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 坏 writer/未来行仍严格 corrupt 2
+AssertionError: expected [ { source: 'journal', …(3) } ] to deeply equal [ { source: 'journal', …(3) } ]
+
+- Expected
++ Received
+
+@@ -1,11 +1,11 @@
+  [
+    {
+      "event": {
+        "generation": null,
+        "intentId": null,
+-       "kind": "journal-corrupt",
++       "kind": "unknown-line",
+        "seq": 0,
+        "ts": null,
+      },
+      "locator": "1",
+      "raw": "{\"t\":\"writer\",\"epoch\":1.5,\"bootId\":\"fixture-boot\",\"at\":\"x\"}",
+
+ ❯ tests/unit/history-projection.test.ts:102:43
+    100|   ])("坏 writer/未来行仍严格 corrupt %#", (invalid) => {
+    101|     const raw = JSON.stringify({ t: "writer", epoch: 1, bootId: "fixtu…
+    102|     expect(journalToScanRows(`${raw}\n`)).toEqual([
+       |                                           ^
+    103|       {
+    104|         source: "journal",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/13]⎯
+
+ FAIL  tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 坏 writer/未来行仍严格 corrupt 3
+AssertionError: expected [ { source: 'journal', …(3) } ] to deeply equal [ { source: 'journal', …(3) } ]
+
+- Expected
++ Received
+
+@@ -1,11 +1,11 @@
+  [
+    {
+      "event": {
+        "generation": null,
+        "intentId": null,
+-       "kind": "journal-corrupt",
++       "kind": "unknown-line",
+        "seq": 0,
+        "ts": null,
+      },
+      "locator": "1",
+      "raw": "{\"t\":\"writer\",\"epoch\":9007199254740992,\"bootId\":\"fixture-boot\",\"at\":\"x\"}",
+
+ ❯ tests/unit/history-projection.test.ts:102:43
+    100|   ])("坏 writer/未来行仍严格 corrupt %#", (invalid) => {
+    101|     const raw = JSON.stringify({ t: "writer", epoch: 1, bootId: "fixtu…
+    102|     expect(journalToScanRows(`${raw}\n`)).toEqual([
+       |                                           ^
+    103|       {
+    104|         source: "journal",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/13]⎯
+
+ FAIL  tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 坏 writer/未来行仍严格 corrupt 4
+AssertionError: expected [ { source: 'journal', …(3) } ] to deeply equal [ { source: 'journal', …(3) } ]
+
+- Expected
++ Received
+
+@@ -1,11 +1,11 @@
+  [
+    {
+      "event": {
+        "generation": null,
+        "intentId": null,
+-       "kind": "journal-corrupt",
++       "kind": "unknown-line",
+        "seq": 0,
+        "ts": null,
+      },
+      "locator": "1",
+      "raw": "{\"t\":\"writer\",\"epoch\":\"1\",\"bootId\":\"fixture-boot\",\"at\":\"x\"}",
+
+ ❯ tests/unit/history-projection.test.ts:102:43
+    100|   ])("坏 writer/未来行仍严格 corrupt %#", (invalid) => {
+    101|     const raw = JSON.stringify({ t: "writer", epoch: 1, bootId: "fixtu…
+    102|     expect(journalToScanRows(`${raw}\n`)).toEqual([
+       |                                           ^
+    103|       {
+    104|         source: "journal",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/13]⎯
+
+ FAIL  tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 坏 writer/未来行仍严格 corrupt 5
+AssertionError: expected [ { source: 'journal', …(3) } ] to deeply equal [ { source: 'journal', …(3) } ]
+
+- Expected
++ Received
+
+@@ -1,11 +1,11 @@
+  [
+    {
+      "event": {
+        "generation": null,
+        "intentId": null,
+-       "kind": "journal-corrupt",
++       "kind": "unknown-line",
+        "seq": 0,
+        "ts": null,
+      },
+      "locator": "1",
+      "raw": "{\"t\":\"writer\",\"bootId\":\"fixture-boot\",\"at\":\"x\"}",
+
+ ❯ tests/unit/history-projection.test.ts:102:43
+    100|   ])("坏 writer/未来行仍严格 corrupt %#", (invalid) => {
+    101|     const raw = JSON.stringify({ t: "writer", epoch: 1, bootId: "fixtu…
+    102|     expect(journalToScanRows(`${raw}\n`)).toEqual([
+       |                                           ^
+    103|       {
+    104|         source: "journal",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/13]⎯
+
+ FAIL  tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 坏 writer/未来行仍严格 corrupt 6
+AssertionError: expected [ { source: 'journal', …(3) } ] to deeply equal [ { source: 'journal', …(3) } ]
+
+- Expected
++ Received
+
+@@ -1,11 +1,11 @@
+  [
+    {
+      "event": {
+        "generation": null,
+        "intentId": null,
+-       "kind": "journal-corrupt",
++       "kind": "unknown-line",
+        "seq": 0,
+        "ts": null,
+      },
+      "locator": "1",
+      "raw": "{\"t\":\"writer\",\"epoch\":1,\"bootId\":\"\",\"at\":\"x\"}",
+
+ ❯ tests/unit/history-projection.test.ts:102:43
+    100|   ])("坏 writer/未来行仍严格 corrupt %#", (invalid) => {
+    101|     const raw = JSON.stringify({ t: "writer", epoch: 1, bootId: "fixtu…
+    102|     expect(journalToScanRows(`${raw}\n`)).toEqual([
+       |                                           ^
+    103|       {
+    104|         source: "journal",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/13]⎯
+
+ FAIL  tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 坏 writer/未来行仍严格 corrupt 7
+AssertionError: expected [ { source: 'journal', …(3) } ] to deeply equal [ { source: 'journal', …(3) } ]
+
+- Expected
++ Received
+
+@@ -1,11 +1,11 @@
+  [
+    {
+      "event": {
+        "generation": null,
+        "intentId": null,
+-       "kind": "journal-corrupt",
++       "kind": "unknown-line",
+        "seq": 0,
+        "ts": null,
+      },
+      "locator": "1",
+      "raw": "{\"t\":\"writer\",\"epoch\":1,\"bootId\":1,\"at\":\"x\"}",
+
+ ❯ tests/unit/history-projection.test.ts:102:43
+    100|   ])("坏 writer/未来行仍严格 corrupt %#", (invalid) => {
+    101|     const raw = JSON.stringify({ t: "writer", epoch: 1, bootId: "fixtu…
+    102|     expect(journalToScanRows(`${raw}\n`)).toEqual([
+       |                                           ^
+    103|       {
+    104|         source: "journal",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/13]⎯
+
+ FAIL  tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 坏 writer/未来行仍严格 corrupt 8
+AssertionError: expected [ { source: 'journal', …(3) } ] to deeply equal [ { source: 'journal', …(3) } ]
+
+- Expected
++ Received
+
+@@ -1,11 +1,11 @@
+  [
+    {
+      "event": {
+        "generation": null,
+        "intentId": null,
+-       "kind": "journal-corrupt",
++       "kind": "unknown-line",
+        "seq": 0,
+        "ts": null,
+      },
+      "locator": "1",
+      "raw": "{\"t\":\"writer\",\"epoch\":1,\"at\":\"x\"}",
+
+ ❯ tests/unit/history-projection.test.ts:102:43
+    100|   ])("坏 writer/未来行仍严格 corrupt %#", (invalid) => {
+    101|     const raw = JSON.stringify({ t: "writer", epoch: 1, bootId: "fixtu…
+    102|     expect(journalToScanRows(`${raw}\n`)).toEqual([
+       |                                           ^
+    103|       {
+    104|         source: "journal",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/13]⎯
+
+ FAIL  tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 坏 writer/未来行仍严格 corrupt 9
+AssertionError: expected [ { source: 'journal', …(3) } ] to deeply equal [ { source: 'journal', …(3) } ]
+
+- Expected
++ Received
+
+@@ -1,11 +1,11 @@
+  [
+    {
+      "event": {
+        "generation": null,
+        "intentId": null,
+-       "kind": "journal-corrupt",
++       "kind": "unknown-line",
+        "seq": 0,
+        "ts": null,
+      },
+      "locator": "1",
+      "raw": "{\"t\":\"writer\",\"epoch\":1,\"bootId\":\"fixture-boot\",\"at\":\"\"}",
+
+ ❯ tests/unit/history-projection.test.ts:102:43
+    100|   ])("坏 writer/未来行仍严格 corrupt %#", (invalid) => {
+    101|     const raw = JSON.stringify({ t: "writer", epoch: 1, bootId: "fixtu…
+    102|     expect(journalToScanRows(`${raw}\n`)).toEqual([
+       |                                           ^
+    103|       {
+    104|         source: "journal",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/13]⎯
+
+ FAIL  tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 坏 writer/未来行仍严格 corrupt 10
+AssertionError: expected [ { source: 'journal', …(3) } ] to deeply equal [ { source: 'journal', …(3) } ]
+
+- Expected
++ Received
+
+@@ -1,11 +1,11 @@
+  [
+    {
+      "event": {
+        "generation": null,
+        "intentId": null,
+-       "kind": "journal-corrupt",
++       "kind": "unknown-line",
+        "seq": 0,
+        "ts": null,
+      },
+      "locator": "1",
+      "raw": "{\"t\":\"writer\",\"epoch\":1,\"bootId\":\"fixture-boot\",\"at\":1}",
+
+ ❯ tests/unit/history-projection.test.ts:102:43
+    100|   ])("坏 writer/未来行仍严格 corrupt %#", (invalid) => {
+    101|     const raw = JSON.stringify({ t: "writer", epoch: 1, bootId: "fixtu…
+    102|     expect(journalToScanRows(`${raw}\n`)).toEqual([
+       |                                           ^
+    103|       {
+    104|         source: "journal",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/13]⎯
+
+ FAIL  tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 坏 writer/未来行仍严格 corrupt 11
+AssertionError: expected [ { source: 'journal', …(3) } ] to deeply equal [ { source: 'journal', …(3) } ]
+
+- Expected
++ Received
+
+@@ -1,11 +1,11 @@
+  [
+    {
+      "event": {
+        "generation": null,
+        "intentId": null,
+-       "kind": "journal-corrupt",
++       "kind": "unknown-line",
+        "seq": 0,
+        "ts": null,
+      },
+      "locator": "1",
+      "raw": "{\"t\":\"writer\",\"epoch\":1,\"bootId\":\"fixture-boot\"}",
+
+ ❯ tests/unit/history-projection.test.ts:102:43
+    100|   ])("坏 writer/未来行仍严格 corrupt %#", (invalid) => {
+    101|     const raw = JSON.stringify({ t: "writer", epoch: 1, bootId: "fixtu…
+    102|     expect(journalToScanRows(`${raw}\n`)).toEqual([
+       |                                           ^
+    103|       {
+    104|         source: "journal",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/13]⎯
+
+ FAIL  tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > R5/P1：schema 非法行→journal-corrupt 不抛错（严格校验与恢复侧同权威）
+TypeError: input.normalize is not a function
+ ❯ sanitizeText packages/protocol/src/sanitizer.ts:113:17
+    111|  */
+    112| export function sanitizeText(input: string, limit: number): SanitizedT…
+    113|   let s = input.normalize("NFC");
+       |                 ^
+    114|   s = s.replace(CONTROL_RE, (ch) => (ch === "\n" ? " " : ch === "\t" ?…
+    115|   // 形态替换（PEM 线性扫描器先行——旧①②；单轮全局即够：替换输出 [xxx] 形态不再匹配任何规则）
+ ❯ projectLine packages/protocol/src/history-projection.ts:49:127
+ ❯ journalToScanRows packages/protocol/src/history-projection.ts:85:15
+ ❯ tests/unit/history-projection.test.ts:231:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/13]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  13 failed | 23 passed (36)
+   Start at  16:23:27
+   Duration  305ms (transform 66%, import 17%, tests 16%, worker 2%)

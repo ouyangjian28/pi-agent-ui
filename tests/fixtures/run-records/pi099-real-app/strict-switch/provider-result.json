@@ -1,0 +1,22 @@
+{
+  "applicationExitCode": 0,
+  "providerRequests": [
+    {
+      "index": 1,
+      "path": "/v1/chat/completions",
+      "model": "fixture"
+    },
+    {
+      "index": 2,
+      "path": "/v1/chat/completions",
+      "model": "fixture"
+    }
+  ],
+  "providerErrors": [],
+  "blockedNonLoopbackAttempts": [],
+  "networkGuardSelfcheck": "passed",
+  "isolation": "allowlisted env, temporary HOME/agentDir/workspace; Node TCP/fetch loopback guard; fresh browser",
+  "productionAuthUsed": false,
+  "paidProviderUsed": false,
+  "limitation": "Node network guard is not an OS sandbox; mock provider does not prove real auth/billing/real phone."
+}

@@ -1,0 +1,120 @@
+
+ RUN  v5.0.1 /tmp/writer-projection-mutation-zn0ip6at/copy
+
+ ❯ tests/unit/history-projection.test.ts (36 tests | 3 failed) 19ms
+   ❯ journalToScanRows（3b-2a 投影；R5 严格 schema） (36)
+     ✓ enqueue→turn-enqueued（preview/ordinal/generation/intentId/locator 全链） 3ms
+     × 合法 writer 元数据保留为既有辅助行，不冒充损坏/回合/发送结论 5ms
+     × writer 不删行/不串回合身份，真结果未知仍保留原裁决 1ms
+     × writer 撕裂尾仍不提前发布，换行补全才有完整辅助行 1ms
+     ✓ 坏 writer/未来行仍严格 corrupt 0 0ms
+     ✓ 坏 writer/未来行仍严格 corrupt 1 0ms
+     ✓ 坏 writer/未来行仍严格 corrupt 2 0ms
+     ✓ 坏 writer/未来行仍严格 corrupt 3 0ms
+     ✓ 坏 writer/未来行仍严格 corrupt 4 0ms
+     ✓ 坏 writer/未来行仍严格 corrupt 5 0ms
+     ✓ 坏 writer/未来行仍严格 corrupt 6 0ms
+     ✓ 坏 writer/未来行仍严格 corrupt 7 0ms
+     ✓ 坏 writer/未来行仍严格 corrupt 8 0ms
+     ✓ 坏 writer/未来行仍严格 corrupt 9 0ms
+     ✓ 坏 writer/未来行仍严格 corrupt 10 0ms
+     ✓ 坏 writer/未来行仍严格 corrupt 11 0ms
+     ✓ 坏 writer/未来行仍严格 corrupt 12 0ms
+     ✓ 完整行集合各 kind 映射（sending/engaged/consumed/cancelled/delivered/settled/unknown/response-timeout/clear） 0ms
+     ✓ 撕裂尾（无换行）不发布；补全换行后成行 0ms
+     ✓ 空文本=0 行；空行=journal-corrupt 占位（完整行不静默丢） 0ms
+     ✓ 坏完整行分型：JSON 解析失败/非对象/null/缺 t/未知 t→journal-corrupt 0ms
+     ✓ R5/P1：schema 非法行→journal-corrupt 不抛错（严格校验与恢复侧同权威） 0ms
+     ✓ R5：未知行型不猜语义（未来版本行保守 corrupt） 0ms
+     ✓ 合法行容忍额外字段（前向兼容：多余键不判坏） 0ms
+     ✓ preview 截断到 HISTORY_PREVIEW_LIMIT（200） 0ms
+     ✓ 行号定位：坏行也占行号（locator 连续） 0ms
+     ✓ 跨行序完整性：100 行→100 行、locator 单调 3ms
+     ✓ 同文本不同两行=两行各自投影（去重归源 diff，不归投影） 0ms
+     ✓ sanitize 面：控制字符被剥后进 preview 0ms
+     ✓ baseEvent 只认行内字段（跨行不串扰） 0ms
+     ✓ R5 与恢复侧同权威：journalLineSchemaError 直接对照（同输入同判定） 0ms
+     ✓ 3b2c-B5 额外字段安全 null 投影 (5)
+       ✓ N7 精确输入：sending+generation 对象→kind=sending、generation=null（对象不逃入事件） 0ms
+       ✓ sending+generation 数组/字符串/负数/非安全整数→一律 null（不猜语义） 0ms
+       ✓ engaged/delivered/settled 带额外 generation→null（生命周期行不声明该字段） 0ms
+       ✓ clear+额外 intentId（错型对象）→事件 intentId=null（clear 不声明 intentId） 0ms
+       ✓ enqueue/response-timeout 的 generation=已验证字段→照常投影（正控制） 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > 合法 writer 元数据保留为既有辅助行，不冒充损坏/回合/发送结论
+AssertionError: expected [ { source: 'journal', …(3) } ] to deeply equal [ { source: 'journal', …(3) } ]
+
+- Expected
++ Received
+
+@@ -1,11 +1,11 @@
+  [
+    {
+      "event": {
+        "generation": null,
+        "intentId": null,
+-       "kind": "unknown-line",
++       "kind": "journal-corrupt",
+        "seq": 0,
+        "ts": null,
+      },
+      "locator": "1",
+      "raw": "{\"t\":\"writer\",\"epoch\":2,\"bootId\":\"fixture-boot\",\"at\":\"2026-10-01T07:00:00Z\"}",
+
+ ❯ tests/unit/history-projection.test.ts:55:43
+     53|   it("合法 writer 元数据保留为既有辅助行，不冒充损坏/回合/发送结论", () => {
+     54|     const raw = simple("writer", { epoch: 2, bootId: "fixture-boot", a…
+     55|     expect(journalToScanRows(`${raw}\n`)).toEqual([
+       |                                           ^
+     56|       {
+     57|         source: "journal",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > writer 不删行/不串回合身份，真结果未知仍保留原裁决
+AssertionError: expected [ 'turn-enqueued', …(3) ] to deeply equal [ 'turn-enqueued', …(3) ]
+
+- Expected
++ Received
+
+  [
+    "turn-enqueued",
+-   "unknown-line",
++   "journal-corrupt",
+    "verdict-unknown",
+    "sending",
+  ]
+
+ ❯ tests/unit/history-projection.test.ts:75:43
+     73|     expect(rows.map((r) => r.locator)).toEqual(["1", "2", "3", "4"]);
+     74|     expect(rows.map((r) => r.raw)).toEqual(raw);
+     75|     expect(rows.map((r) => r.event.kind)).toEqual(["turn-enqueued", "u…
+       |                                           ^
+     76|     expect(rows[1]?.event).toMatchObject({ generation: null, intentId:…
+     77|     expect(rows[2]?.event).toMatchObject({ intentId: "i-7", kind: "ver…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  tests/unit/history-projection.test.ts > journalToScanRows（3b-2a 投影；R5 严格 schema） > writer 撕裂尾仍不提前发布，换行补全才有完整辅助行
+AssertionError: expected 'journal-corrupt' to be 'unknown-line' // Object.is equality
+
+Expected: "unknown-line"
+Received: "journal-corrupt"
+
+ ❯ tests/unit/history-projection.test.ts:83:58
+     81|     const raw = simple("writer", { epoch: 1, bootId: "fixture-boot", a…
+     82|     expect(journalToScanRows(raw)).toEqual([]);
+     83|     expect(journalToScanRows(`${raw}\n`)[0]?.event.kind).toBe("unknown…
+       |                                                          ^
+     84|   });
+     85|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 33 passed (36)
+   Start at  16:23:26
+   Duration  258ms (transform 70%, import 18%, tests 11%, worker 1%)
