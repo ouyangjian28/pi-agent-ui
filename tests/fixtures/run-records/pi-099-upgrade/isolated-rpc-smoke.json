@@ -1,0 +1,73 @@
+{
+  "runtime": "0.99.2",
+  "binary": "/home/yyj/ai/repos/pi-agent-ui-hybrid/node_modules/.bin/pi",
+  "isolation": "temporary HOME/agentDir/cwd; allowlisted env; offline; no tools/extensions/resources; no provider calls",
+  "checks": [
+    {
+      "command": "get_state",
+      "success": true,
+      "dataKeys": [
+        "autoCompactionEnabled",
+        "followUpMode",
+        "isCompacting",
+        "isStreaming",
+        "messageCount",
+        "model",
+        "pendingMessageCount",
+        "sessionId",
+        "steeringMode",
+        "thinkingLevel"
+      ]
+    },
+    {
+      "command": "get_available_models",
+      "success": true,
+      "dataKeys": [
+        "models"
+      ]
+    },
+    {
+      "command": "get_available_thinking_levels",
+      "success": true,
+      "dataKeys": [
+        "levels"
+      ]
+    },
+    {
+      "command": "get_messages",
+      "success": true,
+      "dataKeys": [
+        "messages"
+      ]
+    },
+    {
+      "command": "get_entries",
+      "success": true,
+      "dataKeys": [
+        "entries",
+        "leafId"
+      ],
+      "initialEntryTypes": [
+        "thinking_level_change"
+      ]
+    },
+    {
+      "command": "get_tree",
+      "success": true,
+      "dataKeys": [
+        "leafId",
+        "tree"
+      ]
+    },
+    {
+      "command": "get_commands",
+      "success": true,
+      "dataKeys": [
+        "commands"
+      ]
+    }
+  ],
+  "stdinEofExitCode": 0,
+  "stderrLines": 0,
+  "limitation": "No prompt/model/tool execution; initial model/thinking metadata is permitted, not assumed to be absent."
+}
