@@ -1,0 +1,301 @@
+{
+  "archiveHead": "df6cd0280e6c07c710c924c75152985c01939863",
+  "successfulNativeSource": "96c749c",
+  "fullRegressionSource": "df6cd02",
+  "defaultRegression": {
+    "passed": 2044,
+    "originalSkipped": 24
+  },
+  "rootTypeDebtDiagnostics": 111,
+  "scope": "actual AppRoot/production composition/real candidate pi0.99.2/private loopback mock; controlled recovery, not full unknown-intent UI restart, paid authentication, independent audit or physical keyboard",
+  "files": [
+    {
+      "source": ".pi/composer-checks/thinking-menu/focused.log",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/logs/focused.log.gz",
+      "rawSha256": "ad7a4299ccf817303b642e0e31dfcf90a518b9030cb2a6afbc5a9411b1f2c953",
+      "rawBytes": 791
+    },
+    {
+      "source": ".pi/composer-checks/thinking-menu/server-tsc.log",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/logs/server-tsc.log.gz",
+      "rawSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "rawBytes": 0
+    },
+    {
+      "source": ".pi/composer-checks/thinking-menu/web-tsc.log",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/logs/web-tsc.log.gz",
+      "rawSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "rawBytes": 0
+    },
+    {
+      "source": ".pi/composer-checks/thinking-menu/full-focused.log",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/logs/full-focused.log.gz",
+      "rawSha256": "5257c4f6134f2ce69ac8994d35b781ed26687d2628e2add88a248c641f1a3c69",
+      "rawBytes": 3015
+    },
+    {
+      "source": ".pi/composer-checks/thinking-menu/failed-sparse-map-expectation.log",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/logs/failed-sparse-map-expectation.log.gz",
+      "rawSha256": "5257c4f6134f2ce69ac8994d35b781ed26687d2628e2add88a248c641f1a3c69",
+      "rawBytes": 3015
+    },
+    {
+      "source": ".pi/composer-checks/thinking-menu/focused-sdk-fixed.log",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/logs/focused-sdk-fixed.log.gz",
+      "rawSha256": "3535b737325f14812c7ebd61932f1c78ed764548fa1ddbe9d564e049b9698600",
+      "rawBytes": 937
+    },
+    {
+      "source": ".pi/composer-checks/thinking-menu/final-build.log",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/logs/final-build.log.gz",
+      "rawSha256": "0e7debd780e00ec82037d1154008fede90809df6041d97f67f7bf4b5ab82c4c1",
+      "rawBytes": 549
+    },
+    {
+      "source": ".pi/composer-checks/thinking-menu/final-native.log",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/logs/final-native.log.gz",
+      "rawSha256": "dac69b1d0a08d26ff36b399bb665ec85abd9c44e4f1fef17b7a32aa87dcaa93a",
+      "rawBytes": 948
+    },
+    {
+      "source": ".pi/composer-checks/thinking-menu/native-dom-diagnostic.log",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/logs/native-dom-diagnostic.log.gz",
+      "rawSha256": "7291f364dd2e883fbc222c9616f6181bf00e2530733d0ba77c331fcf44e943f7",
+      "rawBytes": 948
+    },
+    {
+      "source": ".pi/composer-checks/thinking-menu/final-native-option-property.log",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/logs/final-native-option-property.log.gz",
+      "rawSha256": "b5077a004febafecb079f1717008b448afa9c7981f2149a8ea017116fcb11ec0",
+      "rawBytes": 849
+    },
+    {
+      "source": ".pi/composer-checks/thinking-menu/final-default.log",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/logs/final-default.log.gz",
+      "rawSha256": "7bd223258affed45722c2c7bc5ac35f48c5e3fd923683e9475fd90656bccc26b",
+      "rawBytes": 37449
+    },
+    {
+      "source": ".pi/composer-checks/thinking-menu/r1-capability-fixture.log",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/logs/r1-capability-fixture.log.gz",
+      "rawSha256": "af4af2555f5fd91e77377e6ce903ee593cf94334e2d97121bc8696354acaf0b7",
+      "rawBytes": 697
+    },
+    {
+      "source": ".pi/composer-checks/thinking-menu/final-default-fixture-fixed.log",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/logs/final-default-fixture-fixed.log.gz",
+      "rawSha256": "374db5e147dd6d9254716b507f963d93849cf78a84c8697e6261aa5d6e024bae",
+      "rawBytes": 34746
+    },
+    {
+      "source": ".pi/composer-checks/thinking-menu/final-package-types.log",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/logs/final-package-types.log.gz",
+      "rawSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "rawBytes": 0
+    },
+    {
+      "source": ".pi/composer-checks/thinking-menu/final-root-types.log",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/logs/final-root-types.log.gz",
+      "rawSha256": "a22028586fc1f4c89829e6ececdda9bd8c0645ef2af600cc0389a19f3ca732cf",
+      "rawBytes": 29043
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T224618623720Z/journals.json",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T224618623720Z/journals.json.gz",
+      "rawSha256": "228d8254d36764aa271d5a2b908f63dd820293cb806bf852ee92e47a4b9e8de3",
+      "rawBytes": 32
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T224618623720Z/owned-transcripts.json",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T224618623720Z/owned-transcripts.json.gz",
+      "rawSha256": "323bf00172507a6fdb161b2889feb5127111af934e0e7691002b54bd7865863e",
+      "rawBytes": 507
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T224618623720Z/audits.log",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T224618623720Z/audits.log.gz",
+      "rawSha256": "ae87b0ad591fe164d8a4d0d97a0f2a7217920785ebdb40e9de50c5f85ed25030",
+      "rawBytes": 1007
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T224618623720Z/last-page.png",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T224618623720Z/last-page.png",
+      "rawSha256": "27b0d2c4ed138de723b1bbd8f6c9fe71bed1ddd0b0756902e6ad018f5b53d015",
+      "rawBytes": 55341
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T224618623720Z/result.json",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T224618623720Z/result.json.gz",
+      "rawSha256": "48632fb9d4e7deef371fc37865afda6aa305ee23d2286faedf842ffb0c9858e3",
+      "rawBytes": 126
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T224618623720Z/provider-result.json",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T224618623720Z/provider-result.json.gz",
+      "rawSha256": "8a3026bf66f16db02d5b1e623f46373a201def23c21a41761ff512b648be2160",
+      "rawBytes": 448
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T224618623720Z/run.log",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T224618623720Z/run.log.gz",
+      "rawSha256": "42796ebcb1f1aaba2dbb3cc175d2d64d48ab947cb1d8c4ef5c28181bbafa5465",
+      "rawBytes": 435
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T224618623720Z/server-frames.json",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T224618623720Z/server-frames.json.gz",
+      "rawSha256": "918944fedffc3d8f2c4d1aa98cfa7e8a8fec8a9ad8f896e90d7154bece057bf0",
+      "rawBytes": 1893
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T230633984105Z/thinking-menu-dom.json",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T230633984105Z/thinking-menu-dom.json.gz",
+      "rawSha256": "b001b2fd21d57ed1b8a73983ed2980a81fb462a3e14f68ba710862bb3ffbd299",
+      "rawBytes": 1747
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T230633984105Z/journals.json",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T230633984105Z/journals.json.gz",
+      "rawSha256": "228d8254d36764aa271d5a2b908f63dd820293cb806bf852ee92e47a4b9e8de3",
+      "rawBytes": 32
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T230633984105Z/owned-transcripts.json",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T230633984105Z/owned-transcripts.json.gz",
+      "rawSha256": "c526313f771fc5e71358cdc5932edaef79124fea8c4284f4dc6a5018ab09759d",
+      "rawBytes": 507
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T230633984105Z/audits.log",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T230633984105Z/audits.log.gz",
+      "rawSha256": "8cd63cd8accb018a5ec498497112e16427aa2e70dd0634f240c77a406176509f",
+      "rawBytes": 1007
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T230633984105Z/last-page.png",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T230633984105Z/last-page.png",
+      "rawSha256": "27b0d2c4ed138de723b1bbd8f6c9fe71bed1ddd0b0756902e6ad018f5b53d015",
+      "rawBytes": 55341
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T230633984105Z/result.json",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T230633984105Z/result.json.gz",
+      "rawSha256": "48632fb9d4e7deef371fc37865afda6aa305ee23d2286faedf842ffb0c9858e3",
+      "rawBytes": 126
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T230633984105Z/provider-result.json",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T230633984105Z/provider-result.json.gz",
+      "rawSha256": "8a3026bf66f16db02d5b1e623f46373a201def23c21a41761ff512b648be2160",
+      "rawBytes": 448
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T230633984105Z/run.log",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T230633984105Z/run.log.gz",
+      "rawSha256": "8eecbf79abb9ab1d83ec0f8bedbc8359e614ecdc0f082906294433ebaa10379e",
+      "rawBytes": 435
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T230633984105Z/server-frames.json",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T230633984105Z/server-frames.json.gz",
+      "rawSha256": "de76f8ef49cee2b4f273dc6256a0360c3d84b542928bfc22d915942de173cb6c",
+      "rawBytes": 1893
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T231155798605Z/desktop-first-response.png",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T231155798605Z/desktop-first-response.png",
+      "rawSha256": "713d7d5b6e880dcb4db86156b529c4099cea52854ac1a273b4caaccca4bc2d81",
+      "rawBytes": 70199
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T231155798605Z/desktop-new-image-composer.png",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T231155798605Z/desktop-new-image-composer.png",
+      "rawSha256": "ad0f47c52f80b85ec534055433cef5cd3dd76511d28f149ad8adcde62a114c31",
+      "rawBytes": 59533
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T231155798605Z/thinking-menu-dom.json",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T231155798605Z/thinking-menu-dom.json.gz",
+      "rawSha256": "c20e8ca5a40b79a115972b93f6d9e43fee9895154d5c77bb62a21f724409b812",
+      "rawBytes": 1747
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T231155798605Z/journals.json",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T231155798605Z/journals.json.gz",
+      "rawSha256": "3a977e8d928f9adf7fe1088bc67ce15b2f5fa58ccf952025315b7c1b81216802",
+      "rawBytes": 2871
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T231155798605Z/mobile-new-image-composer.png",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T231155798605Z/mobile-new-image-composer.png",
+      "rawSha256": "50b2aed785c466f0e971d5d532e24955c6094afa7f9544c1f82ca0dd86dd9603",
+      "rawBytes": 31900
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T231155798605Z/owned-transcripts.json",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T231155798605Z/owned-transcripts.json.gz",
+      "rawSha256": "783d7ad043e40c9d882ac62496042848d510cb3c12d15c873c42c57302a026d3",
+      "rawBytes": 6643
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T231155798605Z/mobile-320-new-image-composer.png",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T231155798605Z/mobile-320-new-image-composer.png",
+      "rawSha256": "0c43c87e7f2ced75e5a11daf7d6d918d164b0a246669c0214ab054d1ea6648d8",
+      "rawBytes": 30934
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T231155798605Z/audits.log",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T231155798605Z/audits.log.gz",
+      "rawSha256": "9ca7596f07782d8ec3e3e150bcd49f5aee55a7dc623bf8d2909e765508f5dbb9",
+      "rawBytes": 11619
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T231155798605Z/desktop-existing-code-composer.png",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T231155798605Z/desktop-existing-code-composer.png",
+      "rawSha256": "3db43ace1c1d72a02092eab9357b31613b18fff5b5e7165cafa656555d31de8d",
+      "rawBytes": 65702
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T231155798605Z/last-page.png",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T231155798605Z/last-page.png",
+      "rawSha256": "d4f3ce515201e40868fc1d148856f09d4c7d453044ca02ea0c66a1d6ee37ae3c",
+      "rawBytes": 39656
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T231155798605Z/result.json",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T231155798605Z/result.json.gz",
+      "rawSha256": "01f33b3f3cefe86faf6247a02410935de281239e80973f96f0c6da73da929240",
+      "rawBytes": 1542
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T231155798605Z/provider-result.json",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T231155798605Z/provider-result.json.gz",
+      "rawSha256": "3d5e5dcf33aea02a086dd664825e7fc06f67d68f1f8472cca1460cfb364abc1c",
+      "rawBytes": 871
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T231155798605Z/run.log",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T231155798605Z/run.log.gz",
+      "rawSha256": "422323d5ef939c4337b084b5f68c22990517e31a470d55070c9aa69c3db4b598",
+      "rawBytes": 1383
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T231155798605Z/desktop-second-response.png",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T231155798605Z/desktop-second-response.png",
+      "rawSha256": "0d36a39b77687cba52ed763905d6c778cbf2e049f1a3bf0faac5aa3d05ea902a",
+      "rawBytes": 71126
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T231155798605Z/mobile-real-response.png",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T231155798605Z/mobile-real-response.png",
+      "rawSha256": "5ceac668c538265d5e83a0d2b14ec8b5dcf6d1bb988e10f1fb56bf5d3b50a84a",
+      "rawBytes": 39111
+    },
+    {
+      "source": ".pi/composer-checks/real-app/runs/20261001T231155798605Z/server-frames.json",
+      "artifact": "tests/fixtures/run-records/composer-stage/verification-thinking/native/20261001T231155798605Z/server-frames.json.gz",
+      "rawSha256": "5902ba9a7d112acdc903603f030183d2f6c7b7f3c1b1491f5eee5e27199efb4b",
+      "rawBytes": 19992
+    }
+  ]
+}
