@@ -4,11 +4,19 @@
 //（1s/2s/4s…≤0s 封顶，永续）；重连后 welcome→自动拉清单/订阅/写面全自恢复。认证失败（4401）不重连。
 // 认证失败（任一客户端 errorKind=auth-failed）→受控错误面+「清除 token 重输」（清 localStorage 回输入面）。
 import React, { useEffect, useState, useSyncExternalStore } from "react";
+import "./real-app-hybrid.css";
 import { WriteComposer } from "./components/write-composer";
 import { HealthDot } from "./components/health-dot";
 import { ConversationHeader } from "./components/conversation-header";
 import { ConversationState } from "./ws/conversation-state";
-import { autoFile, readLastModel, writeLastModel, MODEL_DEFAULT, effectiveModel, isPersistableModel } from "./ws/draft-model";
+import {
+  autoFile,
+  readLastModel,
+  writeLastModel,
+  MODEL_DEFAULT,
+  effectiveModel,
+  isPersistableModel,
+} from "./ws/draft-model";
 import { useSessionDetail } from "./ws/use-session-detail";
 import { useConversationLifetime } from "./ws/use-conversation-lifetime";
 import { SessionDetail } from "./components/session-detail";
@@ -229,22 +237,33 @@ function ConnectedApp({
   // 唯一订阅 owner：隐藏/返回不改变 file，本钩子只在真换目标或 client 时清旧。
   const detail = useSessionDetail(clients.subscribeClient, file);
   const isNew = ui.view.kind === "draft" || file === null;
-  const slot = ui.view.kind === "draft" ? ui.drafts.get(ui.view.id) ?? null : file ? ui.sessions.get(`session:${file}`) ?? null : null;
+  const slot =
+    ui.view.kind === "draft"
+      ? (ui.drafts.get(ui.view.id) ?? null)
+      : file
+        ? (ui.sessions.get(`session:${file}`) ?? null)
+        : null;
   const pendingQuestions = detail.uiRequests.length > 0;
-  const allowLeave = (): boolean => !pendingQuestions || window.confirm("当前对话仍有待回答的问题。切换会话将退订，并可能取消待答。确定离开吗？");
+  const allowLeave = (): boolean =>
+    !pendingQuestions || window.confirm("当前对话仍有待回答的问题。切换会话将退订，并可能取消待答。确定离开吗？");
   const newDraft = (): string | null => {
     if (!owner.canCreate || !allowLeave()) return null;
     return owner.create(autoFile(), readLastModel() ?? MODEL_DEFAULT);
   };
-  const select = (target: string): void => { if (target === file || allowLeave()) owner.open(target); };
-  const restore = (id: string): void => { if (allowLeave()) owner.restore(id); };
+  const select = (target: string): void => {
+    if (target === file || allowLeave()) owner.open(target);
+  };
+  const restore = (id: string): void => {
+    if (allowLeave()) owner.restore(id);
+  };
   const ensureDraft = (): string | null => slot?.id ?? newDraft();
   const [narrow, setNarrow] = useState(() => window.matchMedia?.("(max-width: 767px)").matches ?? false);
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
     const media = window.matchMedia("(max-width: 767px)");
     const change = () => setNarrow(media.matches);
-    media.addEventListener("change", change); change();
+    media.addEventListener("change", change);
+    change();
     return () => media.removeEventListener("change", change);
   }, []);
   const mainRef = React.useRef<HTMLElement>(null);
@@ -281,12 +300,17 @@ function ConnectedApp({
     observer.observe(element, { childList: true, characterData: true, subtree: true });
     return () => observer.disconnect();
   }, []);
-  const title = isNew ? "新对话" : resolveTitle(wsSnap.sessions?.find((session) => session.file === file) ?? { file: file!, title: { text: "", truncated: false } });
+  const title = isNew
+    ? "新对话"
+    : resolveTitle(
+        wsSnap.sessions?.find((session) => session.file === file) ?? {
+          file: file!,
+          title: { text: "", truncated: false },
+        },
+      );
 
   const authFailed =
-    wsSnap.errorKind === "auth-failed" ||
-    subSnap.errorKind === "auth-failed" ||
-    writeSnap.errorKind === "auth-failed";
+    wsSnap.errorKind === "auth-failed" || subSnap.errorKind === "auth-failed" || writeSnap.errorKind === "auth-failed";
   const states: readonly ConnState[] = [wsSnap.state, subSnap.connState, writeSnap.connState];
   const anyDown = states.some((s) => s === "closed" || s === "error");
   // 上报连接健康（自动重连驱动面；须在 authFailed 早退前=hooks 顺序稳定）：
@@ -312,50 +336,142 @@ function ConnectedApp({
   }
 
   return (
-    <div className="app real-app" data-view={ui.view.kind}>
-      <header className="topbar">
-        <strong><span className="brand">π</span> <span>pi agent</span></strong>
-        <div className="topbar-actions"><HealthDot states={states} onReconnect={onRetry} reconnect={reconnectUi} /><ThemeToggle /></div>
-      </header>
+    <div className="app real-app hybrid-ui" data-view={ui.view.kind}>
+      <div className="topbar">
+        <ConversationHeader
+          title={narrow && ui.view.kind === "list" ? "会话" : title}
+          isNew={isNew}
+          onBack={() => owner.back()}
+          onNew={() => {
+            newDraft();
+          }}
+          canCreate={owner.canCreate}
+          status={!isNew ? detail.statusSummary?.turn : undefined}
+          actions={
+            <>
+              <HealthDot states={states} onReconnect={onRetry} reconnect={reconnectUi} />
+              <details className="theme-menu">
+                <summary>外观</summary>
+                <ThemeToggle />
+              </details>
+            </>
+          }
+        />
+      </div>
       <div className="workspace two-col">
         <nav ref={navRef} className="session-panel" aria-label="会话列表" inert={narrow && ui.view.kind !== "list"}>
+          <div className="workspace-brand">
+            <span aria-hidden="true">π</span>
+            <strong>
+              pi <small>workspace</small>
+            </strong>
+          </div>
           <div className="panel-heading">
-            <h1>会话</h1>
+            <h1>你的会话</h1>
             <div className="panel-actions">
               <button type="button" className="refresh" onClick={() => clients.wsClient.requestSessions()}>
                 刷新
               </button>
-              <button type="button" className="new-session-btn" disabled={!owner.canCreate} onClick={() => { newDraft(); }}>
+              <button
+                type="button"
+                className="new-session-btn"
+                disabled={!owner.canCreate}
+                onClick={() => {
+                  newDraft();
+                }}
+              >
                 ＋新对话
               </button>
             </div>
           </div>
           <SessionList client={clients.wsClient} selectedFile={file} onSelect={select} />
-          {pendingQuestions && file && <div className="pending-answer-inline" role="status"><p>当前对话有待回答的问题。</p><button type="button" onClick={() => owner.open(file)}>回到待答对话</button></div>}
-          {ui.drafts.size > 0 && <section className="unfinished-drafts" aria-label="未完成草稿"><h3>未完成草稿</h3>{[...ui.drafts.values()].filter((draft) => draft.operation !== null && (draft.phase !== "settled-launched" || !wsSnap.sessions?.some((session) => session.file === draft.file))).map((draft) => <button key={draft.id} type="button" onClick={() => restore(draft.id)}>{draft.phase === "settled-launched" ? "打开已受理对话" : draft.phase === "settled-unknown" ? "找回结果未知的草稿" : draft.operation?.pending ? "找回发送中的草稿" : "找回未发送成功的草稿"}<small>{draft.operation?.text.slice(0, 40)}</small></button>)}</section>}
+          {pendingQuestions && file && (
+            <div className="pending-answer-inline" role="status">
+              <p>当前对话有待回答的问题。</p>
+              <button type="button" onClick={() => owner.open(file)}>
+                回到待答对话
+              </button>
+            </div>
+          )}
+          {ui.drafts.size > 0 && (
+            <section className="unfinished-drafts" aria-label="未完成草稿">
+              <h3>未完成草稿</h3>
+              {[...ui.drafts.values()]
+                .filter(
+                  (draft) =>
+                    draft.operation !== null &&
+                    (draft.phase !== "settled-launched" ||
+                      !wsSnap.sessions?.some((session) => session.file === draft.file)),
+                )
+                .map((draft) => (
+                  <button key={draft.id} type="button" onClick={() => restore(draft.id)}>
+                    {draft.phase === "settled-launched"
+                      ? "打开已受理对话"
+                      : draft.phase === "settled-unknown"
+                        ? "找回结果未知的草稿"
+                        : draft.operation?.pending
+                          ? "找回发送中的草稿"
+                          : "找回未发送成功的草稿"}
+                    <small>{draft.operation?.text.slice(0, 40)}</small>
+                  </button>
+                ))}
+            </section>
+          )}
         </nav>
-        <main ref={mainRef} className={`conversation ${isNew ? "conversation-new" : ""}`} aria-label="当前会话" inert={narrow && ui.view.kind === "list"}>
-          <ConversationHeader title={title} isNew={isNew} onBack={() => owner.back()} onNew={() => { newDraft(); }} canCreate={owner.canCreate} status={!isNew ? detail.statusSummary?.turn : undefined} />
-          <div ref={messageScroll} className="conversation-body" onScroll={(event) => {
-            const element = event.currentTarget;
-            nearBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight <= 64;
-            if (file) scrollPositions.current.set(file, { top: element.scrollTop, follow: nearBottom.current });
-          }}>
-            {isNew ? <div className="welcome"><span className="welcome-mark">π</span><h1>从一个想法开始</h1><p>从左侧继续或直接开始新对话</p></div> : <SessionDetail managed client={clients.subscribeClient} file={file} title={title} />}
+        <main
+          ref={mainRef}
+          className={`conversation ${isNew ? "conversation-new" : ""}`}
+          aria-label="当前会话"
+          inert={narrow && ui.view.kind === "list"}
+        >
+          <div
+            ref={messageScroll}
+            className="conversation-body"
+            onScroll={(event) => {
+              const element = event.currentTarget;
+              nearBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight <= 64;
+              if (file) scrollPositions.current.set(file, { top: element.scrollTop, follow: nearBottom.current });
+            }}
+          >
+            {isNew ? (
+              <div className="welcome">
+                <span className="welcome-mark">π</span>
+                <h1>从一个想法开始</h1>
+                <p>从左侧继续或直接开始新对话</p>
+              </div>
+            ) : (
+              <SessionDetail managed client={clients.subscribeClient} file={file} title={title} />
+            )}
           </div>
-          <WriteComposer client={clients.writeClient} file={slot?.file ?? null} editor={{
-            slot, source: clients.wsClient, isNew, defaultChoice: readLastModel() ?? MODEL_DEFAULT,
-            onEdit: (text) => { const id = ensureDraft(); if (id) owner.edit(id, text); },
-            onConfigure: (choice, text) => { if (!isPersistableModel(choice)) return; const id = ensureDraft(); if (id) owner.configure(id, choice, text); },
-            onCancel: () => owner.back(),
-            onViewTarget: () => { if (slot && allowLeave()) owner.open(slot.file); },
-            onSend: (confirmed) => {
-              if (!slot) return Promise.resolve({ status: "local", kind: "local-invalid", message: "请输入消息。" });
-              const model = isNew ? effectiveModel(slot.modelChoice, slot.freeText) : undefined;
-              if (isNew) writeLastModel(model ?? MODEL_DEFAULT);
-              return owner.send(slot.id, model, confirmed);
-            },
-          }} />
+          <WriteComposer
+            client={clients.writeClient}
+            file={slot?.file ?? null}
+            editor={{
+              slot,
+              source: clients.wsClient,
+              isNew,
+              defaultChoice: readLastModel() ?? MODEL_DEFAULT,
+              onEdit: (text) => {
+                const id = ensureDraft();
+                if (id) owner.edit(id, text);
+              },
+              onConfigure: (choice, text) => {
+                if (!isPersistableModel(choice)) return;
+                const id = ensureDraft();
+                if (id) owner.configure(id, choice, text);
+              },
+              onCancel: () => owner.back(),
+              onViewTarget: () => {
+                if (slot && allowLeave()) owner.open(slot.file);
+              },
+              onSend: (confirmed) => {
+                if (!slot) return Promise.resolve({ status: "local", kind: "local-invalid", message: "请输入消息。" });
+                const model = isNew ? effectiveModel(slot.modelChoice, slot.freeText) : undefined;
+                if (isNew) writeLastModel(model ?? MODEL_DEFAULT);
+                return owner.send(slot.id, model, confirmed);
+              },
+            }}
+          />
         </main>
       </div>
     </div>

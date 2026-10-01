@@ -1,0 +1,486 @@
+/* UI-HYBRID: approved OpenChamber-like shell, existing real clients/owner.
+   Only the real-app namespace consumes these tokens; no mock data or remote assets. */
+:root {
+  --hy-bg: #fcfcfa;
+  --hy-side: #f3f3f0;
+  --hy-panel: #ffffff;
+  --hy-text: #2c302c;
+  --hy-muted: #6e756e;
+  --hy-border: #e3e6df;
+  --hy-selected: #e5eae2;
+  --hy-accent: #347152;
+  --hy-accent-bg: #e9f1e8;
+  --hy-bubble: #f0f2ec;
+}
+:root[data-theme="dark"] {
+  --hy-bg: #181b1a;
+  --hy-side: #141716;
+  --hy-panel: #202422;
+  --hy-text: #e1e7e2;
+  --hy-muted: #9da89f;
+  --hy-border: #343c36;
+  --hy-selected: #29362d;
+  --hy-accent: #8bba98;
+  --hy-accent-bg: #253b2b;
+  --hy-bubble: #262e28;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --hy-bg: #181b1a;
+    --hy-side: #141716;
+    --hy-panel: #202422;
+    --hy-text: #e1e7e2;
+    --hy-muted: #9da89f;
+    --hy-border: #343c36;
+    --hy-selected: #29362d;
+    --hy-accent: #8bba98;
+    --hy-accent-bg: #253b2b;
+    --hy-bubble: #262e28;
+  }
+}
+.app.real-app.hybrid-ui {
+  --c-bg: var(--hy-bg);
+  --c-panel: var(--hy-panel);
+  --c-fg: var(--hy-text);
+  --c-muted: var(--hy-muted);
+  --c-border: var(--hy-border);
+  --c-accent: var(--hy-accent);
+  --c-accent-bg: var(--hy-accent-bg);
+  --c-neutral-bg: var(--hy-selected);
+  display: grid;
+  grid-template-columns: 272px minmax(0, 1fr);
+  grid-template-rows: 72px minmax(0, 1fr);
+  background: var(--hy-bg);
+  color: var(--hy-text);
+  font:
+    14px/1.6 Inter,
+    system-ui,
+    "Noto Sans CJK SC",
+    sans-serif;
+}
+.app.real-app.hybrid-ui .workspace.two-col {
+  display: contents;
+}
+.app.real-app.hybrid-ui .topbar {
+  grid-column: 2;
+  grid-row: 1;
+  min-height: 0;
+  padding: 0;
+  background: var(--hy-bg);
+}
+.app.real-app.hybrid-ui .conversation-header {
+  width: 100%;
+  min-height: 0;
+  height: 100%;
+  padding: 10px 24px;
+  border: 0;
+  gap: 12px;
+}
+.app.real-app.hybrid-ui .conversation-heading h2 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.app.real-app.hybrid-ui .conversation-heading small {
+  margin-top: 1px;
+  font-size: 11px;
+}
+.app.real-app.hybrid-ui .conversation-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.app.real-app.hybrid-ui .new-model-conversation {
+  border-color: transparent;
+  font-size: 12px;
+}
+.app.real-app.hybrid-ui .model-new-short {
+  display: none;
+}
+.app.real-app.hybrid-ui .theme-menu {
+  position: relative;
+}
+.app.real-app.hybrid-ui .theme-menu > summary {
+  min-height: 44px;
+  padding: 10px;
+  cursor: pointer;
+  color: var(--hy-muted);
+  border-radius: 8px;
+  list-style: none;
+}
+.app.real-app.hybrid-ui .theme-menu > summary::-webkit-details-marker {
+  display: none;
+}
+.app.real-app.hybrid-ui .theme-menu[open] > summary {
+  background: var(--hy-selected);
+}
+.app.real-app.hybrid-ui .theme-menu .theme-toggle {
+  position: absolute;
+  z-index: 40;
+  right: 0;
+  top: 100%;
+  display: flex;
+  padding: 8px;
+  gap: 4px;
+  background: var(--hy-panel);
+  border: 1px solid var(--hy-border);
+  border-radius: 10px;
+  white-space: nowrap;
+}
+.app.real-app.hybrid-ui .health-dot {
+  min-height: 44px;
+}
+.app.real-app.hybrid-ui .session-panel {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  min-height: 0;
+  padding: 20px 14px 12px;
+  background: var(--hy-side);
+  border-right: 1px solid var(--hy-border);
+  overflow: auto;
+}
+.app.real-app.hybrid-ui .workspace-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px 28px;
+}
+.app.real-app.hybrid-ui .workspace-brand > span {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  background: var(--hy-text);
+  color: var(--hy-side);
+  border-radius: 9px;
+  font:
+    bold 24px Georgia,
+    serif;
+}
+.app.real-app.hybrid-ui .workspace-brand strong {
+  font-size: 20px;
+  letter-spacing: -0.6px;
+}
+.app.real-app.hybrid-ui .workspace-brand small {
+  font-size: 11px;
+  letter-spacing: 0.8px;
+  font-weight: 400;
+}
+.app.real-app.hybrid-ui .panel-heading {
+  padding: 0;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.app.real-app.hybrid-ui .panel-heading h1 {
+  padding: 0 8px;
+  font-size: 12px;
+}
+.app.real-app.hybrid-ui .panel-actions {
+  gap: 8px;
+}
+.app.real-app.hybrid-ui .new-session-btn {
+  box-shadow: none;
+  padding: 10px 12px;
+}
+.app.real-app.hybrid-ui .refresh {
+  font-size: 12px;
+  border-color: transparent;
+}
+.app.real-app.hybrid-ui .session-list-region {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.app.real-app.hybrid-ui .session-search {
+  margin-bottom: 12px;
+}
+.app.real-app.hybrid-ui .session-search input {
+  width: 100%;
+  border-color: transparent;
+  background: transparent;
+  font-size: 13px;
+}
+.app.real-app.hybrid-ui .session-search input:focus {
+  background: var(--hy-panel);
+}
+.app.real-app.hybrid-ui .session-search small {
+  display: block;
+  padding: 0 8px;
+  font-size: 10px;
+}
+.app.real-app.hybrid-ui .session-list {
+  flex: 1;
+  padding: 0;
+  overflow: auto;
+}
+.app.real-app.hybrid-ui .session-group h3 {
+  font-size: 11px;
+  padding: 14px 10px 6px;
+  color: var(--hy-muted);
+}
+.app.real-app.hybrid-ui .session-list button {
+  padding: 10px;
+  border: 1px solid transparent;
+  margin: 0 0 3px;
+  border-radius: 8px;
+}
+.app.real-app.hybrid-ui .session-list button[aria-current] {
+  background: var(--hy-selected);
+  border-color: transparent;
+}
+.app.real-app.hybrid-ui .session-list .row-title {
+  font-size: 13px;
+}
+.app.real-app.hybrid-ui .session-list small {
+  font-size: 11px;
+}
+.app.real-app.hybrid-ui .search-empty {
+  padding: 10px;
+  color: var(--hy-muted);
+  font-size: 12px;
+}
+.app.real-app.hybrid-ui .list-pagination {
+  margin-top: auto;
+  padding-top: 12px;
+}
+.app.real-app.hybrid-ui .unfinished-drafts {
+  padding: 12px 0 0;
+}
+.app.real-app.hybrid-ui .conversation {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  background: var(--hy-bg);
+  border: 0;
+  min-width: 0;
+}
+.app.real-app.hybrid-ui .conversation-body {
+  flex: 1;
+  margin: 0;
+  scroll-padding: 24px;
+}
+.app.real-app.hybrid-ui .session-detail {
+  max-width: 850px;
+  padding: 24px 28px 40px;
+}
+.app.real-app.hybrid-ui .chat-message {
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.85;
+  border: 0;
+  box-shadow: none;
+  padding: 20px 0;
+  margin: 0 0 14px;
+}
+.app.real-app.hybrid-ui .chat-user {
+  background: var(--hy-bubble);
+  border-radius: 12px;
+  margin-left: 64px;
+  padding: 16px 20px;
+}
+.app.real-app.hybrid-ui .chat-assistant {
+  background: transparent;
+}
+.app.real-app.hybrid-ui .message-author {
+  font-size: 11px;
+  color: var(--hy-muted);
+  margin-bottom: 9px;
+}
+.app.real-app.hybrid-ui .chat-preview,
+.app.real-app.hybrid-ui .live-stream-text {
+  font-family: inherit;
+  line-height: 1.85;
+  overflow-wrap: anywhere;
+}
+.app.real-app.hybrid-ui .activity-details {
+  border: 1px solid var(--hy-border);
+  border-radius: 10px;
+  background: var(--hy-panel);
+  padding: 12px 16px;
+  margin-top: 16px;
+}
+.app.real-app.hybrid-ui .activity-details > summary {
+  cursor: pointer;
+  color: var(--hy-muted);
+  font-size: 12px;
+}
+.app.real-app.hybrid-ui .activity-list,
+.app.real-app.hybrid-ui .live-list {
+  font-size: 12px;
+}
+.app.real-app.hybrid-ui .write-composer {
+  width: calc(100% - 56px);
+  max-width: 794px;
+  padding: 14px 18px;
+  margin: 8px auto max(22px, env(safe-area-inset-bottom));
+  border-radius: 14px;
+  background: var(--hy-panel);
+  box-shadow: none;
+  max-height: 60dvh;
+}
+.app.real-app.hybrid-ui .conversation-new .write-composer {
+  max-width: 680px;
+  margin-bottom: auto;
+}
+.app.real-app.hybrid-ui .conversation-new .conversation-body {
+  flex: 0 1 auto;
+  margin-top: auto;
+}
+.app.real-app.hybrid-ui .welcome {
+  padding: 24px;
+  gap: 12px;
+}
+.app.real-app.hybrid-ui .welcome h1 {
+  font-size: clamp(24px, 3vw, 32px);
+  font-weight: 600;
+  letter-spacing: -0.7px;
+}
+.app.real-app.hybrid-ui .welcome-mark {
+  font-size: 42px;
+}
+.app.real-app.hybrid-ui .write-composer textarea {
+  font-family: inherit;
+  font-size: 15px;
+  min-height: 80px;
+}
+.app.real-app.hybrid-ui .write-actions > button:first-child {
+  background: var(--hy-accent);
+  border-color: var(--hy-accent);
+  color: var(--hy-panel);
+}
+.app.real-app.hybrid-ui .model-picker select {
+  background: var(--hy-side);
+}
+.app.real-app.hybrid-ui .live-generating .message-author::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: var(--hy-accent);
+  animation: hy-breathe 1.5s ease-in-out infinite;
+}
+@keyframes hy-breathe {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (max-width: 767px) {
+  .app.real-app.hybrid-ui {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 70px minmax(0, 1fr);
+  }
+  .app.real-app.hybrid-ui .topbar {
+    grid-column: 1;
+  }
+  .app.real-app.hybrid-ui .conversation-header {
+    padding: 8px 12px;
+    gap: 5px;
+  }
+  .app.real-app.hybrid-ui .conversation-tools {
+    gap: 0;
+  }
+  .app.real-app.hybrid-ui .conversation-heading h2 {
+    font-size: 13px;
+  }
+  .app.real-app.hybrid-ui .conversation-heading small {
+    font-size: 10px;
+  }
+  .app.real-app.hybrid-ui .model-new-full {
+    display: none;
+  }
+  .app.real-app.hybrid-ui .model-new-short {
+    display: inline;
+  }
+  .app.real-app.hybrid-ui .new-model-conversation {
+    min-height: 44px;
+    padding: 8px;
+    font-size: 11px;
+  }
+  .app.real-app.hybrid-ui .back-to-list {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 8px;
+  }
+  .app.real-app.hybrid-ui[data-view="list"] .back-to-list {
+    display: none;
+  }
+  .app.real-app.hybrid-ui .theme-menu > summary {
+    min-width: 44px;
+    font-size: 11px;
+  }
+  .app.real-app.hybrid-ui .theme-toggle button {
+    min-height: 44px;
+  }
+  .app.real-app.hybrid-ui .health-popover {
+    right: -44px;
+  }
+  .app.real-app.hybrid-ui .session-panel {
+    grid-column: 1;
+    grid-row: 2;
+    padding: 16px;
+    border: 0;
+  }
+  .app.real-app.hybrid-ui .workspace-brand {
+    display: none;
+  }
+  .app.real-app.hybrid-ui .conversation {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .app.real-app.hybrid-ui .session-detail {
+    padding: 12px 16px 24px;
+  }
+  .app.real-app.hybrid-ui .chat-message {
+    font-size: 15px;
+    padding-top: 14px;
+    padding-bottom: 14px;
+  }
+  .app.real-app.hybrid-ui .chat-user {
+    margin-left: 24px;
+    padding: 12px 14px;
+  }
+  .app.real-app.hybrid-ui .write-composer {
+    width: calc(100% - 24px);
+    padding: 10px 12px;
+    margin: 4px auto max(12px, env(safe-area-inset-bottom));
+    max-height: 65dvh;
+  }
+  .app.real-app.hybrid-ui .write-composer textarea {
+    font-size: 16px;
+    min-height: 80px;
+  }
+  .app.real-app.hybrid-ui .activity-details > summary,
+  .app.real-app.hybrid-ui .entry-expand,
+  .app.real-app.hybrid-ui .resume-demo > summary,
+  .app.real-app.hybrid-ui .custom-model > summary,
+  .app.real-app.hybrid-ui .frozen-summary,
+  .app.real-app.hybrid-ui .live-stream-thinking > button {
+    min-height: 44px;
+  }
+  .app.real-app.hybrid-ui .activity-details > summary,
+  .app.real-app.hybrid-ui .resume-demo > summary {
+    display: flex;
+    align-items: center;
+  }
+}
+@media (max-height: 560px) {
+  .app.real-app.hybrid-ui .conversation-new .conversation-body {
+    margin-top: 0;
+  }
+  .app.real-app.hybrid-ui .conversation-new .welcome {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app.real-app.hybrid-ui *,
+  .app.real-app.hybrid-ui *::before,
+  .app.real-app.hybrid-ui *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
