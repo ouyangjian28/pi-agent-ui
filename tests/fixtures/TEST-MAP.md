@@ -1547,3 +1547,16 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 - 原首轮启动器缺esbuild、旧夹具缺D导致4402及过弱选择态断言均留在 `run-records/pi099-real-app/first-loader-failure/`、`first-mechanical/`；严格结果不能抹掉前次失败。日志原字节gzip+可读EOF规范化，archive.json逐件hash。
 - 独立交叉/视觉/用户试用/真手机未过，日常服务未替换；旧根111类型债分账，不写全仓全绿。
 
+## UI-HYBRID 输入区参数内部确认（2026-10-02；非三功能完工）
+
+| 检查对象 | 重放/耐久证据 | 判据与边界 |
+|---|---|---|
+| cfg RPC独立响应/截止/取消 | `tests/unit/server/rpc-settings-channel.test.ts` | 16项：代次/id/command严格域、写入+回执双完成、3s统一截止、抢跑与挂写、stop/dispose/旧代不复活；失败代次quarantine；不抢ready/c* |
+| 下一prompt实际参数确认 | `tests/unit/server/rpc-session-model.test.ts` | 原spawn/sidecar7项保留+12新例，warm模型/思考先实际确认再意图/prompt、同步准备租约、busy/stale/缺idle事实/SDK clamp/不支持/timeout/stop均不发送，偏好仅确认后落；受控Host不是实际SDK |
+| 真composition+受控pi回环 | `tests/integration/m-ops-e2e.test.ts`；`tests/fixtures/mops-fake-pi.mjs` | 原launched/argv/sidecar成功断言保留且加强cfg顺序、实际prompt模型/singlepid；新增success无事实及模型setter成功却实际旧模型两反例：拒绝/零prompt/偏好/用户意图。冷启动仅writer登记合法；不是journal完全空白 |
+| 完整默认集/build/三包类型 | `run-records/composer-next-settings/manifest.json` 与8原字节gzip日志 | 源f596d62、b20934ab6 exit0：1980通过/24原opt-in skip、111文件过/5原文件skip，build及protocol/server/web tsc0；根历史类型债分账、付费真模型未跑。不冒称整仓全绿或新功能已交付 |
+| 失败保留与修正边界 | 同目录first-default-failure/negative-writer-expectation-failure日志 | bb0488af7原1977绿/1红/24skip，build/类型未运行；旧mops仅success无事实，新门正确拒绝。仅增强替身/断言，生产源相对6c9b208零改；首版新反例错误期待空journal、2红，改严格单writer后93定向绿。未增skip或减原成功断言 |
+
+- 实际0.99.2模型/思考切换单独用 `python3 tests/fixtures/pi099-next-settings.py`，真实RpcSession/ProcessHost/自有loopback请求；此段归档时任务be8443478在跑，不能称已通过。该链即使通过也不证明主应用DTO/前端菜单/附件已接。
+- 附件HTTP主注册、同字节发送/恢复、owner/client、图示输入框、窄变异、独立/用户/实机仍待。日常服务、全局pi、生产认证不动。
+

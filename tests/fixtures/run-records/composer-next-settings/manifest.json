@@ -1,0 +1,88 @@
+{
+  "originalFailedTask": "bb0488af7",
+  "failedBaseline": "6c9b208",
+  "failure": "m-ops-e2e launched vs not-ready: old fixture success without actual state facts",
+  "fixBaseline": "f596d6232b0ac97f1698c5ebaf8fed4d2175644e",
+  "passingTask": "b20934ab6",
+  "taskExitCode": 0,
+  "defaultTests": {
+    "passed": 1980,
+    "existingOptInSkipped": 24,
+    "filesPassed": 111,
+    "filesSkipped": 5
+  },
+  "focusedTestsPassed": 93,
+  "buildExitCode": 0,
+  "packageTypecheckExitCodes": {
+    "protocol": 0,
+    "server": 0,
+    "web": 0
+  },
+  "productionSourceChangedByFixtureFix": false,
+  "knownBoundaries": [
+    "No new skip or removed success assertion",
+    "Cold writer registration is allowed; user intent/prompt forbidden on rejected settings",
+    "No real pi next-settings proof in this archived gate; separate fixture pending",
+    "No browser/DTO/attachments/recovery/new-composer wiring",
+    "Root historical type debt separate; not all-repo typecheck green",
+    "No independent/user/physical-phone acceptance or daily deployment"
+  ],
+  "files": [
+    {
+      "artifact": "first-default-failure.log.gz",
+      "original": ".pi/composer-checks/next-settings/default-tests.log",
+      "originalBytes": 33397,
+      "originalSha256": "ad147a556030392592e350a1a3c4fdf54921a0b7665af0b8f0eecfd42800b972",
+      "archiveSha256": "a1c7871fc14cdb5936f28a2467530971b4035053d17bcc55fd5b81e5427b5b34"
+    },
+    {
+      "artifact": "negative-writer-expectation-failure.log.gz",
+      "original": ".pi/composer-checks/next-settings/mops-fix-focused.log",
+      "originalBytes": 2483,
+      "originalSha256": "4226cf8cb9c7db0d7d425a17d5d4a77740d2ffb02f3fd64b822d482af5be2f2b",
+      "archiveSha256": "4849abac15a73ba618ad41ecc64b1d625290f1b103a1c53de7fe391371f58f37"
+    },
+    {
+      "artifact": "focused-93-success.log.gz",
+      "original": ".pi/composer-checks/next-settings/mops-fix-focused-success.log",
+      "originalBytes": 188,
+      "originalSha256": "272b1f4f2b410c2d0c05fa0820789fb41ad66becb1fc8d5fb9268c51e0c57acd",
+      "archiveSha256": "8cbec208662ea1420d1b9bb9c0dc52bb66085132ad67d7226cfc3fda8cef9d9e"
+    },
+    {
+      "artifact": "full-default-tests.log.gz",
+      "original": ".pi/composer-checks/next-settings-rerun/default-tests.log",
+      "originalBytes": 31280,
+      "originalSha256": "a05551fd319e54f0e2b943e10dc56196112960538d47ca5013596cb0d9e6d843",
+      "archiveSha256": "b4275577b86d36adfba739a86b5835468d63aeb784d960810bc40566ac1ac8c5"
+    },
+    {
+      "artifact": "full-build.log.gz",
+      "original": ".pi/composer-checks/next-settings-rerun/build.log",
+      "originalBytes": 549,
+      "originalSha256": "49e298b7339cc1dc8cedbbde14fdfd7801be20294d7a452a2b66450d8e04f08a",
+      "archiveSha256": "bb6bca262a69fbc0270a6454888f0727ffc55e0b6d77dda29e3aaa70da36d7bb"
+    },
+    {
+      "artifact": "full-protocol-types.log.gz",
+      "original": ".pi/composer-checks/next-settings-rerun/protocol-types.log",
+      "originalBytes": 0,
+      "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "archiveSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+    },
+    {
+      "artifact": "full-server-types.log.gz",
+      "original": ".pi/composer-checks/next-settings-rerun/server-types.log",
+      "originalBytes": 0,
+      "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "archiveSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+    },
+    {
+      "artifact": "full-web-types.log.gz",
+      "original": ".pi/composer-checks/next-settings-rerun/web-types.log",
+      "originalBytes": 0,
+      "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "archiveSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+    }
+  ]
+}
