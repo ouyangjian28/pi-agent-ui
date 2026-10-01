@@ -18,7 +18,7 @@ if (
 )
   throw new Error("Refuse non-isolated bridge environment; run the Python fixture launcher");
 const out = process.env.PI099_OUTPUT_DIR ?? join(repo, ".pi/upgrade-checks/app-bridge");
-if (!out.startsWith(join(repo, ".pi/upgrade-checks/app-bridge"))) throw new Error("Invalid bridge output path");
+if (!out.startsWith(join(repo, ".pi/composer-checks/real-app/runs") + "/")) throw new Error("Invalid bridge output path");
 await mkdir(out, { recursive: true });
 const piBin = join(repo, "node_modules/.bin/pi");
 const actualVersion = execFileSync(piBin, ["--version"], { encoding: "utf8" }).trim();
