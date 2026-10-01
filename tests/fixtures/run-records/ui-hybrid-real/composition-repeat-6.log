@@ -1,0 +1,11 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.1 [39m[90m/home/yyj/ai/repos/pi-agent-ui-hybrid[39m
+
+ [32m✓[39m [30m[42m unit [49m[39m tests/unit/server/composition-write.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 1092[2mms[22m[39m
+   [32m✓[39m 3c-3 composition 写侧接线 [2m(11)[22m
+     [33m[2m✓[22m[39m CW3 真链失败面：prompt→cat 回声不答探针→not-ready(cause=readiness-timeout)+write-ack；审计含 spawn/registry/readiness 链[33m 404[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m11 passed[39m[22m[90m (11)[39m
+[2m   Start at [22m 13:03:29
+[2m   Duration [22m 1.55s[2m (tests 74%, transform 20%, import 6%)[22m

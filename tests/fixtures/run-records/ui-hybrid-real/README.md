@@ -9,4 +9,10 @@
 - 可读 `.log` 仅移除多余空白 EOF；同名 `.log.gz` 保存复制时原始字节，未删错误、断言或跳过信息。
 - 后续任务 b0085de5f 进行 8 次完整 composition-write 文件 + 原全套、构建、包级类型、隔离实际 pi 探针及服务端/协议/冻结 docs 零差分复验。本档写入时仍待结果，不声明通过。
 
+## 基线复验闭环（2026-10-01）
+
+- `b0085de5f` 最终 exit 0。源基线 `225d5f5dc4fd2adb1a94c27c3af358b84376e597`，见 `verified-baseline-commit.txt`；8 次完整 composition-write 文件均为 11/11，通过记录 `composition-repeat-1.log` 至 `composition-repeat-8.log`。
+- `verified-baseline-tests.log`：1876 pass / 24 既有 opt-in skip；`verified-baseline-build.log`：web 构建和 server 类型构建 exit 0；三包类型、实际候选 RPC、服务器/协议/冻结文档零差分在同任务通过（RPC 日志 `verified-baseline-rpc.log`）。这才解除此前正式接线前阻塞，不删除或改写前次红灯。
+- 后续正式界面从 `40841ee` 开始；搜索与真实视口驱动 `2618498`，字体断言 `d582902`，视觉收口 `8c30ff4`。本小节是 UI 开工前基线，不把它冒充上述正式界面的复验结果。
+
 这些均为本地合成测试，不使用生产认证、生产会话或付费提供商；不是正式 UI/真机/独立验收。
