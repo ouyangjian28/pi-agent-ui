@@ -1607,5 +1607,7 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 
 | 外网静态样机（替换不可达loopback交付） | tools/ui-oc-build.sh的public相对base副本、tools/ui-oc-public-preview.mjs、tools/ui-oc-static-probe.mjs；be870c7df及最终UTF-8版be2546f89退出0；15原字节log/JSON/PNG/已发HTML与脚本+roundtrip/SHA归tests/fixtures/run-records/ui-oc-source-probe/public-static | 真实原App在代表性/html子目录：模型/原Settings可见、390独立UA/touch无溢出、模拟写501、无后台HTTP/pageerror0；原UI未改，mock传输不是后台发送证据。发布复用既有密码ext-html，三文件内侧200字节一致/实际公网路径无凭据401，未代替用户登录/真机/UX验收。126启动权限/生成正则转义失败/首幅父层字符乱码均留，1e178e9/7288ffd修复；旧b5c8e0167已停，入口见public-static/manifest.json |
 
+| 认证后外网404修正（部署运维，不是引擎用例） | tests/fixtures/run-records/ui-oc-source-probe/public-route-fix.json | 用户真实404证伪了“本机200+外网401即可交付”；VPS旧/html路由缺失，副本完整配置预演/备份/live nginx -t/reload后恢复兼容路径，既有密码保留。实际认证外网三页面/脚本+原UI入口js四文件200字节一致，原DSH入口200、无凭据401；凭据只在进程内存，没有prod pi token/截图/日志。不等于跨网浏览器交互、用户确认或后台接线；默认trade域政策未改 |
+
 本批证明源码/编译及原App初始启动；原项目typecheck/完整单测、真实控件可用性、手机真机、性能与用户试用尚未证明。初诊phone是已挂载桌面缩小并挤压，不记手机通过。所有后台动作不得伪报成功。
 

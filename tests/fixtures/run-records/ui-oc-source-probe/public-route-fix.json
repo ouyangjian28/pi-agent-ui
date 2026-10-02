@@ -1,0 +1,35 @@
+{
+  "kind": "external-delivery-operational-check",
+  "date": "2026-10-02",
+  "trigger": "User reported published preview URL returned not found after login",
+  "rootCause": "Active VPS dsh-ser9max.conf had no /html/ location, so authenticated requests hit DSH fallback. Prior local HTTP200 and public unauthenticated401 did not prove authenticated external delivery. Infrastructure main catalog already uses trade.yangyijian.com as canonical; service subcatalog retained historical /html/ information.",
+  "before": {
+    "activeNginxConfigCheckExit": 0,
+    "htmlLocationPresent": false,
+    "tunnelPreviewHttp": 200,
+    "tunnelUnstrippedHtmlPrefixHttp": 404
+  },
+  "change": {
+    "file": "/etc/nginx/conf.d/dsh-ser9max.conf",
+    "scope": "Restore historical compatibility location ^~ /html/ with proxy_pass http://127.0.0.1:28097/; trailing slash removes /html/ prefix. Inherit existing server Basic Auth; keep DSH routes and TLS unchanged.",
+    "backup": "/etc/nginx/conf.d/dsh-ser9max.conf.bak-20261002T191322Z-restore-html",
+    "candidateRehearsal": "/tmp/pi-preview-route-to2nxqj5/nginx.conf",
+    "candidateCheckExit": 0,
+    "liveCheckExit": 0,
+    "reloadExit": 0,
+    "rollback": "Restore backup to the original config path, nginx -t, then reload nginx. No new port or application process."
+  },
+  "after": {
+    "externalUrl": "https://dsh.yangyijian.com:28084/html/pi-oc-preview-1e178e9/preview.html",
+    "authenticatedPreviewHttp": 200,
+    "authenticatedIndexHttp": 200,
+    "authenticatedFixtureScriptHttp": 200,
+    "authenticatedOriginalEntryScriptHttp": 200,
+    "allFourBodiesMatchLocalPublishedBytes": true,
+    "existingDshEntryHttp": 200,
+    "unauthenticatedPreviewHttp": 401
+  },
+  "credentialHandling": "Existing authentication source mode600; credentials used only in process memory for own HTTPS origin. No credentials, request headers or production pi token recorded. Redirects disabled. This is an operational HTTP check, not a test screenshot using production credentials.",
+  "limits": ["User trial/visual acceptance still pending", "Authenticated external HTTP bodies/assets verified, not an authenticated cross-network browser interaction proof", "UI remains simulated and unconnected to pi/OpenCode", "Canonical trade HTML entry policy unchanged; this restores compatibility for the already-delivered historical URL"],
+  "lesson": "Check main and service capability catalogs; actual nginx runtime and authenticated external page+assets200 are required. 401 only proves a gate exists."
+}
