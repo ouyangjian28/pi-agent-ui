@@ -18,7 +18,7 @@ globalThis.fetch=async(input,options={})=>{
  const method=(options.method||input?.method||'GET').toUpperCase();
  if(method!=='GET'||url.origin!==location.origin) return refuse();
  let path=url.pathname;
- if(path.startsWith(prefix)) {const suffix=path.slice(prefix.length); if(/^(api\/|auth\/|health$)/.test(suffix))path='/'+suffix;}
+ if(path.startsWith(prefix)) {const suffix=path.slice(prefix.length); if(suffix.startsWith('api/')||suffix.startsWith('auth/')||suffix==='health')path='/'+suffix;}
  if(previewEventPaths.has(path)) {
   const stream=new ReadableStream({start(c){c.enqueue(new TextEncoder().encode(': inert UI preview; no execution events\\n\\n')); const signal=options.signal||input?.signal; if(signal?.aborted)c.close(); else signal?.addEventListener('abort',()=>c.close(),{once:true});}});
   return new Response(stream,{headers:{'Content-Type':'text/event-stream'}});
