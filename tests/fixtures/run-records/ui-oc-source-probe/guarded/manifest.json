@@ -1,0 +1,43 @@
+{
+  "format": 1,
+  "scriptCommit": "f6d9316",
+  "purpose": "Literal original UI/read-only preview; not pi/backend/UX acceptance",
+  "checks": {
+    "fixtureReady": true,
+    "settingsDialogVisible": true,
+    "backendWriteRefused": 501,
+    "phoneNoHorizontalOverflow": true,
+    "phoneIdentity": "fresh iPhone UA/touch context; not physical device/keyboard"
+  },
+  "controls": 56,
+  "pageErrors": 0,
+  "backendConnected": false,
+  "settingsSaving": "Intentionally rejected; original Save failed indicator, not a successful persistence claim",
+  "files": [
+    {
+      "file": "probe-guarded-controls.log.gz",
+      "rawBytes": 143,
+      "rawSha256": "7b742c603496927c39e413315564ccab54b5c864e364cac3e49b2974b4d83a68"
+    },
+    {
+      "file": "diagnostic.json.gz",
+      "rawBytes": 52007,
+      "rawSha256": "5f7e3db28a3f9a30c10a62cc042cdc6bf8bd77beaa89ba69b18fe18498eed87c"
+    },
+    {
+      "file": "desktop.png.gz",
+      "rawBytes": 65300,
+      "rawSha256": "f762587e514577b7fad55f2b0733f7a8b97f75daf42ff8eb9c3130c4c3799983"
+    },
+    {
+      "file": "settings.png.gz",
+      "rawBytes": 130052,
+      "rawSha256": "f2846c093688b4df5d171a92770a9b1894fd719a78317d3894e23db157fdcb3d"
+    },
+    {
+      "file": "phone.png.gz",
+      "rawBytes": 47772,
+      "rawSha256": "c3fa8182dab3e805b60d0705df4b4ab28dc1b2b2228afdfab874f7c8b61495f6"
+    }
+  ]
+}
