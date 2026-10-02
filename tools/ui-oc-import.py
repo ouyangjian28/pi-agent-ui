@@ -46,14 +46,17 @@ def verify(source: Path) -> None:
     manifest = json.loads((TARGET / "SOURCE-MANIFEST.json").read_text())
     rows = manifest["files"]
     expected = {row["path"] for row in rows}
-    actual = {str(p.relative_to(TARGET)) for p in TARGET.rglob("*") if p.is_file()}
+    actual = {str(p.relative_to(TARGET)) for p in TARGET.rglob("*")
+              if p.is_file() and not any(part in {"node_modules", "dist", ".pi"}
+                                        for part in p.relative_to(TARGET).parts)}
     if actual != expected | {"SOURCE-MANIFEST.json"}:
         raise RuntimeError("Imported snapshot file set changed")
     if set(selected(source)) != expected:
         raise RuntimeError("Reference source file set changed")
     for row in rows:
         relative = row["path"]
-        if digest(TARGET / relative) != row["sha256"] or digest(source / relative) != row["sha256"]:
+        if ((TARGET / relative).is_symlink() or (source / relative).is_symlink()
+                or digest(TARGET / relative) != row["sha256"] or digest(source / relative) != row["sha256"]):
             raise RuntimeError(f"Imported/reference source differs: {relative}")
     print(json.dumps({"verifiedFiles": len(rows), "bytes": sum(row["bytes"] for row in rows),
                       "sourceBytesIdentical": True, "backendStarted": False}))
