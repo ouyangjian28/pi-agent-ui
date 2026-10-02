@@ -1602,7 +1602,7 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 | 四次构建分账 | tests/fixtures/run-records/ui-oc-source-build/manifest.json及4原字节gzip日志 | 前3次在PWA依赖解析、缺Electron引用配置、外层cwd Babel插件解析处失败，均非编译成功；第4次b24ae95c5退出0，Vite7.3.1转换3144模块/52.02s及PWA产物成功，存在原动态导入/大块警告，不冒称零告警 |
 | 可重放构建入口 | tools/ui-oc-build.sh（cbe928d） | 拒覆证据、缓存插件/原SDK文件别名预检、原snapshot cwd、隔离HOME/env、runner、前后字节复核；不install/原生命周期脚本/OpenCode服务/生产凭据；依赖缓存须先准备，非独立可联网重装证明 |
 | 后端冻结 | 从beeec28到此候选的apps/server、packages/protocol、apps/web、根package/lock差异空 | 旧pi逻辑/协议/原hybrid UI/根依赖未改；没有运行OpenCode引擎，不声称已经接pi |
-| 浏览器初诊 | tools/ui-oc-probe.mjs；首次任务b6b858ea1进行中 | 原构建App/新Chromium/本机静态面，假auth GET显式previewOnly，其余动作501，非本机请求拦截；只用于观察启动和请求，不等于可点击样机/连接验收 |
+| 浏览器初诊 | tools/ui-oc-probe.mjs；首次b6b858ea1在页面前因隔离HOME下无浏览器二进制失败；361ea42明确复用已装Chromium并预检X_OK，复验b5a1ab66d进行中 | 原构建App/新Chromium/本机静态面，假auth GET显式previewOnly，其余动作501，非本机请求拦截；只用于观察启动和请求，不等于可点击样机/连接验收 |
 
 本批仅源码/编译证据；原项目typecheck/完整单测、实际控件、手机真机、性能与用户试用尚未证明。所有后台动作不得伪报成功。
 
