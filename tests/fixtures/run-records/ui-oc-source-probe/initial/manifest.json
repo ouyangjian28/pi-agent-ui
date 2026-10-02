@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "scriptCommit": "361ea42",
+  "purpose": "Original App boot diagnosis only, not clickable/pi/mobile acceptance",
+  "controls": 52,
+  "pageErrors": 0,
+  "backendConnected": false,
+  "failure": "First browser launch used empty isolated HOME cache; no page started",
+  "phoneScope": "Already-mounted desktop resized390; unusable layout, not fresh phone identity",
+  "files": [
+    {
+      "file": "probe-first.log.gz",
+      "rawBytes": 1186,
+      "rawSha256": "2c3abb73ce8dd7e03f8ad6f92185f60401d473a193db8eaa6a211d1d40068f93"
+    },
+    {
+      "file": "probe-existing-chromium.log.gz",
+      "rawBytes": 143,
+      "rawSha256": "6c18c55e1a262f81b1601f19aab819a2b7473c7154bb5f0bb178acbea86fcd64"
+    },
+    {
+      "file": "diagnostic.json.gz",
+      "rawBytes": 28554,
+      "rawSha256": "4f1583ff56b18478c24aa8c6d6d0137697e156f89fa9b40eedc426dcd338fbd9"
+    },
+    {
+      "file": "desktop.png.gz",
+      "rawBytes": 64204,
+      "rawSha256": "1afb613f1f9424e269a752faf60329e20431a18b55c94d9ca5abf96718edc0d1"
+    },
+    {
+      "file": "phone.png.gz",
+      "rawBytes": 33834,
+      "rawSha256": "e49f1797e485acbee8d77b99e41fafba3a66d141f1e5e7474015a08af4cc5d19"
+    }
+  ]
+}
