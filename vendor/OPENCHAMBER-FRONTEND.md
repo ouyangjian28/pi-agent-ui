@@ -20,7 +20,15 @@ Initial import is allowed only into a fresh target; overwrite, source symlinks, 
 
 Initial snapshot: 2,951 files, 26,893,071 bytes; source/import hashes match. The original root TypeScript config also references `packages/electron/tsconfig.json`; only this 426-byte configuration was subsequently added (no native source). Current snapshot: 2,952 files, 26,893,497 bytes; all original hashes still match. Importer syntax and byte verification passed; frontend build, browser clicks, visuals and user acceptance are separate checks, not yet implied.
 
-Build trials keep separate logs in `.pi/ui-oc-source/`: the first stopped before compilation because root cached dependencies did not include the web-workspace `vite-plugin-pwa`; workspace cache links fixed resolution without installation. The second stopped at the missing referenced Electron type configuration, not UI compilation. Build uses an isolated HOME/environment and `--configLoader runner`; neither failure is counted as a build pass.
+Build trials keep separate logs in `.pi/ui-oc-source/`: the first stopped before compilation because root cached dependencies did not include the web-workspace `vite-plugin-pwa`; workspace cache links fixed resolution without installation. The second stopped at the missing referenced Electron type configuration, not UI compilation. The third trial reached Vite but transformed zero modules: Babel searched for `babel-plugin-react-compiler` from the outer product cwd. The existing cache resolves the plugin correctly from the original snapshot root; this is launcher cwd, not missing UI dependency. A CJS probe of `@opencode-ai/sdk/v2` also used the wrong export condition; the original Vite uses an explicit browser-file alias instead.
+
+Replayable build interface (requires the prepared, ignored root/web/UI dependency-cache links; no install):
+
+```sh
+bash tools/ui-oc-build.sh "$PWD/.pi/ui-oc-source/build-new.log"
+```
+
+The helper refuses to overwrite an existing log, verifies all imported source bytes, preflights cached plugins and the original SDK alias, uses the original workspace cwd plus isolated HOME/environment and `--configLoader runner`, then re-verifies source bytes. No blocked trial is counted as a build pass.
 
 ## Runtime boundary
 
