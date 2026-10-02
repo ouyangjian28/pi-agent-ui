@@ -1,0 +1,377 @@
+# Composer
+
+The chat composer: the prompt language, the editor that renders it, and
+everything between typing and sending.
+
+`ChatInput.tsx` (one directory up) is the orchestrator. It holds the composer's
+own state and wires these modules together; it should not grow logic that
+belongs to one of them.
+
+`ChatContainer.tsx` keeps one `ChatInput` mounted while a new-session draft
+becomes its first session. Draft-only UI first fades for 120ms while the editor
+stays in place. The parent then moves the editor to its final session position
+with a 180ms transform-only FLIP animation. Reduced-motion mode skips these
+transitions. `session-ui-store.ts` marks sessions materialized from a submitted
+draft, so selecting an existing session while a draft is open switches without
+animation. Do not restore separate draft and session composer branches:
+remounting the editor loses focus and interrupts the transition. Keep the
+existing mobile fixed-position rules unchanged.
+
+`ComposerFloatingPanel` is the shared frame for `BtwPanel` and
+`QueuedMessageChips`. They mount inside the composer form, outside both the
+full editor and collapsed mobile pill, with one absolute `bottom-full`
+anchor, input-column width, gap, and glass surface. Appearing, disappearing,
+or collapsing a panel does not resize the transcript or composer.
+The frame also owns the header row through its `header` and `compact` props;
+callers supply controls and content, not their own header padding.
+
+`SessionSuggestionChip` is not a frame: it renders as the composer's own top
+row, inside the box and inside the mobile pill, so the surface stays one
+shape. Visibility priority is BTW, then a nonempty queue, then suggestion.
+Every BTW frame, including its collapsed strip, creation state, and pending
+draft, hides the other two. Composer content also hides suggestion;
+new-session drafts hide both queue and suggestion. Hiding the queue does not
+pause its delivery.
+
+The queue header toggles an `aria-expanded` disclosure with the current count.
+Its collapse state is local to the mounted runtime/directory/session queue key
+and survives temporary hiding behind BTW. Switching queue identity resets it.
+The expanded list retains its drag sensors, ordering, edit, send, and remove
+actions, and clamps to available space above the composer. It receives the
+composer's main-session queue target instead of resolving the global selection,
+so embedded chat columns address their own queue.
+
+The shared frame measures its height and gap into the chat column's
+`--chat-floating-panel-clearance`. The floating status row and
+`ScrollToBottomButton` translate upward by that amount, and the column
+carries `data-floating-panel` while any frame is mounted so the recap hint
+hides instead of landing over the transcript. Transcript height, insets, and
+scroll position remain unchanged. Unmounting clears the offset and the
+marker; resizing or collapsing the frame updates it.
+
+## Floating composer
+
+In a normal session view the composer slot is an absolute layer over the
+bottom of the transcript (`ChatContainer`), and the input box is glass
+(`oc-glass-composer`). The draft screen and the expanded editor keep the slot
+in flow. A `ResizeObserver` on the slot writes its height into the chat
+column's `--chat-composer-inset`; the timeline's tail spacer reads that
+variable plus a fixed gap, so the last row always ends above the composer.
+The variable is written straight to the DOM, so composer growth never
+re-renders the timeline: the list's own footer observer extends the content
+and the scroll hook's pinned-end observer keeps a reader on the end. The
+mobile keyboard choreography is unchanged: the form inside the slot is still
+the keyboard mover and the column shrinks around it at settle.
+
+Glass does not nest: a `backdrop-filter` element is a backdrop root, so a
+glass child only blurs its parent's content. Popups therefore anchor to the
+wrapper outside the box, and the dictation overlay (`.oc-dictation-overlay`)
+never stacks glass on glass: a CSS rule in `design-system.css` hides the
+composer's own contents while it is up, leaving the box as the single glass
+surface on desktop and the overlay itself on mobile.
+
+## Layers
+
+| Directory | Owns |
+|---|---|
+| `language/` | What the text *means*: `@` references, `/` and `#` tokens, markdown, and which picker a caret asks for |
+| `editor/` | The CodeMirror view that renders the language and owns the caret |
+| `state/` | Composer-local lifecycle state: ArrowUp/ArrowDown browsing, draft stash/restore, mobile shell, popup placement, draft targeting |
+| `submit/` | Turning what the user has into what gets sent. `guestCommands.ts` routes an extension's slash command (`contributes.commands`) before anything is sent: `/name args` never reaches the model, the extension resolves it into a chip |
+| `attachments/` | Files: paths, drop payloads |
+| `ui/` | Presentation. `ComposerAttachmentControls` lists files, GitHub, Linear, then guests with `contributes.attach`. `"panel"` opens the rail. `"dialog"` opens `GuestAttachDialog` with that guest iframe and `ready.surface: "dialog"` (loading `attachEntry` when the manifest declared one). `host.attach` writes the composer chip. Clicking that chip reopens the guest with the chip as `ready.item`: dialog guests get it as a prop, panel guests through `lib/guests/item-store.ts` and the rail. Message and session actions (`contributes.actions`) travel the same two roads with a `GuestMessageItem` / `GuestSessionItem` (`lib/guests/dialog-store.ts` `openGuestWithItem`); the dialog they open lives in `layout/GuestHosts.tsx`, not here, and an `attach` from it closes it through `handleGuestAttach`. The chip keeps the guest's opaque `data` (also on the `guest-issue` / `guest-pr` context part metadata and the session `LinkedGuestIssue` snapshot) so it comes back byte-identical; it is never part of the context text. VS Code and mobile skip that list. |
+| `text.ts` | How inserted text meets the text already there |
+| `largeTextPaste.ts` | Detect large plain-text pastes and build virtual `.txt` files |
+| `largeTextPasteOffer.ts` | Ask-toast offer id begin/resolve (supersede + double-apply guards) |
+
+`ChatInput.handlePaste` owns paste orchestration: URL-over-selection markdown
+links, clipboard files, and large plain-text pastes. Pasted and dropped files
+share `attachFilesWithCitation`: every file attaches and is cited in the draft
+as `[name]`; images get a generated unique name first, other files keep their
+own name and are cited only after they attached. A copied file's filename text
+is suppressed so only the citation lands in the draft.
+Large pastes (about 2,000 characters or 25 lines) follow the composer setting
+`largeTextPasteBehavior` (`ask` / `attach` / `inline`). Attaching creates an
+in-memory `text/plain` file named `pasted-context-N.txt`, inserts a bracket
+citation, and sends it through the same attachment pipeline as a manually
+picked `.txt` file. Ask-toast actions read live composer/attachment state so
+typing or other attaches between paste and choice stay consistent. Short text,
+images, and URL wraps keep their existing paths.
+
+## The prompt language
+
+`language/` is the single source of truth for composer syntax. Everything that
+needs to know what a token means — highlighting, send-time resolution, and the
+autocomplete triggers — goes through it.
+
+**This is the invariant that matters most in this module.** Before it existed,
+the `@` rule was written four times with divergent cleanup and the `/` rule
+three times with different valid character sets, so a token could be painted as
+a reference and then not resolve as one. Adding a construct meant finding every
+copy.
+
+- `mentions.ts` — `@` references. The `start..end` span is the reference
+  itself and is what gets highlighted; in `see @a/b.ts,` the comma is sentence
+  punctuation, not part of the file being referenced. Mentions are plain
+  editable text: deleting a character edits the token and reopens the mention
+  picker, the same way `/skill` tokens behave — not an atomic delete.
+- `prefixTokens.ts` — `/command`, `/skill`, `#snippet`. Scanning is deliberately
+  generous; **membership in the command, skill or snippet registry is the
+  authority**, not the pattern. An unknown `/token` stays plain prose.
+- `triggers.ts` — which picker a caret position asks for. Exactly one can be
+  active, with precedence `command > skill > snippet > mention`.
+- `tokenize.ts` — one pass producing every highlight range. Adding a construct
+  to the language means adding it here, once.
+
+## The editor
+
+`editor/` wraps CodeMirror. The document is a plain string: `getValue()` is
+exactly what gets sent, so nothing downstream serializes a rich document model
+back into a prompt.
+
+The document is not, however, the string it was given: CodeMirror normalizes
+line endings, so a `\r\n` pair becomes one break and the document ends up
+shorter than the inserted string. **Never derive a caret position from the
+length of text you are inserting** — a caret past the end makes `dispatch`
+throw, the transaction never applies, and the un-normalized text stays in React
+state to crash again on the next restore. Every edit that moves the caret goes
+through `replaceWithCaret` (`editor/documentEdits.ts`), which measures the
+change instead of the string.
+
+The composer previously painted a transparent `<textarea>` over a mirror
+`<div>`. That restricted highlighting to styles which do not change glyph
+advance width — colour, background, underline — because anything else made the
+mirror drift out from under the caret. Bold and italic were impossible, and the
+overlay was disabled outright on mobile, where wrapped text drifted anyway.
+**Those constraints are gone**; adding a width-affecting style is now a
+question of design, not of feasibility.
+
+Selection rendering: every device runs CodeMirror's `drawSelection()` — it
+keeps typing on the drawn-selection code path, and removing it makes
+CodeMirror enforce cursor association on the native selection, which iOS
+answers with severe input lag. **That much is not platform-specific and must
+not be undone.** What differs is who paints the selection, and
+`composerSelectionExtension` (`editor/theme.ts`) picks that per platform.
+
+When CodeMirror 6.43.9's iOS predicate does not match,
+`composerNativeSelectionExtension` layers over `drawSelection()`: it re-shows
+the native selection, and — only while a range is selected — the native caret,
+hiding the painted layers those replace. The native selection is the one that
+shows for two reasons: the painted layer sits behind the content, so tokens
+with their own background (inline code, fences) cover it completely; and the
+platform's selection drag handles attach to the visible native selection and
+take their colour from the caret, so a transparent caret means invisible
+handles. The range-only caret scoping is load-bearing — a native caret visible
+while typing makes the browser re-render its caret UI after every keystroke,
+felt as severe input lag.
+
+When CodeMirror 6.43.9's exact iOS predicate matches,
+`composerIOSSelectionExtension` leaves selection-handle geometry and appearance
+to CodeMirror. CodeMirror puts the handles in `.cm-selectionLayer`, normally at
+`z-index: -1`; the extension raises that layer above the content so opaque
+token backgrounds cannot cover them, and leaves it transparent to touch.
+The handle dots extend 8px past their range; matching scroller padding and
+negative margin expand the clip area without moving the text or changing the
+composer height. iOS still paints its taller system selection overlay even
+when CSS makes `::selection` transparent. The extension therefore suppresses
+CodeMirror's synthetic selection rectangles on iOS while leaving its handles,
+cursor path and `nativeSelectionHidden` facet active. Otherwise the grey system
+highlight and themed rectangle overlap with visibly different heights.
+Do not add a second custom layer or custom handles here: overlapping translucent
+rectangles make selection darker at their seams and imitated handles drift from
+the geometry WebKit actually manipulates. What iOS avoids is installing the
+native-selection workaround above: explicitly restoring native paint and caret
+makes WebKit re-measure them after every decoration redraw, and the composer
+rebuilds every decoration on every keystroke. That cost is felt worst during
+IME composition.
+
+The non-iOS native selection tint comes from `--primary`, not the selection
+token: themes define `--interactive-selection` with its own alpha, so mixing it
+with transparent again is nearly invisible. The iOS system overlay owns its
+visible selection fill.
+
+The content element keeps the existing correction policy: on in the mobile UI,
+off elsewhere. CodeMirror also reads the attribute and reverts Apple and
+Android's insert-period-on-double-space only when its value is exactly `off`.
+`editor/autocorrect.ts` uses the HTML standard's
+[ASCII case-insensitive `autocorrect` keywords](https://html.spec.whatwg.org/multipage/interaction.html#attr-autocorrect)
+to keep desktop word correction off while avoiding that CodeMirror-only
+revert. Its platform checks deliberately match CodeMirror's own browser flags.
+
+`composerLanguage.ts` retokenizes the whole document on every change. The
+composer holds a prompt, not a source file: it is short enough that a full pass
+is cheaper and far simpler than incremental mapping, and it keeps the editor
+and the send path reading the same grammar.
+
+## Ordering rules worth knowing
+
+- `editor/ComposerEditor.tsx` forwards a click on the composer's padding by
+  focusing the view *before* setting the selection: CodeMirror reveals its
+  drawn caret through a class it only writes while applying an update, so the
+  selection has to be the update that follows the focus.
+- `submit/buildOutgoingMessage.ts` flattens queued messages, the composer text,
+  context drafts and linked references into OpenCode's one-primary-plus-parts
+  shape. The oldest queued message becomes primary. **Every attached context
+  item (inline comments, terminal selections, browser annotations, PR context,
+  linked issue/PR) becomes its own synthetic text part carrying structured
+  metadata** built by `lib/messages/contextParts.ts`; the timeline reads that
+  metadata back to render context blocks. PR instructions precede the PR diff.
+  The same module's `buildComposerContext` captures that context when a message
+  is **queued** instead of sent: the chips leave the composer with the message
+  (as `QueuedContextPart`s on the queue item), the server or the VS Code
+  auto-send delivers them through `queuedContextToParts`, and editing the
+  queued message puts them back. A queued message is placed as captured — its
+  mention, file mentions, and skill instruction were resolved when it was
+  queued, never at delivery — and its context follows it before the next
+  queued message.
+- Extension slash commands are routed first (`submit/guestCommands.ts`,
+  entries from `useGuestCommands` minus every name the composer already
+  knows, so an extension can never shadow a built-in, an OpenCode command, or
+  a skill). The command text is cleared and `runGuestCommand`
+  (`lib/guests/run-command.ts`) asks the extension: the rail pane if it is
+  mounted, otherwise a hidden headless `PluginPane` that `GuestHosts` mounts
+  for the call. A returned chip lands through
+  `useInputStore.setPendingGuestIssue`, the same slot a panel's `attach` uses;
+  `null` is an info toast; an error or 20s of silence restores the text and
+  shows an error toast. Queueing runs it instead of queueing, like a local
+  command. `CommandAutocomplete` lists the same entries with the extension's
+  name as their badge, and the language highlights them as known `/tokens`.
+- Local slash commands are planned by `submit/slashCommands.ts` before any
+  attached context is consumed. Commands that act on session or UI state
+  (`/undo`, `/redo`, `/compact`, `/timeline`, `/handoff-review`) take only
+  their command text and leave comments, files, and linked context attached;
+   magic prompt commands send that
+  context with the prompt they produce. Session actions are planned only when
+  a session exists, so typing one into a new-session draft stays on the normal
+  send path. A local command is never queued as text: queueing runs it
+  instead. A failed prompt command restores everything it consumed: text,
+  confirmed mentions, files, comment drafts, and pending synthetic context.
+- `state/useComposerDraft.ts` — a draft belongs to a (runtime, directory,
+  session) identity. Writes are debounced while typing but forced at every edge
+  where the page may stop running, because a pending timer is not a saved
+  draft. Two orderings are load-bearing: the debounced write is skipped once
+  while a draft is being restored, and a deleted draft's empty signature is
+  recorded before a queued write could resurrect it.
+  Fork replay text and files arrive in `input-store.pendingComposerRestore`,
+  addressed to the fork's runtime, directory, and session. The hook consumes
+  them after loading that identity's draft. Selection alone is not enough:
+  the deferred chat column can still show the source composer. Ordinary
+  pending text insertions keep their existing path in `ChatInput`.
+- `state/useDraftTarget.ts` — the draft can target a directory that does not
+  exist yet (a worktree being created). It must survive not appearing in the
+  branch list, or the selector snaps back to the project root mid-creation. It
+  also owns the advisory dirty state for the selected directory, clearing it as
+  soon as the target changes so a warning never names a previous branch.
+- `ui/DraftTargetSelectors.tsx` owns the controlled project/worktree picker
+  state and registers its application shortcuts locally. The desktop project
+  picker is a searchable popup: it ranks the current projects with
+  `rankByQuery` over display label and path, keeps the query and the active
+  result as transient local state that resets on every close, and commits
+  through the existing project-change flow only on explicit activation.
+  Filtering changes the result area below the anchored input without moving
+  the search field. The worktree picker remains a Select; mobile keeps its
+  bottom sheets. The selectors only consume their shared prefix while the
+  draft target UI is mounted.
+  Keyboard selection returns focus to the current form's composer, including
+  when the selected value is unchanged.
+- `ChatInput.tsx` maps Ctrl+N/P to the active command, skill, snippet, or
+  mention picker after its IME guard.
+
+## Input recall ownership
+
+Prompt recall has two owners on purpose.
+
+- `packages/ui/src/stores/useInputHistoryStore.ts` owns the persisted source of
+  truth. It keeps the runtime-scoped global bucket and the runtime + directory
+  + session bucket, each capped by the configurable input-history limit. That
+  setting defaults to 40 entries. Recall reads the current session's bucket by
+  default; the Chat setting can widen it to every project on the runtime.
+- `state/useMessageHistory.ts` owns only keyboard traversal through whichever
+  bucket the composer was given. Moving away from a position stores the
+  composer's current text and attachments as an overlay for that position, so
+  the live draft and any edit made to a recalled prompt survive a round trip
+  through history. Overlays never rewrite stored history; sending resets them.
+- `ChatInput.tsx` applies the recalled text and attachments to the composer and
+  places the caret.
+
+In session scope the composer merges two sources, oldest first: the visible
+transcript's user prompts (`useUserMessageHistory` in `sync-context.tsx`), so
+sessions that predate the persisted store still recall, and the persisted
+session bucket, which adds attachments and keeps prompts a revert hid from the
+timeline. A prompt present in both collapses to the persisted entry. Global
+scope reads the persisted runtime bucket only.
+
+## BTW composer
+
+An empty `/btw` opens an unsent draft. `/btw <question>` opens BTW and sends
+that question immediately after its own draft and model selection are active.
+**By the way…** opens an unsent draft with Quote-formatted selection text.
+The first send creates the fork; Enter follows the user's preference. Pending text and references then
+move to the fork's draft identity. Normal and BTW drafts remain independent,
+including in memory when persistence is disabled.
+
+Both modes reuse `ComposerEditor` and `ModelControls`; BTW transitions put the
+caret at the end. BTW copies the main model/effort once, including explicit
+Default, and uses `plan` or the first selectable agent. Its controlled model
+path only writes BTW selections. Attachments, goals, expansion, shell, and
+agent selection and file/agent mention autocomplete are unavailable. Auto-accept is applied before the first send.
+On mobile, model and effort controls sit in the input's upper-left row; the
+footer only contains auto-accept and send/stop controls.
+
+Escape closes menus first. Otherwise it returns to normal: an unsent BTW is
+discarded with its text, references, selections and panel; a creating or real
+fork is only collapsed. Neither exit sends, aborts, or deletes a server session,
+nor consumes the main draft's files, queue, or linked context. Pending snippet
+expansion belongs to the unsent panel. Discarding that panel invalidates the
+send, and a runtime change prevents fork creation and stale UI recovery.
+
+The unsent panel shows "Ask your question" until fork creation starts.
+Existing panels hide titles. Promotion retains the existing internal title, without
+transcript fetching or Small Model generation.
+
+## Mobile
+
+`state/useMobileComposerShell.ts` and `state/useMobileViewportPin.ts` are
+mostly not state machines but corrections for specific platform behaviors:
+mobile browsers dismissing the keyboard before a tap's click lands, iOS
+refusing programmatic focus outside a gesture, WebKit leaving the layout
+viewport panned after the keyboard hides, overlay chains handing off through a
+frame where nothing is open.
+
+**Every timeout and `flushSync` in them has a reason recorded next to it, and
+none of them is verifiable outside a real device.** Change them only against
+hardware.
+
+## Testing
+
+The package has no DOM test environment, so coverage stops at the state and
+logic layers: the language, the submit assembly, path and drop handling, text
+splicing, large-paste detection, paste-offer invalidation, input-history
+traversal, and the CodeMirror language extension at the `EditorState` level.
+
+Rendering, focus, keyboard behavior, IME and WKWebView are **not covered by
+tests** and are verified by hand. That includes ArrowUp and ArrowDown recall,
+caret placement after recall, restored drafts, and any edited-entry overlay.
+Do not report a change to them as validated on the strength of type-check and
+unit tests.
+
+Run tests per file (`bun test <path>`): `mock.module` is process-global, so
+suites that install module mocks are order-dependent.
+
+## Enter preference
+
+`keyboardPolicy.ts` owns the submission decision. The expanded desktop composer
+always inserts a newline with Enter, including Shift+Enter, and sends with
+Ctrl/Cmd+Enter; it ignores the Enter-to-send preference. Outside expanded mode,
+until the Chat setting is changed, desktop Enter sends, mobile requires
+Ctrl/Cmd+Enter, and Shift-modified Enter does not send. An explicit choice
+applies across the other shared composers; Ctrl/Cmd+Enter sends in either
+configured mode.
+
+CodeMirror's deferred mobile Enter loses modifier information. Untouched
+settings restore Shift to keep the original policy. Once configured, with mobile
+autocapitalization enabled, the editor cannot distinguish its Shift flag from
+an intentional Shift press and does not restore Shift. Consequently, deferred
+Shift+Enter can send when Enter-to-send is enabled and cannot serve as the send
+shortcut when it is disabled. Ctrl/Cmd+Enter remains the supported modified
+send shortcut on this path.
