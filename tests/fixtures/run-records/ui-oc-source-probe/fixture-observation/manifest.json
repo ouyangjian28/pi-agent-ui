@@ -1,0 +1,39 @@
+{
+  "format": 1,
+  "scriptCommit": "25e0bcf",
+  "purpose": "Original App with read-only synthetic data observation, not connected/UX acceptance",
+  "controls": 54,
+  "fixtureReady": true,
+  "pageErrors": 0,
+  "backendConnected": false,
+  "phoneScope": "Fresh iPhone UA/touch Chromium390; not physical phone/keyboard",
+  "settingsScope": "Click occurred but lazy dialog was not awaited or visible in captured body; no settings pass",
+  "externalRequests": "Recorded public models.dev API/logos aborted by browser routing; no provider calls",
+  "files": [
+    {
+      "file": "probe-fixture-controls.log.gz",
+      "rawBytes": 143,
+      "rawSha256": "74fec8d9453b7f9a07bf7dbcaa987ff4b671ea1782e666736146420d9da4ba2a"
+    },
+    {
+      "file": "diagnostic.json.gz",
+      "rawBytes": 50062,
+      "rawSha256": "2af8d048397b9c30be077a4d735148b4252e23b6f4f4393ccee38486c189fbfb"
+    },
+    {
+      "file": "desktop.png.gz",
+      "rawBytes": 65937,
+      "rawSha256": "640d912a3071733cb76b77ff988bf21ddb045de452ef4194579cac86adfa12ff"
+    },
+    {
+      "file": "settings.png.gz",
+      "rawBytes": 68259,
+      "rawSha256": "8155c675ef2a8e0f49710d2f93811a1ba6bb39009f93068a799dc6dff8a31a10"
+    },
+    {
+      "file": "phone.png.gz",
+      "rawBytes": 47772,
+      "rawSha256": "c3fa8182dab3e805b60d0705df4b4ab28dc1b2b2228afdfab874f7c8b61495f6"
+    }
+  ]
+}

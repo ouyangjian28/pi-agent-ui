@@ -1604,7 +1604,7 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 | 后端冻结 | 从beeec28到此候选的apps/server、packages/protocol、apps/web、根package/lock差异空 | 旧pi逻辑/协议/原hybrid UI/根依赖未改；没有运行OpenCode引擎，不声称已经接pi |
 | 浏览器初诊 | tools/ui-oc-probe.mjs；首次b6b858ea1在页面前因隔离HOME下无浏览器二进制失败；361ea42明确复用已装Chromium并预检X_OK，复验b5a1ab66d原App启动成功52控件/pageerror0；5原字节失败/成功日志+图+JSON归tests/fixtures/run-records/ui-oc-source-probe/initial（gzip roundtrip+SHA） | 初诊时原构建App/新Chromium/本机静态面，假auth GET显式previewOnly，其余动作501，非本机请求拦截；只用于观察启动和请求，不等于可点击样机/连接验收 |
 
-| 原控件样机诊断 | tools/ui-oc-preview-data.mjs、tools/ui-oc-probe.mjs（25e0bcf）；b5b4997ae进行中 | 只读合成provider/model/agent/project/空列表并标未连接，所有写仍501；--serve的/preview外层明确未接banner，无源UI改动；原设置按钮实点、新手机UA/touch独立context，不再以缩桌面当手机启动；未记通过 |
+| 原控件样机诊断 | tools/ui-oc-preview-data.mjs、tools/ui-oc-probe.mjs（25e0bcf）；b5b4997ae观察退出0：54控件/样机模型已加载/pageerror0；5原字节观测归tests/fixtures/run-records/ui-oc-source-probe/fixture-observation。f6d9316强化检查b34a82246进行中 | 只读合成provider/model/agent/project/空列表并标未连接，所有写仍501；--serve的/preview外层明确未接banner，无源UI改动；原设置按钮实点、新手机UA/touch独立context，不再以缩桌面当手机启动；当时Settings仅点按钮，懒加载窗口尚未出现、没等窗口，不作设置通过。强化版等待原dialog真正可见并检查新手机无横溢出/写实际501，结果未定 |
 
 本批证明源码/编译及原App初始启动；原项目typecheck/完整单测、真实控件可用性、手机真机、性能与用户试用尚未证明。初诊phone是已挂载桌面缩小并挤压，不记手机通过。所有后台动作不得伪报成功。
 
