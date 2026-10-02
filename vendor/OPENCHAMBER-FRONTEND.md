@@ -18,7 +18,9 @@ python3 tools/ui-oc-import.py --source /home/yyj/ai/repos/openchamber --verify
 
 Initial import is allowed only into a fresh target; overwrite, source symlinks, excluded/private files and source changes during copying fail closed. Verification checks the exact source/import file set and hashes. The script never installs dependencies, runs upstream scripts or starts a backend.
 
-Initial snapshot: 2,951 files, 26,893,071 bytes; source/import hashes match. Importer syntax and byte verification passed; frontend build, browser clicks, visuals and user acceptance are separate checks, not yet implied.
+Initial snapshot: 2,951 files, 26,893,071 bytes; source/import hashes match. The original root TypeScript config also references `packages/electron/tsconfig.json`; only this 426-byte configuration was subsequently added (no native source). Current snapshot: 2,952 files, 26,893,497 bytes; all original hashes still match. Importer syntax and byte verification passed; frontend build, browser clicks, visuals and user acceptance are separate checks, not yet implied.
+
+Build trials keep separate logs in `.pi/ui-oc-source/`: the first stopped before compilation because root cached dependencies did not include the web-workspace `vite-plugin-pwa`; workspace cache links fixed resolution without installation. The second stopped at the missing referenced Electron type configuration, not UI compilation. Build uses an isolated HOME/environment and `--configLoader runner`; neither failure is counted as a build pass.
 
 ## Runtime boundary
 
