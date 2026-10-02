@@ -5,6 +5,7 @@ import { constants } from 'node:fs';
 import { resolve, sep, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { previewGet, previewEventPaths } from './ui-oc-preview-data.mjs';
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const dist = resolve(root, 'vendor/openchamber-frontend/packages/web/dist');
 const output = resolve(root, '.pi/ui-oc-source/probe-' + Date.now());
@@ -16,7 +17,12 @@ const server = http.createServer(async (req, res) => {
   requests.push({ method: req.method, pathname }); // Never log credentials/query/body.
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET') { res.writeHead(501, {'Content-Type':'application/json'}).end(JSON.stringify({error:'Preview only: action not connected'})); return; }
-  if (pathname === '/auth/session') { res.writeHead(200, {'Content-Type':'application/json'}).end(JSON.stringify({previewOnly:true})); return; }
+  if (pathname === '/preview') {
+    res.writeHead(200, {'Content-Type':'text/html'}).end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>原样UI · 未连接后端</title><body style="margin:0"><header style="height:36px;box-sizing:border-box;padding:8px;background:#fff2cf;font:14px sans-serif">仅UI样机 · 所有数据模拟 · 未连接pi或OpenCode · 后台动作拒绝执行</header><iframe title="OpenChamber 原UI样机" src="/" style="border:0;width:100%;height:calc(100dvh - 36px);display:block"></iframe>'); return;
+  }
+  if (previewEventPaths.has(pathname)) { res.writeHead(200, {'Content-Type':'text/event-stream'}); res.write(': UI fixture only; no execution events\n\n'); return; }
+  const fixture = previewGet(pathname);
+  if (fixture !== undefined) { res.writeHead(200, {'Content-Type':'application/json'}).end(JSON.stringify(fixture)); return; }
   let path;
   try { path = resolve(dist, '.' + decodeURIComponent(pathname === '/' ? '/index.html' : pathname)); } catch { res.writeHead(400).end(); return; }
   if (!path.startsWith(dist + sep)) { res.writeHead(403).end(); return; }
@@ -27,6 +33,14 @@ await new Promise((done, fail) => { server.once('error', fail); server.listen(0,
 const base = `http://127.0.0.1:${server.address().port}`;
 // Use an existing binary cache, never the isolated HOME's empty cache or install.
 process.env.PLAYWRIGHT_BROWSERS_PATH ??= '/home/yyj/.cache/ms-playwright';
+if (process.argv.includes('--serve')) {
+  console.log(JSON.stringify({previewURL:base+'/preview', backendConnected:false, fixtureOnly:true}));
+  await new Promise(done => {
+    const stop = () => { server.closeAllConnections(); server.close(done); };
+    process.once('SIGTERM', stop); process.once('SIGINT', stop);
+  });
+  process.exit(0);
+}
 const { chromium } = createRequire('/home/yyj/ai/repos/pi-agent-ui-hybrid/package.json')('playwright');
 let browser;
 try {
@@ -42,13 +56,23 @@ try {
   const page = await context.newPage();
   page.on('pageerror', e => errors.push(String(e)));
   await page.goto(base, {waitUntil:'domcontentloaded'});
-  await page.waitForTimeout(3500); // Explicit diagnostic observation window, not a job polling loop.
+  const fixtureReady = await page.waitForFunction(() => document.body.innerText.includes('UI sample'), undefined, {timeout:10000}).then(() => true, () => false);
   await page.screenshot({path:resolve(output, 'desktop.png'), fullPage:false});
   const body = await page.locator('body').innerText();
   const controls = await page.locator('button').evaluateAll(nodes => nodes.map(node => ({text:node.textContent, title:node.title, aria:node.getAttribute('aria-label')})));
-  await page.setViewportSize({width:390,height:844});
-  await page.screenshot({path:resolve(output, 'phone.png'), fullPage:false});
-  await writeFile(resolve(output, 'diagnostic.json'), JSON.stringify({previewOnly:true, backendConnected:false, body, controls, requests, errors, blocked}, null, 2)+'\n');
+  await page.getByRole('button', {name:'Settings', exact:true}).first().click();
+  await page.screenshot({path:resolve(output, 'settings.png'), fullPage:false});
+  const settingsBody = await page.locator('body').innerText();
+  // Fresh phone identity; shrinking an already-mounted desktop is not phone boot.
+  const phoneContext = await browser.newContext({viewport:{width:390,height:844}, isMobile:true, hasTouch:true, userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1', serviceWorkers:'block'});
+  await phoneContext.route('**/*', route => new URL(route.request().url()).origin === base ? route.continue() : route.abort());
+  const phone = await phoneContext.newPage();
+  phone.on('pageerror', e => errors.push(String(e)));
+  await phone.goto(base, {waitUntil:'domcontentloaded'});
+  await phone.waitForFunction(() => document.body.innerText.includes('UI sample'), undefined, {timeout:10000}).catch(() => {});
+  await phone.screenshot({path:resolve(output, 'phone.png'), fullPage:false});
+  const phoneBody = await phone.locator('body').innerText();
+  await writeFile(resolve(output, 'diagnostic.json'), JSON.stringify({previewOnly:true, backendConnected:false, fixtureReady, body, settingsBody, phoneBody, controls, requests, errors, blocked}, null, 2)+'\n');
   console.log(JSON.stringify({output, controls:controls.length, pageErrors:errors.length, backendStarted:false}));
 } finally {
   if (browser) await browser.close();
