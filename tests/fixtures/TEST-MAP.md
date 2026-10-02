@@ -1605,5 +1605,7 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 | 浏览器初诊 | tools/ui-oc-probe.mjs；首次b6b858ea1在页面前因隔离HOME下无浏览器二进制失败；361ea42明确复用已装Chromium并预检X_OK，复验b5a1ab66d原App启动成功52控件/pageerror0；5原字节失败/成功日志+图+JSON归tests/fixtures/run-records/ui-oc-source-probe/initial（gzip roundtrip+SHA） | 初诊时原构建App/新Chromium/本机静态面，假auth GET显式previewOnly，其余动作501，非本机请求拦截；只用于观察启动和请求，不等于可点击样机/连接验收 |
 | 原控件样机诊断 | tools/ui-oc-preview-data.mjs、tools/ui-oc-probe.mjs（25e0bcf）；b5b4997ae仅观测54控件/modelReady/pageerror0，原字节归fixture-observation；f6d9316强化检查b34a82246退出0：56控件/modelReady/Settings原dialog可见/390独立手机无横溢出/POST501/pageerror0；5原字节log/JSON/图+SHA归tests/fixtures/run-records/ui-oc-source-probe/guarded | 只读合成provider/model/agent/project/空列表标未接，全写501，--serve外层banner/loopback，不改原源码/引擎/后端。旧Settings仅点后没等懒加载、没窗口，不算过；本次真正等窗口可见，原Save failed因保存未接、未隐藏。新iPhone UA/touch Chromium不冒称真机/键盘；只读46585/preview HTTP200，可点待用户确认，不算后台/UX验收 |
 
+| 外网静态样机（替换不可达loopback交付） | tools/ui-oc-build.sh的public相对base副本、tools/ui-oc-public-preview.mjs、tools/ui-oc-static-probe.mjs；be870c7df及最终UTF-8版be2546f89退出0；15原字节log/JSON/PNG/已发HTML与脚本+roundtrip/SHA归tests/fixtures/run-records/ui-oc-source-probe/public-static | 真实原App在代表性/html子目录：模型/原Settings可见、390独立UA/touch无溢出、模拟写501、无后台HTTP/pageerror0；原UI未改，mock传输不是后台发送证据。发布复用既有密码ext-html，三文件内侧200字节一致/实际公网路径无凭据401，未代替用户登录/真机/UX验收。126启动权限/生成正则转义失败/首幅父层字符乱码均留，1e178e9/7288ffd修复；旧b5c8e0167已停，入口见public-static/manifest.json |
+
 本批证明源码/编译及原App初始启动；原项目typecheck/完整单测、真实控件可用性、手机真机、性能与用户试用尚未证明。初诊phone是已挂载桌面缩小并挤压，不记手机通过。所有后台动作不得伪报成功。
 

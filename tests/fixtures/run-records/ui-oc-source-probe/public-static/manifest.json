@@ -1,0 +1,98 @@
+{
+  "format": 1,
+  "sourceUiChanged": false,
+  "sourceFiles": 2952,
+  "sourceBytes": 26893497,
+  "upstreamRevision": null,
+  "finalToolCommit": "7288ffd",
+  "publicURL": "https://dsh.yangyijian.com:28084/html/pi-oc-preview-1e178e9/preview.html",
+  "gateEvidence": "Existing localhost static service three files HTTP200 and byte-identical; exact external URL unauthenticated401. User remote authenticated trial not yet verified.",
+  "browserEvidence": "Real original App at representative HTML subdirectory layout; be2546f89 exit0 models/Settings/390 fresh UA touch/no API HTTP/pageerrors0/fixture write501. No actual engine or phone keyboard.",
+  "failures": [
+    "Shell126 Permission denied; use bash and absolute log path",
+    "Generated nested-template regexp slash escape; failed bytes retained; fixed1e178e9",
+    "Parent wrapper charset missing; first screenshot retained; fixed7288ffd"
+  ],
+  "scopeLimits": [
+    "No pi/OpenCode engine connection",
+    "No full upstream tests/typecheck/performance/independent/user acceptance",
+    "Mock write501 is a browser fixture refusal, not backend prompt proof"
+  ],
+  "files": [
+    {
+      "file": "permission-failure.log.gz",
+      "rawBytes": 59,
+      "rawSha256": "9f150cd74c779f5b6a04168a608ef63da26b3361ead08b15bd39543dddf608f3"
+    },
+    {
+      "file": "generated-syntax-failure.log.gz",
+      "rawBytes": 1346,
+      "rawSha256": "cfc8355cfdeaa267d141f55cd02aa6774293d5f81f64cfb4bbb7eadbfa410c46"
+    },
+    {
+      "file": "static-first-pass.log.gz",
+      "rawBytes": 215,
+      "rawSha256": "8b83c734a5fb03dd41919ee15faebdf6b88ee9a6bab45ecec3d0480740e1c7fb"
+    },
+    {
+      "file": "static-final-pass.log.gz",
+      "rawBytes": 215,
+      "rawSha256": "4c891d4e33c2623c0396c7c01afa53701c277bd336aa369e0a54b4dd1d56899e"
+    },
+    {
+      "file": "public-build.log.gz",
+      "rawBytes": 214605,
+      "rawSha256": "183ddc84bed65ae68bf14dfa7cca58d80362419a2f291fcd01885f29d4d1b281"
+    },
+    {
+      "file": "failed-original-prelude.js.gz",
+      "rawBytes": 5176,
+      "rawSha256": "323cd7611d2e9b063b40c8a94f702ff0592f893c3cbd034d94252f20e9e49760"
+    },
+    {
+      "file": "first-checks.json.gz",
+      "rawBytes": 37463,
+      "rawSha256": "5cb1bb9fe0bc2387a6dde8cb3d5c01b3411c63b219e02f51aa28e79af2802c82"
+    },
+    {
+      "file": "first-banner-charset-observation.png.gz",
+      "rawBytes": 73891,
+      "rawSha256": "60449fb3a8bfa8de78d43111c2623e7d7beb2094902e337d82c5eaf09fb806d1"
+    },
+    {
+      "file": "final-checks.json.gz",
+      "rawBytes": 37757,
+      "rawSha256": "658f5c64eb1e4227d58b52c7c24da0c404df41d7d0a88a138aaf796130c1ac76"
+    },
+    {
+      "file": "final-desktop.png.gz",
+      "rawBytes": 73566,
+      "rawSha256": "00989c0ee6c2befe6777c2e286e005334ad5890dd4bb5126557d5e4d25d233a3"
+    },
+    {
+      "file": "final-settings.png.gz",
+      "rawBytes": 134428,
+      "rawSha256": "0e5650f3cec0d50c056c0534ee8c810bd27d1b655494c2f647ae4bf49024bd22"
+    },
+    {
+      "file": "final-phone.png.gz",
+      "rawBytes": 52597,
+      "rawSha256": "39191a7467bb2e50ac4134e66444edce937e0c40d4b65fa900ea7e175360b963"
+    },
+    {
+      "file": "published-preview.html.gz",
+      "rawBytes": 514,
+      "rawSha256": "d95691e1ae73ee0688258809a54bf8d9838df9baca4f5d275652f40e3ff25266"
+    },
+    {
+      "file": "published-index.html.gz",
+      "rawBytes": 27647,
+      "rawSha256": "7bcdeb482c5b458240f3d7feeb892f2c35339ad368f39f22cf2f5924de08b64b"
+    },
+    {
+      "file": "published-preview-fixture.js.gz",
+      "rawBytes": 5212,
+      "rawSha256": "89aceb61151ac572738870ea5f57d62f7ef2a4260fa9007a0f760c97dc3cc4a8"
+    }
+  ]
+}
