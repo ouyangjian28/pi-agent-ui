@@ -1,6 +1,7 @@
 // Diagnostic of the original built App; isolated fake auth only, no backend.
 import http from 'node:http';
-import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { readFile, mkdir, writeFile, access } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { resolve, sep, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -24,10 +25,14 @@ const server = http.createServer(async (req, res) => {
 });
 await new Promise((done, fail) => { server.once('error', fail); server.listen(0, '127.0.0.1', done); });
 const base = `http://127.0.0.1:${server.address().port}`;
+// Use an existing binary cache, never the isolated HOME's empty cache or install.
+process.env.PLAYWRIGHT_BROWSERS_PATH ??= '/home/yyj/.cache/ms-playwright';
 const { chromium } = createRequire('/home/yyj/ai/repos/pi-agent-ui-hybrid/package.json')('playwright');
 let browser;
 try {
-  browser = await chromium.launch({ headless:true });
+  const executablePath = chromium.executablePath();
+  await access(executablePath, constants.X_OK);
+  browser = await chromium.launch({ headless:true, executablePath });
   const context = await browser.newContext({viewport:{width:1440,height:900}, serviceWorkers:'block'});
   await context.route('**/*', route => {
     const url = new URL(route.request().url());
