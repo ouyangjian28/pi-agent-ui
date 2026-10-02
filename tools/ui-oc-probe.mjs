@@ -1,4 +1,4 @@
-// Diagnostic of the original built App; isolated fake auth only, no backend.
+// Actual original App over labelled read-only synthetic data; no backend engine.
 import http from 'node:http';
 import { readFile, mkdir, writeFile, access } from 'node:fs/promises';
 import { constants } from 'node:fs';
@@ -16,6 +16,7 @@ const server = http.createServer(async (req, res) => {
   const pathname = new URL(req.url, 'http://127.0.0.1').pathname;
   requests.push({ method: req.method, pathname }); // Never log credentials/query/body.
   res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Security-Policy', "connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'");
   if (req.method !== 'GET') { res.writeHead(501, {'Content-Type':'application/json'}).end(JSON.stringify({error:'Preview only: action not connected'})); return; }
   if (pathname === '/preview') {
     res.writeHead(200, {'Content-Type':'text/html'}).end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>原样UI · 未连接后端</title><body style="margin:0"><header style="height:36px;box-sizing:border-box;padding:8px;background:#fff2cf;font:14px sans-serif">仅UI样机 · 所有数据模拟 · 未连接pi或OpenCode · 后台动作拒绝执行</header><iframe title="OpenChamber 原UI样机" src="/" style="border:0;width:100%;height:calc(100dvh - 36px);display:block"></iframe>'); return;
@@ -61,6 +62,7 @@ try {
   const body = await page.locator('body').innerText();
   const controls = await page.locator('button').evaluateAll(nodes => nodes.map(node => ({text:node.textContent, title:node.title, aria:node.getAttribute('aria-label')})));
   await page.getByRole('button', {name:'Settings', exact:true}).first().click();
+  await page.getByRole('dialog').filter({hasText:'Settings'}).waitFor({state:'visible', timeout:10000});
   await page.screenshot({path:resolve(output, 'settings.png'), fullPage:false});
   const settingsBody = await page.locator('body').innerText();
   // Fresh phone identity; shrinking an already-mounted desktop is not phone boot.
@@ -69,10 +71,14 @@ try {
   const phone = await phoneContext.newPage();
   phone.on('pageerror', e => errors.push(String(e)));
   await phone.goto(base, {waitUntil:'domcontentloaded'});
-  await phone.waitForFunction(() => document.body.innerText.includes('UI sample'), undefined, {timeout:10000}).catch(() => {});
+  await phone.waitForFunction(() => document.body.innerText.includes('UI sample'), undefined, {timeout:10000});
+  const phoneNoHorizontalOverflow = await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
+  if (!fixtureReady || !phoneNoHorizontalOverflow || errors.length) throw new Error('Original preview fixture/phone/page-error guard failed');
+  const refused = await fetch(base+'/api/session', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+  if (refused.status !== 501) throw new Error('Preview must not accept backend writes');
   await phone.screenshot({path:resolve(output, 'phone.png'), fullPage:false});
   const phoneBody = await phone.locator('body').innerText();
-  await writeFile(resolve(output, 'diagnostic.json'), JSON.stringify({previewOnly:true, backendConnected:false, fixtureReady, body, settingsBody, phoneBody, controls, requests, errors, blocked}, null, 2)+'\n');
+  await writeFile(resolve(output, 'diagnostic.json'), JSON.stringify({previewOnly:true, backendConnected:false, fixtureReady, settingsDialogVisible:true, backendWriteRefused:refused.status, phoneNoHorizontalOverflow, phoneIdentity:'fresh iPhone UA/touch context; not physical device/keyboard', body, settingsBody, phoneBody, controls, requests, errors, blocked}, null, 2)+'\n');
   console.log(JSON.stringify({output, controls:controls.length, pageErrors:errors.length, backendStarted:false}));
 } finally {
   if (browser) await browser.close();
