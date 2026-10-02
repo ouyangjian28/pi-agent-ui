@@ -6,6 +6,15 @@ SOURCE=/home/yyj/ai/repos/openchamber
 SNAPSHOT="$ROOT/vendor/openchamber-frontend"
 NODE_BIN=/home/yyj/.nvm/versions/node/v24.18.0/bin
 LOG=${1:-"$ROOT/.pi/ui-oc-source/build.log"}
+MODE=${2:-original}
+FLAGS=()
+if [[ "$MODE" == public ]]; then
+  OUT="$ROOT/.pi/ui-oc-source/public-dist"
+  if [[ -e "$OUT" ]]; then printf 'Refuse overwrite of public build: %s\n' "$OUT" >&2; exit 1; fi
+  FLAGS=(--base ./ --outDir "$OUT")
+elif [[ "$MODE" != original ]]; then
+  printf 'Unknown build mode: %s\n' "$MODE" >&2; exit 1
+fi
 if [[ -e "$LOG" ]]; then printf 'Refuse overwrite of build evidence: %s\n' "$LOG" >&2; exit 1; fi
 mkdir -p "$ROOT/.pi/ui-oc-source/home" "$(dirname -- "$LOG")"
 # Every copied input remains original. Prepared dependency links are ignored.
@@ -27,5 +36,5 @@ JS
 # Separate log per trial; callers choose a fresh path to retain previous failures.
 env -i HOME="$ROOT/.pi/ui-oc-source/home" PATH="$NODE_BIN:/usr/bin:/bin" CI=1 \
   "$NODE_BIN/node" node_modules/vite/bin/vite.js build \
-  --config packages/web/vite.config.ts --configLoader runner > "$LOG" 2>&1
+  --config packages/web/vite.config.ts --configLoader runner "${FLAGS[@]}" > "$LOG" 2>&1
 python3 "$ROOT/tools/ui-oc-import.py" --source "$SOURCE" --verify
