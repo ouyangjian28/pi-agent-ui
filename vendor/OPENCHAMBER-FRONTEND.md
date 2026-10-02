@@ -28,7 +28,9 @@ Replayable build interface (requires the prepared, ignored root/web/UI dependenc
 bash tools/ui-oc-build.sh "$PWD/.pi/ui-oc-source/build-new.log"
 ```
 
-The helper refuses to overwrite an existing log, verifies all imported source bytes, preflights cached plugins and the original SDK alias, uses the original workspace cwd plus isolated HOME/environment and `--configLoader runner`, then re-verifies source bytes. No blocked trial is counted as a build pass.
+The helper refuses to overwrite an existing log, verifies all imported source bytes, preflights cached plugins and the original SDK alias, uses the original workspace cwd plus isolated HOME/environment and `--configLoader runner`, then re-verifies source bytes. No blocked trial is counted as a build pass. Fourth trial `b24ae95c5` passed: Vite 7.3.1 transformed 3,144 modules in 52.02s, produced the original frontend/PWA outputs, and source verification before/after both passed (2,952 files, 26,893,497 bytes). Original dynamic-import/large-chunk warnings remain; this is not original-project typecheck, runtime, performance or UX acceptance. All four original-byte logs and hashes are archived in `tests/fixtures/run-records/ui-oc-source-build/`.
+
+Diagnostic interface: `node tools/ui-oc-probe.mjs` uses a fresh Chromium context and loopback-only temporary static server, never production credentials. Only its fake auth GET is implemented; unsupported backend requests fail explicitly. It inspects the actual built App and records requests/controls/desktop/phone screenshots, not a completed clickable preview or connected pi frontend.
 
 ## Runtime boundary
 

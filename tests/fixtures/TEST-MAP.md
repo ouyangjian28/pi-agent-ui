@@ -1592,3 +1592,17 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 
 **交付边界**：本批具备候选/报告/作者证据；独立GLM/Kimi/视觉、用户试用、真机键盘与完整真实未知意图UI跨重启恢复未通过，不宣称部署/根全绿/整项目完成。7附件故障与5菜单故障按各自版本/范围分账，不合称全应用12项故障覆盖。日常服务、全局pi、生产master未切；下一阶段须用户集中对齐。
 
+## UI-OC-SOURCE 原样前端：源码与构建（2026-10-02；非功能/UX验收）
+
+用户在上述候选之后否定混合外观，选择先搬OpenChamber原布局/控件/主题/交互，原样可点击面确认后再最小接回已有pi后端；不把上批2044/故障结果当本阶段UI验收。
+
+| 检查 | 实际证据 | 结果与范围 |
+| --- | --- | --- |
+| 原字节/许可保留 | vendor/openchamber-frontend、vendor/openchamber-frontend/SOURCE-MANIFEST.json、tools/ui-oc-import.py --verify | 2952文件/26,893,497B原字节一致；只追加原426B Electron引用配置，不搬native代码；所有UI原源码未改、许可保留；sourceRevision:null，不伪称固定上游提交 |
+| 四次构建分账 | tests/fixtures/run-records/ui-oc-source-build/manifest.json及4原字节gzip日志 | 前3次在PWA依赖解析、缺Electron引用配置、外层cwd Babel插件解析处失败，均非编译成功；第4次b24ae95c5退出0，Vite7.3.1转换3144模块/52.02s及PWA产物成功，存在原动态导入/大块警告，不冒称零告警 |
+| 可重放构建入口 | tools/ui-oc-build.sh（cbe928d） | 拒覆证据、缓存插件/原SDK文件别名预检、原snapshot cwd、隔离HOME/env、runner、前后字节复核；不install/原生命周期脚本/OpenCode服务/生产凭据；依赖缓存须先准备，非独立可联网重装证明 |
+| 后端冻结 | 从beeec28到此候选的apps/server、packages/protocol、apps/web、根package/lock差异空 | 旧pi逻辑/协议/原hybrid UI/根依赖未改；没有运行OpenCode引擎，不声称已经接pi |
+| 浏览器初诊 | tools/ui-oc-probe.mjs；首次任务b6b858ea1进行中 | 原构建App/新Chromium/本机静态面，假auth GET显式previewOnly，其余动作501，非本机请求拦截；只用于观察启动和请求，不等于可点击样机/连接验收 |
+
+本批仅源码/编译证据；原项目typecheck/完整单测、实际控件、手机真机、性能与用户试用尚未证明。所有后台动作不得伪报成功。
+

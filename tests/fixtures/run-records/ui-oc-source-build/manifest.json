@@ -1,0 +1,43 @@
+{
+  "candidateBuildScriptCommit": "cbe928d",
+  "verifiedOriginalFiles": 2952,
+  "verifiedOriginalBytes": 26893497,
+  "sourceBytesIdenticalBeforeAndAfterBuild": true,
+  "vite": "7.3.1",
+  "modulesTransformed": 3144,
+  "buildSeconds": 52.02,
+  "runtimeStarted": false,
+  "piBackendChanged": false,
+  "uiAccepted": false,
+  "scope": "Original frontend build only; no original typecheck, browser interaction, performance or UX acceptance implied.",
+  "trials": [
+    {
+      "trial": 1,
+      "log": "build.log.gz",
+      "originalBytes": 1869,
+      "originalSha256": "d7ba689ead2be532c9b4d2606edafd7aa7628264905f575a11e27830f5997ee4",
+      "buildPassed": false
+    },
+    {
+      "trial": 2,
+      "log": "build-2.log.gz",
+      "originalBytes": 594,
+      "originalSha256": "bc82f7079ef42d15a8c11f36faa2bb5529c2602c803945c26da7f7d2c60e29a5",
+      "buildPassed": false
+    },
+    {
+      "trial": 3,
+      "log": "build-3.log.gz",
+      "originalBytes": 2083,
+      "originalSha256": "2d9fabcda8652ca9427f75ca69bf3695f2f7c40d4ed9980d6883233ebaf580b9",
+      "buildPassed": false
+    },
+    {
+      "trial": 4,
+      "log": "build-4.log.gz",
+      "originalBytes": 181089,
+      "originalSha256": "116d98d49eb3833d5aa74b288469080865f5b7931472e3172e889ffc8dd3ae14",
+      "buildPassed": true
+    }
+  ]
+}
