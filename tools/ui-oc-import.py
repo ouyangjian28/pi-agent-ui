@@ -19,6 +19,8 @@ FILES = (
     "packages/sdk/package.json", "packages/sdk/tsconfig.json", "packages/sdk/LICENSE", "packages/web/package.json",
     "packages/web/tsconfig.json", "packages/web/vite.config.ts", "packages/web/index.html",
     "packages/web/mobile.html", "packages/web/mini-chat.html",
+    # Root project references require this config; no Electron code is copied.
+    "packages/electron/tsconfig.json",
 )
 EXCLUDED = {"node_modules", ".git", ".env", ".openchamber", "server", "dist"}
 

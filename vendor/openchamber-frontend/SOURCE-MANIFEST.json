@@ -21,6 +21,11 @@
       "sha256": "4b0aae3186553a04651425c5b5a083f7bd65b5990d5e5a769a54d8158c6c410f"
     },
     {
+      "path": "packages/electron/tsconfig.json",
+      "bytes": 426,
+      "sha256": "ea2dba54c1be40666776f9836768ce667b31a864be13c94bea0715cc8e848056"
+    },
+    {
       "path": "packages/sdk/LICENSE",
       "bytes": 1074,
       "sha256": "1f6e869a3feff6b4eb07907afc89176562b1f4324389f163d9fd94f09864b44e"
