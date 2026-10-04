@@ -1,0 +1,69 @@
+{
+  "codeCommit": "8046c35",
+  "failedProducer": "bff701c7b",
+  "failedExit": 1,
+  "failure": "Cannot resolve entry module vitest.unit.config.ts. (no assertions executed)",
+  "successfulProducer": "b811d9484",
+  "successfulExit": 0,
+  "focusedTests": {
+    "total": 70,
+    "passed": 70,
+    "pending": 0,
+    "failed": 0,
+    "newSDKActualSourceModule": 19
+  },
+  "webTypes": "passed",
+  "sourceBytesIdentical": true,
+  "backendProtocolZeroDiff": true,
+  "nativeOwnerMounted": false,
+  "nativeSdkFetchInstalled": false,
+  "nativeComposerActionsMounted": false,
+  "proofScope": "Unit/read-only SDK seam + actual original runtime-fetch syntax-transpiled module priority; not original App bootstrap/editor/upload/native send/provider/phone/unknown UI restart acceptance. Setup failure preserved raw; raw reports not rewritten.",
+  "records": {
+    "sdk-fetch-1-commit.txt.gz": {
+      "bytes": 41,
+      "sha256": "f2bb7410d29020ecef031e6fcb837dc6fe41cd2429d6759e23e395356d34b4ac",
+      "rawSource": ".pi/oc-bridge-checks/sdk-fetch-1/commit.txt"
+    },
+    "sdk-fetch-1-tests.log.gz": {
+      "bytes": 1665,
+      "sha256": "277dc56699c9915f1c425be338eac71d8d1acadd4c90b8969b72e2c554bbdcac",
+      "rawSource": ".pi/oc-bridge-checks/sdk-fetch-1/tests.log"
+    },
+    "sdk-fetch-2-commit.txt.gz": {
+      "bytes": 41,
+      "sha256": "f2bb7410d29020ecef031e6fcb837dc6fe41cd2429d6759e23e395356d34b4ac",
+      "rawSource": ".pi/oc-bridge-checks/sdk-fetch-2/commit.txt"
+    },
+    "sdk-fetch-2-tests.log.gz": {
+      "bytes": 110,
+      "sha256": "34f88bb4ae5e1f9f781065ad80b5ff737a17aa42fb9b81acce3ea200014c37a2",
+      "rawSource": ".pi/oc-bridge-checks/sdk-fetch-2/tests.log"
+    },
+    "sdk-fetch-2-results.json.gz": {
+      "bytes": 33692,
+      "sha256": "74c10a971d11a2b24d24573e47f37ba8ad88f3993e2d25af333691050c555cb5",
+      "rawSource": ".pi/oc-bridge-checks/sdk-fetch-2/results.json"
+    },
+    "sdk-fetch-2-coverage-check.log.gz": {
+      "bytes": 135,
+      "sha256": "2f2d7ed2e872e463d1fd8f738c8c61a1125469ccad52a036272ecd4dfe57e523",
+      "rawSource": ".pi/oc-bridge-checks/sdk-fetch-2/coverage-check.log"
+    },
+    "sdk-fetch-2-web-types.log.gz": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "rawSource": ".pi/oc-bridge-checks/sdk-fetch-2/web-types.log"
+    },
+    "sdk-fetch-2-source-check.log.gz": {
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "rawSource": ".pi/oc-bridge-checks/sdk-fetch-2/source-check.log"
+    },
+    "sdk-fetch-2-backend-protocol.diff.gz": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "rawSource": ".pi/oc-bridge-checks/sdk-fetch-2/backend-protocol.diff"
+    }
+  }
+}
