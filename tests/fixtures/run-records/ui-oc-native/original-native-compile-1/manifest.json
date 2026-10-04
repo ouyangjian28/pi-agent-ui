@@ -1,0 +1,84 @@
+{
+  "producerTask": "bd21172b7",
+  "exitCode": 0,
+  "codeCommit": "ae5a3a7a8b543a0b115ea0a034aced25830c8547",
+  "compiledOriginalApp": true,
+  "compileAudit": {
+    "compiledOriginalApp": true,
+    "nativeOwnerMounted": false,
+    "nativeComposerActionsMounted": false,
+    "originalSourceModified": false,
+    "backendStarted": false,
+    "overlayTargets": [
+      "packages/ui/src/sync/message-ordering.ts",
+      "packages/ui/src/components/chat/ModelControls.tsx"
+    ],
+    "reactAliases": [
+      "react/jsx-runtime",
+      "react/jsx-dev-runtime",
+      "react/compiler-runtime",
+      "react-dom/client",
+      "react-dom",
+      "react"
+    ],
+    "reactPackageRootCount": 1,
+    "reactDomPackageRootCount": 1,
+    "proofScope": "Compiler/collection only. Not native-connected App or UI send proof."
+  },
+  "transformedModuleReports": [
+    "3151",
+    "1"
+  ],
+  "originalSnapshotFiles": 2952,
+  "originalSnapshotBytes": 26893497,
+  "backendProtocolDiffBase": "5197977b80e05c6326d8f8969043ea44e37f8c3e",
+  "backendProtocolDiff": "empty",
+  "scope": "Actual original desktop/mobile/mini-chat Vite build; two pre-compiler behavior overlays; original App/CSS bytes untouched. NOT Source tsc, browser proof, mounted owner/editor/actions or real UI send.",
+  "dependencies": "Existing original caches via three ignored links only; no install/lifecycle; isolated HOME/env-i; Node 24.18.0",
+  "browserTask": "b2075e888 pending separately; no premature browser pass",
+  "warnings": "Original dynamic-import/large-chunk warnings retained in full build.log",
+  "records": [
+    {
+      "name": "build.log",
+      "bytes": 236231,
+      "sha256": "3443d0b3972eaf104fb10a576f95b351f8ab6092eddfe91f6869811f462f64c3",
+      "gzipSha256": "a33ccdefcfb6c103c433d0a9249e5b54d758faf7a873ffab05dab059cea0d8b4"
+    },
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "9602bc22e98ab1de8dc8b1f11f5912d64a7925c6974396334d635a68f1383089",
+      "gzipSha256": "d19c4134e75f1ed3ad906389dd1a5d78a8ae5b5f51a4b97d8f450ef07dcf55f5"
+    },
+    {
+      "name": "source-before.json",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a"
+    },
+    {
+      "name": "source-after.json",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a"
+    },
+    {
+      "name": "backend-protocol.diff",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+    },
+    {
+      "name": "native-overlays.json",
+      "bytes": 612,
+      "sha256": "4ed80f76be442a848114f5cb0322805d77e74ae6b57f6341046e844d2a67faee",
+      "gzipSha256": "aadc08c1bed3f486d18977b87a861c9c2ceb8da6782a95675d8424208e77b53d"
+    },
+    {
+      "name": "producer-output.log",
+      "bytes": 165,
+      "sha256": "5c9cbb9913661dc60aa93964f63a5f3b73a0c7c08c1cc8252f60bd3d09f0b251",
+      "gzipSha256": "74216f1d9c1411747d6af9ff451adf051be4def6b97516c86f2e24da6e5a0bb9"
+    }
+  ]
+}
