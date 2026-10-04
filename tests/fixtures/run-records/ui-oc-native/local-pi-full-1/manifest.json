@@ -1,0 +1,83 @@
+{
+  "task": "be6edfc38",
+  "producerExitCode": 0,
+  "vitestExitCode": 0,
+  "codeCommit": "7dd448db6066dac2cd12559b7346459cd82d8f8d",
+  "actualPiVersion": "0.86.1",
+  "verification": {
+    "profile": "sdk",
+    "total": 2138,
+    "passed": 2114,
+    "existingOptIns": 24,
+    "sameOptInIdentities": true,
+    "targets": {
+      "tests/unit/web/native-pi-port.test.ts": 8,
+      "tests/unit/web/oc-read-projection.test.ts": 12,
+      "tests/unit/web/native-composer-actions.test.tsx": 10,
+      "tests/unit/web/oc-event-projection.test.ts": 10,
+      "tests/unit/web/oc-read-transport.test.ts": 8,
+      "tests/unit/web/native-message-ordering.test.ts": 3,
+      "tests/unit/attachment-store.test.ts": 13,
+      "tests/integration/prod-smoke.test.ts": 7,
+      "tests/unit/web/native-sdk-fetch.test.ts": 19
+    }
+  },
+  "localProviderRequestCount": 1,
+  "rootCauseBoundary": "Old empty-HOME/no model config failed; original spawnPi controlled missing-key reproduction and adding temporary local provider allows unchanged smoke plus full suite to pass. Does not retroactively expose original stderr or prove paid provider.",
+  "changedTestsAssertionsTimeoutPermanentConfigSkips": false,
+  "maxWorkers": 2,
+  "environment": "Empty temporary HOME/agentDir; allowlisted env; owned synthetic SSE provider; actual unchanged global CLI; Node loopback guard selfchecked, no extra blocked network attempts. Not OS sandbox.",
+  "priorFailureArchive": "ui-oc-native/sdk-full-failed-1 retained unchanged",
+  "sourceOriginalAppMounted": false,
+  "nativeSdkBootstrapMounted": false,
+  "nativeEditorSendMounted": false,
+  "paidProviderAcceptance": false,
+  "physicalPhoneAcceptance": false,
+  "scope": "All default tests and exact baseline opt-in identities plus nine targets verified twice; only synthetic-provider actual CLI event pump, not UI functional delivery. Source compile/browser/types proofs remain separate.",
+  "records": {
+    "commit.txt": {
+      "bytes": 41,
+      "sha256": "702e74b7f7eed88c39b6233e631655fe0417d938f8283f6b8e461ab0c9cafc02"
+    },
+    "tests.log": {
+      "bytes": 6188,
+      "sha256": "f872a5e149244b8718c79a2a2290b1420b2b430b0af808ccb964c20969387c98"
+    },
+    "results.json": {
+      "bytes": 950426,
+      "sha256": "dac9b5320ac5598a38c1cb5b4dfb53d0379b44a598b3f4c1eedb779f19c76a2f"
+    },
+    "profile.json": {
+      "bytes": 676,
+      "sha256": "a0d3b2e5ced539ab5d547c0e1ae09cc29f26c2526196398ebc67ce249755ebfb"
+    },
+    "provider-facts.json": {
+      "bytes": 286,
+      "sha256": "dc35faa62457bdee8011aca606cb275efad082609e8ea681c8f2da7ae16c7953"
+    },
+    "pi-version.log": {
+      "bytes": 7,
+      "sha256": "37275690d7caf85f14a9634bfea008fb8bc4fabd593c345316cb84d0a738d0b0"
+    },
+    "guard-selfcheck.log": {
+      "bytes": 48,
+      "sha256": "efe35a19ac5636495b448caf4c21bdf8fd3448449e710c2f0697ebfe21a67660"
+    },
+    "network-selfcheck.jsonl": {
+      "bytes": 34,
+      "sha256": "6ba6dded3fe921c4d5591e54181dc11eecec538d3e8933f7f261414f2f3777d8"
+    },
+    "exit.json": {
+      "bytes": 36,
+      "sha256": "70a5204b7076b92bb81ccc311740bfdde42b19af103e583600a2742074dbb14a"
+    },
+    "coverage-check.log": {
+      "bytes": 599,
+      "sha256": "a0c557b9ee1663fd72c0dd43ebbb78cf9e11c113f9704a67c53b185e7bb6f82d"
+    },
+    "parent-coverage-check.json": {
+      "bytes": 599,
+      "sha256": "a0c557b9ee1663fd72c0dd43ebbb78cf9e11c113f9704a67c53b185e7bb6f82d"
+    }
+  }
+}
