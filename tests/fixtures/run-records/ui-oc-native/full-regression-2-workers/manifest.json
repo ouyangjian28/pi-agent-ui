@@ -1,0 +1,69 @@
+{
+  "producerTask": "b2ce776f3",
+  "codeCommit": "0f1740f",
+  "exitCode": 0,
+  "fullDefaultTestSet": true,
+  "total": 2097,
+  "passed": 2073,
+  "existingOptIn": 24,
+  "maxWorkers": 2,
+  "changedPermanentConfigTimeoutsAssertionsSkips": false,
+  "targets": {
+    "prod-smoke.test.ts": 7,
+    "attachment-store.test.ts": 13,
+    "native-composer-actions.test.tsx": 10,
+    "native-pi-port.test.ts": 8,
+    "oc-read-projection.test.ts": 11
+  },
+  "webTypesNativeBuildSourceBytesBackendDiff": "passed",
+  "sourceSnapshotFiles": 2952,
+  "sourceSnapshotBytes": 26893497,
+  "backendProtocolDiffBase": "5197977b80e05c6326d8f8969043ea44e37f8c3e",
+  "unrestrictedFailure": "retained in full-regression-1; resource-pressure cause supported but not proven",
+  "originalAppMounted": false,
+  "paidProviderPhoneIndependentGates": "not proved",
+  "records": [
+    {
+      "name": "default.log.gz",
+      "originalBytes": 32128,
+      "originalSha256": "c6626a184c5637be6288c2029b74dc4ba053d49fc1e5a4ca0c2d27fbe8cb2527",
+      "packedSha256": "bd499371daa2e83ea65eb04c547544f63b31927c59366866bbc4a1c0ae4dd0d8"
+    },
+    {
+      "name": "default.json.gz",
+      "originalBytes": 930680,
+      "originalSha256": "018b05034f9a9c94c9ae56725de0b2ee888ee807a082b4be8eb438f29f631b8f",
+      "packedSha256": "b0b5def661e71f7f0a66624b1b38d3293e2a911637bd8be017ca225360fe5b4d"
+    },
+    {
+      "name": "coverage-check.log.gz",
+      "originalBytes": 136,
+      "originalSha256": "5e88849b697b0fc8117a2cab1ab3ce8a94c0691ded373e915e9b2df67f19aab3",
+      "packedSha256": "d9bb6767eb4d46a47732513c8528681b57c93d0c56dac8c7c92850980d31c9b7"
+    },
+    {
+      "name": "web-types.log.gz",
+      "originalBytes": 0,
+      "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "packedSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+    },
+    {
+      "name": "build.log.gz",
+      "originalBytes": 549,
+      "originalSha256": "c54acb2715a25744d849ce2978c930510e6eb7c2aaa2a073d62fbea32e028e66",
+      "packedSha256": "207eaf0607506bd111e8f6d11e4b8ec8f42271bb330302efbcbf206e66e888b4"
+    },
+    {
+      "name": "source-check.log.gz",
+      "originalBytes": 98,
+      "originalSha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "packedSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a"
+    },
+    {
+      "name": "backend-diff.log.gz",
+      "originalBytes": 0,
+      "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "packedSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+    }
+  ]
+}
