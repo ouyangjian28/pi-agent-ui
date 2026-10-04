@@ -1,0 +1,20 @@
+{
+  "task": "b6a907c0e",
+  "phase": "network guard selfcheck before child launch",
+  "childExecuted": false,
+  "reason": "Guard intentionally throws synchronously; producer wrongly used assert.rejects(fetch(...)) so expected denial escaped. Read log exact PI099 test blocked non-loopback host: example.invalid. This is diagnostic-producer failure, not application/provider proof.",
+  "retryTask": "b88ef5d69",
+  "retrySelfcheck": "assert.throws(() => fetch(...), /PI099 test blocked non-loopback host/)",
+  "noTestsChanged": true,
+  "noCredentialsImported": true,
+  "records": {
+    "diagnose-child.mjs": {
+      "bytes": 1494,
+      "sha256": "9bf2926bea068784c7e5e6bab52a70fc80fa03fdeb839be53f009f0b3039e699"
+    },
+    "diagnostic-guard-selfcheck.log": {
+      "bytes": 827,
+      "sha256": "98adcbcd57188c5decaa2cb0148b1d32ae0877c727522f0ed875ce4246dce576"
+    }
+  }
+}
