@@ -1,0 +1,53 @@
+{
+  "producerTask": "b7c16c35a",
+  "codeCommit": "0f1740f",
+  "exitCode": 1,
+  "success": false,
+  "total": 2097,
+  "passed": 2065,
+  "failedAssertions": 1,
+  "pending": 31,
+  "failedFiles": [
+    "tests/unit/attachment-store.test.ts",
+    "tests/integration/prod-smoke.test.ts"
+  ],
+  "causeNotYetDetermined": true,
+  "errors": [
+    "Test timed out in 5000ms.",
+    "timeout: main ready 审计行"
+  ],
+  "pendingBreakdown": "24 existing opt-in + 7 unexecuted actual-main assertions from failing setup; not 31 authorised skips",
+  "nativeTargets": {
+    "native-composer-actions.test.tsx": {
+      "status": "passed",
+      "assertions": 10
+    },
+    "native-pi-port.test.ts": {
+      "status": "passed",
+      "assertions": 8
+    },
+    "oc-read-projection.test.ts": {
+      "status": "passed",
+      "assertions": 11
+    }
+  },
+  "downstreamTypesBuildSourceCheck": "not executed: shell && stopped at default regression",
+  "unchangedFailedFilesBackendProtocolVs": "5197977b80e05c6326d8f8969043ea44e37f8c3e (git diff exit0)",
+  "isolatedReproductionTask": "bb4b975df",
+  "isolatedReproductionStatus": "pending",
+  "originalAppMounted": false,
+  "records": [
+    {
+      "name": "default.log.gz",
+      "originalBytes": 34686,
+      "originalSha256": "a1f00794447fb60d27ad0b83d2ef23a6508dced5224ae22904d287e1d60293cd",
+      "packedSha256": "66cb88773511f9998f4af4991270a30a579522db7171eb79b6c1710d71990e0c"
+    },
+    {
+      "name": "default.json.gz",
+      "originalBytes": 931819,
+      "originalSha256": "791da6b2482dc395e027953a9d43289b438dbb19bda1480868223ced635a3c99",
+      "packedSha256": "a41ee14b141f9050fc70821d1d2c4280654be4661b6ba3e2490d7edfc773b063"
+    }
+  ]
+}
