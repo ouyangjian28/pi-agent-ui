@@ -1,0 +1,68 @@
+{
+  "sourceCommit": "a9b945ee2242d68509804f69090d4a2facdeb56e",
+  "taskId": "b506660aa",
+  "exitCode": 0,
+  "targetFiles": {
+    "native-pi-port.test.ts": 8,
+    "oc-read-projection.test.ts": 12,
+    "native-composer-actions.test.tsx": 10,
+    "oc-event-projection.test.ts": 10,
+    "oc-read-transport.test.ts": 8,
+    "native-message-ordering.test.ts": 3
+  },
+  "tests": {
+    "total": 51,
+    "passed": 51,
+    "pending": 0
+  },
+  "sourceCheck": {
+    "verifiedFiles": 2952,
+    "bytes": 26893497,
+    "sourceBytesIdentical": true,
+    "backendStarted": false
+  },
+  "files": [
+    {
+      "name": "results.json",
+      "bytes": 24489,
+      "sha256": "f8f136eb76217ee1a8cabb587e693fe0272f4e640e1cefd9cb3ba03461799d8b",
+      "gzipSha256": "60a79185d7ee325e8a767b34635787b93c953d989211adffe75fbac5679573bc"
+    },
+    {
+      "name": "focused.log",
+      "bytes": 111,
+      "sha256": "d1a672ce3a7c68e33bb23fa3888e084f88595d953cfb4345c3677c2c51cd4d4e",
+      "gzipSha256": "aed6ccc8de8b81919fc8fb7c086eb6a7fb3a32f215a3104e1f97e459e1e4269f"
+    },
+    {
+      "name": "web-types.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+    },
+    {
+      "name": "build.log",
+      "bytes": 549,
+      "sha256": "c89a10206163705b2fb7a292d272858e9d92485254dcb48140fe092ed10c2e6b",
+      "gzipSha256": "f8b72c3820cecbfc9e5c50408dd7b0ad63e993594eb002ccdfc4274cc251a407"
+    },
+    {
+      "name": "source-check.json",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a"
+    },
+    {
+      "name": "backend-protocol.diff",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+    }
+  ],
+  "scope": "Native read/event/order substrate. web types and existing native entry build only. Not original App build or UI send acceptance.",
+  "limitations": [
+    "Full default suite at this new commit not run",
+    "Original App/SDK bootstrap/composer hooks not mounted",
+    "No provider/physical-phone/unknown-intent UI-restart proof"
+  ]
+}
