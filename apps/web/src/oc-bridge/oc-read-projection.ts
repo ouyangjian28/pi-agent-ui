@@ -7,7 +7,7 @@ const DISPLAY_DEFAULT_PROVIDER = "pi-default";
 export const DISPLAY_DEFAULT_MODEL = `${DISPLAY_DEFAULT_PROVIDER}/default`;
 export function ocSession(row: SessionSummaryDTO, directory: string) {
   return { id: row.file, slug: row.file, projectID: "pi-native", directory, title: row.title.text,
-    version: "pi-native", time: { created: row.lastActiveMs ?? undefined, updated: row.lastActiveMs ?? undefined },
+    version: "pi-native", time: { updated: row.lastActiveMs ?? undefined },
     native: { file: row.file, sessionId: row.sessionId, titleTruncated: row.title.truncated, listReliability: row.listReliability, hasRecoveryNotice: row.hasRecoveryNotice },
   };
 }
@@ -42,7 +42,7 @@ function historyMessage(event: Extract<HistoryEvent, { kind: "message" }>, file:
   return { info: { id, sessionID: file, role: event.role === "user" ? "user" : "assistant",
     time: { created: event.ts ?? undefined, ...(event.final ? { completed: event.ts ?? undefined } : {}) },
     agent: "pi", mode: "pi", model: { providerID: DISPLAY_DEFAULT_PROVIDER, modelID: "default" },
-    path: { cwd: "", root: "" }, tokens: {}, native: { role: event.role, final: event.final, entryId: event.entryId, truncated: event.textPreview?.truncated ?? false } },
+    path: { cwd: "", root: "" }, tokens: {}, native: { role: event.role, final: event.final, entryId: event.entryId, seq: event.seq as number | null, temporary: false, truncated: event.textPreview?.truncated ?? false } },
     parts: [{ id: `${id}-text`, sessionID: file, messageID: id, type: "text", text }],
   };
 }
@@ -62,13 +62,13 @@ export function ocMessages(events: readonly HistoryEvent[], liveEvents: readonly
     if (event.kind === "message-final") text = event.text;
   }
   const last = messages[messages.length - 1];
-  if ((text || thinking) && !(last?.info.role === "assistant" && last.info.native.final && last.parts[0]?.text === text)) {
+  if ((text || thinking) && !(last?.info.native.role === "assistant" && last.info.native.final && last.parts[0]?.text === text)) {
     const id = `pi-live-${liveIntent ?? "unattributed"}-assistant`;
     const parts = [{ id: `${id}-text`, sessionID: file, messageID: id, type: "text", text }];
     if (thinking) parts.unshift({ id: `${id}-thinking`, sessionID: file, messageID: id, type: "reasoning", text: thinking });
     messages.push({ info: { id, sessionID: file, role: "assistant", time: { created: undefined }, agent: "pi", mode: "pi",
       model: { providerID: DISPLAY_DEFAULT_PROVIDER, modelID: "default" }, path: { cwd: "", root: "" }, tokens: {},
-      native: { role: "assistant", final: false, entryId: "", truncated: false } }, parts });
+      native: { role: "assistant", final: false, entryId: "", seq: null, temporary: true, truncated: false } }, parts });
   }
   return messages;
 }
@@ -102,7 +102,7 @@ export function ocReadResponse(pathname: string, method: string, snapshot: Nativ
   if (path === "/api/session/status") {
     const result: Record<string, unknown> = {};
     const detail = snapshot.detail;
-    if (detail.file && detail.status) result[detail.file] = { type: detail.status.turn.state === "idle" ? "idle" : "busy" };
+    if (detail.file && detail.status && detail.status.turn.state !== "closed") result[detail.file] = { type: detail.status.turn.state === "idle" ? "idle" : "busy" };
     return json(result);
   }
   if (directory === null) return unavailable("pi 授权目录尚未确认。", 503);

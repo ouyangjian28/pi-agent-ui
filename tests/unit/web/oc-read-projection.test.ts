@@ -78,6 +78,12 @@ describe("OC display projection is not a second backend fact/write authority", (
     const result = ocMessages([message("assistant", "old reply", 1), message("user", "new question", 2)], live, "a.jsonl");
     expect(result).toHaveLength(2); expect(result.at(-1)?.info.role).toBe("user");
   });
+  it("last activity is not a fabricated creation date, and tool-final cannot retire native assistant live bytes", async () => {
+    const f = facts(); const changed = { ...f, list: { ...f.list, sessions: [{ sessionId: null, file: "a.jsonl", title: { text: "actual", truncated: false }, lastActiveMs: 123, entryCount: 1, sizeBytes: 1, hasRecoveryNotice: false, listReliability: "full" as const }] } };
+    expect(await ocReadResponse("/api/session", "GET", changed).json()).toEqual([expect.objectContaining({ time: { updated: 123 } })]);
+    const rows = ocMessages([message("toolResult", "answer")], [{ kind: "message-final", role: "assistant", text: "工具结果\nanswer" }], "a.jsonl");
+    expect(rows).toHaveLength(2); expect(rows[1]!.info.native.temporary).toBe(true);
+  });
   it("model discovery and an authorised landing directory do not prove provider auth, OS home or runtime cwd", async () => {
     expect(await ocReadResponse("/api/provider", "GET", facts()).json()).not.toHaveProperty("connected");
     expect(await ocReadResponse("/api/path", "GET", facts()).json()).toMatchObject({ nativeExecutionDirectoryKnown: false });
