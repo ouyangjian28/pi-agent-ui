@@ -1,14 +1,32 @@
 // Actual original App over labelled read-only synthetic data; no backend engine.
 import http from 'node:http';
 import { readFile, mkdir, writeFile, access } from 'node:fs/promises';
-import { constants } from 'node:fs';
+import { constants, existsSync } from 'node:fs';
 import { resolve, sep, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { previewGet, previewEventPaths } from './ui-oc-preview-data.mjs';
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const dist = resolve(root, 'vendor/openchamber-frontend/packages/web/dist');
-const output = resolve(root, '.pi/ui-oc-source/probe-' + Date.now());
+function option(name) {
+  const matches = process.argv.slice(2).flatMap((value, index) => value === name ? [index + 2] : []);
+  if (matches.length > 1) throw new Error('Duplicate probe option: ' + name);
+  if (!matches.length) return undefined;
+  const value = process.argv[matches[0] + 1];
+  if (!value || value.startsWith('--')) throw new Error('Missing probe option value: ' + name);
+  return value;
+}
+const candidateDist = option('--dist');
+const candidateOutput = option('--output');
+const candidateRoot = resolve(root, '.pi/oc-bridge-checks') + sep;
+const dist = resolve(candidateDist ?? resolve(root, 'vendor/openchamber-frontend/packages/web/dist'));
+const output = resolve(candidateOutput ?? resolve(root, '.pi/ui-oc-source/probe-' + Date.now()));
+if ((candidateDist && !dist.startsWith(candidateRoot)) || (candidateOutput && !output.startsWith(candidateRoot))) throw new Error('Candidate probe paths must stay below ignored .pi/oc-bridge-checks');
+let compileAudit = null;
+if (candidateDist) {
+  compileAudit = JSON.parse(await readFile(resolve(dist, 'native-overlays.json'), 'utf8'));
+  if (compileAudit.compiledOriginalApp !== true || compileAudit.nativeOwnerMounted !== false || compileAudit.nativeComposerActionsMounted !== false || compileAudit.backendStarted !== false || compileAudit.originalSourceModified !== false || compileAudit.reactPackageRootCount !== 1 || compileAudit.reactDomPackageRootCount !== 1) throw new Error('Candidate probe needs exact unconnected original-App compile audit');
+}
+if (existsSync(output)) throw new Error('Refuse overwrite of original-App browser evidence');
 await mkdir(output, { recursive: true });
 const requests = [], errors = [], blocked = [];
 const mime = {'.html':'text/html', '.js':'text/javascript', '.css':'text/css', '.svg':'image/svg+xml', '.png':'image/png', '.woff2':'font/woff2', '.json':'application/json'};
@@ -78,7 +96,7 @@ try {
   if (refused.status !== 501) throw new Error('Preview must not accept backend writes');
   await phone.screenshot({path:resolve(output, 'phone.png'), fullPage:false});
   const phoneBody = await phone.locator('body').innerText();
-  await writeFile(resolve(output, 'diagnostic.json'), JSON.stringify({previewOnly:true, backendConnected:false, fixtureReady, settingsDialogVisible:true, backendWriteRefused:refused.status, phoneNoHorizontalOverflow, phoneIdentity:'fresh iPhone UA/touch context; not physical device/keyboard', body, settingsBody, phoneBody, controls, requests, errors, blocked}, null, 2)+'\n');
+  await writeFile(resolve(output, 'diagnostic.json'), JSON.stringify({previewOnly:true, backendConnected:false, compileAudit, nativeOwnerMounted:false, nativeComposerActionsMounted:false, fixtureReady, settingsDialogVisible:true, backendWriteRefused:refused.status, phoneNoHorizontalOverflow, phoneIdentity:'fresh iPhone UA/touch context; not physical device/keyboard', body, settingsBody, phoneBody, controls, requests, errors, blocked}, null, 2)+'\n');
   console.log(JSON.stringify({output, controls:controls.length, pageErrors:errors.length, backendStarted:false}));
 } finally {
   if (browser) await browser.close();
