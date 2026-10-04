@@ -1,0 +1,36 @@
+{
+  "producerTask": "bb4b975df",
+  "codeCommit": "0f1740f",
+  "passed": 20,
+  "skipped": 0,
+  "files": {
+    "attachment-store.test.ts": 13,
+    "prod-smoke.test.ts": 7
+  },
+  "timeouts": "unchanged (5s budget test, 10s actual-main readiness)",
+  "actualMain": "temporary roots/fake pi/fake fixture token, not production deployment or real provider",
+  "conclusion": "isolated tests pass; does NOT discharge failed complete default regression or prove resource-pressure cause",
+  "nextExperiment": {
+    "task": "b2ce776f3",
+    "status": "pending",
+    "fullDefaultSet": true,
+    "maxWorkers": 2,
+    "changedAssertionsTimeoutsSkips": false,
+    "permanentConfigChange": false
+  },
+  "originalAppMounted": false,
+  "records": [
+    {
+      "name": "focused.log.gz",
+      "originalBytes": 6704,
+      "originalSha256": "72141ca1bafd09a6ea5937a48905a44d0189c84833ee9f88396fdaec8d5a31a6",
+      "packedSha256": "21512a7b145e08c776213e5b416e0bcd45b21d21a7f29370b5b35482ff7b1942"
+    },
+    {
+      "name": "results.json.gz",
+      "originalBytes": 8747,
+      "originalSha256": "487d248766697771819e4fbbe13f6a928c4eb0cbef2e35e2f4883aec1e56251a",
+      "packedSha256": "0035201a7754391eaa6670f923c1508125f788b7208e40fdb575d97053b9ac51"
+    }
+  ]
+}
