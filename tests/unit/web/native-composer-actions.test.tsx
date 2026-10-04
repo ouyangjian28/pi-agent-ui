@@ -3,7 +3,8 @@ import React from "react";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { transformSync } from "esbuild";
+import { resolve } from "node:path";
+import ts from "typescript";
 import { NativePiPort } from "../../../apps/web/src/oc-bridge/native-pi-port";
 import { activeEditor, nativeComposerActions, supportedThinking } from "../../../apps/web/src/oc-bridge/native-composer-actions";
 import { NativeModelControlsScope, useNativeModelControls } from "../../../apps/web/src/oc-bridge/native-model-controls";
@@ -79,6 +80,19 @@ describe("original controls bind only explicit actions to the native owner", () 
     r.sockets[1]!.receive({ t: "write-ack", requestId: frame.requestId, file: frame.file, outcome: { kind: "launched", intentId: "fixture-intent", commandId: 1 } });
     expect((await pending).status).toBe("launched"); expect(activeEditor(r.port)?.text).toBe("second");
   });
+  it("existing-session controls resolve the owner id and send actual next-prompt parameters", async () => {
+    const r = rig(); const id = r.port.openSession("existing.jsonl")!;
+    const actions = nativeComposerActions(r.port, id);
+    expect(activeEditor(r.port)).toMatchObject({ id, file: "existing.jsonl", isNew: false });
+    expect(actions.chooseModelAndThinking("fixture", "high", "high")).toBe(true);
+    expect(actions.edit("next turn")).toBe(true);
+    const pending = actions.send(); const frame = r.sockets[1]!.sent.find((f) => f.t === "prompt")!;
+    expect(frame).toMatchObject({ file: "existing.jsonl", text: "next turn", model: "fixture/high", thinkingLevel: "high" });
+    expect(activeEditor(r.port)?.text).toBe("next turn");
+    r.sockets[1]!.receive({ t: "write-ack", requestId: frame.requestId, file: frame.file, outcome: { kind: "launched", intentId: "existing-intent", commandId: 2 } });
+    expect((await pending).status).toBe("launched");
+    expect(activeEditor(r.port)).toMatchObject({ id, file: "existing.jsonl", text: "", modelChoice: "fixture/high", thinkingLevel: "high" });
+  });
   it("unknown after reconnect never auto-retries through reused user controls", async () => {
     const r = rig(); r.actions.edit("keep"); const pending = r.actions.send(); r.port.reconnect(); r.sockets.forEach((s) => { if (s.readyState === 0) s.welcome(); });
     expect((await pending).status).toBe("unknown"); expect(await r.actions.send()).toMatchObject({ status: "local" });
@@ -86,14 +100,16 @@ describe("original controls bind only explicit actions to the native owner", () 
   });
 });
 describe("immutable original ModelControls build overlay", () => {
-  const source = readFileSync(new URL("../../../vendor/openchamber-frontend/packages/ui/src/components/chat/ModelControls.tsx", import.meta.url), "utf8");
+  const sourcePath = resolve("vendor/openchamber-frontend/packages/ui/src/components/chat/ModelControls.tsx");
+  const source = readFileSync(sourcePath, "utf8");
   it("transforms the literal original component, keeps menu markup, and parses as TSX", () => {
     const result = nativeModelControlsTransform(source);
     expect(result).toContain("nativeModelControls?.selection ?? originalSelection");
     expect(result).toContain("[nativeModelControls, commitVariantSelectionForModel");
     for (const className of ["rounded-xl border border-border/40 bg-sidebar/30 px-2 py-1.5", "typography-meta text-foreground font-medium"]) expect(result).toContain(className);
-    expect(() => transformSync(result, { loader: "tsx", format: "esm" })).not.toThrow();
-    expect(readFileSync(new URL("../../../vendor/openchamber-frontend/packages/ui/src/components/chat/ModelControls.tsx", import.meta.url), "utf8")).toBe(source);
+    const parsed = ts.transpileModule(result, { fileName: "ModelControls.tsx", reportDiagnostics: true, compilerOptions: { jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } });
+    expect(parsed.diagnostics?.filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error) ?? []).toEqual([]);
+    expect(readFileSync(sourcePath, "utf8")).toBe(source);
   });
   it("source drift, duplicate anchors and repeated transformation reject before a partial build", () => {
     expect(() => nativeModelControlsTransform(source.replace("const handleMobileModelApply =", "const renamed ="))).toThrow("anchor missing/ambiguous");

@@ -9,7 +9,11 @@ import type { NativePiPort } from "./native-pi-port";
 export function activeEditor(port: NativePiPort): EditorSlot | null {
   const state = port.getSnapshot().conversation;
   if (state.view.kind === "draft") return state.drafts.get(state.view.id) ?? null;
-  if (state.view.kind === "session") return state.sessions.get(state.view.file) ?? null;
+  if (state.view.kind === "session") {
+    // Native session slots are keyed by owner id, not transport filename.
+    // Resolve the page's file through owner facts without duplicating id rules.
+    for (const slot of state.sessions.values()) if (slot.file === state.view.file) return slot;
+  }
   return null;
 }
 export function supportedThinking(port: NativePiPort, slot: EditorSlot): readonly ThinkingLevel[] | undefined {
