@@ -45,6 +45,15 @@ const nativeOverlay = {
     return { code, map: null };
   },
   generateBundle() {
+    const moduleIds = [...this.getModuleIds()].map(id => id.replace(/^\0/, '').split('?')[0]);
+    const packageRoots = name => [...new Set(moduleIds.flatMap(id => {
+      const marker = '/node_modules/' + name + '/';
+      const index = id.lastIndexOf(marker);
+      return index < 0 ? [] : [id.slice(0, index + marker.length - 1)];
+    }))];
+    const reactRoots = packageRoots('react');
+    const reactDomRoots = packageRoots('react-dom');
+    if (reactRoots.length !== 1 || reactDomRoots.length !== 1) throw new Error('Original/native App must collect exactly one React and ReactDOM package root');
     for (const target of targets.keys()) {
       if (!transformed.has(target)) throw new Error('Original App did not collect native-overlay target: ' + path.relative(snapshot, target));
     }
@@ -56,6 +65,8 @@ const nativeOverlay = {
       backendStarted: false,
       overlayTargets: [...transformed.keys()].map(file => path.relative(snapshot, file)),
       reactAliases: reactSpecifiers,
+      reactPackageRootCount: reactRoots.length,
+      reactDomPackageRootCount: reactDomRoots.length,
       proofScope: 'Compiler/collection only. Not native-connected App or UI send proof.',
     }, null, 2) + '\n' });
   },
