@@ -1,0 +1,70 @@
+{
+  "codeCommit": "50198761c429ed2abea5336ef8679c2ac9722878",
+  "producerTask": "b3ddb6d44",
+  "producerExitCode": 1,
+  "producerFailure": "Verification used nonexistent attachment-budget.test.ts / actual-main.test.ts names. Original producer remains failed; raw report was not changed.",
+  "vitestExitCode": 0,
+  "vitestExitEvidence": "set -e producer reached the subsequent Node verifier; successful original JSON with all suites passed",
+  "verificationCommit": "ef0fbeb03245682db6abdcedfd3f9d48e5c7a44d",
+  "verificationExitCode": 0,
+  "verification": {
+    "total": 2119,
+    "passed": 2095,
+    "existingOptIns": 24,
+    "sameOptInIdentities": true,
+    "targets": {
+      "tests/unit/web/native-pi-port.test.ts": 8,
+      "tests/unit/web/oc-read-projection.test.ts": 12,
+      "tests/unit/web/native-composer-actions.test.tsx": 10,
+      "tests/unit/web/oc-event-projection.test.ts": 10,
+      "tests/unit/web/oc-read-transport.test.ts": 8,
+      "tests/unit/web/native-message-ordering.test.ts": 3,
+      "tests/unit/attachment-store.test.ts": 13,
+      "tests/integration/prod-smoke.test.ts": 7
+    }
+  },
+  "maxWorkers": 2,
+  "changedPermanentConfigTimeoutAssertionsSkips": false,
+  "selfchecks": "Seven invalid in-memory report copies rejected; originals unchanged",
+  "baselineOptInIdentities": "Byte-verified prior default.json.gz in full-regression-2-workers",
+  "originalAppMounted": false,
+  "scope": "Full default tests only. CLI workers=2. Prior unrestricted failure retained, no resource root-cause claim; no original App/send/provider/phone/unknown-UI-restart proof.",
+  "records": [
+    {
+      "name": "default.log",
+      "bytes": 6053,
+      "sha256": "64cda176989180d676c83a0bc1d152111ae6dafb9ceb3772b75fca1cb5eeea01",
+      "gzipSha256": "1e91f2f68ebb75b7d06284b530b7f1eb724f82189fe27d2fdc45fe2c7c97994f"
+    },
+    {
+      "name": "results.json",
+      "bytes": 941189,
+      "sha256": "76c1f71c268a6e884c2b4ae1e5b62b826f8596a1df44cf3a96b59866458b0528",
+      "gzipSha256": "c6d7e51d31d15f169fa76e934beb731cf80d3fc5c3dd98f0d93f67e826556418"
+    },
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "2676a5ed1c73758c8056834d7ecfe68f8ded3182bf4f5158d46f809384491d28",
+      "gzipSha256": "a1e6aede846dca4eee68508f8ed99f585a326553d80c44480cb9e97d71f105db"
+    },
+    {
+      "name": "producer-output.log",
+      "bytes": 1210,
+      "sha256": "7fd149d0a8b7cead25c9931c7b135d27e1439a34232f9fcda6643b5564d33fa0",
+      "gzipSha256": "c9a07817b15dc8532c4ea20b5c77048177a33f0ed6ff23ef55ed93d585325714"
+    },
+    {
+      "name": "coverage-check.json",
+      "bytes": 528,
+      "sha256": "39a8ee26922654bd23ac5f1b556f398ade3ab5b6c5b16cb7d96fbed48b89f15b",
+      "gzipSha256": "4d430c3159aef2c0c763c316eea0ec960823074541d145ece8ae42b0a6ba3afd"
+    },
+    {
+      "name": "verifier-selfchecks.log",
+      "bytes": 549,
+      "sha256": "35ed0ac65d79c12d5f2adb680a076509b79a86888b4df6d2404fbe9667d172de",
+      "gzipSha256": "47242071879523f58e05e2c979e384e117298517cd68dbd98cd500a34174c5b0"
+    }
+  ]
+}
