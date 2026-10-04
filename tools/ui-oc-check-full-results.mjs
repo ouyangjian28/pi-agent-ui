@@ -26,31 +26,36 @@ function skipIdentities(report) {
     .filter(test => test.status !== 'passed')
     .map(test => JSON.stringify([pathOf(suite), test.fullName, test.status]))).sort();
 }
-export function verifyFullResults(report, baseline) {
+export function verifyFullResults(report, baseline, profile = 'event') {
+  assert.ok(profile === 'event' || profile === 'sdk', 'Unknown fixed evidence profile');
+  const total = profile === 'sdk' ? 2138 : 2119;
+  const passed = total - 24;
+  const targets = new Map(TARGETS);
+  if (profile === 'sdk') targets.set('tests/unit/web/native-sdk-fetch.test.ts', 19);
   assert.equal(report.success, true, 'Whole report not successful');
-  assert.equal(report.numTotalTests, 2119, 'Unexpected total count');
-  assert.equal(report.numPassedTests, 2095, 'Unexpected passed count');
+  assert.equal(report.numTotalTests, total, 'Unexpected total count');
+  assert.equal(report.numPassedTests, passed, 'Unexpected passed count');
   assert.equal(report.numPendingTests, 24, 'Unexpected opt-in count');
   assert.equal(report.numFailedTests, 0, 'Failed assertions');
   assert.equal(report.numFailedTestSuites, 0, 'Failed suites/setup');
   assert.equal(report.numPassedTestSuites, report.numTotalTestSuites, 'Incomplete suite execution');
-  assert.equal(report.testResults.reduce((n, s) => n + s.assertionResults.length, 0), 2119, 'Assertion rows incomplete');
+  assert.equal(report.testResults.reduce((n, s) => n + s.assertionResults.length, 0), total, 'Assertion rows incomplete');
   assert.equal(baseline.success, true, 'Invalid baseline');
   assert.equal(baseline.numTotalTests, 2097, 'Unexpected baseline set');
   assert.equal(baseline.numPendingTests, 24, 'Unexpected baseline opt-ins');
   assert.ok(report.testResults.every(suite => suite.status === 'passed'), 'Failed/setup-only file');
   assert.deepEqual(skipIdentities(report), skipIdentities(baseline), 'Changed opt-in identities, not only count');
-  for (const [name, count] of TARGETS) {
+  for (const [name, count] of targets) {
     const suites = report.testResults.filter(suite => pathOf(suite) === name);
     assert.equal(suites.length, 1, `Missing/ambiguous target: ${name}`);
     assert.equal(suites[0].assertionResults.length, count, `Target assertion count: ${name}`);
     assert.ok(suites[0].assertionResults.every(test => test.status === 'passed'), `Unexecuted/failed target: ${name}`);
   }
-  return { total: 2119, passed: 2095, existingOptIns: 24, sameOptInIdentities: true, targets: Object.fromEntries(TARGETS) };
+  return { profile, total, passed, existingOptIns: 24, sameOptInIdentities: true, targets: Object.fromEntries(targets) };
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  assert.equal(process.argv.length, 4, 'Usage: node tools/ui-oc-check-full-results.mjs RESULTS_JSON BASELINE_JSON_GZ');
+  assert.ok(process.argv.length === 4 || process.argv.length === 5, 'Usage: node tools/ui-oc-check-full-results.mjs RESULTS_JSON BASELINE_JSON_GZ [event|sdk]');
   const report = JSON.parse(readFileSync(process.argv[2], 'utf8'));
   const baseline = JSON.parse(gunzipSync(readFileSync(process.argv[3])).toString('utf8'));
-  console.log(JSON.stringify(verifyFullResults(report, baseline), null, 2));
+  console.log(JSON.stringify(verifyFullResults(report, baseline, process.argv[4]), null, 2));
 }
