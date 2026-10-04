@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import original from '../vendor/openchamber-frontend/packages/web/vite.config.ts';
 import { nativeModelControlsTransform } from './ui-oc-native-model-transform.mjs';
 import { nativeMessageOrderTransform } from './ui-oc-native-order-transform.mjs';
+import { nativeRuntimeFetchTransform } from './ui-oc-native-fetch-transform.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const snapshot = path.join(root, 'vendor/openchamber-frontend');
@@ -31,6 +32,7 @@ const reactAliases = reactSpecifiers.map(specifier => ({
 const targets = new Map([
   [path.join(snapshot, 'packages/ui/src/components/chat/ModelControls.tsx'), nativeModelControlsTransform],
   [path.join(snapshot, 'packages/ui/src/sync/message-ordering.ts'), nativeMessageOrderTransform],
+  [path.join(snapshot, 'packages/ui/src/lib/runtime-fetch.ts'), nativeRuntimeFetchTransform],
 ]);
 const transformed = new Map();
 const nativeOverlay = {
@@ -61,6 +63,8 @@ const nativeOverlay = {
       compiledOriginalApp: true,
       nativeOwnerMounted: false,
       nativeComposerActionsMounted: false,
+      nativeSdkFetchOverlayCompiled: true,
+      nativeSdkFetchInstalled: false,
       originalSourceModified: false,
       backendStarted: false,
       overlayTargets: [...transformed.keys()].map(file => path.relative(snapshot, file)),
@@ -83,6 +87,7 @@ export default {
       ...reactAliases,
       { find: '@pi-native/model-controls', replacement: path.join(root, 'apps/web/src/oc-bridge/native-model-controls.tsx') },
       { find: '@pi-native/message-ordering', replacement: path.join(root, 'apps/web/src/oc-bridge/native-message-ordering.ts') },
+      { find: '@pi-native/sdk-fetch', replacement: path.join(root, 'apps/web/src/oc-bridge/native-sdk-fetch.ts') },
       ...original.resolve.alias,
     ],
     dedupe: [...new Set([...(original.resolve.dedupe ?? []), 'react', 'react-dom'])],
