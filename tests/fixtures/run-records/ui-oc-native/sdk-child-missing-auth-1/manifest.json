@@ -1,0 +1,32 @@
+{
+  "task": "b88ef5d69",
+  "diagnosticProducerExitCode": 0,
+  "actualOriginalSpawnPiExitCode": 1,
+  "sameOriginalPrompt": true,
+  "emptyOwnedHomeAllowlistedEnv": true,
+  "guardSelfcheck": "assert.throws exact synchronous non-loopback denial passed before actual child",
+  "missingKeyObserved": true,
+  "providerIdentityKnown": false,
+  "safeRegexLimitation": "Matched No API key found for the; final the is not a provider name. Only missing-key fact is supported. No arbitrary child output/keys logged.",
+  "applicationRegressionExcluded": false,
+  "wholeDefaultGreen": false,
+  "claimBoundary": "Reproduces pre-provider missing-key failure using original spawnPi/empty HOME. Original full-run stderr was not surfaced; controlled reproduction is not a retroactive stderr transcript or independent UI/provider acceptance.",
+  "records": {
+    "diagnose-child.mjs": {
+      "bytes": 1494,
+      "sha256": "9bf2926bea068784c7e5e6bab52a70fc80fa03fdeb839be53f009f0b3039e699"
+    },
+    "child-diagnostic.json": {
+      "bytes": 413,
+      "sha256": "9231ec24a43290b15ca9da18db656a92e96e31f910d4d8d31fed6d1f4a283f83"
+    },
+    "child-diagnostic.log": {
+      "bytes": 536,
+      "sha256": "fc322026c83cd98dd4bf8bf6197d212eea7374bd06345491fe4cd0b7b4256847"
+    },
+    "diagnostic-guard-selfcheck-2.log": {
+      "bytes": 80,
+      "sha256": "e1c76406ec73d8da842ce15fe92cbe99f10d02e92f13edc2f9face2870462e29"
+    }
+  }
+}
