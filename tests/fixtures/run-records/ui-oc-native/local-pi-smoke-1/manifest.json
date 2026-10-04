@@ -1,0 +1,59 @@
+{
+  "task": "b62f85d3e",
+  "exitCode": 0,
+  "total": 1,
+  "passed": 1,
+  "pending": 0,
+  "actualPiVersion": "0.86.1",
+  "codeCommit": "c8b5c6b60adab83920bcb7c2954f940434dd0867",
+  "byteIdenticalToolCopyFirstRun": true,
+  "preservedFileIdentity": "Original tool __file__ retained only to resolve actual repo root; no source body modification",
+  "testUnchanged": "tests/integration/pi-child.smoke.test.ts",
+  "localProviderRequestCount": 1,
+  "productionAuthImported": false,
+  "paidProviderAcceptance": false,
+  "fullDefaultAcceptance": false,
+  "scope": "Original real CLI event pump with local synthetic provider/empty temporary HOME/agentDir/allowlisted env/Node loopback guard; not original App/native editor/send/user/phone acceptance. Old missing-auth/full red artifacts preserved.",
+  "records": {
+    "commit.txt": {
+      "bytes": 41,
+      "sha256": "2545604fc962a73d4c7b15979471074f1519c4166f1dd462ba6cb7b1e48faa03"
+    },
+    "tests.log": {
+      "bytes": 120,
+      "sha256": "86c25b816b09e952c9b2a711eba0988e2ee98932121c7c2b131bcd8a04ed25a1"
+    },
+    "results.json": {
+      "bytes": 998,
+      "sha256": "c00194a6757c0ccff4416dccaf6351e6400d52f9bb5830d3b47710a3f698d2e5"
+    },
+    "profile.json": {
+      "bytes": 766,
+      "sha256": "46429b3fd5ccd1a798bea3beb978c9086246c4892e6b908cc68bb647e9691d84"
+    },
+    "provider-facts.json": {
+      "bytes": 286,
+      "sha256": "dc35faa62457bdee8011aca606cb275efad082609e8ea681c8f2da7ae16c7953"
+    },
+    "pi-version.log": {
+      "bytes": 7,
+      "sha256": "37275690d7caf85f14a9634bfea008fb8bc4fabd593c345316cb84d0a738d0b0"
+    },
+    "guard-selfcheck.log": {
+      "bytes": 48,
+      "sha256": "efe35a19ac5636495b448caf4c21bdf8fd3448449e710c2f0697ebfe21a67660"
+    },
+    "network-selfcheck.jsonl": {
+      "bytes": 34,
+      "sha256": "6ba6dded3fe921c4d5591e54181dc11eecec538d3e8933f7f261414f2f3777d8"
+    },
+    "exit.json": {
+      "bytes": 37,
+      "sha256": "f3ca6c7f64b900cc929eb496f9f57a95220c733fb7abe4ba7177b41354b0b80b"
+    },
+    "copied-tool.py": {
+      "bytes": 8202,
+      "sha256": "081d15631de897467115515e7c88740e9fb3c00c73d585693afff1f4646db949"
+    }
+  }
+}
