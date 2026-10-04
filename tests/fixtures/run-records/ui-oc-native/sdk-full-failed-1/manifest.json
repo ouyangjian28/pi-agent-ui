@@ -1,0 +1,57 @@
+{
+  "producer": "bfe3fb900",
+  "producerExitCode": 1,
+  "codeCommit": "ad7c80dc27c522d32903c534a984d90a3dd48f51",
+  "total": 2138,
+  "passed": 2113,
+  "failed": 1,
+  "existingOptIns": 24,
+  "sameOptInIdentities": true,
+  "failedSuiteCounter": 2,
+  "failedFileCount": 1,
+  "failedAssertions": [
+    {
+      "file": "tests/integration/pi-child.smoke.test.ts",
+      "assertion": "pi 子进程事件泵（集成冒烟） spawn pi -p →stdout JSONL 事件流→退出",
+      "errors": [
+        "AssertionError: expected 1 to be +0 // Object.is equality\n    at /home/yyj/ai/repos/pi-agent-ui-oc-bridge/tests/integration/pi-child.smoke.test.ts:20:20\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///home/yyj/ai/repos/pi-agent-ui-hybrid/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+      ]
+    }
+  ],
+  "nineFocusedTargetsPassed": {
+    "tests/unit/web/native-pi-port.test.ts": 8,
+    "tests/unit/web/oc-read-projection.test.ts": 12,
+    "tests/unit/web/native-composer-actions.test.tsx": 10,
+    "tests/unit/web/oc-event-projection.test.ts": 10,
+    "tests/unit/web/oc-read-transport.test.ts": 8,
+    "tests/unit/web/native-message-ordering.test.ts": 3,
+    "tests/unit/web/native-sdk-fetch.test.ts": 19,
+    "tests/unit/attachment-store.test.ts": 13,
+    "tests/integration/prod-smoke.test.ts": 7
+  },
+  "envIsolation": "env-i; fresh temporary HOME; fixed Node PATH; maxWorkers2; no credential import",
+  "priorFullEventEnvironment": "b3ddb6d44 inherited HOME/env; unlike new isolated run; absence of prior provider request proof noted",
+  "rootCause": "Pending isolated original spawnPi diagnostic; no missing-auth root-cause claim yet",
+  "wholeDefaultPassed": false,
+  "didNotReachFullVerifier": true,
+  "changedTestsSkipsConfigTimeoutAssertions": false,
+  "scope": "Failed full default raw evidence retained, not a green result. SDK70 and synthetic three-overlay renderer remain separate bounded proofs.",
+  "records": {
+    "commit.txt": {
+      "bytes": 41,
+      "sha256": "0cd8850c0eb1a0e6f06e7acb262afdb46ef79b2d0d53f91efcb9b1baeff2bfed"
+    },
+    "default.log": {
+      "bytes": 5871,
+      "sha256": "bb2ab674e6762376d5a77b9a38b55228ceec02887dcd74f21ad7be83f0b8aeaa"
+    },
+    "results.json": {
+      "bytes": 950741,
+      "sha256": "bbd3c9b47023d8e86ebd49b5b4899d301cf13b4238e6d1e8d53903cbc07efeef"
+    },
+    "profile-self-check.log": {
+      "bytes": 442,
+      "sha256": "704da854a890e5088d5ea854011b6d97a82fa104efd1ff4fef2bab4e4f47b929"
+    }
+  }
+}
