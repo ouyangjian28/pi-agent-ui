@@ -1,0 +1,104 @@
+{
+  "producer": "b2348f7f2",
+  "exit": 0,
+  "codeCommit": "8046c35c6ec94559ce08b003bafdc016e789caaf",
+  "compile": {
+    "compiledOriginalApp": true,
+    "nativeOwnerMounted": false,
+    "nativeComposerActionsMounted": false,
+    "nativeSdkFetchOverlayCompiled": true,
+    "nativeSdkFetchInstalled": false,
+    "originalSourceModified": false,
+    "backendStarted": false,
+    "overlayTargets": [
+      "packages/ui/src/lib/runtime-fetch.ts",
+      "packages/ui/src/sync/message-ordering.ts",
+      "packages/ui/src/components/chat/ModelControls.tsx"
+    ],
+    "reactAliases": [
+      "react/jsx-runtime",
+      "react/jsx-dev-runtime",
+      "react/compiler-runtime",
+      "react-dom/client",
+      "react-dom",
+      "react"
+    ],
+    "reactPackageRootCount": 1,
+    "reactDomPackageRootCount": 1,
+    "proofScope": "Compiler/collection only. Not native-connected App or UI send proof."
+  },
+  "browser": {
+    "controls": 56,
+    "pageErrors": 0,
+    "phoneNoHorizontalOverflow": true,
+    "desktop": "1440x900",
+    "phone": "fresh iPhone UA/touch 390x844, not physical device",
+    "blockedDesktopExternalRequests": 6,
+    "allBackendWritesRefused": true,
+    "settingsSaveFailedPreserved": true,
+    "desktopScreenshotInitiallyShowsSessionLoading": true,
+    "laterDiagnosticBodyReportsSessionLoading": false
+  },
+  "sourceBytesIdentical": true,
+  "backendProtocolZeroDiff": true,
+  "proofScope": "Actual original App compile/render with three build-only overlays and synthetic loopback GET data. Native getter null/owner/SDK bootstrap/editor/upload/send NOT installed; no true provider, physical keyboard or unknown UI restart proof. Original warnings/raw screenshots retained.",
+  "records": {
+    "commit.txt.gz": {
+      "bytes": 41,
+      "sha256": "f2bb7410d29020ecef031e6fcb837dc6fe41cd2429d6759e23e395356d34b4ac",
+      "rawSource": ".pi/oc-bridge-checks/sdk-native-original-1/commit.txt"
+    },
+    "build.log.gz": {
+      "bytes": 232503,
+      "sha256": "8f55f9779043fdc6cb3b7a680728938d61eab19cd66383477aeca3c6fb4980c2",
+      "rawSource": ".pi/oc-bridge-checks/sdk-native-original-1/build.log"
+    },
+    "compile-check.log.gz": {
+      "bytes": 733,
+      "sha256": "5b2ef57249a760417ce34d1c14bd5861c67d0529aa2af9082d21126ca19cd246",
+      "rawSource": ".pi/oc-bridge-checks/sdk-native-original-1/compile-check.log"
+    },
+    "browser.log.gz": {
+      "bytes": 157,
+      "sha256": "eda287fc2e02dcb13915147af5d0919b9df1e2dddac32f37fcd5e1fd8b7df211",
+      "rawSource": ".pi/oc-bridge-checks/sdk-native-original-1/browser.log"
+    },
+    "browser-diagnostic.json.gz": {
+      "bytes": 53204,
+      "sha256": "3710ce85c4b36260ddcaf63a0384d5fe20e3b9667b0194bf634ed95685b8925d",
+      "rawSource": ".pi/oc-bridge-checks/sdk-native-original-1/browser/diagnostic.json"
+    },
+    "dist-native-overlays.json.gz": {
+      "bytes": 733,
+      "sha256": "5b2ef57249a760417ce34d1c14bd5861c67d0529aa2af9082d21126ca19cd246",
+      "rawSource": ".pi/oc-bridge-checks/sdk-native-original-1/dist/native-overlays.json"
+    },
+    "source-before.log.gz": {
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "rawSource": ".pi/oc-bridge-checks/sdk-native-original-1/source-before.log"
+    },
+    "source-after.log.gz": {
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "rawSource": ".pi/oc-bridge-checks/sdk-native-original-1/source-after.log"
+    },
+    "backend-protocol.diff.gz": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "rawSource": ".pi/oc-bridge-checks/sdk-native-original-1/backend-protocol.diff"
+    },
+    "desktop.png": {
+      "bytes": 65022,
+      "sha256": "d8bad20d502cbb3d24074ce030c02e5d731f7708dd05f3d14700f47ce2e0c3fb"
+    },
+    "settings.png": {
+      "bytes": 130099,
+      "sha256": "ffcaded37d25b7c05e245836787c9846924c6dc9e037fd5f397f20854671b699"
+    },
+    "phone.png": {
+      "bytes": 47772,
+      "sha256": "c3fa8182dab3e805b60d0705df4b4ab28dc1b2b2228afdfab874f7c8b61495f6"
+    }
+  }
+}
