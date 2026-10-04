@@ -1,0 +1,88 @@
+{
+  "producerTask": "b2075e888",
+  "exitCode": 0,
+  "codeCommit": "f642e1887f8a25c1b97b4b9c98cc896d3e75f03c",
+  "compiledFrom": "ae5a3a7 / original-native-compile-1",
+  "actualOriginalAppRender": true,
+  "syntheticReadOnlyFixture": true,
+  "nativeOwnerMounted": false,
+  "nativeComposerActionsMounted": false,
+  "backendConnected": false,
+  "fixtureReady": true,
+  "settingsDialogVisible": true,
+  "pageErrors": 0,
+  "controls": 54,
+  "desktopViewport": "1440x900",
+  "phoneViewport": "390x844",
+  "phoneIdentity": "fresh iPhone UA/touch context; not physical device/keyboard",
+  "phoneNoHorizontalOverflow": true,
+  "backendWriteRefused": 501,
+  "externalBlocked": 6,
+  "settingsSaveFailed": "Visible and retained: mock rejects ALL writes (including automatic settings PUT) with 501. Settings capability is NOT passed.",
+  "visualSelfcheck": "Actual original desktop/sidebar/hero/footer and fresh phone boot rendered. Original settings modal visible. Unconnected sample labels remain; no invented live/idle/owner/send acceptance.",
+  "originalSnapshotFiles": 2952,
+  "originalSnapshotBytes": 26893497,
+  "backendProtocolDiffBase": "5197977b80e05c6326d8f8969043ea44e37f8c3e",
+  "backendProtocolDiff": "empty",
+  "noProductionTokenProviderOrPhysicalPhone": true,
+  "scope": "Original App renderer with two pre-compiler native overlays, null native scope/fallback original controls. NOT native owner/SDK/input/upload/model/send integration; not Source tsc, actual provider, phone keyboard or independent acceptance.",
+  "records": [
+    {
+      "name": "probe.log",
+      "bytes": 159,
+      "sha256": "293f812bd4e3cb9c58c1d50c1f958519b82874e0bd7489fef0505453e60ae04e",
+      "gzipSha256": "effbddc6a2f96ab4e9e699fb623a1333b99c90e092ee9e2912c5fd94c3044eda"
+    },
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "0cedc040ec4be4c70323f8ef20560062756db2aba06f745b806a9e5f3feec591",
+      "gzipSha256": "4021426f1949852973368b2632149b65df72ec0a94ef45af8e01f44e74f4272e"
+    },
+    {
+      "name": "source-before.json",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a"
+    },
+    {
+      "name": "source-after.json",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a"
+    },
+    {
+      "name": "backend-protocol.diff",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+    },
+    {
+      "name": "diagnostic.json",
+      "bytes": 53042,
+      "sha256": "8b38712d7491403ba5051551fbe424a496cbb54136f58e3a954db199fc35f77b",
+      "gzipSha256": "7a0c999df7f41cd8e5f89536338ff4485ddb009c041ffe2afda53a0a7d7c41e7"
+    },
+    {
+      "name": "producer-output.log",
+      "bytes": 186,
+      "sha256": "d86e7077db8ff9eaddfbc629e5c8b1bec12396c3130a1b640b6377a53827d387",
+      "gzipSha256": "6a03b30f221917c9568fd07e9b62b88cca83e7244cf986cf14f95886e046f5de"
+    },
+    {
+      "name": "desktop.png",
+      "bytes": 65910,
+      "sha256": "5861acdb1346060f33a2ced24ccb48f149cfced48b6e461d951e9b0f81631fe9"
+    },
+    {
+      "name": "phone.png",
+      "bytes": 47772,
+      "sha256": "c3fa8182dab3e805b60d0705df4b4ab28dc1b2b2228afdfab874f7c8b61495f6"
+    },
+    {
+      "name": "settings.png",
+      "bytes": 130042,
+      "sha256": "db8e4c88c92d6dbf56efa2d55fcd21d3c930c324bf39528bf5ef37f8d8e20171"
+    }
+  ]
+}
