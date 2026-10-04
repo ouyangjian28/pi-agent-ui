@@ -1,0 +1,81 @@
+{
+  "sourceFixCommit": "0f1740f",
+  "falseCoverageTask": "bb135bff5",
+  "falseCoverage": "exit0 but only 19 old assertions; new TSX file excluded, NOT menu acceptance",
+  "failures": {
+    "2": "missing esbuild dependency; suite failed before assertions",
+    "3": "fixture URL transformed to non-file scheme; suite failed before assertions",
+    "4": "28 collected, 26 passed, 2 failed: session slots looked up by file instead of owner id"
+  },
+  "fix": "unit glob includes ts/tsx; existing TypeScript parser; explicit repository fixture path; resolve active session slot through owner facts without duplicating id rules",
+  "focusedResult": {
+    "files": {
+      "native-pi-port.test.ts": 8,
+      "oc-read-projection.test.ts": 11,
+      "native-composer-actions.test.tsx": 10
+    },
+    "passed": 29,
+    "skipped": 0
+  },
+  "fullRegressionTask": "b7c16c35a",
+  "fullRegressionStatus": "pending",
+  "boundary": "Original App/real original editor/provider/phone/unknown cross-restart not proved; no production token/OpenCode engine/native backend/protocol change",
+  "records": [
+    {
+      "source": "model-binding-1/focused.log",
+      "name": "omitted-jsx-tests.log.gz",
+      "originalBytes": 641,
+      "originalSha256": "eb2598ab3e56ed6f14a69e02ae20cca542eac055dbce4679c486641c7c18a414",
+      "packedSha256": "eae2d2f17ab05cb9d84398cefd4af889df2f9b39b8d96899a480c13071e0dda3"
+    },
+    {
+      "source": "model-binding-1/web-types.log",
+      "name": "original-web-types.log.gz",
+      "originalBytes": 0,
+      "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "packedSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+    },
+    {
+      "source": "model-binding-1/build.log",
+      "name": "original-native-build.log.gz",
+      "originalBytes": 549,
+      "originalSha256": "481af97b1c8db667e335b344ec9710fcecbaa6021fd98ecd50c4f023b6c71087",
+      "packedSha256": "a846a5c645ef6e6ec31b07313a64cdeaf15e8a2742df30f5c908db8fbdf40b2d"
+    },
+    {
+      "source": "model-binding-1/source-check.log",
+      "name": "original-source-check.log.gz",
+      "originalBytes": 98,
+      "originalSha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "packedSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a"
+    },
+    {
+      "source": "model-binding-2/results.json",
+      "name": "attempt-2.json.gz",
+      "originalBytes": 9761,
+      "originalSha256": "d09facfdb68f858ce8f3f27a385d3b41dcd0a1f72818b8f83ddb6a7e6ada625f",
+      "packedSha256": "8a3c3f94d448328ee9efb9eb1920794fc58df0ae643ebb281f47b7056c8f121e"
+    },
+    {
+      "source": "model-binding-3/results.json",
+      "name": "attempt-3.json.gz",
+      "originalBytes": 9677,
+      "originalSha256": "57a8f78595ff2ffeb3dc1c2e6aa4c86358e0aea10ef4d53677654160b3ece201",
+      "packedSha256": "b408fb101b9584c17bf0bca815fa1fc5576e41054776af1729d13a769082253a"
+    },
+    {
+      "source": "model-binding-4/results.json",
+      "name": "attempt-4.json.gz",
+      "originalBytes": 14217,
+      "originalSha256": "0d6ed1f24ec75540bd087d9b75dd689307388f4903c1c86247a5f6b85e19000e",
+      "packedSha256": "68ddd18025886ff9031a47107934eabae5ffddc0feba8d12a4e0ddb85162ed25"
+    },
+    {
+      "source": "model-binding-5/results.json",
+      "name": "attempt-5.json.gz",
+      "originalBytes": 14059,
+      "originalSha256": "757f47f7e4f10c16368f8c7048e23e5acf835c1512295052be291bc5845addf3",
+      "packedSha256": "cf6dea11c51e5e75054e94560a118aae59b24cfe64f0f5b8a2645be9a5184316"
+    }
+  ]
+}
