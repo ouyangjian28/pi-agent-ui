@@ -81,6 +81,8 @@ describe("S1 独立缺口复现：真实探针收到的已有 response-timeout �
     act(()=>Socket.all[1]!.receive({t:"events",subscriptionId:"sub-1",origin:"history",refSeq:3,events:[{seq:3,ts:null,generation:null,intentId:"i-1",kind}]}));
     expect(document.querySelector(".response-timeout-banner")).toBeNull();
     expect(document.querySelector(".conversation-header")?.textContent).not.toContain("响应超时");
+    expect(document.querySelector(".conversation-header")?.textContent).not.toContain("执行中");
+    expect(screen.queryByText("消息已受理，等待回复。")).toBeNull();
     if(kind === "verdict-unknown") expect(screen.getByRole("alert").textContent).toContain("结果未知或损坏");
   });
   it("新 enqueue 先于状态帧到达，不将旧超时贴给新轮", async () => {
