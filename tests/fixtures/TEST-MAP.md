@@ -1643,5 +1643,9 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 
 完整报告复核接口：`node tools/ui-oc-check-full-results.mjs RESULTS_JSON BASELINE_JSON_GZ [event|sdk]`，只读报告、不运行/修改测试、不落回原件；默认event保留固定2119/2095/24＋8真实目标；显式sdk固定2138/2114/24＋第9目标native-sdk-fetch.test.ts19（ad7c80d），未知档位/错总数拒绝，不按报告计数自动放宽。两档均核对整报+文件成功、断言总数、逐文件断言数与原opt-in完整身份。首跑用复制旧event及与真实SDK19合成的仅自检报告，7坏副本及错误档位拒绝、旧event仍过，严格日志在sdk-full-1/profile-self-check.log；合成报告绝不是新完整默认证明。裸node语法检查曾PATH缺失exit127（未执行验证），补环境常量后node --check0，不掩盖失败。SDK新完整默认exit1并保留sdk-full-failed-1，后续全仓绿门未过。基线为`run-records/ui-oc-native/full-regression-2-workers/default.json.gz`；本轮报告为`run-records/ui-oc-native/event-full-1/results.json.gz`（解压到忽略面副本再喂工具）。
 
+| NativeSurfaceHost认证/网络生命周期首跑（部分过，整体失败） | 36a43dc；bd3d3e78b exit2；5原件gzip/SHA归ui-oc-native/native-host-failed-1 | 9真实目标8/12/10/10/8/3/19/16/9=95全执行通过/零skip，随后web types TS2322 native-surface-host.ts:73:51：WebSocketFactory与DOM Socket的onopen参数宽度不相容；producer已停，source/hash/backend检查未执行，绝不当全部通过。只受控host/SDK/owner/HTTP/socket，未装原App Root/输入发送，也未用实际DOM Socket证明适配。16新例含延迟认证零owner/socket、失败/abort/redirect/origin改变、重复/关闭生命周期、捕获HTTP上传绕SDK门、captured native Socket与global旧Socket/SSE封闭；同owner显式reconnect保留草稿。原95报告/types错误字节保留，不改测试/config/types补洞假绿 |
+
+修复方式：内部browserSocketFactory显式适配DOM事件→既有WebSocketLike最小面，send/close绑定native this、open/error忽略Event参数、message只取data/close只取code，回调可解绑，不使用双cast掩盖TS2322。原16不改断言，另加1真实Node DOM风格WebSocket＋owned loopback HTTP/WS独立例，实际3连接/welcome/models消息及SDK auth gate/无prompt-resume-stop；仍不是真pi gateway/SourceRoot/付费provider/UI发送。待重查目标96（host17＋旧70＋原附件9）；完整默认旧2138仅此前基线，当前types/原字节/backend/编译/UI截图仍须分别证实。
+
 重放原生底座：`vitest run tests/unit/web/native-pi-port.test.ts tests/unit/web/oc-read-projection.test.ts tests/unit/web/native-composer-actions.test.tsx`，环境Node24.18.0/已有缓存；不安装、不读生产token、不连原OpenCode后台。完整默认回归、窄变异与独立/真实界面跨重启/手机键盘门仍未由这些单测豁免。多文件过滤命令exit0不证明每个目标被收集：须核对JSON各目标出现/具体断言数/无失败或跳过的目标断言以及整报success；零断言失败suite不能被numFailedTests=0掩盖。
 

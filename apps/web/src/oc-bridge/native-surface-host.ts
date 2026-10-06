@@ -1,5 +1,5 @@
 import { authenticatedAttachmentUploader } from "../ws/conversation-state";
-import type { WebSocketFactory } from "../ws/ws-client";
+import type { WebSocketFactory, WebSocketLike } from "../ws/ws-client";
 import { NativePiPort } from "./native-pi-port";
 import { getNativeSdkFetch, installNativeSdkFetch, type NativeFetchTarget } from "./native-sdk-fetch";
 
@@ -33,6 +33,33 @@ const abortIfNeeded = (signal?: AbortSignal): void => {
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 };
 
+/** Adapt actual DOM event signatures instead of asserting a DOM socket to the
+ * narrower client interface. Methods retain native this; assigned callbacks
+ * see only fields consumed by the existing clients. No constructor recapture.
+ */
+function browserSocketFactory(Ctor: typeof WebSocket): WebSocketFactory {
+  return (url) => {
+    const socket = new Ctor(url);
+    let onopen: WebSocketLike["onopen"] = null;
+    let onmessage: WebSocketLike["onmessage"] = null;
+    let onclose: WebSocketLike["onclose"] = null;
+    let onerror: WebSocketLike["onerror"] = null;
+    return {
+      get readyState() { return socket.readyState; },
+      send(data) { socket.send(data); },
+      close(code) { socket.close(code); },
+      get onopen() { return onopen; },
+      set onopen(value) { onopen = value; socket.onopen = value ? () => value() : null; },
+      get onmessage() { return onmessage; },
+      set onmessage(value) { onmessage = value; socket.onmessage = value ? (event) => value({ data: event.data }) : null; },
+      get onclose() { return onclose; },
+      set onclose(value) { onclose = value; socket.onclose = value ? (event) => value({ code: event.code }) : null; },
+      get onerror() { return onerror; },
+      set onerror(value) { onerror = value; socket.onerror = value ? () => value() : null; },
+    };
+  };
+}
+
 /** Authenticate before constructing owner/SDK/sockets. No Source runtime
  * restore, remote URL, source credentials, implicit retry or token in facts.
  * Failed initial auth permits explicit retry; a mounted/closed owner cannot be
@@ -47,7 +74,7 @@ export async function createNativeSurfaceHost(options: NativeSurfaceOptions): Pr
   if (!['http:', 'https:'].includes(base.protocol) || base.origin !== target.location.origin || base.username || base.password || base.search || base.hash) throw new Error("原生界面仅支持本站地址。");
   const wsURL = `${base.protocol === 'https:' ? 'wss:' : 'ws:'}//${base.host}/`;
   const OriginalWebSocket = target.WebSocket;
-  const createSocket = options.createSocket ?? (OriginalWebSocket ? (url: string) => new OriginalWebSocket(url) : null);
+  const createSocket = options.createSocket ?? (OriginalWebSocket ? browserSocketFactory(OriginalWebSocket) : null);
   if (!createSocket) throw new Error("原生连接不可用。");
   abortIfNeeded(signal);
   hosts.set(target, "authenticating");

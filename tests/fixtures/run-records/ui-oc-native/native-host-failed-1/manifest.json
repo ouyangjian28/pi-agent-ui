@@ -1,0 +1,43 @@
+{
+  "taskId": "bd3d3e78b",
+  "producerExitCode": 2,
+  "status": "failed",
+  "unitAssertions": 95,
+  "passed": 95,
+  "skipped": 0,
+  "webTypes": "TS2322 native-surface-host.ts:73:51 DOM WebSocket callback signature incompatible with WebSocketLike",
+  "sourceAndBackendChecksReached": false,
+  "proofScope": "Controlled standalone host/SDK/owner tests only; not Source App, DOM socket constructor/real gateway/provider/UI send/phone acceptance. Preserve original typed failure.",
+  "files": [
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "c890885a788516dc373f257f217b948b7ae05ce9c7dff78c7fe39351d4a86cf5",
+      "gzipSha256": "87d333fb772fd993b1009194e2115254f33e88a16ec08fecd9d2d647ff8787b8"
+    },
+    {
+      "name": "tests.log",
+      "bytes": 112,
+      "sha256": "01d8ed40c7ae0df4afdf2143165d12c0dc7edf21d54193a38d4e6b229b187c70",
+      "gzipSha256": "926d895bf417cf33f2d05f2df19a642360f2592a738b4179d73b0a204357d91c"
+    },
+    {
+      "name": "results.json",
+      "bytes": 45399,
+      "sha256": "34aded6bf12657ac08441036b4613519e7fcb0439a4775a29047cb3bb1248d12",
+      "gzipSha256": "a7312fcfcf87adfcee2109697434422c2500eb679d44231261a12b76b30a13a1"
+    },
+    {
+      "name": "coverage-check.log",
+      "bytes": 148,
+      "sha256": "419308a402f1ae20d913e23c322b787ebae72d23bf981c78009c4cee518f83c0",
+      "gzipSha256": "99f4001cd3e80fb4d90e82cc20b02dd035ffb4c70b077eac85f230df1f59055a"
+    },
+    {
+      "name": "web-types.log",
+      "bytes": 701,
+      "sha256": "914aeb53b5bbe9c8bc803e5f7bc87f4b2d1e239788cf7e40711072cab918a195",
+      "gzipSha256": "9383edf43f80c73a73fff89b3690a00bb1e1b0a4594b8b4f18aa6029494ef66b"
+    }
+  ]
+}

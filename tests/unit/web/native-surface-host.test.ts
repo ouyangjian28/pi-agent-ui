@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createServer } from "node:http";
+import { WebSocketServer } from "ws";
 import { createNativeSurfaceHost, getNativeSurfaceHost, type NativeSurfaceHost, type NativeSurfaceTarget } from "../../../apps/web/src/oc-bridge/native-surface-host";
 import { installNativeSdkFetch, getNativeSdkFetch } from "../../../apps/web/src/oc-bridge/native-sdk-fetch";
 import { NativePiPort } from "../../../apps/web/src/oc-bridge/native-pi-port";
@@ -110,6 +112,31 @@ describe('Native surface lifecycle, actual owner/clients with controlled HTTP (n
   it('pre-existing SDK owner cannot be adopted or replaced by a new authenticated surface', async () => {
     const r = rig(), port = new NativePiPort('ws://127.0.0.1:7777', 'local-only'); const sdk = installNativeSdkFetch(r.target, port, r.target.location.origin, r.network);
     try { await expect(r.start()).rejects.toThrow('不可替换'); expect(r.network).not.toHaveBeenCalled(); } finally { sdk.dispose(); port.dispose(); }
+  });
+  it('adapts real DOM-style Socket events against owned loopback HTTP/WS, without the injected socket shortcut', async () => {
+    const server = createServer((request, response) => { response.writeHead(request.url === '/login' && request.method === 'POST' ? 200 : 404); response.end(); });
+    const websocket = new WebSocketServer({ server }); const frameTypes: string[] = [];
+    websocket.on('connection', client => client.on('message', bytes => {
+      const frame = JSON.parse(bytes.toString()) as { t: string; requestId?: string }; frameTypes.push(frame.t);
+      if (frame.t === 'hello') client.send(JSON.stringify({ t: 'welcome', protocolVersion: 1, serverBootId: 'loopback', serverBuildId: 'loopback' }));
+      if (frame.t === 'get-models') client.send(JSON.stringify({ t: 'models-list', requestId: frame.requestId, models: [] }));
+    }));
+    let host: NativeSurfaceHost | null = null;
+    try {
+      await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve)); const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Loopback fixture address unavailable');
+      const target: NativeSurfaceTarget = { fetch: globalThis.fetch, WebSocket: globalThis.WebSocket, location: { origin: `http://127.0.0.1:${address.port}` } };
+      host = await createNativeSurfaceHost({ target, token: 'local-dom-event-fixture-only', capturedNetworkFetch: globalThis.fetch.bind(globalThis) }); hosts.push(host);
+      const port = host.port;
+      await expect.poll(() => [port.getSnapshot().list.state, port.getSnapshot().write.connState, port.getSnapshot().detail.connState]).toEqual(['ready', 'ready', 'ready']);
+      await expect.poll(() => port.getSnapshot().list.models.status).toBe('ok');
+      expect(websocket.clients.size).toBe(3); expect(frameTypes.filter(t => t === 'hello')).toHaveLength(3); expect(frameTypes.filter(t => ['prompt', 'resume', 'stop'].includes(t))).toEqual([]);
+      expect((await target.fetch('/auth/session')).status).toBe(200); expect(JSON.stringify(port.getSnapshot())).not.toContain('local-dom-event-fixture-only');
+      expect(() => new target.WebSocket!(target.location.origin)).toThrow('旧后台连接');
+    } finally {
+      host?.dispose(); for (const client of websocket.clients) client.terminate();
+      await new Promise<void>(resolve => websocket.close(() => resolve())); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
+    }
   });
   it('HTTP login alone is not reported as ready native authentication/catalogue', async () => {
     const r = rig(), host = await r.start(); expect(host.port.getSnapshot().write.connState).not.toBe('ready'); expect((await r.target.fetch('/auth/session')).status).toBe(503); expect(host.port.getSnapshot().list.models.status).toBe('idle'); expect(host.port.getSnapshot().conversation.view.kind).toBe('list');
