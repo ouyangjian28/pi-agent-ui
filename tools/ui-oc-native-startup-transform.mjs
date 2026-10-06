@@ -31,6 +31,19 @@ const startup = startOriginalNativeSurface({ target: window, root, surface, capt
 window.addEventListener('pagehide', () => startup.dispose(), { once: true });
 `;
 }
+/** This is the OpenChamber companion-server stream (tasks/worktrees/browser
+ * control/memory), NOT SDK/native chat events. VSCode already skips it when
+ * its companion backend is absent. Native keeps the global SSE gate CLOSED
+ * and skips before listener/runtime/timer registration; no invented events.
+ */
+export function nativeCompanionEventsTransform(source) {
+  if (source.includes('pi-native-companion-events-overlay')) throw new Error('Original native companion events already applied');
+  const anchor = 'export const subscribeOpenchamberEvents = (listener: Listener): (() => void) => {';
+  once(source, anchor);
+  once(source, 'if (isVSCodeRuntime()) return () => undefined;');
+  return "// pi-native-companion-events-overlay\nimport { getNativeSurfaceHost as piGetNativeHost } from '@pi-native/surface-host';\n" + source.replace(anchor,
+    anchor + '\n  // No companion backend in native mode, including a closed host.\n  if (piGetNativeHost()) return () => undefined;');
+}
 export function nativeReadOnlyComposerTransform(source) {
   if (source.includes('pi-native-readonly-composer-overlay')) throw new Error('Original native composer overlay already applied');
   once(source, 'export const ChatInput = React.memo(ChatInputComponent);');

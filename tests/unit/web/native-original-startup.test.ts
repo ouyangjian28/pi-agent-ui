@@ -6,7 +6,7 @@ import { runInNewContext } from 'node:vm';
 import { NativePiPort, type NativePiSnapshot } from '../../../apps/web/src/oc-bridge/native-pi-port';
 const ROOT = resolve(process.cwd());
 const ts = createRequire(resolve(ROOT, 'package.json'))('typescript') as typeof import('typescript');
-const { nativeOriginalEntryTransform, nativeReadOnlyComposerTransform } = await import(resolve(ROOT, 'tools/ui-oc-native-startup-transform.mjs'));
+const { nativeOriginalEntryTransform, nativeReadOnlyComposerTransform, nativeCompanionEventsTransform } = await import(resolve(ROOT, 'tools/ui-oc-native-startup-transform.mjs'));
 function compile(path: string) {
   return ts.transpileModule(readFileSync(resolve(ROOT, path), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 }
@@ -91,6 +91,64 @@ describe('original native startup orchestration (fake DOM/host, not actual Sourc
   it('Source import failure closes the host and exposes no arbitrary transport error', async () => {
     const r = rig(); r.loadRenderer.mockRejectedValueOnce(new Error('fixture-secret-error')); r.start(); await r.login(); r.update(r.ready); await flush();
     expect(r.host.dispose).toHaveBeenCalledTimes(1); expect(r.render).not.toHaveBeenCalled(); expect(r.root.find('p').textContent).not.toContain('fixture-secret-error');
+  });
+});
+
+function companionEventsRig(host: object | null, vscode = false) {
+  const source = readFileSync(resolve(ROOT, 'vendor/openchamber-frontend/packages/ui/src/lib/openchamberEvents.ts'), 'utf8');
+  const output = nativeCompanionEventsTransform(source);
+  const exports: Record<string, any> = {};
+  const runtimeUnsubscribe = vi.fn(); const runtimeSubscribe = vi.fn(() => runtimeUnsubscribe);
+  const timers = vi.fn(() => 1); const clearTimer = vi.fn(); const sseUrl = vi.fn((path: string) => path);
+  const created: FakeEvents[] = [];
+  class FakeEvents {
+    static CLOSED = 2;
+    readonly readyState = 0;
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    readonly close = vi.fn();
+    constructor(readonly url: string) { created.push(this); }
+  }
+  const zod = createRequire(resolve(ROOT, 'vendor/openchamber-frontend/package.json'))('zod');
+  const code = ts.transpileModule(output, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  runInNewContext(code, { exports, window: {}, EventSource: FakeEvents, setTimeout: timers, clearTimeout: clearTimer,
+    require: (name: string) => {
+      if (name === '@pi-native/surface-host') return { getNativeSurfaceHost: () => host };
+      if (name === './runtime-url') return { getRuntimeUrlResolver: () => ({ sse: sseUrl }) };
+      if (name === './runtime-switch') return { subscribeRuntimeEndpointChanged: runtimeSubscribe };
+      if (name === './desktop') return { isVSCodeRuntime: () => vscode };
+      if (name === '@/stores/messageQueueStore') return { messageQueueUpdatedEventSchema: { safeParse: () => ({ success: false }) } };
+      if (name === 'zod') return zod;
+      throw new Error('Unexpected original companion dependency: ' + name);
+    },
+  });
+  return { source, output, exports, created, timers, clearTimer, sseUrl, runtimeSubscribe, runtimeUnsubscribe };
+}
+describe('actual original companion stream module (VM execution, not actual Source Root)', () => {
+  it.each(['open', 'closed'])('native %s host registers no companion listeners, timers, runtime callbacks, or old SSE', state => {
+    const r = companionEventsRig({ state }); const listener = vi.fn();
+    const unsubscribe = r.exports.subscribeOpenchamberEvents(listener); unsubscribe(); unsubscribe();
+    expect(r.created).toHaveLength(0); expect(r.sseUrl).not.toHaveBeenCalled(); expect(r.runtimeSubscribe).not.toHaveBeenCalled();
+    expect(r.timers).not.toHaveBeenCalled(); expect(r.clearTimer).not.toHaveBeenCalled(); expect(listener).not.toHaveBeenCalled();
+  });
+  it('retains original VSCode no-companion path when no native host exists', () => {
+    const r = companionEventsRig(null, true); const listener = vi.fn(); r.exports.subscribeOpenchamberEvents(listener)();
+    expect(r.created).toHaveLength(0); expect(r.runtimeSubscribe).not.toHaveBeenCalled(); expect(r.timers).not.toHaveBeenCalled(); expect(listener).not.toHaveBeenCalled();
+  });
+  it('retains actual nonnative companion connection/event/heartbeat and cleanup behavior', () => {
+    const r = companionEventsRig(null); const listener = vi.fn(); const unsubscribe = r.exports.subscribeOpenchamberEvents(listener);
+    expect(r.runtimeSubscribe).toHaveBeenCalledTimes(1); expect(r.created).toHaveLength(1); const connection = r.created[0]!;
+    expect(connection.url).toBe('/api/openchamber/events'); connection.onopen!(); expect(r.timers).toHaveBeenCalledTimes(1);
+    connection.onmessage!({ data: JSON.stringify({ type: 'openchamber:event-stream-ready', properties: {} }) });
+    expect(listener).toHaveBeenCalledWith({ type: 'event-stream-ready' }); expect(r.timers).toHaveBeenCalledTimes(2);
+    unsubscribe(); expect(connection.close).toHaveBeenCalledTimes(1); expect(r.runtimeUnsubscribe).toHaveBeenCalledTimes(1); expect(r.clearTimer).toHaveBeenCalled();
+  });
+  it('rejects drift, duplicate anchors or a second companion overlay instead of silently bypassing old SSE', () => {
+    const r = companionEventsRig(null);
+    expect(() => nativeCompanionEventsTransform(r.output)).toThrow('already applied');
+    expect(() => nativeCompanionEventsTransform(r.source.replace('export const subscribeOpenchamberEvents =', 'export const renamedEvents ='))).toThrow('anchor');
+    expect(() => nativeCompanionEventsTransform(r.source + '\nif (isVSCodeRuntime()) return () => undefined;')).toThrow('anchor');
   });
 });
 
