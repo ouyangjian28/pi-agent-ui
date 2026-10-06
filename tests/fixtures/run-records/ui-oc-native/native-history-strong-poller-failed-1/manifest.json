@@ -1,0 +1,62 @@
+{
+  "task": "bbf3fbb62",
+  "files": [
+    {
+      "name": "result.json",
+      "bytes": 33557,
+      "sha256": "7695ee2b596bd2a45656fcc5b4f8a1795d8a0841d01ebc80d0b05a1e297c20dc",
+      "gzipSha256": "7ffb29f9d53f3b41a78350c3a48ecd0d50d40caa14515afa581a6c5042258a90",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "run.log",
+      "bytes": 677,
+      "sha256": "0b76f9a7967db771aed5851060ce7637b72c07efc279cbf9df3a3decbac4b963",
+      "gzipSha256": "bbbfe69f85bc8a6d4b3d68aeeaaee0c03998c3441637fc0ab88837a8ba188d2a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "provider-result.json",
+      "bytes": 505,
+      "sha256": "14a1cee92ecdbe7786d220306235479ff04d24d3eb06c052646456efc5c104d5",
+      "gzipSha256": "cf1e148655e2654a72204bdfd653b0d16b7815a50f71177c35e94dbf37235bec",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "harness-copy.json",
+      "bytes": 194,
+      "sha256": "1625b3753dbbb710065db48cef00c2c513b5a8e0d4132199bcbeb73d3226ead4",
+      "gzipSha256": "820e88e7389ad5eb484147bb6a7ddaa211be38f8c95a5d38b4441913908f63c9",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "desktop.png",
+      "bytes": 29780,
+      "sha256": "300399a5c994f383d41b9379d07aa4be778db0d6e60007b57d51085bb6ed4cd9",
+      "gzipSha256": "a24228235e1004ff8486a3fb2a2c633d83ad5310fbbfde11ae127e1b9244087d",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "last-page.png",
+      "bytes": 54309,
+      "sha256": "31cca8441fb305c5ba745bd99a011a1a98b8621a940fec6ec7e587349e5949b5",
+      "gzipSha256": "2688d74ad2c8069a44fa1e64faf02e26b8337152e95c9d343ed45a1d8ea221ea",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "rehearsal/oc-native-root.mjs",
+      "bytes": 18890,
+      "sha256": "01f65fb84e9c50f7de074bae72af2ef68c38e803c4bbea38042c92cc2d92ca92",
+      "gzipSha256": "ee03046269893cb90fdbbba9f64731df5b3eff7942145532e00cfdbbf4ccce26",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "producer/oc-native-root.py",
+      "bytes": 7076,
+      "sha256": "d6dd8cf9e2aab97ba628ae76efd9adda1ead0fde9139ae2bcad566e6d7b197ff",
+      "gzipSha256": "5e5404ba244f4dee4812ae424a2672b780464b1fd4e8d41c058913f5d3d4d5a0",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "FAILED1 stronger paint postassert catches desktop opacity0.260316/animation1; phone not reached. Inspection: waitForFunction STRING was arrow-function expression => truthy function object, not invoked boolean; two RAF alone not settled. Fix poller expression invocation BEFORE NativeUI mutation, keep original30s and .99/full-animation/assert gates, do not mask CSS. Failed raw8 SHA/gz preserved. Not meaningful old-notice red yet/not history visual pass; provider/nonloopback/production0 does not make pass. Original Python launch ea01912 matches, not copied."
+}
