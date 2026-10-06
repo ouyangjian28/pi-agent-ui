@@ -83,4 +83,21 @@ describe("S1 独立缺口复现：真实探针收到的已有 response-timeout �
     expect(document.querySelector(".conversation-header")?.textContent).not.toContain("响应超时");
     if(kind === "verdict-unknown") expect(screen.getByRole("alert").textContent).toContain("结果未知或损坏");
   });
+  it("新 enqueue 先于状态帧到达，不将旧超时贴给新轮", async () => {
+    start();const {frame}=firstSend();await ack(frame,{kind:"launched",intentId:"i-1",commandId:1});snapshot(String(frame.file));
+    act(()=>Socket.all[1]!.receive({t:"events",subscriptionId:"sub-1",origin:"history",refSeq:3,events:[
+      {seq:2,ts:null,generation:1,intentId:"i-1",kind:"response-timeout",commandId:1},
+      {seq:3,ts:null,generation:1,intentId:"i-2",kind:"turn-enqueued",preview:{text:"下一轮",truncated:false},ordinal:1}
+    ]}));
+    expect(document.querySelector(".response-timeout-banner")).toBeNull();
+  });
+  it("已结算轮的超时观测行晚落盘，不把 settled 推翻为结果未知", async () => {
+    start();const {frame}=firstSend();await ack(frame,{kind:"launched",intentId:"i-1",commandId:1});snapshot(String(frame.file));
+    act(()=>Socket.all[1]!.receive({t:"events",subscriptionId:"sub-1",origin:"history",refSeq:4,events:[
+      {seq:2,ts:null,generation:1,intentId:"i-1",kind:"turn-enqueued",preview:{text:"本轮",truncated:false},ordinal:0},
+      {seq:3,ts:null,generation:null,intentId:"i-1",kind:"verdict-settled"},
+      {seq:4,ts:null,generation:1,intentId:"i-1",kind:"response-timeout",commandId:1}
+    ]}));
+    expect(document.querySelector(".response-timeout-banner")).toBeNull();
+  });
 });
