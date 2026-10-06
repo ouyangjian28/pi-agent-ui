@@ -16,7 +16,9 @@ const dist = process.env.PI_OC_ROOT_DIST;
 if (!home || !basename(home).startsWith('pi-oc-root-') || process.env.HOME !== home || process.env.PI_CODING_AGENT_DIR !== join(home, 'agent')) throw new Error('Refuse non-isolated original Root fixture');
 const ignored = join(repo, '.pi/oc-bridge-checks') + '/';
 if (!out?.startsWith(ignored) || !dist?.startsWith(ignored) || !dist.endsWith('/dist')) throw new Error('Invalid original Root proof paths');
+const navigation = process.env.PI_OC_ROOT_NAVIGATION === '1';
 const compilation = JSON.parse(await readFile(join(dist, 'native-overlays.json'), 'utf8'));
+if (navigation && !compilation.nativeSourceNavigationCompiled) throw new Error('Navigation probe needs audited Source navigation overlay');
 if (!compilation.nativeOriginalEntryCompiled || !compilation.nativeSourceComposerReadOnly || compilation.originalSourceModified || compilation.backendStarted) throw new Error('Need audited original native-entry dist');
 const piBin = join(repo, 'node_modules/.bin/pi');
 if (execFileSync(piBin, ['--version'], { encoding: 'utf8' }).trim() !== '0.99.2') throw new Error('Candidate runtime drift');
@@ -31,7 +33,7 @@ const token = randomBytes(32).toString('hex');
 const tokenFile = join(home, 'fixture-token.json');
 await writeFile(tokenFile, JSON.stringify({ version: 1, tokens: [token] }), { mode: 0o600, flag: 'wx' });
 const transcripts = join(home, 'transcripts'), journals = join(home, 'journal');
-const frames = [], sends = [], errors = [], errorStacks = [], blocked = [], requests = [], surfaces = [], navigationFacts = [];
+const frames = [], sends = [], errors = [], errorStacks = [], blocked = [], requests = [], surfaces = [], navigationFacts = [], historyFacts = [];
 const mobileSessionsLabel = 'Open sessions and projects';
 const mobileDialogLabel = 'Sessions';
 const assert = (value, message) => { if (!value) throw new Error(message); };
@@ -107,7 +109,32 @@ try {
     assert(facts.overflow <= 1, 'Original surface horizontal overflow');
     await page.screenshot({ path: join(out, mobile ? 'phone.png' : 'desktop.png'), fullPage: false });
     const drawerGeometry = mobile ? await page.getByRole('dialog', { name: mobileDialogLabel, exact: true }).evaluate(el => ({ bounds: el.getBoundingClientRect().toJSON(), transform: getComputedStyle(el).transform, ariaHidden: el.getAttribute('aria-hidden'), runningAnimations: el.getAnimations().filter(a => a.playState === 'running' || a.pending).length })) : null;
-    surfaces.push({ ...facts, ownedButtonBounds, drawerGeometry }); await context.close();
+    surfaces.push({ ...facts, ownedButtonBounds, drawerGeometry });
+    if (navigation) {
+      // Actual original row gesture only: no Source/owner/window state writes.
+      if (mobile) await ownedButton.tap(); else await ownedButton.click();
+      await page.waitForFunction(() => {
+        const cards = [...document.querySelectorAll('[data-message-id]')];
+        return ['NATIVE-HISTORY-ASSISTANT-OWNED', 'NATIVE-HISTORY-USER-OWNED'].every(text => cards.some(el => el.textContent.includes(text)));
+      }, undefined, { timeout: 30000 });
+      if (mobile) await page.waitForFunction(label => {
+        const el = [...document.querySelectorAll('[role="dialog"]')].find(n => n.getAttribute('aria-label') === label);
+        return el?.getAttribute('aria-hidden') === 'true' && !el.getAnimations().some(a => a.playState === 'running' || a.pending);
+      }, mobileDialogLabel, { timeout: 30000 });
+      // Require durable native snapshot bytes too, not only list title or UI text.
+      assert(frames.some(f => f.t === 'snapshot' && JSON.stringify(f).includes('NATIVE-HISTORY-ASSISTANT-OWNED') && JSON.stringify(f).includes('NATIVE-HISTORY-USER-OWNED')), 'Owned native persisted history snapshot never reached browser');
+      const history = await page.evaluate(() => ({ surface: window.__OPENCHAMBER_SURFACE__, overflow: document.documentElement.scrollWidth - innerWidth, cards: [...document.querySelectorAll('[data-message-id]')].map(el => ({ id: el.getAttribute('data-message-id'), text: el.textContent, bounds: el.getBoundingClientRect().toJSON() })), controls: [...document.querySelectorAll('button')].map(el => ({ text: el.textContent, aria: el.getAttribute('aria-label') })) }));
+      assert(history.overflow <= 1, 'Actual native history horizontal overflow');
+      for (const text of ['NATIVE-HISTORY-ASSISTANT-OWNED', 'NATIVE-HISTORY-USER-OWNED']) {
+        const card = page.locator('[data-message-id]').filter({ hasText: text });
+        assert(await card.count() === 1, 'Missing/duplicated distinct persisted history card: ' + text);
+        await card.waitFor({ state: 'visible', timeout: 30000 });
+        const bounds = await card.boundingBox(); assert(bounds && bounds.width > 0 && bounds.height > 0 && bounds.x >= -1 && bounds.x + bounds.width <= viewport.width + 1 && bounds.y < viewport.height && bounds.y + bounds.height > 0, 'Persisted history card outside viewport');
+      }
+      await page.screenshot({ path: join(out, mobile ? 'phone-history.png' : 'desktop-history.png'), fullPage: false });
+      historyFacts.push(history);
+    }
+    await context.close();
   }
   assert(frames.some(f => f.t === 'models-list' && f.models?.some(m => m.provider === 'ui-upgrade-test' && m.id === 'fixture')), 'Actual model listing never reached browser');
   assert(frames.some(f => f.t === 'sessions' && JSON.stringify(f).includes('NATIVE-ROOT-OWNED')), 'Actual session listing never reached browser');
@@ -117,7 +144,7 @@ try {
 finally {
   if (failure && lastPage && !lastPage.isClosed()) await lastPage.screenshot({ path: join(out, 'last-page.png'), fullPage: false }).catch(() => {});
   if (browser) await browser.close(); if (server) await server.dispose(); await compiler.close();
-  await writeFile(join(out, 'result.json'), JSON.stringify({ passed: !failure, error: failure?.message, proofScope: 'Actual original App/MobileApp plus unchanged gateway/native clients with owned history and local model configuration. Readonly Root only; not chat/composer/paid-provider/physical phone/IME acceptance.', compilation, surfaces, navigationFacts, requests, frameTypes: frames.map(f => f.t), sentTypes: sends, errors, errorStacks, blocked, productionAuthUsed: false }, null, 2) + '\n');
+  await writeFile(join(out, 'result.json'), JSON.stringify({ passed: !failure, error: failure?.message, proofScope: navigation ? 'Actual original desktop+fresh phone UI row click/tap, native persisted JSONL snapshots and two distinct Source message cards. Readonly navigation/history only, not new/send/stream/stop/composer/paid provider/physical phone/IME acceptance.' : 'Actual original App/MobileApp plus unchanged gateway/native clients with owned history and local model configuration. Readonly Root only; not chat/composer/paid-provider/physical phone/IME acceptance.', compilation, surfaces, navigationFacts, historyFacts, historySnapshots: navigation ? frames.filter(f => f.t === 'snapshot' && JSON.stringify(f).includes('NATIVE-HISTORY-ASSISTANT-OWNED')) : [], requests, frameTypes: frames.map(f => f.t), sentTypes: sends, errors, errorStacks, blocked, productionAuthUsed: false }, null, 2) + '\n');
 }
 if (failure) throw failure;
-console.log('Original desktop/mobile native read-only Root browser passed; chat still unbound.');
+console.log(navigation ? 'Original desktop/mobile explicit native row selection and persisted history passed; composer still readonly.' : 'Original desktop/mobile native read-only Root browser passed; chat still unbound.');

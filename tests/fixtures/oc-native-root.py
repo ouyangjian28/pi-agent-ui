@@ -19,6 +19,7 @@ assert str(REPO) == '/home/yyj/ai/repos/pi-agent-ui-oc-bridge', 'unapproved cand
 parser = argparse.ArgumentParser()
 parser.add_argument('--dist', required=True)
 parser.add_argument('--out', required=True)
+parser.add_argument('--navigation', action='store_true', help='Also exercise actual UI selection and owned persisted history (composer stays readonly)')
 args = parser.parse_args()
 base = REPO / '.pi/oc-bridge-checks'
 dist, out = pathlib.Path(args.dist).resolve(), pathlib.Path(args.out).resolve()
@@ -56,6 +57,11 @@ with tempfile.TemporaryDirectory(prefix='pi-oc-root-') as home:
     now = datetime.datetime.now(datetime.timezone.utc)
     rows = [{'type': 'session', 'version': 3, 'id': 'NATIVE-ROOT-OWNED', 'timestamp': now.isoformat(), 'cwd': str(root / 'workspace')},
             {'type': 'message', 'id': 'feed0001', 'parentId': None, 'timestamp': now.isoformat(), 'message': {'role': 'user', 'content': [{'type': 'text', 'text': 'NATIVE-ROOT-OWNED'}], 'timestamp': int(now.timestamp() * 1000)}}]
+    if args.navigation:
+        # Real native JSONL on disk, not Source DTO/store or a list-title proxy.
+        rows.extend([
+            {'type': 'message', 'id': 'feed0002', 'parentId': 'feed0001', 'timestamp': now.isoformat(), 'message': {'role': 'assistant', 'content': [{'type': 'text', 'text': 'NATIVE-HISTORY-ASSISTANT-OWNED'}], 'api': 'openai-completions', 'provider': 'ui-upgrade-test', 'model': 'fixture', 'stopReason': 'stop', 'usage': {'input': 0, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0, 'totalTokens': 0, 'cost': {'input': 0, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0, 'total': 0}}, 'timestamp': int(now.timestamp() * 1000)}},
+            {'type': 'message', 'id': 'feed0003', 'parentId': 'feed0002', 'timestamp': now.isoformat(), 'message': {'role': 'user', 'content': [{'type': 'text', 'text': 'NATIVE-HISTORY-USER-OWNED'}], 'timestamp': int(now.timestamp() * 1000)}}])
     (root / 'transcripts/NATIVE-ROOT-OWNED.jsonl').write_text(''.join(json.dumps(row) + '\n' for row in rows))
     (root / 'journal/NATIVE-ROOT-OWNED.jsonl').write_text('')
     env = {'PATH': '/home/yyj/.nvm/versions/node/v24.18.0/bin:/usr/bin:/bin', 'HOME': home, 'TMPDIR': home,
@@ -63,7 +69,7 @@ with tempfile.TemporaryDirectory(prefix='pi-oc-root-') as home:
            'PI_OC_ROOT_HOME': home, 'PI_OC_ROOT_REPO': str(REPO), 'PI_OC_ROOT_OUTPUT': str(out), 'PI_OC_ROOT_DIST': str(dist),
            'PLAYWRIGHT_BROWSERS_PATH': '/home/yyj/.cache/ms-playwright',
            'NODE_OPTIONS': f'--import={REPO / "tests/fixtures/pi099-loopback-only.mjs"}',
-           'PI099_NETWORK_LOG': str(root / 'network-selfcheck.jsonl')}
+           'PI099_NETWORK_LOG': str(root / 'network-selfcheck.jsonl'), 'PI_OC_ROOT_NAVIGATION': '1' if args.navigation else '0'}
     try:
         probe = subprocess.run(['node', '--input-type=module', '-e',
             "try { await fetch('https://example.com'); process.exit(1); } catch(e) { if (!String(e).includes('PI099 test blocked non-loopback host')) throw e; }"],
@@ -77,7 +83,7 @@ with tempfile.TemporaryDirectory(prefix='pi-oc-root-') as home:
         (out / 'provider-result.json').write_text(json.dumps({'exitCode': run.returncode, 'providerRequests': provider_requests,
             'blockedNonLoopbackAttempts': attempts, 'networkGuardSelfcheck': 'passed', 'productionAuthUsed': False,
             'isolation': 'temporary HOME/agentDir/workspace; allowlisted env; fresh browsers; owned loopback gateway and provider; copied harness',
-            'limitation': 'Node loopback guard is not an OS sandbox. Original Root readonly only, not composer/chat/paid provider/physical phone.'}, indent=2) + '\n')
+            'limitation': 'Node loopback guard is not an OS sandbox. Original Root/list and optionally explicit selection/persisted history only, not composer/send/chat/paid provider/physical phone.', 'navigationMode': args.navigation}, indent=2) + '\n')
         print('Artifacts:', out)
         assert run.returncode == 0, f'original Root browser failed; inspect {out / "run.log"}'
         assert not provider_requests and not attempts, 'readonly Root emitted provider or external network request'
