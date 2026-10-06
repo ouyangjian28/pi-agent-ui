@@ -1,0 +1,55 @@
+{
+  "task": "b2da49643",
+  "files": [
+    {
+      "name": "result.json",
+      "bytes": 33961,
+      "sha256": "fa436b739d17d53b0af4525a2c8527ff168b0f2b75cc81567f309eed60299263",
+      "gzipSha256": "88b59fdc1e3b0a434610d42dc2000aaf8f469738cacf26737175b7c4b3e0a582",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "run.log",
+      "bytes": 306,
+      "sha256": "8745d95ea63cfd51730c7e251cbc4ebd4c84b77414568d9a658def2025e63d1e",
+      "gzipSha256": "686e8da9c635ed028921615b9b67fab674d77b29d41d3cbcbd6ff84875861578",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "provider-result.json",
+      "bytes": 505,
+      "sha256": "14a1cee92ecdbe7786d220306235479ff04d24d3eb06c052646456efc5c104d5",
+      "gzipSha256": "cf1e148655e2654a72204bdfd653b0d16b7815a50f71177c35e94dbf37235bec",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "harness-copy.json",
+      "bytes": 194,
+      "sha256": "6873bec4895f81f2e889b6e586c2deebc88b149986908548a55ce27591d888d8",
+      "gzipSha256": "1fa35eadf189824e3b041f8428f827c60bec0e432c9ab79f76c4933b2b049131",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "last-page.png",
+      "bytes": 67985,
+      "sha256": "c95e559e0b02845299a0b75c7b541aadd2445342b6bf73398e6857a8615f02a9",
+      "gzipSha256": "c11fd197ce9f18448cbd03ef432db8018a279e6197045c16cd5b8f1ae93c840a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "rehearsal/oc-native-root.mjs",
+      "bytes": 16479,
+      "sha256": "d8b92d7df36b52aff5c362a7fdecf7b39ac7e406b9909f2e3a78f4ce82bc5d8f",
+      "gzipSha256": "bf79e9cd856754dc7083b57a79969cd747271cf60e0c5aa00aa6220da9e50e86",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "producer/oc-native-root.py",
+      "bytes": 7076,
+      "sha256": "d6dd8cf9e2aab97ba628ae76efd9adda1ead0fde9139ae2bcad566e6d7b197ff",
+      "gzipSha256": "5e5404ba244f4dee4812ae424a2672b780464b1fd4e8d41c058913f5d3d4d5a0",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "FAILED1: actual desktop first recent-row sent subscribe, raw native snapshot contains assistant+user owned JSONL markers, but only2 user cards rendered; same30000ms dual-card gate failed, phone not reached. Actual Source console question.list501 aborts workspace initialization. Source injections/production auth/provider/nonloopback0 do NOT make pass. Six raw outputs+unchanged original Python producer SHA against launch9089860 preserved BEFORE repair; Python producer was NOT copied (only browser harness was). Initial archive attempt guessed nonexistent rehearsal Python; existing6 gzip originals preserved unchanged, not overwritten."
+}
