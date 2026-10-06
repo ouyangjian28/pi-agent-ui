@@ -63,7 +63,7 @@ describe('actual Source notification effect (VM/React hook capture, not browser/
   });
   it('actual effect/path anchors reject drift/duplicates and applying the overlay twice', () => {
     const out = nativeWebNotificationTransform(source); expect(() => nativeWebNotificationTransform(out)).toThrow('already applied');
-    expect(() => nativeWebNotificationTransform(source.replace('  React.useEffect(() => {\n', '  React.useLayoutEffect(() => {\n')))).toThrow('anchor');
+    expect(() => nativeWebNotificationTransform(source.replace('  React.useEffect(() => {\n', '  React.useLayoutEffect(() => {\n'))).toThrow('anchor');
     expect(() => nativeWebNotificationTransform(source + '\n  React.useEffect(() => {\n')).toThrow('anchor');
     expect(() => nativeWebNotificationTransform(source.replace('/api/notifications/stream', '/api/drift'))).toThrow('anchor');
   });
