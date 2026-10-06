@@ -1,0 +1,83 @@
+{
+  "task": "b310017ae",
+  "files": [
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "58894617991634f22575431e3b2d38a33b9116dfd09a88dcfc50ac31a15e7687",
+      "gzipSha256": "6f58f70b02a07c31bfda74b7dd0a0b5fe2d49b7ec2d11471117bc77bd3dbff4c",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "results.json",
+      "bytes": 106092,
+      "sha256": "e5efa48ea2112ce9edaece4e60d075f3d0347abc3790cc451030c4debd25ae8d",
+      "gzipSha256": "88bb234e6c44509ee4bf07f350f42c811d40f53b3cd8d4315a66c2f803ce3cf0",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "tests.log",
+      "bytes": 123,
+      "sha256": "a98a81eda0f6dbf37ed0eb8f73b68d967b20b5e8184c112ff2806017b6aac29a",
+      "gzipSha256": "642805d7f315882467dcb516b6c5aca315cf07dd9665cade4508bc97b7f94dfb",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "expected.json",
+      "bytes": 709,
+      "sha256": "edc9e84d64f47936c0da92b5a1c46ecfafadb60ada0c4ddda5f23bb42152ba07",
+      "gzipSha256": "c29c1f1a97159d76e153d28878f7ea1af3aaa452a577c705af807efa90268157",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "targets.txt",
+      "bytes": 820,
+      "sha256": "a66bf468ae47c86ba1adbc646da76d0376afca98bf5812132a65c324de3decf3",
+      "gzipSha256": "d9abf2999f5faf3677b2fe8c82a16248ab26554c15f4278ad7ce741532dcd0dd",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "baseline-expected.sha256",
+      "bytes": 65,
+      "sha256": "4e7f4d4baae97b46ffa04ee59c458b298f956b3558881cad3d92ca4d9cadfa97",
+      "gzipSha256": "ee1fefca34d88232cf3e1362fe72e561881b47f9ec86cfdd62b15262b6c7f0c6",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "check.py",
+      "bytes": 1346,
+      "sha256": "589a52db4e9a3f15e345f721849d46fd2494bdffde499e86ed9a5168c96f4967",
+      "gzipSha256": "65066fcda32ffd6a711554cd64976bd207976c0473c1d8b278b83f8d31edbe76",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/native-source-composer.tsx",
+      "bytes": 10189,
+      "sha256": "4c88598988eca83839b1fb51b9f73ca28a9b7f5c1e2427ffbdf4f5512b40f452",
+      "gzipSha256": "f94b3521b81982fecfa38369161bae20f728f9990cdf408215aa5512a558bf19",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/native-source-composer.test.tsx",
+      "bytes": 15647,
+      "sha256": "024131ab38a8b47b8082faf1fbfb0ad24bfd51045360670e621e8aea77537c1c",
+      "gzipSha256": "4322601828039c04e5712d41567c9ca84f9526ec76d847d7011e5ff11f7ad2eb",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/ui-oc-native-composer-transform.mjs",
+      "bytes": 3743,
+      "sha256": "bb088639182f3e6efa8662288ad11b641b61967a6ffeb7ed1501a3afc14677e5",
+      "gzipSha256": "571e495bef8a7c15b690cf7ace28851b025834fd6e909694923167727f7e8c52",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/ui-oc-native-vite.config.mjs",
+      "bytes": 9788,
+      "sha256": "a665e2146fcd0df6ee035f20bbf4202e9b8256a78aef1769d9003151ea7fa923",
+      "gzipSha256": "87804dfd8f06e89c2d4f14f5d41cd63eb709b05ebd7ae0b28a982d5dd352b73e",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "FAILED1 200pass6fail of pre-fixed206/18/no pending. Five actualSource/parser/SSR/config cases never reach actualSource because fixture new URL/import.meta.url path is not file scheme. Upload canSend pending case failed true-v-false; NativeComposerInput public API has actions.upload/removeAttachment/setCustomModel, not direct methods used by renderer: actual binding API mismatch suspected (first TS gate not reached). No exclusions/skip/relaxed expectations/count corrections; native Source/body behavior not passed. Frozen b8bccc6 source/transform/config/fixture archived BEFORE repairs. Build10 concurrent unchanged inputs; no actual original UI/send/IME/provider/independent acceptance."
+}
