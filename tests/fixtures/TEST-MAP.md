@@ -1647,5 +1647,18 @@ composition.ts：writerBootId=randomUUID()（P02-D2 进程身份单次）+create
 
 修复方式：内部browserSocketFactory显式适配DOM事件→既有WebSocketLike最小面，send/close绑定native this、open/error忽略Event参数、message只取data/close只取code，回调可解绑，不使用双cast掩盖TS2322。原16不改断言，另加1真实Node DOM风格WebSocket＋owned loopback HTTP/WS独立例，实际3连接/welcome/models消息及SDK auth gate/无prompt-resume-stop；仍不是真pi gateway/SourceRoot/付费provider/UI发送。待重查目标96（host17＋旧70＋原附件9）；完整默认旧2138仅此前基线，当前types/原字节/backend/编译/UI截图仍须分别证实。
 
+### 原生启动与原页面入口追加证据（当前仍非聊天完工）
+
+| 检查 | 实际证据 | 结果与边界 |
+| --- | --- | --- |
+| DOM Socket适配后严格底座 | a419031/1f81a68；b4869afed exit0；f3db743归native-host-2七原件gz/SHA | parent核9目标8/12/10/10/8/3/19/17/9=96全过/零fail-pending、web types0/source2952同字节/后台协议diff0。上方95＋types失败仍保留；DOM-style real loopback socket不是真实Source Root/真实gateway/发送证据 |
+| Source入口/只读composer/API边界首跑计数失败 | ce1f7de；b9818c4ff exit1；c004081归original-startup-failed-1四原件gz/SHA | 新startup14确实全执行过，但CLI误写不存在attachment-upload.test.ts漏原附件9；实际9文件101/101无fail-pending，严格110拒而producer红，后续types/source/backend未执行。预检须真实10文件stat并从native-host-2报告核正确composer-attachments-owner.test.ts，不削期待/测试/timeout/config |
+| Source入口/只读composer/API严格重查 | b7a75560d exit0；30b011f归original-startup-2九原件gz/SHA | 10目标8/12/10/10/8/3/19/17/9/14=110全过/无skip或setup失败，web types/source/backend分别过。新14=9 fakeDOM启动生命周期＋3实际desktop/mobile/mini入口VM/转译＋1实际ChatInput readonly包装语法＋1API门底层零调用；不是Source整包tsc/实际Root或发送 |
+| 原native入口第一次原App编译 | b48a2967b exit0；5e0e85e归original-root-build-1六原件gz/SHA | literal App/MobileApp/3HTML/7 actual overlays与依赖图React/DOM各1根、Source2952文件26,893,497B同字节；审计nativeOwnerMounted/SDKInstalled/actionsMounted=false为编译范围声明，不推运行时。7目标=ModelControls/message-ordering/runtime-fetch/ChatInput/web main/mobile-main/mini-chat-main。原输入Native模式只读，旧hooks/prepare/clear/send未运行；不当真实gateway或browser |
+| Source import前surface/旧bootstrap字段纪律 | 4dd56c4；b6aeaad6f exit0；7a2749a归original-startup-3九原件gz/SHA | 早desktop/mobile标记、同源URL/localOrigin、清旧token/header/relay防Source模块缓存/旧注入；实际原入口转译VM在start callback检查早字段与一个startup import/零Source import，旧14与110计数不改且断言增强。Parent再核110全10实际目标/零fail-pending、web types0/source同字节/backend diff0；变更两文件active LSP0。仍VM非Source tsc/浏览器；新编译b44321c9a尚待 |
+| 真实gateway原Root只读夹具 | 7ae6718；tests/browser/oc-native-root.mjs＋tests/fixtures/oc-native-root.py；bd2cbe3b8副本预演在跑 | temp HOME/agentDir/workspace、白名单env、真startServer/候选pi0.99.2/native Socket/自有NATIVE-ROOT-OWNED与本地模型，不Source DTO模拟/状态注入；假token/HTTP token600不记auth body、provider必须0、guard自检但非OS sandbox。错登录拒/清DOM→桌面及fresh iPhone UA+touch390→模型/会话帧与无写指令/外连/横溢/注入token；只读Root不冒充聊天/真机/付费。首跑Python/Node字节一致双副本，对已验证old dist build1仅baseline诊断，不拿旧代码证4dd，结果未出 |
+
+当前原App编译`native-overlays.json`须核7原模块准确集合而非上方历史三模块。旧`tools/ui-oc-probe.mjs`是未挂native入口的合成样机，不能用于已挂native入口而称真实pi；原Root real-gateway使用新只读夹具，正式依赖须等当前源码对应build输出。重放接口：`PI_OC_ROOT_REPO=/home/yyj/ai/repos/pi-agent-ui-oc-bridge python3 tests/fixtures/oc-native-root.py --dist ABS_FRESH_AUDITED_DIST --out ABS_FRESH_IGNORED_OUTPUT`；限定本树.pi/oc-bridge-checks、拒覆盖，runner副本与原字节核对；输出result/provider-result/run与截图必须实际核，不用编译audit的false当运行时已安装证明。输入/附件/model/thinking/发送/流式/停止/真实UI恢复/独立/真机仍未完成；旧2138是新host前全默认基线，不是本轮整仓绿。
+
 重放原生底座：`vitest run tests/unit/web/native-pi-port.test.ts tests/unit/web/oc-read-projection.test.ts tests/unit/web/native-composer-actions.test.tsx`，环境Node24.18.0/已有缓存；不安装、不读生产token、不连原OpenCode后台。完整默认回归、窄变异与独立/真实界面跨重启/手机键盘门仍未由这些单测豁免。多文件过滤命令exit0不证明每个目标被收集：须核对JSON各目标出现/具体断言数/无失败或跳过的目标断言以及整报success；零断言失败suite不能被numFailedTests=0掩盖。
 
