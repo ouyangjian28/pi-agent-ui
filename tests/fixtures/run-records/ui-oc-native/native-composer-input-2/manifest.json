@@ -1,0 +1,83 @@
+{
+  "task": "b5b895019",
+  "files": [
+    {
+      "name": "vitest.json",
+      "bytes": 93425,
+      "sha256": "27ff005c125e408671395c4c1e460ff1741bd87e1d8c50fe7043894305c4cca8",
+      "gzipSha256": "f91fdb991c549bd387d0ec64c9f864c0e0fe35d9f4e62bd020b9db486547a614",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "run.log",
+      "bytes": 3035,
+      "sha256": "5f2be6939a82a3b8dcac07df14fab93b126f6cba35f2fb3da33eff8ec80920aa",
+      "gzipSha256": "6ab43b1fc756d5f7c76216c6934206d296897c3383ab3e25d61673eb1b0986a7",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "check.py",
+      "bytes": 1440,
+      "sha256": "ef521422cf1b748a5c81982d949d1c8a32ea105aa570ef6befd4668c8a8ce569",
+      "gzipSha256": "677452b6473d07434bba31cf555fbbec7c2f993df051dc36ac9634b0b8752751",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "coverage-check.log",
+      "bytes": 212,
+      "sha256": "e4bc3c4bab8e82b8a96bb40c62afee0d1f4204c0b153954fd7e8c4979dd897cb",
+      "gzipSha256": "14fa1ac303c014e0e608d5556ba73dee6e8515cfbab0f3b5d593e9d4567a0abb",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "expected.json",
+      "bytes": 668,
+      "sha256": "86a367957eb3c9cbb5954d2fa27aa700978f5d482a58096bbe6275a1786057e3",
+      "gzipSha256": "4a7026f50de460fb49d233cacaca3488e45e8570fd5f0e940fbddebce259277b",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "targets.txt",
+      "bytes": 773,
+      "sha256": "1c75397fba0f3fd9afc9fa4b724ffb49eaf0c625edc8c1d969255d9d77835c89",
+      "gzipSha256": "13ea43faaa68043293966712308169ca5f55b9444d577475ff41d28e459ace13",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "baseline-expected.sha256",
+      "bytes": 65,
+      "sha256": "306aa81c88f31873569fbf3d0d5cab7d78a3590996ac83d2ff8a290fa1980419",
+      "gzipSha256": "8c19f998f994bc1f4341981f5df09006279b8850386569f1f1eeecd15d77b1c1",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "5a1d9e01f568a7542758fb04e42c4e8e77858870377b385d827835620eae7739",
+      "gzipSha256": "29e017a1bc92acdd24235fb664e6c71fb1c3f6fd7acab509cf4ac6025a9883c5",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "web-types.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-check.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "backend-protocol.diff",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "Parent independently checks exact192/17/each suite+case passed/no skips-todo-pending-missing, original176 expected.json SHA unchanged and only fixed16 input cases added; frozen5c0c27b runtime/tools/tests unchanged; webtypes log0, Source bytes verification0, backend/protocol diff0. Old12pass4fail preserved in18fa33b, lifecycle/sanitize fixture correction did NOT modify adapter/owner. Controlled real NativePiPort/owner and actual Source VM regressions only, NOT mounted original CodeMirror/footer, draft-to-warm IME continuity, native send/browser/physicalphone/paidprovider/independent/user/fullrepo acceptance. Baseline persisted before next composer overlay."
+}
