@@ -77,12 +77,14 @@ const TERMINAL_TEXT: Partial<Record<HistoryEvent["kind"], string>> = {
 };
 
 /** F1：纯呈现投影，不把超时解释为执行失败，也不改协议状态/发送/草稿。 */
-function responseNoticeOf(snap: SessionDetailSnapshot): {
+function responseNoticeOf(snap: SessionDetailSnapshot, promptIntentId?: string): {
   responseTimeoutNotice: string | null; responseTerminalNotice: string | null;
 } {
   const turn = snap.status?.turn;
   if (!turn) return NO_RESPONSE_NOTICE;
-  const intentId = "intentId" in turn ? turn.intentId : null;
+  const active = "intentId" in turn;
+  // idle 后用同 file 最近 launched ACK 的身份保留它的终局，不取任意旧超时。
+  const intentId = active ? turn.intentId : promptIntentId ?? null;
   const timeout = snap.events.findLast((event) => event.kind === "response-timeout" &&
     (intentId === null || event.intentId === intentId) && event.generation === snap.status?.process.generation);
   if (!timeout) return NO_RESPONSE_NOTICE;
@@ -96,7 +98,7 @@ function responseNoticeOf(snap: SessionDetailSnapshot): {
     (event.generation === null || event.generation === timeout.generation) && TERMINAL_TEXT[event.kind] !== undefined);
   if (terminal) return { responseTimeoutNotice: null, responseTerminalNotice: TERMINAL_TEXT[terminal.kind] ?? null };
   // idle/closed 不把历史超时贴成当前在途；也不凭 idle 推断模型成功。
-  if (intentId === null) return turn.state === "closed"
+  if (!active) return turn.state === "closed"
     ? { responseTimeoutNotice: null, responseTerminalNotice: "回合已关闭，执行结果仍须核对；不会自动重发。" }
     : NO_RESPONSE_NOTICE;
   return { responseTimeoutNotice: "响应超时，本次结果尚未确认。请查看活动详情核对；不会自动重发。", responseTerminalNotice: null };
@@ -112,7 +114,7 @@ function connLevelStatus(snap: SessionDetailSnapshot): DetailViewStatus {
 /** 快照→视图派生（纯函数）。连接级优先于订阅相位；有内容终局保留内容+横幅（stopped，不伪装 streaming）。
  * targetFile（可选，保真②身份门）：快照 file≠目标（file prop 已切换/client 替换/已退订残留）时，
  * 连接级状态如实呈现而内容一律不透出；targetFile=null 视为未选择（组件呈现「尚未选择会话」）。 */
-export function sessionDetailViewOf(snap: SessionDetailSnapshot, targetFile?: string | null): SessionDetailView {
+export function sessionDetailViewOf(snap: SessionDetailSnapshot, targetFile?: string | null, promptIntentId?: string): SessionDetailView {
   if (targetFile !== undefined && snap.file !== targetFile) {
     const status = connLevelStatus(snap); // 含 ready：目标订阅尚未建立/在途——loading
     return {
@@ -153,7 +155,7 @@ export function sessionDetailViewOf(snap: SessionDetailSnapshot, targetFile?: st
   } else if (snap.phase === "closed" && snap.connState === "ready" && (snap.events.length > 0 || snap.liveEvents.length > 0)) {
     banner = snap.streamNote ?? snap.errorMessage ?? "订阅已停止"; // C4：终局有内容→已停止/被替换受控横幅（4431/替换终局）
   }
-  const { responseTimeoutNotice, responseTerminalNotice } = responseNoticeOf(snap);
+  const { responseTimeoutNotice, responseTerminalNotice } = responseNoticeOf(snap, promptIntentId);
   return {
     status,
     file: snap.file,
@@ -176,7 +178,7 @@ export function sessionDetailViewOf(snap: SessionDetailSnapshot, targetFile?: st
 }
 
 /** 订阅单文件会话详情：file 变更即（重新）订阅，卸载/换目标即退订；视图由快照纯派生（保真②⑤）。 */
-export function useSessionDetail(client: SubscribeClientSurface, file: string | null, ownSubscription = true): SessionDetailView {
+export function useSessionDetail(client: SubscribeClientSurface, file: string | null, ownSubscription = true, promptIntentId?: string): SessionDetailView {
   const snap = useSyncExternalStore(client.subscribe, client.getSnapshot);
   useEffect(() => {
     if (!ownSubscription || file === null) return;
@@ -184,5 +186,5 @@ export function useSessionDetail(client: SubscribeClientSurface, file: string | 
     return () => client.unsubscribeSession();
   }, [client, file, ownSubscription]);
   // 身份门以目标 file 在提交阶段复核——file prop 切换后的首次提交即无旧文件内容（不依赖 effect 事后清理）
-  return sessionDetailViewOf(snap, file);
+  return sessionDetailViewOf(snap, file, promptIntentId);
 }

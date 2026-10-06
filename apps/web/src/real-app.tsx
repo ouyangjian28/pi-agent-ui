@@ -227,7 +227,10 @@ function ConnectedApp({
   const ui = useSyncExternalStore(owner.subscribe, owner.getSnapshot);
   const file = ui.activeFile;
   // 唯一订阅 owner：隐藏/返回不改变 file，本钩子只在真换目标或 client 时清旧。
-  const detail = useSessionDetail(clients.subscribeClient, file);
+  const lastPrompt = writeSnap.lastResult;
+  const promptIntentId = lastPrompt?.ok && lastPrompt.kind === "prompt" && lastPrompt.file === file && lastPrompt.outcome.kind === "launched"
+    ? lastPrompt.outcome.intentId : undefined;
+  const detail = useSessionDetail(clients.subscribeClient, file, true, promptIntentId);
   const isNew = ui.view.kind === "draft" || file === null;
   const slot = ui.view.kind === "draft" ? ui.drafts.get(ui.view.id) ?? null : file ? ui.sessions.get(`session:${file}`) ?? null : null;
   const pendingQuestions = detail.uiRequests.length > 0;
