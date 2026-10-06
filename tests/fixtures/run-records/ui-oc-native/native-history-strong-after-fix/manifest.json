@@ -1,0 +1,76 @@
+{
+  "task": "b42412281",
+  "files": [
+    {
+      "name": "result.json",
+      "bytes": 59947,
+      "sha256": "7f66f0ff9c620fe207938cc4402ddcb7909e738da928c53749c8b0573a74f258",
+      "gzipSha256": "7b10a7f8310dc26e2617410dbfb56586de8964d3fd3b066c2ff0f6492e89ba73",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "run.log",
+      "bytes": 109,
+      "sha256": "5a5f43fb67090f465587599ed632204f9ea162098923d42b97529f9b95425405",
+      "gzipSha256": "f17fdd44606f6ed05646a0ae4d59639ed682e75f58411bb53a7befe70f9f234f",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "provider-result.json",
+      "bytes": 505,
+      "sha256": "7b64b7b23d90ef8382ca236e292c9a9225d089346765fa83efcbfdf3ce2063ac",
+      "gzipSha256": "dd9666d6900025a25ba10682d8f39d85601a5e4ea31eb4c91d2968ab9ec5058a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "harness-copy.json",
+      "bytes": 194,
+      "sha256": "101a5f85ff61eb5b571ed6dce26d5e1610b6a0fb4a8a61ca72a655ac158edf8f",
+      "gzipSha256": "977458ea46cff35fc841d4d265c08d95791040b16483756e91cc52cbfdfa78ef",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "desktop.png",
+      "bytes": 29780,
+      "sha256": "300399a5c994f383d41b9379d07aa4be778db0d6e60007b57d51085bb6ed4cd9",
+      "gzipSha256": "a24228235e1004ff8486a3fb2a2c633d83ad5310fbbfde11ae127e1b9244087d",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "phone.png",
+      "bytes": 24858,
+      "sha256": "a865ba216e5bb3ec69d44b1b1dc40aab778b015e12fd7885916d284cb096d44b",
+      "gzipSha256": "0329f5cb337c405da321b557abdcfb0c05090a8ab569368651f9a0fa7fd255a3",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "desktop-history.png",
+      "bytes": 53794,
+      "sha256": "93b2520c0764c178bd45225b998f582c0602653c57ed6db5661010c9767985e2",
+      "gzipSha256": "abf0aee6fc991bdca65b6122dad5b8f6929706d6dac4e4b4fb32e04ebbe3b062",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "phone-history.png",
+      "bytes": 25606,
+      "sha256": "f3c509111038922e0329be50d1ffbe1df39c9fbf7b02e499ae0145825fb8f69f",
+      "gzipSha256": "187744bb26eea0df613f827189810dba16047bff2a4b3180f290a815d9f3ca5c",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "rehearsal/oc-native-root.mjs",
+      "bytes": 18884,
+      "sha256": "610565a09e30d95cb01277881606d106fd364f75e5bdcf3888cc34f8c58d6144",
+      "gzipSha256": "b23406d1937ffd13f7c6b8b316dc38c883ee9d96d215c2bf33706cb2f6d11d01",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "producer/oc-native-root.py",
+      "bytes": 7076,
+      "sha256": "d6dd8cf9e2aab97ba628ae76efd9adda1ead0fde9139ae2bcad566e6d7b197ff",
+      "gzipSha256": "5e5404ba244f4dee4812ae424a2672b780464b1fd4e8d41c058913f5d3d4d5a0",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "Parent independently checks PASSED actual original desktop+fresh390touchphone first-row click/tap, each3 unique Source cards/two distinct persisted markers,2raw snapshots,subscribe2,actual marker/ancestor opacity1/animations0/visible+twoRAF, original no-false-legacy-notice gate. Parent READ BOTH original history PNGs: text fully readable and old red noReply absent. Same30s/noCSS/noAnimationDisabling/noSourceStateInjection kept; frozen8842da5 runtime/fixtures unchanged. Input remains readonly; no native write/provider/external/production auth. Console Git-unavailable/404/intentional badlogin401 remain HONEST, not console-clean. Ten raw SHA/gz incl original unchanged Python producer launch100b06d(NOT copied) and copied browser. Prior valid negative control bc70b6944 and other failures unchanged. First parent script expected error:null field but successful artifact omits error, failed before archive creation; now accepts only absent-or-null, original JSON unchanged. Bounded author navigation/history/read-visual proof, NOT independent/user/physicalphone/paidprovider/new/send/IME/stream/stop/allrepo acceptance."
+}
