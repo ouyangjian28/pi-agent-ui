@@ -96,7 +96,9 @@ function responseNoticeOf(snap: SessionDetailSnapshot): {
     (event.generation === null || event.generation === timeout.generation) && TERMINAL_TEXT[event.kind] !== undefined);
   if (terminal) return { responseTimeoutNotice: null, responseTerminalNotice: TERMINAL_TEXT[terminal.kind] ?? null };
   // idle/closed 不把历史超时贴成当前在途；也不凭 idle 推断模型成功。
-  if (intentId === null) return NO_RESPONSE_NOTICE;
+  if (intentId === null) return turn.state === "closed"
+    ? { responseTimeoutNotice: null, responseTerminalNotice: "回合已关闭，执行结果仍须核对；不会自动重发。" }
+    : NO_RESPONSE_NOTICE;
   return { responseTimeoutNotice: "响应超时，本次结果尚未确认。请查看活动详情核对；不会自动重发。", responseTerminalNotice: null };
 }
 
