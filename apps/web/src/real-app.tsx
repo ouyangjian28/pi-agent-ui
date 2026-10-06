@@ -343,7 +343,7 @@ function ConnectedApp({
           }}>
             {isNew ? <div className="welcome"><span className="welcome-mark">π</span><h1>从一个想法开始</h1><p>从左侧继续或直接开始新对话</p></div> : <SessionDetail managed client={clients.subscribeClient} file={file} title={title} />}
           </div>
-          <WriteComposer client={clients.writeClient} file={slot?.file ?? null} editor={{
+          <WriteComposer client={clients.writeClient} file={slot?.file ?? null} responseTimeout={detail.responseTimeoutNotice !== null} editor={{
             slot, source: clients.wsClient, isNew, defaultChoice: readLastModel() ?? MODEL_DEFAULT,
             onEdit: (text) => { const id = ensureDraft(); if (id) owner.edit(id, text); },
             onConfigure: (choice, text) => { if (!isPersistableModel(choice)) return; const id = ensureDraft(); if (id) owner.configure(id, choice, text); },

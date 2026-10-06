@@ -105,7 +105,7 @@ export interface ManagedEditor {
   readonly onViewTarget: () => void;
   readonly onCancel: () => void;
 }
-export function WriteComposer({ client, file, editor }: { client: WriteClientSurface; file: string | null; editor?: ManagedEditor }) {
+export function WriteComposer({ client, file, editor, responseTimeout = false }: { client: WriteClientSurface; file: string | null; editor?: ManagedEditor; responseTimeout?: boolean }) {
   const { view, send, stop, resume } = useWrite(client, file);
   const [localText, setText] = useState("");
   const text = editor ? (editor.slot?.text ?? "") : localText;
@@ -228,7 +228,7 @@ export function WriteComposer({ client, file, editor }: { client: WriteClientSur
         <NotReadyBanner info={view.notReady} onRetry={canSend ? onSend : undefined} />
       ) : null}
       {view.lastResult !== null && (!editor || (view.lastResult.ok && (view.lastResult.kind === "stop" || view.lastResult.outcome.kind === "launched"))) ? (
-        <p role="status">{editor && view.lastResult.kind === "prompt" ? "消息已受理，等待回复。" : lastResultText(view.lastResult)}</p>
+        <p role="status">{editor && view.lastResult.kind === "prompt" ? (responseTimeout ? "响应超时，结果待核对；不会自动重发。" : "消息已受理，等待回复。") : lastResultText(view.lastResult)}</p>
       ) : null}
       <details className="resume-demo" hidden={editor?.isNew === true}>
         <summary>高级诊断</summary>

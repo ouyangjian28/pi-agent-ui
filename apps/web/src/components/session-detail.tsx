@@ -377,6 +377,7 @@ export function SessionDetail({
           </p>
         ) : null}
         <LiveStreamView liveEvents={view.liveEvents} historyEvents={view.events} generationKey={generationKey} />
+        {view.responseTimeoutNotice && <p className="banner response-timeout-banner" role="alert">{view.responseTimeoutNotice}</p>}
         {view.events.some((event) => ["verdict-unknown", "journal-corrupt", "corrupt-entry"].includes(event.kind)) && <p className="banner" role="alert">历史存在结果未知或损坏记录，请查看活动详情核对；不要据此重复发送。</p>}
         {view.liveEvents.some((event) => event.kind === "ui-note" && event.notifyType !== "info") && <p className="banner" role="alert">有新的警告或错误通知，请查看活动详情。</p>}
         {(view.events.some((event) => event.kind !== "message" || (event.role !== "user" && event.role !== "assistant")) || view.liveEvents.some(isSideLiveEvent)) && <details className="activity-details"><summary>活动详情</summary>

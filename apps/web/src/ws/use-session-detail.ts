@@ -39,6 +39,8 @@ export interface SessionDetailView {
   /** 分页加载在途（streaming 态下展示「加载更多历史」提示）。 */
   readonly paging: boolean;
   readonly statusSummary: StatusSummary | null;
+  /** 当前会话/进程代次/在途意图的保守超时提示；不修改协议状态或传输健康。 */
+  readonly responseTimeoutNotice: string | null;
   /** 错误态受控文案（status=error/auth-failed 时）。 */
   readonly errorMessage: string | null;
   /** 流上方横幅受控文案（4431 终局保留内容/4409 需续读等；与错误态文案分立）。 */
@@ -64,6 +66,15 @@ function processSummaryText(phase: "idle" | "running" | "stopping", ready: boole
   return ready ? `${label}·就绪` : label;
 }
 
+/** F1：只消费当前在途意图的已有超时事实，不把超时解释为执行失败。 */
+function responseTimeoutNoticeOf(snap: SessionDetailSnapshot): string | null {
+  const turn = snap.status?.turn;
+  if (!turn || !("intentId" in turn)) return null;
+  const timeout = snap.events.findLast((event) => event.kind === "response-timeout" &&
+    event.intentId === turn.intentId && event.generation === snap.status?.process.generation);
+  return timeout ? "响应超时，本次结果尚未确认。请查看活动详情核对；不会自动重发。" : null;
+}
+
 /** 连接级状态→视图态（身份门内外共用；error 按 errorKind 细分 auth-failed）。 */
 function connLevelStatus(snap: SessionDetailSnapshot): DetailViewStatus {
   if (snap.connState === "error") return snap.errorKind === "auth-failed" ? "auth-failed" : "error";
@@ -85,6 +96,7 @@ export function sessionDetailViewOf(snap: SessionDetailSnapshot, targetFile?: st
       liveEvents: [],
       paging: false,
       statusSummary: null,
+      responseTimeoutNotice: null,
       errorMessage: snap.connState === "error" ? snap.errorMessage : null,
       banner: null,
       canResync: false,
@@ -113,6 +125,7 @@ export function sessionDetailViewOf(snap: SessionDetailSnapshot, targetFile?: st
   } else if (snap.phase === "closed" && snap.connState === "ready" && (snap.events.length > 0 || snap.liveEvents.length > 0)) {
     banner = snap.streamNote ?? snap.errorMessage ?? "订阅已停止"; // C4：终局有内容→已停止/被替换受控横幅（4431/替换终局）
   }
+  const responseTimeoutNotice = responseTimeoutNoticeOf(snap);
   return {
     status,
     file: snap.file,
@@ -122,8 +135,9 @@ export function sessionDetailViewOf(snap: SessionDetailSnapshot, targetFile?: st
     paging: snap.connState === "ready" && snap.phase === "paging",
     statusSummary: snap.status === null ? null : {
       process: processSummaryText(snap.status.process.phase, snap.status.process.ready),
-      turn: turnText(snap.status.turn),
+      turn: responseTimeoutNotice ? "响应超时 · 结果待核对" : turnText(snap.status.turn),
     },
+    responseTimeoutNotice,
     // 空内容终局且无错误文案时（如被替换前无任何内容）：streamNote 受控提示走错误文案，不静默
     errorMessage: status === "error" && snap.phase === "closed" && snap.errorMessage === null ? snap.streamNote : snap.errorMessage,
     banner,
