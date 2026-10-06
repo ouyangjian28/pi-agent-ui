@@ -1,0 +1,76 @@
+{
+  "task": "b43d60b06",
+  "files": [
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "dc2311060dbcd4b8c364adb4c1dd4417885c03670bc7db78bd6d5192290da577",
+      "gzipSha256": "83f615b7d4a2c56ea2ed5cbeec5e7622240c4cb03ae72f22e6ebe786e5362f49",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "expected.json",
+      "bytes": 514,
+      "sha256": "47b25ceb36976639f9f9e32920ddadc5a30f89a5f48fae06b11862c035b78c90",
+      "gzipSha256": "292416892cdaa62f27e2127325a18d66244622738003a585dcd0f9d28e0edf44",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "targets.txt",
+      "bytes": 631,
+      "sha256": "0a1524df5239d745af0c04d8cf324aa15d8cf1c981bb728881364f2c07dd680b",
+      "gzipSha256": "995c323c993ddb83028ae6b177f692e2dcb2b835bb8b5b659572ba3ea72ea222",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "preflight.log",
+      "bytes": 102,
+      "sha256": "49d641ffc34f27cd80dbffe6141c09a525f907b73b33dcbd8f268c350abbf74c",
+      "gzipSha256": "6c56a0b2da15164dccc3b7e327e7260c5810094e58998c69fe0414adf0b5349a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "results.json",
+      "bytes": 75005,
+      "sha256": "6b1a2d4b74893b5ab96daeadec0a860f38484f5c37dc185ed4cee4cad945ed88",
+      "gzipSha256": "fd72eea03c0627ddb9e5127143092350b3bc94b6232f76580e0a47c2f92ebd9b",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "tests.log",
+      "bytes": 125,
+      "sha256": "b765940164e60fc262410d7235e45123112b9a67e4665cdff02abc8d7ebdf64a",
+      "gzipSha256": "9205cd9b0846fc92e5e5cc99eb0a83a9826c3d2e9db5a096cedb823899fdc570",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "coverage-check.log",
+      "bytes": 120,
+      "sha256": "6ff974056cea46aa953a205059d6f0cb191028919dd6e9bd141ffed0215c8a96",
+      "gzipSha256": "8f8b900d10842da854d33bf92d874924900525a81636d52edaa1f84ff4ed8046",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "web-types.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-check.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "backend-protocol.diff",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "Parent independently verified fixed154/14 exact files/all assertion statuses, unchanged original140 SHA, web types0/source2952+26893497B/backend-protocol0. New14 actual Source AST/VM only. Not actual row clicks, history, Source tsc, native composer/new/send/provider/physical-phone acceptance."
+}
