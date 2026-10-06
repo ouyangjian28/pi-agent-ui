@@ -1,0 +1,86 @@
+{
+  "task": "bca1c6775",
+  "recordedAtCommit": "372e7d1f33c62065249e9574de2f791169f2d1c6",
+  "files": [
+    {
+      "name": "result.json",
+      "bytes": 34314,
+      "sha256": "aca3a6d09f6f2eeea4aaf0867a2e9a677c108550fe1c0ed041d5f7c2951572e3",
+      "gzipSha256": "94198a851dd88f0b431a30eabdf0a7107c30e462332397c91cd2cc5d33118005",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "provider-result.json",
+      "bytes": 589,
+      "sha256": "2a298d627a966c6183ecaff651624a59fb88334b168b00756d0dd07509d64129",
+      "gzipSha256": "bdafe67f35d4e8aa37a6c279558b3e1104d9dc98e84642f5db42c79ff11f4f37",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "run.log",
+      "bytes": 636,
+      "sha256": "7601b3a45bc0999002c65478287d923eac783265981a8a18f6a91b3febf8eb66",
+      "gzipSha256": "46572ff10ed539b005af483e5cdb389807f4000ba706fcaca1e59a90868d4ae1",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "harness-copy.json",
+      "bytes": 194,
+      "sha256": "1f546aa01d3a8b8ede24ebdd53a3506088f2ce19a2abc16347fd8e9b9fa1cccc",
+      "gzipSha256": "5f7fd56c3a133cfd295f0ca10a38801bff1db172ebf07da833843fdd9a3dc9da",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "desktop.png",
+      "bytes": 29780,
+      "sha256": "300399a5c994f383d41b9379d07aa4be778db0d6e60007b57d51085bb6ed4cd9",
+      "gzipSha256": "a24228235e1004ff8486a3fb2a2c633d83ad5310fbbfde11ae127e1b9244087d",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "last-page.png",
+      "bytes": 59479,
+      "sha256": "afeeb496f7561721cba3260c951c8bda9b2c5f1a0b5ebe3f9fd5bc035bab519f",
+      "gzipSha256": "29c40c3961213ab95af98d7cd0da4b4949b59a30ae821fc8d8322d323fee18dc",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "rehearsal/oc-native-root.mjs",
+      "bytes": 24135,
+      "sha256": "e98a20f86c06489ce015a71baf93a3a4d2e4a1e7ac7c8f11fe20d8afe5159175",
+      "gzipSha256": "4269f6972b700c5bb3504d4acc0d84a96af0ebdd47995eb3aaf4c7d99a237a74",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/oc-native-root.py",
+      "bytes": 7768,
+      "sha256": "8ec457bb60858c21d27f7869c9444d5a3d8b6b601a13f23a7c4c63292ff70904",
+      "gzipSha256": "df7dd1a7266199f3dc3a35371f65254e4a02184ea353e16eeba1005a64b50030",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/native-source-composer.tsx",
+      "bytes": 10671,
+      "sha256": "ddcf2175deb9316708f65556911878e5123969b222b47521be702239abfd30b3",
+      "gzipSha256": "02db3ba67703223429ed4aae94fcbda16da03abab9ae3a1c3936546997fa6094",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/ui-oc-native-composer-transform.mjs",
+      "bytes": 3823,
+      "sha256": "bea6f4f2b8905c3af0af82a6b3eaecb774e1a09be235810cc6bcc7caa626c014",
+      "gzipSha256": "9d87d091af49d55d3f81e2dca0afef08e94e49e3eb0c7aebb1b667fcdd4f47a7",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/original-ModelControls.tsx",
+      "bytes": 154443,
+      "sha256": "5d2be17614a1abfcb44c496af0b63b0b34f93e1cd875434ff0b06565a3018910",
+      "gzipSha256": "858210f70da36cdd5b7ae4998e98cd4b69e61938230a7e878f38b780cf7dd543",
+      "roundtripIdentical": true
+    }
+  ],
+  "producerPassed": false,
+  "authorVisualPassed": false,
+  "proofScope": "Original width/column/editor geometry and placeholder guards reached/passed on DESKTOP, but model readability guard FAILED before phone execution: Error: Actual original native model selector missing/clipped/unreadable. Last-page PNG visibly wider source composer and label; original ModelControls desktop DropdownMenuTrigger asChild uses div.model-controls__model-trigger, harness guessed button and therefore missed it. Preserve exact failed producer/source/PNG before fixing locator; no weakening size/range/history/timeouts/provider0 guards. No phone layout/send/IME acceptance. Author also sees original chat placeholder advertises legacy @/slash/shell/snippets absent native capabilities; choose honest neutral copy rather than implying these wired."
+}
