@@ -21,8 +21,8 @@ function ready() {
   const snapshot = { list: { state: 'ready', sessions: [], roots: { status: 'ok', items: ['/owned', '/journal'], journalRoot: '/journal' } }, write: { connState: 'ready' }, detail: { connState: 'ready', status: null } } as unknown as NativePiSnapshot;
   binding.host = { port: { getSnapshot: () => snapshot } }; return snapshot;
 }
-function transpile(source: string) {
-  const result = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX }, reportDiagnostics: true });
+function transpile(source: string, fileName = 'fixture.ts') {
+  const result = ts.transpileModule(source, { fileName, compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX }, reportDiagnostics: true });
   expect(result.diagnostics ?? []).toEqual([]); return result.outputText;
 }
 function module(kind: 'window' | 'projection') {
@@ -107,6 +107,6 @@ describe('native history original Source AST/VM (not browser/Source tsc acceptan
     binding.host = null; const fn = initializer(); const getState = vi.fn(() => ({ config: {} })); await expect(fn({ directory: '/old', store: { getState }, global: { config: {}, projects: [] }, set: vi.fn() })).rejects.toThrow('projectID is not defined'); expect(getState).toHaveBeenCalledOnce(); const source = nativeHistorySurfaceTransform(read('bootstrap'), 'bootstrap'); for (const literal of ['sdk.question.list({ directory })', 'sdk.permission.list({ directory })', 'if (errors.length)', 'return "failed"']) expect(source).toContain(literal);
   });
   it('all four overlays preserve original bodies, reject repeat/anchor drift and parse actual Source', () => {
-    for (const kind of Object.keys(paths) as (keyof typeof paths)[]) { const original = read(kind); const out = nativeHistorySurfaceTransform(original, kind); transpile(out); expect(() => nativeHistorySurfaceTransform(out, kind)).toThrow('already applied'); expect(() => nativeHistorySurfaceTransform('', kind)).toThrow('anchor'); const lines = out.split('\n'); const remaining = lines.filter(line => !line.includes('piGetNativeHost') && !line.includes('@pi-native/history-surface') && !line.includes('pi-native-history-read-surface-overlay')).join('\n'); expect(remaining).toBe(original); }
+    for (const kind of Object.keys(paths) as (keyof typeof paths)[]) { const original = read(kind); const out = nativeHistorySurfaceTransform(original, kind); transpile(out, paths[kind]); expect(() => nativeHistorySurfaceTransform(out, kind)).toThrow('already applied'); expect(() => nativeHistorySurfaceTransform('', kind)).toThrow('anchor'); const lines = out.split('\n'); const remaining = lines.filter(line => !line.includes('piGetNativeHost') && !line.includes('@pi-native/history-surface') && !line.includes('pi-native-history-read-surface-overlay')).join('\n'); expect(remaining).toBe(original); }
   });
 });
