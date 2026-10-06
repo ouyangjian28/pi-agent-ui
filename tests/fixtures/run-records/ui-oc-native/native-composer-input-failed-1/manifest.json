@@ -1,0 +1,35 @@
+{
+  "task": "bddf5b93c",
+  "sourceCommit": "b1d4172",
+  "files": [
+    {
+      "name": "vitest.json",
+      "bytes": 9641,
+      "sha256": "ef17f3e52e280fefe46b05453c6f2562d7c06aaa84174f6b3b8664e1ac0d6e19",
+      "gzipSha256": "39734651581ee8dce37fe2ee9c6a575fa89689a7469cbd69761710d4df8da738",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "run.log",
+      "bytes": 7800,
+      "sha256": "75201155d66d3a76e3a38691fe060cdef9d8735ec36ea33a72e2abd799ea90b7",
+      "gzipSha256": "202858bc7c6099911a8405a31814e5a49d992eae41966d734c1256dede585b86",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "native-composer-input.ts",
+      "bytes": 2221,
+      "sha256": "60b234a8a3e80a77943a90083a833182cc336326564e7b64726bbfeb460c1661",
+      "gzipSha256": "dd7ce396cc052595703fb136363d63b41926c04c0bd7e9bc250655952a125596",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "native-composer-input.test.ts",
+      "bytes": 10248,
+      "sha256": "bd203f06dd7b11f13e410f4616afe2f32dbb7c171e39487b7b755c9e53367f3d",
+      "gzipSha256": "c70564237a4c98e3e43a1891df220ad9ddcc1e31173e94db16717fca911db1ed",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "FAILED16 controlled actual NativePiPort/owner cases:12pass4fail. Three expected old draft-target binding.slot.text after launched, but owner.open transfers to distinct warm session id so old binding is stale; no rebind fix presumed. Fourth incorrectly expected raw Error.message instead of existing fixed sanitized owner.uploadError. Archive raw failures plus exact initial code/test BEFORE test correction; fixed16 no skip/no production auth/no mounted UI/Source/server changed. Full native192/17 and composer UI remain UNVERIFIED."
+}
