@@ -1,0 +1,93 @@
+{
+  "task": "b76bb6c41",
+  "recordedAtCommit": "d926a45b8a030850ab4949351d0908c9d8dbbe7b",
+  "files": [
+    {
+      "name": "result.json",
+      "bytes": 63066,
+      "sha256": "fa5d59e8b91beae679d021bc5ccd856d78a3a7ca517c614a506c53aeb4076a28",
+      "gzipSha256": "8481d77e5cad75e358ae54bfe483037a03eb00956e67daeeb7bc50a6003bdad3",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "provider-result.json",
+      "bytes": 536,
+      "sha256": "e5618f4655432a9624a030ac7689f652f663b3ebfe31997643c5472c8c4c6357",
+      "gzipSha256": "ecf8243f703fbfd6879b80ed282d7ce87223633833e01d360540ce8086a08ca2",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "run.log",
+      "bytes": 147,
+      "sha256": "4699fa966c87a6c4615927608709783e29df3571f8dab9f3184fb13a59c857e4",
+      "gzipSha256": "1b2471b487b9dbd768995d2f8a96bc576817a1ca19e0c4840d882ba15027532b",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "harness-copy.json",
+      "bytes": 194,
+      "sha256": "0c75d02ed0efed4ad410ded0f9cc048ffa12a1ac8521b33d8070e55e2fe85f41",
+      "gzipSha256": "f33a305fabdc9844d03000382415f6383e5d42153f4114818244d961a3f52d33",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "desktop.png",
+      "bytes": 29780,
+      "sha256": "300399a5c994f383d41b9379d07aa4be778db0d6e60007b57d51085bb6ed4cd9",
+      "gzipSha256": "a24228235e1004ff8486a3fb2a2c633d83ad5310fbbfde11ae127e1b9244087d",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "phone.png",
+      "bytes": 24858,
+      "sha256": "a865ba216e5bb3ec69d44b1b1dc40aab778b015e12fd7885916d284cb096d44b",
+      "gzipSha256": "0329f5cb337c405da321b557abdcfb0c05090a8ab569368651f9a0fa7fd255a3",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "desktop-history.png",
+      "bytes": 51305,
+      "sha256": "d324bde25ba0e3f95ee40ce29c0591b67792464e6c51abb3871edf271cd114f1",
+      "gzipSha256": "d886dbe303702179cfc5c0932b1105fb9c11256ffef22121d6be986a0e99577c",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "phone-history.png",
+      "bytes": 25709,
+      "sha256": "fff3219de974d1dcddb2f1ecd1db2b2331e5d9603573f3cebc85d74a8c2c2d09",
+      "gzipSha256": "e3de29cbb26c662f9c021a02939f8a93acf68e04cc5d6200434804c19592a52e",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "rehearsal/oc-native-root.mjs",
+      "bytes": 22035,
+      "sha256": "66d4929d275f47cdfec810f379990f34b2bbe248b1b07c0d2c1d9e5c6d572d68",
+      "gzipSha256": "b8b5479c2651006762126c7f6dd517121e61e56fcc471b120003a7030089062f",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/oc-native-root.py",
+      "bytes": 7509,
+      "sha256": "4ce0a654df55829e9b91f397393d28d4288298c4d7acd3bbe3d9c4a9344132bb",
+      "gzipSha256": "127104783c8c23a2f38c367df1ec46e08ddc1a22582a2efa61b575e150b8fe8b",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/native-source-composer.tsx",
+      "bytes": 10450,
+      "sha256": "e0f2dde3105e1730d81a061906de7f697e8cc872f380a3c04306383bba93cb6d",
+      "gzipSha256": "40439552968122184eaaf269ee5d313b016fc80ea487855f3b5883e5d2c0f89c",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/ui-oc-native-composer-transform.mjs",
+      "bytes": 3743,
+      "sha256": "bb088639182f3e6efa8662288ad11b641b61967a6ffeb7ed1501a3afc14677e5",
+      "gzipSha256": "571e495bef8a7c15b690cf7ace28851b025834fd6e909694923167727f7e8c52",
+      "roundtripIdentical": true
+    }
+  ],
+  "producerPassed": true,
+  "authorVisualPassed": false,
+  "proofScope": "Actual original CodeMirror/Footer mounted desktop and fresh390phone; unchanged history/rawsnapshot/ancestor opacity1/noanimations/30s/provider0/writes0/productionauth0 gates passed. Parent screenshot selfcheck REJECTED visual: shrink-to-content form desktop190px in1160 parent, phone128px in390; model desktop collapsed and mobile clipped, placeholder absent. Existing mount gate lacked usable-width/text/model-readable checks. Preserve original passing output and visibly bad PNG/source BEFORE mutation. NOT visual PASS/send/Chinese continuity/paid/independent/user/physicalphone. Plan renderer reuse exact original w-full/form+chat-input-column+mobile safe-area and original placeholder; strengthen explicit-bound-mode geometry/readability only, old readonly gates intact; do not alter source snapshot/native owner/backend."
+}
