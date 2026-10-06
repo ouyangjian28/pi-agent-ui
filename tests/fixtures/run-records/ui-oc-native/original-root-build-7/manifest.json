@@ -1,0 +1,48 @@
+{
+  "task": "b2c198ecc",
+  "files": [
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "a31588562814574173c26717bb3735ac62005b243f0e0320efb42645743a4313",
+      "gzipSha256": "fb91915e39120679c322a40d2d62e7d3bc1d8a11fd497aaddfe236d9b176c6cf",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "build.log",
+      "bytes": 232619,
+      "sha256": "03cbf7b85c69a23ea0b796e2c42ce634e5093b26632500fbca67c7b1caed06a2",
+      "gzipSha256": "954a42b4cc0b16618b407da5bd18261cf0dbd5fb5f211573a78fba7e5cb3bbdb",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-before.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-after.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "audit-check.log",
+      "bytes": 157,
+      "sha256": "868166ac7babe9a77ac646447f331f9dc20b45ad846e600be4cdf2f3690f9d10",
+      "gzipSha256": "7df5c02e7cbb67b496f987d9d36c48baf5d0ce5bcd42a637a6d1cfd083f36cd0",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "native-overlays.json",
+      "bytes": 1833,
+      "sha256": "5b9154ade76094ae44a1dce66186834da976197282043ebee1324644ad9ea780",
+      "gzipSha256": "a18e8b994c9f489c7aaaaf42ea2d28ef9f47301d181d3c2713a00e439ee8ec27",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "Parent exact17 vs original16 overlay target SHA, one React+DOM/three actual HTML, source2952/26893497B before-after, compiled apps/web+tools unchanged vs frozen HEAD/backend0. Compiler metadata mounted=false is NOT runtime fact. Not Source tsc/browser/history/new/send/paid-provider/physical-phone acceptance; old actual history1 remains failed."
+}
