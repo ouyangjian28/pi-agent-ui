@@ -1,0 +1,49 @@
+{
+  "task": "b2bf2f1d1",
+  "compileCommit": "5f1c3989dbce5218f53c0f7ff6dce124aeb497f1",
+  "files": [
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "f0a7e7bb3c96b6ebec2f5882e2b3e15670938b05080a68b92e705e5ca3a05b77",
+      "gzipSha256": "962d178c3b941bcde107794c3559389a1e8961e4b9c8b1dc94610bfd9679b09c",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "build.log",
+      "bytes": 232619,
+      "sha256": "bff186c7537231832dc8e39001a4eb37c24812bf53d0e7657d8314e15f54b992",
+      "gzipSha256": "a1dd4038498ce5316a69c068982cfed5a86ecc41887f4912aea802e6ccb084c8",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-before.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-after.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "audit-check.log",
+      "bytes": 190,
+      "sha256": "14744bfd29a7f97305cec3fa80352938b7e7d9fc1549ef1765408ebe50c97e95",
+      "gzipSha256": "f6dbd33c4dddca9942815832aaaaac73155bbca72e3c5c71ed3354b28d463747",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "native-overlays.json",
+      "bytes": 1185,
+      "sha256": "8e6d6c027ac380d83746def92b6590854fd25ef5873e00e16897c86951a79fca",
+      "gzipSha256": "1a17cc065fb3ad5dd8a192d49672210ca795f0e914bc32f29257794dc47f3fe4",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "Parent independently checked nine exact overlays/one original React+DOM/three HTML/2952 unchanged Source bytes before and after. Current native runtime/transform sources equal compilation commit; fixture-only parse repair does not alter dist. Compilation only, NOT Source tsc/Root browser/chat/provider/IME/phone acceptance."
+}
