@@ -1,0 +1,55 @@
+{
+  "task": "b63b95457",
+  "files": [
+    {
+      "name": "harness-copy.json",
+      "bytes": 194,
+      "sha256": "d63858ee08b1b0ddf51744a32d89de1ad71c09393ed6c149206cc1579b949d0f",
+      "gzipSha256": "f765ac21541484276963a312397ea648b6c79722a3db2caeb3f5504f7721e481",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "run.log",
+      "bytes": 306,
+      "sha256": "a8977fef147b4cdb42a8656824607304c2b5c7f57308d703f2a665339bf3cf2d",
+      "gzipSha256": "e2f7b380e6a54aa97d765cbfb89d9c261240261807809944b5ccbaa2f1fc2e25",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "result.json",
+      "bytes": 21799,
+      "sha256": "8bc593bd097bec0564128f0c7cd2f4926350a16e7a764ac0dafea7af8b2263b3",
+      "gzipSha256": "687cf806e3cd2511fdb0aef879a8c097f7facb609a1454a9c38cc86e58a85b0b",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "provider-result.json",
+      "bytes": 505,
+      "sha256": "14a1cee92ecdbe7786d220306235479ff04d24d3eb06c052646456efc5c104d5",
+      "gzipSha256": "cf1e148655e2654a72204bdfd653b0d16b7815a50f71177c35e94dbf37235bec",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "desktop.png",
+      "bytes": 29780,
+      "sha256": "300399a5c994f383d41b9379d07aa4be778db0d6e60007b57d51085bb6ed4cd9",
+      "gzipSha256": "a24228235e1004ff8486a3fb2a2c633d83ad5310fbbfde11ae127e1b9244087d",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "last-page.png",
+      "bytes": 33930,
+      "sha256": "ed6b96ba83b0df12df879d78babc2d5196e7634c127d4d4b439e3ebbcbb4a902",
+      "gzipSha256": "bf6936368362788842764110d4bc5a1c97d2798bd715ecb208410df7c77c0185",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "failed-harness.mjs",
+      "bytes": 15755,
+      "sha256": "7331cd904bdf31cbf48882f7459b14136965e7c93f1cdae3837524cb6160984e",
+      "gzipSha256": "f665a22b8b73c25a308d6456806f4ca9faabaacd699f8b2aa70a842fe46fa843",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "FAIL actual desktop first matching native session row click: waitForFunction Timeout30000ms, no subscribe/historySnapshots/card facts, phone stage unreached. Last image workspace init error, cause not yet proven. Pageerror/externals/provider0 not history pass. Seven raw originals/SHA/gz preserved before diagnosis; no weakened gate."
+}
