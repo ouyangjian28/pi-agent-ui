@@ -37,7 +37,8 @@ const frames = [], sends = [], errors = [], errorStacks = [], blocked = [], requ
 const mobileSessionsLabel = 'Open sessions and projects';
 const mobileDialogLabel = 'Sessions';
 const assert = (value, message) => { if (!value) throw new Error(message); };
-let browser, server, failure, lastPage;
+let browser, server, failure, lastPage, failureFacts;
+const consoleErrors = [];
 try {
   // Bind the exact phone role/name to its actual Source consumer and English
   // locale. Do not borrow the desktop button's different accessible name.
@@ -66,6 +67,7 @@ try {
       // the owned login token even if a future transport embeds it in a stack.
       errorStacks.push((error.stack ?? error.message).split(token).join('[redacted-fixture-token]'));
     });
+    page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text().split(token).join('[redacted-fixture-token]')); });
     page.on('request', request => { const url = new URL(request.url()); requests.push({ method: request.method(), pathname: url.pathname }); });
     page.on('websocket', socket => {
       assert(new URL(socket.url()).origin === origin.replace('http:', 'ws:'), 'Non-owned browser socket');
@@ -142,9 +144,13 @@ try {
   assert(!errors.length && !blocked.length, 'Original Root page errors/external network attempts');
 } catch (error) { failure = error; }
 finally {
-  if (failure && lastPage && !lastPage.isClosed()) await lastPage.screenshot({ path: join(out, 'last-page.png'), fullPage: false }).catch(() => {});
+  if (failure && lastPage && !lastPage.isClosed()) {
+    // Diagnostic reads only; never alter owner/Source state or existing gates.
+    failureFacts = await lastPage.evaluate(() => ({ surface: window.__OPENCHAMBER_SURFACE__, body: document.body.innerText, cards: [...document.querySelectorAll('[data-message-id]')].map(el => ({ id: el.getAttribute('data-message-id'), text: el.textContent })), controls: [...document.querySelectorAll('button')].map(el => ({ text: el.textContent, aria: el.getAttribute('aria-label') })) })).catch(() => null);
+    await lastPage.screenshot({ path: join(out, 'last-page.png'), fullPage: false }).catch(() => {});
+  }
   if (browser) await browser.close(); if (server) await server.dispose(); await compiler.close();
-  await writeFile(join(out, 'result.json'), JSON.stringify({ passed: !failure, error: failure?.message, proofScope: navigation ? 'Actual original desktop+fresh phone UI row click/tap, native persisted JSONL snapshots and two distinct Source message cards. Readonly navigation/history only, not new/send/stream/stop/composer/paid provider/physical phone/IME acceptance.' : 'Actual original App/MobileApp plus unchanged gateway/native clients with owned history and local model configuration. Readonly Root only; not chat/composer/paid-provider/physical phone/IME acceptance.', compilation, surfaces, navigationFacts, historyFacts, historySnapshots: navigation ? frames.filter(f => f.t === 'snapshot' && JSON.stringify(f).includes('NATIVE-HISTORY-ASSISTANT-OWNED')) : [], requests, frameTypes: frames.map(f => f.t), sentTypes: sends, errors, errorStacks, blocked, productionAuthUsed: false }, null, 2) + '\n');
+  await writeFile(join(out, 'result.json'), JSON.stringify({ passed: !failure, error: failure?.message, proofScope: navigation ? 'Actual original desktop+fresh phone UI row click/tap, native persisted JSONL snapshots and two distinct Source message cards. Readonly navigation/history only, not new/send/stream/stop/composer/paid provider/physical phone/IME acceptance.' : 'Actual original App/MobileApp plus unchanged gateway/native clients with owned history and local model configuration. Readonly Root only; not chat/composer/paid-provider/physical phone/IME acceptance.', compilation, surfaces, navigationFacts, historyFacts, historySnapshots: navigation ? frames.filter(f => f.t === 'snapshot' && JSON.stringify(f).includes('NATIVE-HISTORY-ASSISTANT-OWNED')) : [], requests, frameTypes: frames.map(f => f.t), sentTypes: sends, errors, errorStacks, consoleErrors, failureFacts, blocked, productionAuthUsed: false }, null, 2) + '\n');
 }
 if (failure) throw failure;
 console.log(navigation ? 'Original desktop/mobile explicit native row selection and persisted history passed; composer still readonly.' : 'Original desktop/mobile native read-only Root browser passed; chat still unbound.');

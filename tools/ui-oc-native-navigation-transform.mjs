@@ -47,6 +47,9 @@ export function piNativeNewDraftFromUser(options?: Partial<NewSessionDraftState>
 `;
   }
   const replacements = {
+    actions: [
+      ['    (sessionId: string, sessionDirectory?: string | null) => {', "\n      const native = piNativeSelectSessionFromUser(sessionId, sessionDirectory);\n      if (native) {\n        if (native === 'selected') {\n          useUIStore.getState().closeMainSurfaces();\n          if (mobileVariant) setSessionSwitcherOpen(false);\n          if (isSessionSearchOpen || sessionSearchQuery.length > 0) { setSessionSearchQuery(''); setIsSessionSearchOpen(false); }\n        }\n        return;\n      }"],
+    ],
     collection: [
       ["  const selectSessionForProject = React.useCallback((sessionId: string, sessionDirectory: string | null) => {", "\n    if (piNativeSelectSessionFromUser(sessionId, sessionDirectory)) return;"],
     ],

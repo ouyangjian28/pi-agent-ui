@@ -6,7 +6,7 @@ import { runInNewContext } from 'node:vm';
 import { nativeSourceNavigationTransform as overlay } from '../../../tools/ui-oc-native-navigation-transform.mjs';
 const ts: typeof import('typescript') = createRequire(resolve(process.cwd(), 'package.json'))('typescript');
 const base = resolve(process.cwd(), 'vendor/openchamber-frontend/packages/ui/src');
-const paths = { store: 'sync/session-ui-store.ts', collection: 'components/session/sidebar/list/SessionProjectCollection.tsx', mobile: 'apps/MobileSessionsSheet.tsx', sidebar: 'components/session/SessionSidebar.tsx', switcher: 'components/session/SessionSwitcherDropdown.tsx' };
+const paths = { actions: 'components/session/sidebar/sessions/useSessionActions.ts', store: 'sync/session-ui-store.ts', collection: 'components/session/sidebar/list/SessionProjectCollection.tsx', mobile: 'apps/MobileSessionsSheet.tsx', sidebar: 'components/session/SessionSidebar.tsx', switcher: 'components/session/SessionSwitcherDropdown.tsx' };
 const originals = Object.fromEntries(Object.entries(paths).map(([kind, path]) => [kind, readFileSync(resolve(base, path), 'utf8')]));
 function parse(kind: keyof typeof paths) {
   const source = overlay(originals[kind], kind);
@@ -83,7 +83,20 @@ describe('actual overlaid Source explicit navigation AST/VM, not real UI or Sour
     const sourceSelect = vi.fn(), close = vi.fn(); callback('mobile', 'handleSelectSession', { piNativeSelectSessionFromUser: () => false, getSessionDirectory: () => '/old', findExactProjectMatch: () => null, projectsMeta: [], setCurrentSession: sourceSelect, onOpenChange: close })({ id: 'old-session' }); expect(sourceSelect).toHaveBeenCalledExactlyOnceWith('old-session', '/old'); expect(close).toHaveBeenCalledExactlyOnceWith(false);
     const oldNew = vi.fn(); callback('switcher', 'handleNewSession', { piNativeNewDraftFromUser: () => false, onSelect: close, openNewSessionDraft: oldNew })(); expect(oldNew).toHaveBeenCalledTimes(1);
   });
-  it('all five overlays reject unknown/drift/duplicate/reapply and preserve original body after guard removal', () => {
+  it('actual recent/project row callback native first skips legacy onSelected/cache/directory effects, closes UI only on selected', () => {
+    for (const result of ['selected', 'rejected']) {
+      const select = vi.fn(() => result), close = vi.fn(), switcher = vi.fn(), query = vi.fn(), search = vi.fn(), legacy = vi.fn(), mark = vi.fn();
+      callback('actions', 'handleSessionSelect', { piNativeSelectSessionFromUser: select, useUIStore: { getState: () => ({ closeMainSurfaces: close }) }, mobileVariant: true, setSessionSwitcherOpen: switcher, isSessionSearchOpen: true, sessionSearchQuery: 'owned-search', setSessionSearchQuery: query, setIsSessionSearchOpen: search, setCurrentSession: legacy, onSessionSelected: legacy, streamPerfMark: mark })('confirmed', '/native');
+      expect(select).toHaveBeenCalledExactlyOnceWith('confirmed', '/native'); expect(close).toHaveBeenCalledTimes(result === 'selected' ? 1 : 0); expect(switcher).toHaveBeenCalledTimes(result === 'selected' ? 1 : 0); expect(query).toHaveBeenCalledTimes(result === 'selected' ? 1 : 0); expect(search).toHaveBeenCalledTimes(result === 'selected' ? 1 : 0); expect(legacy).not.toHaveBeenCalled(); expect(mark).not.toHaveBeenCalled();
+    }
+  });
+  it('actual recent row unbound callback still executes original selection/onSelected/search logic', () => {
+    const close = vi.fn(), current = vi.fn(), selected = vi.fn(), mark = vi.fn();
+    callback('actions', 'handleSessionSelect', { piNativeSelectSessionFromUser: () => false, useUIStore: { getState: () => ({ closeMainSurfaces: close }) }, mobileVariant: false, isSessionSearchOpen: false, sessionSearchQuery: '', useSessionUIStore: { getState: () => ({ currentSessionId: 'previous' }) }, setCurrentSession: current, onSessionSelected: selected, streamPerfMark: mark })('old', '/old');
+    expect(current).toHaveBeenCalledExactlyOnceWith('old', '/old'); expect(selected).toHaveBeenCalledExactlyOnceWith('old'); expect(close).toHaveBeenCalledTimes(1); expect(mark).toHaveBeenCalledTimes(2);
+    const anchor = '    (sessionId: string, sessionDirectory?: string | null) => {'; expect(() => overlay(originals.actions.replace(anchor, 'changed'), 'actions')).toThrow('anchor'); expect(() => overlay(originals.actions + '\n' + anchor, 'actions')).toThrow('anchor');
+  });
+  it('all six overlays reject unknown/drift/duplicate/reapply and preserve original body after guard removal', () => {
     for (const kind of Object.keys(paths) as (keyof typeof paths)[]) { const out = overlay(originals[kind], kind); expect(() => overlay(out, kind)).toThrow('already applied'); parse(kind); }
     const anchor = '  const handleSelectSession = (session: Session) => {'; expect(() => overlay(originals.mobile.replace(anchor, 'changed'), 'mobile')).toThrow('anchor'); expect(() => overlay(originals.mobile + '\n' + anchor, 'mobile')).toThrow('anchor'); expect(() => overlay('', 'unknown')).toThrow('Unknown');
     const out = overlay(originals.store, 'store'); const start = out.indexOf(originals.store.slice(0, 100)); const body = out.slice(start).split('\n// Explicit user callbacks only.')[0].trimEnd().replace(/\n    \/\/ Legacy selection\/cache\/draft effects never own native navigation\.\n    if \(piGetNativeHost\(\)\) return;/g, ''); expect(body).toBe(originals.store.trimEnd());

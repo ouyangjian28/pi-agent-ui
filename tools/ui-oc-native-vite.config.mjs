@@ -42,6 +42,7 @@ const targets = new Map([
   [path.join(snapshot, 'packages/ui/src/components/chat/ChatInput.tsx'), nativeReadOnlyComposerTransform],
   [path.join(snapshot, 'packages/ui/src/sync/session-ui-store.ts'), source => nativeSourceNavigationTransform(source, 'store')],
   [path.join(snapshot, 'packages/ui/src/components/session/sidebar/list/SessionProjectCollection.tsx'), source => nativeSourceNavigationTransform(source, 'collection')],
+  [path.join(snapshot, 'packages/ui/src/components/session/sidebar/sessions/useSessionActions.ts'), source => nativeSourceNavigationTransform(source, 'actions')],
   [path.join(snapshot, 'packages/ui/src/apps/MobileSessionsSheet.tsx'), source => nativeSourceNavigationTransform(source, 'mobile')],
   [path.join(snapshot, 'packages/ui/src/components/session/SessionSidebar.tsx'), source => nativeSourceNavigationTransform(source, 'sidebar')],
   [path.join(snapshot, 'packages/ui/src/components/session/SessionSwitcherDropdown.tsx'), source => nativeSourceNavigationTransform(source, 'switcher')],
