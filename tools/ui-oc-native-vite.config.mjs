@@ -8,6 +8,7 @@ import original from '../vendor/openchamber-frontend/packages/web/vite.config.ts
 import { nativeModelControlsTransform } from './ui-oc-native-model-transform.mjs';
 import { nativeSourceNavigationTransform } from './ui-oc-native-navigation-transform.mjs';
 import { nativeHistorySurfaceTransform } from './ui-oc-native-history-transform.mjs';
+import { nativeLegacySessionNoticeTransform } from './ui-oc-native-session-error-transform.mjs';
 import { nativeMessageOrderTransform } from './ui-oc-native-order-transform.mjs';
 import { nativeRuntimeFetchTransform } from './ui-oc-native-fetch-transform.mjs';
 import { nativeOriginalEntryTransform, nativeReadOnlyComposerTransform, nativeCompanionEventsTransform, nativeWebNotificationTransform, nativeInitialProjectPromptTransform, nativeProviderLogoTransform } from './ui-oc-native-startup-transform.mjs';
@@ -45,6 +46,7 @@ const targets = new Map([
   [path.join(snapshot, 'packages/ui/src/components/chat/lib/turns/projectTurnRecords.ts'), source => nativeHistorySurfaceTransform(source, 'projection')],
   [path.join(snapshot, 'packages/ui/src/components/chat/MessageList.tsx'), source => nativeHistorySurfaceTransform(source, 'messages')],
   [path.join(snapshot, 'packages/ui/src/sync/bootstrap.ts'), source => nativeHistorySurfaceTransform(source, 'bootstrap')],
+  [path.join(snapshot, 'packages/ui/src/components/chat/SessionErrorNotice.tsx'), nativeLegacySessionNoticeTransform],
   [path.join(snapshot, 'packages/ui/src/sync/session-ui-store.ts'), source => nativeSourceNavigationTransform(source, 'store')],
   [path.join(snapshot, 'packages/ui/src/components/session/sidebar/list/SessionProjectCollection.tsx'), source => nativeSourceNavigationTransform(source, 'collection')],
   [path.join(snapshot, 'packages/ui/src/components/session/sidebar/sessions/useSessionActions.ts'), source => nativeSourceNavigationTransform(source, 'actions')],
@@ -90,6 +92,7 @@ const nativeOverlay = {
       nativeSourceComposerReadOnly: true,
       nativeSourceNavigationCompiled: true,
       nativeChronologyReadSurfaceCompiled: true,
+      nativeLegacySessionNoticeInactiveCompiled: true,
       nativeCompanionEventsInactiveCompiled: true,
       nativeWebNotificationsInactiveCompiled: true,
       nativeInitialProjectPromptInactiveCompiled: true,
