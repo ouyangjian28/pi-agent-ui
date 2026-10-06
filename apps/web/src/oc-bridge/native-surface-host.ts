@@ -97,12 +97,14 @@ export async function createNativeSurfaceHost(options: NativeSurfaceOptions): Pr
           static readonly CONNECTING = 0; static readonly OPEN = 1;
           static readonly CLOSING = 2; static readonly CLOSED = 3;
           constructor() { throw new Error("旧后台连接未接入；请使用原生pi操作。"); }
+          // SAFETY: deny-only facade, construction always throws; native clients use the captured constructor. Only constants remain readable.
         } as unknown as typeof WebSocket;
       }
       if (target.EventSource) {
         target.EventSource = class {
           static readonly CONNECTING = 0; static readonly OPEN = 1; static readonly CLOSED = 2;
           constructor() { throw new Error("旧后台事件连接未接入。"); }
+          // SAFETY: deny-only facade, construction always throws; SDK SSE uses guarded fetch, never this constructor. Constants remain readable.
         } as unknown as typeof EventSource;
       }
       port.connect();
