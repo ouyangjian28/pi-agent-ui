@@ -1,0 +1,91 @@
+{
+  "task": "ba36c8a6a",
+  "sourceCommit": "dbc25086439a23510ce5fa0bcf2c22e28e982407",
+  "files": [
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "c6f61298619a7e06098eab67b401576b8afc87d6046fd3a5a53400b99c50bc98",
+      "gzipSha256": "1ea62ab7c971413f3e0f10086c1bef95f44654c1d8ffa7c212213d4162382ceb",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "expected.json",
+      "bytes": 709,
+      "sha256": "edc9e84d64f47936c0da92b5a1c46ecfafadb60ada0c4ddda5f23bb42152ba07",
+      "gzipSha256": "c29c1f1a97159d76e153d28878f7ea1af3aaa452a577c705af807efa90268157",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "targets.txt",
+      "bytes": 820,
+      "sha256": "a66bf468ae47c86ba1adbc646da76d0376afca98bf5812132a65c324de3decf3",
+      "gzipSha256": "d9abf2999f5faf3677b2fe8c82a16248ab26554c15f4278ad7ce741532dcd0dd",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "baseline-expected.sha256",
+      "bytes": 65,
+      "sha256": "4e7f4d4baae97b46ffa04ee59c458b298f956b3558881cad3d92ca4d9cadfa97",
+      "gzipSha256": "ee1fefca34d88232cf3e1362fe72e561881b47f9ec86cfdd62b15262b6c7f0c6",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "check.py",
+      "bytes": 1346,
+      "sha256": "36d5de83a769135a6461985a4d6b207c3601c13af8452a9e18e5ce59790137e3",
+      "gzipSha256": "291125fc217f6b47215ff2c917cbc7e5246f073b7f58952b16629a2e599e53fe",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "results.json",
+      "bytes": 101531,
+      "sha256": "1a244f0aaa91c8dfedd606bbc59cee77bf0ad682864565c7905be1060cc9e8a9",
+      "gzipSha256": "5c88c8dde8aae93ed0e28c86bd86e0c27ce5e2c0357455e515ae2c5a02e2e32f",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "tests.log",
+      "bytes": 123,
+      "sha256": "2bdf2828869b44bc57381e173ae88ac07887c361e0f587a033638540c977d066",
+      "gzipSha256": "4e08db9be170764ab61af1dc0b61bcabb71f56125f2cfbac755fe09586902def",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "web-types-post-failure.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/native-source-composer.tsx",
+      "bytes": 10450,
+      "sha256": "e0f2dde3105e1730d81a061906de7f697e8cc872f380a3c04306383bba93cb6d",
+      "gzipSha256": "40439552968122184eaaf269ee5d313b016fc80ea487855f3b5883e5d2c0f89c",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/native-source-composer.test.tsx",
+      "bytes": 17911,
+      "sha256": "bd13366eaebe076eea1ba687dc5aa832469db04b5db16d6085d997eb734bd8c0",
+      "gzipSha256": "9e8d57736b552008e0c5454e3132c0e035905281de8774209cf4e44bdd1d785d",
+      "roundtripIdentical": true
+    }
+  ],
+  "failedCases": [
+    {
+      "name": "Original composer native binding (bounded replacement-editor proof) existing warm binding sends exact active file and blocks duplicate pending requests",
+      "failureMessages": [
+        "AssertionError: expected undefined to be 'idle' // Object.is equality\n    at /home/yyj/ai/repos/pi-agent-ui-oc-bridge/tests/unit/web/native-source-composer.test.tsx:142:60\n    at file:///home/yyj/ai/repos/pi-agent-ui-hybrid/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+      ]
+    },
+    {
+      "name": "Original composer native binding (bounded replacement-editor proof) real owner upload pending disables send and sanitized failure keeps draft, never raw error",
+      "failureMessages": [
+        "TypeError: fail is not a function\n    at /home/yyj/ai/repos/pi-agent-ui-oc-bridge/tests/unit/web/native-source-composer.test.tsx:162:27\n    at process.env.NODE_ENV.exports.act (/home/yyj/ai/repos/pi-agent-ui-hybrid/node_modules/react/cjs/react.development.js:890:22)\n    at /home/yyj/ai/repos/pi-agent-ui-oc-bridge/tests/unit/web/native-source-composer.test.tsx:162:11\n    at file:///home/yyj/ai/repos/pi-agent-ui-hybrid/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:1628:35\n    at file:///home/yyj/ai/repos/pi-agent-ui-hybrid/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:26\n    at file:///home/yyj/ai/repos/pi-agent-ui-hybrid/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3319:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///home/yyj/ai/repos/pi-agent-ui-hybrid/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3314:10)\n    at file:///home/yyj/ai/repos/pi-agent-ui-hybrid/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:3299:20\n    at new Promise (<anonymous>)"
+      ]
+    }
+  ],
+  "scope": "Fixed206/18 failed204passed2failed0pending/todo. Original192+other12 passed. Original chained coverage/tsc/source/backend did NOT run; separate actual web tsc now0 (UI code only, excludes fixtures). Both new fixture faults: invalid empty snapshot BOTH historyNext/liveFrom null (real parser MUST refuse, require final liveFrom={streamId,seq:1}); rig options misspells uploader vs NativePiPortOptions.upload, so injected deferred callback never bound. Preserve before fixing fixture; owner/parser assertions and exact counts remain unchanged. Prior six-failure archive intact."
+}
