@@ -1,0 +1,48 @@
+{
+  "task": "bfd9e0990",
+  "files": [
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "f0a7e7bb3c96b6ebec2f5882e2b3e15670938b05080a68b92e705e5ca3a05b77",
+      "gzipSha256": "962d178c3b941bcde107794c3559389a1e8961e4b9c8b1dc94610bfd9679b09c",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "expected.json",
+      "bytes": 375,
+      "sha256": "0b8d9b452672e458b03efe9e111e6859b006d95976d578e5b8848bb55a2e961b",
+      "gzipSha256": "6a3cd94a1088c2b9024ba93b7a1b374d72b729d5bcbd5a5e95efd701a10054b0",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "preflight.log",
+      "bytes": 79,
+      "sha256": "b77e470f6bd991ece61be13f1628e3507d10b929326c2524f687107beb34c09f",
+      "gzipSha256": "f0fa5d391db5b1960c20caaa9f0917dcec82ee4d590338d1d579ab1179a6d243",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "results.json",
+      "bytes": 60600,
+      "sha256": "02ec7234cca01c650779d093bbf13b8a797fec78394cad5fa6c48ac9b32035b9",
+      "gzipSha256": "1a75670458401bff0f0724f9c0e5ff84691c1dfcc90b8bcc55fa6e1872223b15",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "tests.log",
+      "bytes": 117,
+      "sha256": "682062f1c93384fa9d7ec1f09e7504e38eb4037959e61d5b8f9143ed4344911e",
+      "gzipSha256": "219de26869c0867e914635d4fc54d26e7e782329d21b301af17ab2ffb06dbc60",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "failed-test-source.ts",
+      "bytes": 5317,
+      "sha256": "97b25539ff4ef1753963d807e9d193d8a6d9d6a01601d4c91eaad470f4e3be50",
+      "gzipSha256": "8f4b9f0e6e7e134ff53c987579e248c157952e098b903483b7f64cdc9ee70729",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "Failed new-file parse setup: native-notification-stream.test.ts:66:133 PARSE_ERROR Expected a semicolon or an implicit semicolon after a statement, but found none. Original115 passed; new5 never collected. Fixed120/11 expected count was not adjusted. No types/source/backend steps reached, no browser proof. Preserve failing test bytes before one-parenthesis fixture-only fix. Active LSP clean is not syntax or runner evidence."
+}
