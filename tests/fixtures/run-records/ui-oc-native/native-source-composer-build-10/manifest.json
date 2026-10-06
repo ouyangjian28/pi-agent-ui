@@ -1,0 +1,64 @@
+{
+  "task": "b0df8b864",
+  "sourceCommit": "b8bccc6a53a609ec2e888a5a6bf5a9e541ae9b98",
+  "files": [
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "58894617991634f22575431e3b2d38a33b9116dfd09a88dcfc50ac31a15e7687",
+      "gzipSha256": "6f58f70b02a07c31bfda74b7dd0a0b5fe2d49b7ec2d11471117bc77bd3dbff4c",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "build.log",
+      "bytes": 231714,
+      "sha256": "b77808894509750b51b9e0ab0f20b909285965e1f5bf4c5fa04d90e73cc76e3a",
+      "gzipSha256": "888e5760fdca41e41bfd27f60f2c1d8ec6425f4adb4761f091f7594fa7858aac",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-before.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-after.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "dist/native-overlays.json",
+      "bytes": 2459,
+      "sha256": "c4f7539dc34f43fe4d3ba95039d470343e129b283d4ca2a32d340aa49f323b42",
+      "gzipSha256": "a62cfc9ef431db1d458ffa8a2dead16b3e5cda07c8ac3a14cb98e1b77a9393c9",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/native-source-composer.tsx",
+      "bytes": 10189,
+      "sha256": "4c88598988eca83839b1fb51b9f73ca28a9b7f5c1e2427ffbdf4f5512b40f452",
+      "gzipSha256": "f94b3521b81982fecfa38369161bae20f728f9990cdf408215aa5512a558bf19",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/ui-oc-native-composer-transform.mjs",
+      "bytes": 3743,
+      "sha256": "bb088639182f3e6efa8662288ad11b641b61967a6ffeb7ed1501a3afc14677e5",
+      "gzipSha256": "571e495bef8a7c15b690cf7ace28851b025834fd6e909694923167727f7e8c52",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/ui-oc-native-vite.config.mjs",
+      "bytes": 9788,
+      "sha256": "a665e2146fcd0df6ee035f20bbf4202e9b8256a78aef1769d9003151ea7fa923",
+      "gzipSha256": "87804dfd8f06e89c2d4f14f5d41cd63eb709b05ebd7ae0b28a982d5dd352b73e",
+      "roundtripIdentical": true
+    }
+  ],
+  "preparationFailure": "First parent archival erroneously guessed nonexistent ignored build9 path; failed FileNotFoundError before output directory/mutation. Correct replay basis is archived original-root-build-9/dist__native-overlays.json.gz, no old evidence changed.",
+  "proofScope": "Build10 compiler ONLY, exact24 old22+Footer/ActionButtons, 1React+1DOM, original2952 source unchanged. Mounted:false. This SAME frozen code has actual web tsc4 errors and failed206 unittest (200pass6fail); build0 does NOT prove types/actual UI/input/send/IME or erase failed evidence. Sources preserved before repairing NativeComposerInput API and real TurnState guard. Previous readonly build9 untouched."
+}
