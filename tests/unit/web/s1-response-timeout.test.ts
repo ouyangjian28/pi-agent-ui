@@ -74,4 +74,13 @@ describe("S1 独立缺口复现：真实探针收到的已有 response-timeout �
     act(()=>Socket.all[1]!.receive({t:"events",subscriptionId:"sub-1",origin:"history",refSeq:4,events:[{seq:4,ts:null,generation:2,intentId:"i-1",kind:"response-timeout",commandId:1}]}));
     expect(screen.getByText("B 的正文")).toBeTruthy();expect(document.querySelector(".response-timeout-banner")).toBeNull();
   });
+  it.each(["verdict-settled", "verdict-delivered", "turn-cancelled", "verdict-unknown"])("%s 真终局到达后不保留旧超时提示（状态帧可尚未更新）", async kind => {
+    start();const {frame}=firstSend();await ack(frame,{kind:"launched",intentId:"i-1",commandId:1});snapshot(String(frame.file));
+    act(()=>Socket.all[1]!.receive({t:"events",subscriptionId:"sub-1",origin:"history",refSeq:2,events:[{seq:2,ts:null,generation:1,intentId:"i-1",kind:"response-timeout",commandId:1}]}));
+    expect(document.querySelector(".response-timeout-banner")).not.toBeNull();
+    act(()=>Socket.all[1]!.receive({t:"events",subscriptionId:"sub-1",origin:"history",refSeq:3,events:[{seq:3,ts:null,generation:null,intentId:"i-1",kind}]}));
+    expect(document.querySelector(".response-timeout-banner")).toBeNull();
+    expect(document.querySelector(".conversation-header")?.textContent).not.toContain("响应超时");
+    if(kind === "verdict-unknown") expect(screen.getByRole("alert").textContent).toContain("结果未知或损坏");
+  });
 });
