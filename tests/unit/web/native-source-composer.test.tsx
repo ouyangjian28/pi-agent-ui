@@ -69,7 +69,8 @@ function rig(options: NativePiPortOptions = {}) {
 describe('Original composer native binding (bounded replacement-editor proof)', () => {
   it('parses actual input overlay and preserves the entire legacy component body only in unbound branch', () => {
     const source = original('ChatInput.tsx'); const code = transform(source, 'input'); compile(code);
-    expect(code).toContain(source.slice(source.indexOf('const ChatInputComponent:'), source.indexOf('export const ChatInput = React.memo(ChatInputComponent);')));
+    const begin = source.indexOf('const ChatInputComponent:'); const end = source.indexOf('export const ChatInput = React.memo(ChatInputComponent);'); expect(begin).toBeGreaterThanOrEqual(0); expect(end).toBeGreaterThan(begin);
+    expect(code).toContain(source.slice(begin, end));
     expect(code).toContain('if (!host) return <ChatInputComponent {...props} />'); expect(code).toContain('props.active === false'); expect(code).toContain('<ComposerEditor'); expect(code).toContain('<ComposerFooter'); expect(code).toContain('preserveDeferredEnterShift');
   });
   it('actual Source footer parses and native SSR never mounts goals/dictation/old attachment menu, unbound still does', () => {
@@ -80,6 +81,7 @@ describe('Original composer native binding (bounded replacement-editor proof)', 
       expect(html.includes('data-source-child="SessionGoalObjectiveCounter"')).toBe(!native);
       expect(html.includes('data-source-child="ComposerAttachmentControls"')).toBe(!native);
       expect(html.includes('data-source-child="MemoComposerDictation"') || html.includes('data-source-child="ComposerDictation"') || html.includes('name="mic"')).toBe(!native && !mobile);
+      if (mobile) expect(html.includes('chat.dictation.start')).toBe(!native);
       if (native) expect(html).toContain('chat.chatInput.actions.attachFiles');
     }
   });

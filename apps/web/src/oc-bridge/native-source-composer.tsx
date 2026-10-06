@@ -69,10 +69,11 @@ export function NativeSourceComposer({ host, isMobile, renderEditor, renderFoote
   };
   const pick = () => { if (ready && !pending && !slot?.uploading) fileInput.current?.click(); };
   const unsupported = () => setFeedback('此功能尚未接入原生通道，不会执行旧后台操作。');
+  const radius = isMobile ? '1.5rem' : 'var(--radius-xl)';
   const footer = {
     isMobile, isVSCode: false, sessionId: slot && !slot.isNew ? slot.file : null,
     newSessionDraftOpen: slot?.isNew === true, messageLength: slot?.text.length ?? 0,
-    radius: '1rem', footerPaddingClass: 'px-3 pb-2 pt-1', footerGapClass: 'gap-2',
+    radius, footerPaddingClass: 'px-3 pb-2 pt-1', footerGapClass: 'gap-2',
     footerIconButtonClass: 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg hover:bg-interactive-hover/50',
     iconSizeClass: 'h-[18px] w-[18px]', sendIconSizeClass: 'h-5 w-5', stopIconSizeClass: 'h-5 w-5',
     canSend, canAbort: ready && busy && !pending, hasContent, isExpandedInput: expanded,
@@ -112,7 +113,7 @@ export function NativeSourceComposer({ host, isMobile, renderEditor, renderFoote
         const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = '';
         if (files.length) void input.upload(files);
       }} />
-      <div className="flex flex-col relative overflow-visible border border-border/80 focus-within:border-interactive-selection-foreground/35 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)] oc-glass-composer" style={{ borderRadius: '1rem' }}>
+      <div className="flex flex-col relative overflow-visible border border-border/80 focus-within:border-interactive-selection-foreground/35 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)] oc-glass-composer" style={{ borderRadius: radius }}>
         {isMobile && <div className="scrollbar-none relative z-10 flex items-center gap-x-2 overflow-x-auto px-3 pb-0.5 pt-1.5">{renderModels()}</div>}
         {!!slot?.attachments.length && <div className="flex items-center gap-1 px-3 pt-2 flex-wrap">{slot.attachments.map(attachment => <span key={attachment.id} className="inline-flex max-w-full items-center gap-1 rounded-md border px-2 py-1 text-xs"><span className="truncate">{attachment.name}</span><button type="button" disabled={pending} aria-label={`移除 ${attachment.name}`} onClick={() => input.removeAttachment(attachment.id)}>×</button></span>)}</div>}
         {renderEditor({ value: slot?.text ?? '', editable: !!slot, editorKey, expanded, bindEditor: handle => { editor.current = handle; }, onChange: change => { input.change(change.value); }, onKeyDown: event => {
