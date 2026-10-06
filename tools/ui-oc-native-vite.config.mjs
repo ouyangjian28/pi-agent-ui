@@ -8,7 +8,7 @@ import original from '../vendor/openchamber-frontend/packages/web/vite.config.ts
 import { nativeModelControlsTransform } from './ui-oc-native-model-transform.mjs';
 import { nativeMessageOrderTransform } from './ui-oc-native-order-transform.mjs';
 import { nativeRuntimeFetchTransform } from './ui-oc-native-fetch-transform.mjs';
-import { nativeOriginalEntryTransform, nativeReadOnlyComposerTransform, nativeCompanionEventsTransform } from './ui-oc-native-startup-transform.mjs';
+import { nativeOriginalEntryTransform, nativeReadOnlyComposerTransform, nativeCompanionEventsTransform, nativeWebNotificationTransform } from './ui-oc-native-startup-transform.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const snapshot = path.join(root, 'vendor/openchamber-frontend');
@@ -35,6 +35,7 @@ const targets = new Map([
   [path.join(snapshot, 'packages/ui/src/sync/message-ordering.ts'), nativeMessageOrderTransform],
   [path.join(snapshot, 'packages/ui/src/lib/runtime-fetch.ts'), nativeRuntimeFetchTransform],
   [path.join(snapshot, 'packages/ui/src/lib/openchamberEvents.ts'), nativeCompanionEventsTransform],
+  [path.join(snapshot, 'packages/ui/src/hooks/useWebNotificationStream.ts'), nativeWebNotificationTransform],
   [path.join(snapshot, 'packages/ui/src/components/chat/ChatInput.tsx'), nativeReadOnlyComposerTransform],
   [path.join(snapshot, 'packages/web/src/main.tsx'), source => nativeOriginalEntryTransform(source, 'desktop')],
   [path.join(snapshot, 'packages/web/src/mobile-main.tsx'), source => nativeOriginalEntryTransform(source, 'mobile')],
@@ -74,6 +75,7 @@ const nativeOverlay = {
       nativeOriginalEntryCompiled: true,
       nativeSourceComposerReadOnly: true,
       nativeCompanionEventsInactiveCompiled: true,
+      nativeWebNotificationsInactiveCompiled: true,
       originalSourceModified: false,
       backendStarted: false,
       overlayTargets: [...transformed.keys()].map(file => path.relative(snapshot, file)),

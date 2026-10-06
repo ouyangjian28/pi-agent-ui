@@ -44,6 +44,17 @@ export function nativeCompanionEventsTransform(source) {
   return "// pi-native-companion-events-overlay\nimport { getNativeSurfaceHost as piGetNativeHost } from '@pi-native/surface-host';\n" + source.replace(anchor,
     anchor + '\n  // No companion backend in native mode, including a closed host.\n  if (piGetNativeHost()) return () => undefined;');
 }
+/** Separate web notification SSE, not companion/native chat. Keep React hook
+ * order and non-native subscription/cleanup; skip inside the effect only.
+ */
+export function nativeWebNotificationTransform(source) {
+  if (source.includes('pi-native-web-notification-overlay')) throw new Error('Original native web notifications already applied');
+  const anchor = '  React.useEffect(() => {\n';
+  once(source, anchor);
+  once(source, "const NOTIFICATION_STREAM_PATH = '/api/notifications/stream';");
+  return "// pi-native-web-notification-overlay\nimport { getNativeSurfaceHost as piGetNativeHost } from '@pi-native/surface-host';\n" + source.replace(anchor,
+    anchor + '    // No notification backend in native mode, including a closed host.\n    if (piGetNativeHost()) return;\n');
+}
 export function nativeReadOnlyComposerTransform(source) {
   if (source.includes('pi-native-readonly-composer-overlay')) throw new Error('Original native composer overlay already applied');
   once(source, 'export const ChatInput = React.memo(ChatInputComponent);');
