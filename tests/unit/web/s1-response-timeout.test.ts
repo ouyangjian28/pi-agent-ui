@@ -27,9 +27,9 @@ function start() {
   act(() => Socket.all.forEach((socket) => socket.open()));
   list([dto("b.jsonl", "已有对话 B")]);
 }
-function snapshot(file: string, text = "真实历史正文") {
+function snapshot(file: string, text = "真实历史正文", subscriptionId = "sub-1") {
   const socket = Socket.all[1]!; const request = socket.sent.filter((frame) => frame.t === "subscribe").at(-1)!;
-  act(() => socket.receive({ t: "snapshot", requestId: request.requestId, subscriptionId: "sub-1", streamId: "stream-1", snapshotId: "snap-1", barrier: 1, status: status(file), page: [{ seq: 1, ts: Date.now(), generation: 1, intentId: null, kind: "message", role: "assistant", entryId: "e-1", final: true, textPreview: { text, truncated: false } }], historyNext: null, liveFrom: { streamId: "stream-1", seq: 2 }, hasMore: false }));
+  act(() => socket.receive({ t: "snapshot", requestId: request.requestId, subscriptionId, streamId: "stream-1", snapshotId: "snap-1", barrier: 1, status: status(file), page: [{ seq: 1, ts: Date.now(), generation: 1, intentId: null, kind: "message", role: "assistant", entryId: "e-1", final: true, textPreview: { text, truncated: false } }], historyNext: null, liveFrom: { streamId: "stream-1", seq: 2 }, hasMore: false }));
 }
 function draft() { fireEvent.click(screen.getByRole("button", { name: "＋新对话" })); return screen.getByLabelText("首条消息") as HTMLTextAreaElement; }
 function firstSend(text = "v1") {
@@ -57,5 +57,21 @@ describe("S1 独立缺口复现：真实探针收到的已有 response-timeout �
     expect(Socket.all[2]!.sent.filter(f=>f.t==="prompt")).toHaveLength(1);
     const primaryAlerts=[...document.querySelectorAll("section.session-detail > [role=alert]")].map(el=>el.textContent).join(" ");
     expect(primaryAlerts,"response-timeout 已消费，但主读面没有超时/未知横幅").toMatch(/超时|未知|尚未确认/);
+    expect(document.querySelector(".conversation-header")?.textContent).toContain("响应超时 · 结果待核对");
+    expect(screen.queryByText("消息已受理，等待回复。")).toBeNull();
+    expect(screen.getByRole("button", {name:/连接状态：/}).textContent).toContain("全部已连接");
+    expect(primaryAlerts).not.toMatch(/执行失败|未执行|已停止/);
+  });
+  it("旧历史 intent、新进程代次以及换会话后的旧帧不串入当前提示", async () => {
+    start();const {frame}=firstSend();await ack(frame,{kind:"launched",intentId:"i-1",commandId:1});snapshot(String(frame.file));
+    act(()=>Socket.all[1]!.receive({t:"events",subscriptionId:"sub-1",origin:"history",refSeq:2,events:[{seq:2,ts:null,generation:1,intentId:"old-i",kind:"response-timeout",commandId:1}]}));
+    expect(document.querySelector(".response-timeout-banner")).toBeNull();
+    const next={...status(String(frame.file)),process:{...status(String(frame.file)).process,generation:2},statusVersion:2};
+    act(()=>Socket.all[1]!.receive({t:"status",subscriptionId:"sub-1",status:next}));
+    act(()=>Socket.all[1]!.receive({t:"events",subscriptionId:"sub-1",origin:"history",refSeq:3,events:[{seq:3,ts:null,generation:1,intentId:"i-1",kind:"response-timeout",commandId:1}]}));
+    expect(document.querySelector(".response-timeout-banner")).toBeNull();
+    fireEvent.click(screen.getByRole("button",{name:/已有对话 B/}));snapshot("b.jsonl","B 的正文","sub-b");
+    act(()=>Socket.all[1]!.receive({t:"events",subscriptionId:"sub-1",origin:"history",refSeq:4,events:[{seq:4,ts:null,generation:2,intentId:"i-1",kind:"response-timeout",commandId:1}]}));
+    expect(screen.getByText("B 的正文")).toBeTruthy();expect(document.querySelector(".response-timeout-banner")).toBeNull();
   });
 });
