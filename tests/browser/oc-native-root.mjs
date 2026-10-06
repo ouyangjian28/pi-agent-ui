@@ -33,6 +33,7 @@ await writeFile(tokenFile, JSON.stringify({ version: 1, tokens: [token] }), { mo
 const transcripts = join(home, 'transcripts'), journals = join(home, 'journal');
 const frames = [], sends = [], errors = [], errorStacks = [], blocked = [], requests = [], surfaces = [], navigationFacts = [];
 const mobileSessionsLabel = 'Open sessions and projects';
+const mobileDialogLabel = 'Sessions';
 const assert = (value, message) => { if (!value) throw new Error(message); };
 let browser, server, failure, lastPage;
 try {
@@ -40,7 +41,10 @@ try {
   // locale. Do not borrow the desktop button's different accessible name.
   const sourceUi = join(repo, 'vendor/openchamber-frontend/packages/ui/src');
   assert((await readFile(join(sourceUi, 'apps/MobileHeader.tsx'), 'utf8')).includes("aria-label={t('mobile.sessions.openSheetAria')}"), 'Source mobile sessions consumer drift');
-  assert((await readFile(join(sourceUi, 'lib/i18n/messages/en.ts'), 'utf8')).includes("'mobile.sessions.openSheetAria': '" + mobileSessionsLabel + "'"), 'Source mobile English accessible name drift');
+  const english = await readFile(join(sourceUi, 'lib/i18n/messages/en.ts'), 'utf8');
+  assert(english.includes("'mobile.sessions.openSheetAria': '" + mobileSessionsLabel + "'"), 'Source mobile English accessible name drift');
+  assert(english.includes("'mobile.sessions.sheet.title': '" + mobileDialogLabel + "'"), 'Source mobile dialog English name drift');
+  assert((await readFile(join(sourceUi, 'apps/MobileSessionsSheet.tsx'), 'utf8')).includes("ariaLabel={t('mobile.sessions.sheet.title')}"), 'Source mobile dialog consumer drift');
   server = await startServer({ tokenFile, allowedOrigins: [origin], roots: [transcripts, journals, join(home, 'workspace')], scanDir: transcripts, tokenPollMs: 0, port, host: '127.0.0.1', staticDir: dist,
     journalLayout: { transcriptsRoot: transcripts, journalRoot: journals }, sessionFor: file => resolve(transcripts, file),
     write: { sessionFor: file => resolve(transcripts, relative(journals, file)), piBin, extraPiArgs: ['--offline', '--no-approve', '--no-extensions', '--no-context-files', '--no-skills', '--no-themes', '--no-prompt-templates', '--tools', 'read'], readinessTimeoutMs: 20000, responseTimeoutMs: 15000, turnTimeoutMs: 45000 }, audit: () => {} });
@@ -80,15 +84,30 @@ try {
     // Diagnostic only, after login input is gone: capture the actual entry
     // and accessible controls even if navigation later fails. No state writes.
     navigationFacts.push(await page.evaluate(() => ({ surface: window.__OPENCHAMBER_SURFACE__, controls: [...document.querySelectorAll('button')].map(n => ({ text: n.textContent, aria: n.getAttribute('aria-label') })) })));
-    if (mobile) await page.getByRole('button', { name: mobileSessionsLabel, exact: true }).tap();
+    if (mobile) {
+      await page.getByRole('button', { name: mobileSessionsLabel, exact: true }).tap();
+      // The Source drawer remains mounted off-screen while closed and has a
+      // real 320ms enter transition. Visible alone is not viewport/steady proof.
+      await page.waitForFunction(label => {
+        const el = [...document.querySelectorAll('[role="dialog"]')].find(n => n.getAttribute('aria-label') === label);
+        if (!el || el.getAttribute('aria-hidden') !== 'false') return false;
+        const r = el.getBoundingClientRect(), style = getComputedStyle(el);
+        return style.transform === 'none' && style.visibility === 'visible' && r.left >= -1 && r.top >= -1 && Math.abs(r.right - innerWidth) <= 1 && Math.abs(r.bottom - innerHeight) <= 1 && !el.getAnimations().some(a => a.playState === 'running' || a.pending);
+      }, mobileDialogLabel, { timeout: 30000 });
+    }
     await page.waitForFunction(() => document.body.innerText.includes('NATIVE-ROOT-OWNED'), undefined, { timeout: 30000 });
-    await page.locator('button').filter({ hasText: 'NATIVE-ROOT-OWNED' }).first().waitFor({ state: 'visible', timeout: 30000 });
+    const ownedButton = (mobile ? page.getByRole('dialog', { name: mobileDialogLabel, exact: true }) : page).locator('button').filter({ hasText: 'NATIVE-ROOT-OWNED' }).first();
+    await ownedButton.waitFor({ state: 'visible', timeout: 30000 });
+    const ownedButtonBounds = await ownedButton.boundingBox();
+    const viewport = page.viewportSize();
+    assert(ownedButtonBounds && viewport && ownedButtonBounds.width > 0 && ownedButtonBounds.height > 0 && ownedButtonBounds.x >= -1 && ownedButtonBounds.y >= -1 && ownedButtonBounds.x + ownedButtonBounds.width <= viewport.width + 1 && ownedButtonBounds.y + ownedButtonBounds.height <= viewport.height + 1, 'Owned session button is not fully inside viewport');
     assert(!await page.getByRole('dialog', { name: 'Add project directory', exact: true }).isVisible(), 'Native startup auto-opened unsupported project directory dialog');
     const facts = await page.evaluate(() => ({ surface: window.__OPENCHAMBER_SURFACE__, body: document.body.innerText, controls: [...document.querySelectorAll('button')].map(n => ({ text: n.textContent, title: n.title, aria: n.getAttribute('aria-label') })), overflow: document.documentElement.scrollWidth - innerWidth, tokenInjected: window.__OPENCHAMBER_CLIENT_TOKEN__ != null || window.__OPENCHAMBER_RUNTIME_HEADERS__ != null }));
     assert(facts.surface === (mobile ? 'mobile' : 'desktop') && !facts.tokenInjected, 'Surface/token bootstrap mismatch');
     assert(facts.overflow <= 1, 'Original surface horizontal overflow');
     await page.screenshot({ path: join(out, mobile ? 'phone.png' : 'desktop.png'), fullPage: false });
-    surfaces.push(facts); await context.close();
+    const drawerGeometry = mobile ? await page.getByRole('dialog', { name: mobileDialogLabel, exact: true }).evaluate(el => ({ bounds: el.getBoundingClientRect().toJSON(), transform: getComputedStyle(el).transform, ariaHidden: el.getAttribute('aria-hidden'), runningAnimations: el.getAnimations().filter(a => a.playState === 'running' || a.pending).length })) : null;
+    surfaces.push({ ...facts, ownedButtonBounds, drawerGeometry }); await context.close();
   }
   assert(frames.some(f => f.t === 'models-list' && f.models?.some(m => m.provider === 'ui-upgrade-test' && m.id === 'fixture')), 'Actual model listing never reached browser');
   assert(frames.some(f => f.t === 'sessions' && JSON.stringify(f).includes('NATIVE-ROOT-OWNED')), 'Actual session listing never reached browser');
