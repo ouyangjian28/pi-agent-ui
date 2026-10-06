@@ -105,4 +105,38 @@ describe("S1 独立缺口复现：真实探针收到的已有 response-timeout �
     ]}));
     expect(document.querySelector(".response-timeout-banner")).toBeNull();
   });
+  it("其它意图/旧代次终局不掩盖当前超时，真实损坏仍显露且无业务副作用", async () => {
+    start();const {frame}=firstSend();await ack(frame,{kind:"launched",intentId:"i-1",commandId:1});snapshot(String(frame.file));
+    act(()=>Socket.all[1]!.receive({t:"status",subscriptionId:"sub-1",status:{...status(String(frame.file)),process:{...status(String(frame.file)).process,generation:2},statusVersion:2}}));
+    const text=screen.getByLabelText("写入消息内容") as HTMLTextAreaElement;fireEvent.change(text,{target:{value:"保留这份残稿"}});
+    const before=Socket.all.flatMap(s=>s.sent).filter(f=>["prompt","stop","ui-answer","unsubscribe"].includes(String(f.t))).length;
+    act(()=>Socket.all[1]!.receive({t:"events",subscriptionId:"sub-1",origin:"history",refSeq:5,events:[
+      {seq:2,ts:null,generation:2,intentId:"i-1",kind:"response-timeout",commandId:1},
+      {seq:3,ts:null,generation:1,intentId:"i-1",kind:"verdict-settled"},
+      {seq:4,ts:null,generation:null,intentId:"other-i",kind:"verdict-settled"},
+      {seq:5,ts:null,generation:null,intentId:null,kind:"journal-corrupt"}
+    ]}));
+    expect(document.querySelector(".response-timeout-banner")).not.toBeNull();
+    expect(screen.getAllByRole("alert").some(e=>e.textContent?.includes("结果未知或损坏"))).toBe(true);
+    expect(text.value).toBe("保留这份残稿");
+    expect(Socket.all.flatMap(s=>s.sent).filter(f=>["prompt","stop","ui-answer","unsubscribe"].includes(String(f.t)))).toHaveLength(before);
+  });
+  it("idle 中的旧未决超时不是新轮提示；当前新意图真正超时才显示", async () => {
+    start();fireEvent.click(screen.getByRole("button",{name:/已有对话 B/}));snapshot("b.jsonl");
+    act(()=>Socket.all[1]!.receive({t:"status",subscriptionId:"sub-1",status:{...status("b.jsonl"),turn:{state:"idle"},statusVersion:2}}));
+    act(()=>Socket.all[1]!.receive({t:"events",subscriptionId:"sub-1",origin:"history",refSeq:2,events:[{seq:2,ts:null,generation:1,intentId:"old-i",kind:"response-timeout",commandId:1}]}));
+    expect(document.querySelector(".response-timeout-banner")).toBeNull();
+    act(()=>Socket.all[1]!.receive({t:"status",subscriptionId:"sub-1",status:{...status("b.jsonl"),turn:{state:"in-flight",intentId:"i-2"},statusVersion:3}}));
+    act(()=>Socket.all[1]!.receive({t:"events",subscriptionId:"sub-1",origin:"history",refSeq:3,events:[{seq:3,ts:null,generation:1,intentId:"i-2",kind:"response-timeout",commandId:2}]}));
+    expect(document.querySelector(".response-timeout-banner")).not.toBeNull();
+  });
+  it("回合 closed 真终局改为关闭事实，不继续显示等待回复或假装成功", async () => {
+    start();const {frame}=firstSend();await ack(frame,{kind:"launched",intentId:"i-1",commandId:1});snapshot(String(frame.file));
+    act(()=>Socket.all[1]!.receive({t:"events",subscriptionId:"sub-1",origin:"history",refSeq:2,events:[{seq:2,ts:null,generation:1,intentId:"i-1",kind:"response-timeout",commandId:1}]}));
+    act(()=>Socket.all[1]!.receive({t:"status",subscriptionId:"sub-1",status:{...status(String(frame.file)),turn:{state:"closed",reason:"turn-timeout"},statusVersion:2}}));
+    expect(document.querySelector(".response-timeout-banner")).toBeNull();
+    expect(document.querySelector(".conversation-header")?.textContent).toContain("回合已关闭");
+    expect(screen.queryByText("消息已受理，等待回复。")).toBeNull();
+    expect(screen.queryByText("本次回合已结算。")).toBeNull();
+  });
 });
