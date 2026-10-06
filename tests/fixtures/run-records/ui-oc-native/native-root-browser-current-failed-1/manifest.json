@@ -1,0 +1,63 @@
+{
+  "task": "b63876ca4",
+  "exitCode": 1,
+  "files": [
+    {
+      "name": "result.json",
+      "bytes": 15476,
+      "sha256": "009d5fa895189cb12b497e2af2ece875311c88e601dce352210729b8d7e51798",
+      "gzipSha256": "acadb3aedde9e241c738b3550b39d1ff16f5473ad30deda1829b1d41e3229224",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "provider-result.json",
+      "bytes": 426,
+      "sha256": "32101f905c70d092fb5a590cb5fe3886b3f0166554625c6b246173dce265863e",
+      "gzipSha256": "91e84eb2397ccd8aa86a2686b2c2ab3e57184f648b6747650b4e68692a5af9b3",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "run.log",
+      "bytes": 310,
+      "sha256": "19383c70a86a75682a6c33dff4a94076284470ea54ae254953ed98730ad9be84",
+      "gzipSha256": "a03d11362c60e8455fca7bdf7565669d6e5bf43d0acdf3b1eeea61d5d27b9577",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "harness-copy.json",
+      "bytes": 194,
+      "sha256": "501e14b5d930bc50f3b60ea1f0d55d62e184eb9fcc242721e09bb3e27e9a1563",
+      "gzipSha256": "91d477171b8a21cd6bfdc31c68030ce5482bd255041d264ca244e3bf98e33284",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "last-page.png",
+      "bytes": 5853,
+      "sha256": "1dc0c385c65bf2baa27010517c98e89d395058d99055d7628b0c39ac65b17648",
+      "gzipSha256": "8f37099c0be5560b72019634a572d005c144dda357c8cf46f1b0688a5733cd40",
+      "roundtripIdentical": true
+    }
+  ],
+  "failure": "page.waitForFunction: Timeout 30000ms exceeded.",
+  "pageErrors": [
+    "旧后台事件连接未接入。"
+  ],
+  "frameTypes": [
+    "welcome",
+    "roots-list",
+    "welcome",
+    "sessions",
+    "welcome",
+    "models-list"
+  ],
+  "sentTypes": [
+    "hello",
+    "list-sessions",
+    "get-roots",
+    "get-models",
+    "hello",
+    "hello"
+  ],
+  "providerRequests": 0,
+  "proofScope": "Current early-global build2 actual gateway browser failed before readonly Source Root acceptance. Kept as distinct evidence from prior build1. No timeout/assertion/network-guard loosening."
+}
