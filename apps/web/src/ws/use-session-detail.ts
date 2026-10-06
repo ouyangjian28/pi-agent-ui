@@ -72,7 +72,11 @@ function responseTimeoutNoticeOf(snap: SessionDetailSnapshot): string | null {
   if (!turn || !("intentId" in turn)) return null;
   const timeout = snap.events.findLast((event) => event.kind === "response-timeout" &&
     event.intentId === turn.intentId && event.generation === snap.status?.process.generation);
-  return timeout ? "响应超时，本次结果尚未确认。请查看活动详情核对；不会自动重发。" : null;
+  if (!timeout) return null;
+  // 终局历史可能先于状态帧抵达；保留原终局事实，不继续贴旧超时。
+  const terminal = snap.events.some((event) => event.seq > timeout.seq && event.intentId === turn.intentId &&
+    ["verdict-settled", "verdict-delivered", "turn-cancelled", "verdict-unknown"].includes(event.kind));
+  return terminal ? null : "响应超时，本次结果尚未确认。请查看活动详情核对；不会自动重发。";
 }
 
 /** 连接级状态→视图态（身份门内外共用；error 按 errorKind 细分 auth-failed）。 */
