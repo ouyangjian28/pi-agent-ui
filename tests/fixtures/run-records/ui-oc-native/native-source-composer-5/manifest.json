@@ -1,0 +1,134 @@
+{
+  "task": "b823356a4",
+  "sourceCommit": "3206a87f2ebc706584e4861b62ea35bc8a2f5ee8",
+  "files": [
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "81c33484122b17f3c1c0016df66ca3f3764d3767e965ed517dc88b0b1c3e703d",
+      "gzipSha256": "d8286f435e4c5a31e56345d792f89ed9e91b20634d9688105b59610f4117cd9b",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "expected.json",
+      "bytes": 709,
+      "sha256": "edc9e84d64f47936c0da92b5a1c46ecfafadb60ada0c4ddda5f23bb42152ba07",
+      "gzipSha256": "c29c1f1a97159d76e153d28878f7ea1af3aaa452a577c705af807efa90268157",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "targets.txt",
+      "bytes": 820,
+      "sha256": "a66bf468ae47c86ba1adbc646da76d0376afca98bf5812132a65c324de3decf3",
+      "gzipSha256": "d9abf2999f5faf3677b2fe8c82a16248ab26554c15f4278ad7ce741532dcd0dd",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "baseline-expected.sha256",
+      "bytes": 65,
+      "sha256": "4e7f4d4baae97b46ffa04ee59c458b298f956b3558881cad3d92ca4d9cadfa97",
+      "gzipSha256": "ee1fefca34d88232cf3e1362fe72e561881b47f9ec86cfdd62b15262b6c7f0c6",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "check.py",
+      "bytes": 1346,
+      "sha256": "3d1ee7aca482fceb30af100d16e1619bdb1e5515ba41e297c5ab5fcd717be7b7",
+      "gzipSha256": "a81c40dfa670cbf5f35064aca03573f927d8146fa09721c59ab5ce8bb25e5341",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "results.json",
+      "bytes": 100217,
+      "sha256": "de70de462fafebd8502c25d0b63f1e0ee083cb926f990c2bc9ef0e78afad7307",
+      "gzipSha256": "87c9ffb0e287270a88a51ea68cacf3d3280836e45e22114d686458b77a5df5e4",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "tests.log",
+      "bytes": 123,
+      "sha256": "e2ea1f55d28ecc44072b7dc6a6ccc35420c1e83424214300d4cf1ebef80227c6",
+      "gzipSha256": "e9af82864dfe6cc93b149a20d695e2d1a30cc4d92b4df982b573e2ad1d2aa7ce",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "coverage-check.log",
+      "bytes": 188,
+      "sha256": "caf1bbcbcd237d90794eeea41fa3d551f55815dc5f57430c20b92968ff245be3",
+      "gzipSha256": "f7a03d8fc4773e97adab36cb82995184306e3ec8acd2908b3ec1bc522093583b",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "web-types.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "fixture-types.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "fixture-types.tsconfig.json",
+      "bytes": 298,
+      "sha256": "3711ec75a9e01dec7cfb1e251e0cf740916b247aa81eb0f94a9463222cb82585",
+      "gzipSha256": "acf7f91f84f16d0311e479f0f2d9ef4d631798c8ed5243a6006df32791847155",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-check.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "backend-protocol.diff",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/native-source-composer.tsx",
+      "bytes": 10671,
+      "sha256": "ddcf2175deb9316708f65556911878e5123969b222b47521be702239abfd30b3",
+      "gzipSha256": "02db3ba67703223429ed4aae94fcbda16da03abab9ae3a1c3936546997fa6094",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/native-source-composer.test.tsx",
+      "bytes": 18374,
+      "sha256": "5213f0e057cabc39f58173f8c34c7254fd67e58926d8b5fb37ce5e18842e6feb",
+      "gzipSha256": "7690178d3e4d4f08a1aaccf357da42a980a7b546d6f1263b0da5984bff346880",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/ui-oc-native-composer-transform.mjs",
+      "bytes": 3773,
+      "sha256": "cdd1577d3c346b007b3f04f94972f4812d8de1716a25ca388b887bc4da1397e4",
+      "gzipSha256": "a889f932152af7133f5ecd104dd08453b7fe574eee3ec3a3e4e1829b4d6865f6",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/tsconfig.json",
+      "bytes": 607,
+      "sha256": "81c27f30c2a8bf2f82539dafdb9cc8663e13093acb784dc47b1475b0718cd5e7",
+      "gzipSha256": "e3855b4c97765029e593cbd9e8b87f311dc5b639fa9cf3f3a30cdc1521c894de",
+      "roundtripIdentical": true
+    }
+  ],
+  "passedTests": 206,
+  "passedTargets": 18,
+  "failed": 0,
+  "skipped": 0,
+  "pending": 0,
+  "todo": 0,
+  "missing": 0,
+  "duplicates": 0,
+  "proofScope": "Parent rechecked every206/18 against frozen original192 SHA and first206 expected bytes. Native placeholder honest neutral input only; unbound original body preserved, same14 with assertions. Actual web+strict semantic fixture tsc0, source2952/26893497B identical, backend/protocol diff0; current runtime/transform/test/config identical to launch commit. Source parser/SSR VM and React/NativePiPort REPLACEMENT editor ONLY, NOT actual original div trigger usable layout/send/IME. Real layout defect1 and failed2 preserved separately; b4fc895a7 compiler13/repaired real UI replay pending. No paid/independent/user/physicalphone acceptance."
+}
