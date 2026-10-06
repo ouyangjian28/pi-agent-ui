@@ -54,7 +54,10 @@ export function NativeSourceComposer({ host, isMobile, renderEditor, renderFoote
   useEffect(() => () => { if (finishTimer.current !== null) clearTimeout(finishTimer.current); }, []);
   const ready = snapshot.write.connState === 'ready';
   const pending = slot?.operation?.pending === true;
-  const busy = slot !== null && snapshot.detail.file === slot.file && snapshot.detail.status?.turn === 'busy';
+  const turn = snapshot.detail.status?.turn.state;
+  // Native TurnState is a discriminated object, never Source's busy string.
+  // Closed/absent/other-file facts cannot advertise a running turn or stop.
+  const busy = slot !== null && snapshot.detail.file === slot.file && (turn === 'dispatching' || turn === 'in-flight' || turn === 'settling');
   const unknown = slot?.result?.status === 'unknown';
   const riskConfirmed = !!slot && riskWitness?.id === slot.id && riskWitness.version === slot.version && riskWitness.operation === slot.operation;
   const hasContent = !!slot && (slot.text.trim().length > 0 || slot.attachments.length > 0);
@@ -111,11 +114,11 @@ export function NativeSourceComposer({ host, isMobile, renderEditor, renderFoote
       }}>
       <input ref={fileInput} hidden type="file" multiple accept="image/png,image/jpeg,text/*,.ts,.tsx,.js,.py,.json,.md,.yaml,.yml,.csv,.c,.cpp,.rs,.go,.java" onChange={event => {
         const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = '';
-        if (files.length) void input.upload(files);
+        if (files.length) void input.actions.upload(files);
       }} />
       <div className="flex flex-col relative overflow-visible border border-border/80 focus-within:border-interactive-selection-foreground/35 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)] oc-glass-composer" style={{ borderRadius: radius }}>
         {isMobile && <div className="scrollbar-none relative z-10 flex items-center gap-x-2 overflow-x-auto px-3 pb-0.5 pt-1.5">{renderModels()}</div>}
-        {!!slot?.attachments.length && <div className="flex items-center gap-1 px-3 pt-2 flex-wrap">{slot.attachments.map(attachment => <span key={attachment.id} className="inline-flex max-w-full items-center gap-1 rounded-md border px-2 py-1 text-xs"><span className="truncate">{attachment.name}</span><button type="button" disabled={pending} aria-label={`移除 ${attachment.name}`} onClick={() => input.removeAttachment(attachment.id)}>×</button></span>)}</div>}
+        {!!slot?.attachments.length && <div className="flex items-center gap-1 px-3 pt-2 flex-wrap">{slot.attachments.map(attachment => <span key={attachment.id} className="inline-flex max-w-full items-center gap-1 rounded-md border px-2 py-1 text-xs"><span className="truncate">{attachment.name}</span><button type="button" disabled={pending} aria-label={`移除 ${attachment.name}`} onClick={() => input.actions.removeAttachment(attachment.id)}>×</button></span>)}</div>}
         {renderEditor({ value: slot?.text ?? '', editable: !!slot, editorKey, expanded, bindEditor: handle => { editor.current = handle; }, onChange: change => { input.change(change.value); }, onKeyDown: event => {
           if (composing.current || event.isComposing || event.keyCode === 229) return false;
           if (event.key === 'Enter' && !event.shiftKey && canSend) { event.preventDefault(); send(); return true; }
@@ -123,7 +126,7 @@ export function NativeSourceComposer({ host, isMobile, renderEditor, renderFoote
         } })}
         {renderFooter(footer)}
       </div>
-      {slot && <details className="px-3 pt-1 text-xs text-muted-foreground"><summary>自定义模型</summary><input aria-label="自定义模型标识" className="mt-1 w-full rounded border bg-transparent px-2 py-1" value={slot.freeText} disabled={pending} onChange={event => input.setCustomModel(event.currentTarget.value)} placeholder="provider/model；留空使用已选模型" /></details>}
+      {slot && <details className="px-3 pt-1 text-xs text-muted-foreground"><summary>自定义模型</summary><input aria-label="自定义模型标识" className="mt-1 w-full rounded border bg-transparent px-2 py-1" value={slot.freeText} disabled={pending} onChange={event => input.actions.setCustomModel(event.currentTarget.value)} placeholder="provider/model；留空使用已选模型" /></details>}
       {unknown && <label className="block px-3 py-1 text-xs"><input type="checkbox" checked={riskConfirmed} onChange={event => setRiskWitness(event.currentTarget.checked && slot ? { id: slot.id, version: slot.version, operation: slot.operation } : null)} /> 已核对上次请求，接受可能重复执行的风险后再发送</label>}
       {!ready && <div role="status" className="px-3 py-1 text-xs">原生通道未就绪，草稿已保留。<button type="button" onClick={() => port.reconnect()}>重新连接</button></div>}
       {(slot?.uploading || slot?.uploadError || feedback || (slot?.result && slot.result.status !== 'launched')) && <div role="status" className="px-3 py-1 text-xs">{slot?.uploading ? '附件上传中，暂不发送。' : slot?.uploadError || feedback || '原生请求尚未确认成功；草稿保留，不自动重发。'}</div>}

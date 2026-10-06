@@ -133,13 +133,27 @@ describe('Original composer native binding (bounded replacement-editor proof)', 
     act(() => vi.advanceTimersByTime(50)); expect(r.editor.value).toBe('first中文'); expect(r.frames()).toHaveLength(1);
     expect(r.editor.onKeyDown(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true }))).toBe(false);
   });
-  it('existing warm binding sends exact active file and blocks duplicate pending requests', () => {
+  it('existing warm binding sends exact active file and blocks duplicate pending requests', async () => {
     const r = rig(); act(() => r.port.openSession('warm.jsonl')); r.edit('warm bytes'); r.send(); r.send(); expect(r.frames()).toHaveLength(1); expect(r.frames()[0]).toMatchObject({ file: 'warm.jsonl', text: 'warm bytes' }); expect(r.editor.value).toBe('warm bytes');
+    await r.ack(); r.edit('next');
+    const detail = r.sockets[2]!; const request = detail.sent.filter(x => x.t === 'subscribe').at(-1)!;
+    const status = { session: { sessionId: 'fixture-session', file: 'warm.jsonl', adapterSessionId: null }, process: { phase: 'running', generation: 1, lastStartResult: null, lastStopResult: null, ready: true }, backgroundTasks: { availability: 'known', activeCount: null }, reap: { eligible: false, idleElapsedMs: null, idleRemainingMs: null, idleMs: 0 }, recovery: { availability: 'available', resumeBlocked: null, diskBlocked: null, unknownEffectCount: null, unattributableFragments: null, intentsCount: null, settledCount: null, evidenceHash: null }, serverTimeMs: 1730000000000 };
+    act(() => detail.receive({ t: 'snapshot', requestId: request.requestId, subscriptionId: 'fixture-sub', streamId: 'fixture-stream', snapshotId: 'fixture-snapshot', barrier: 0, status: { ...status, turn: { state: 'idle' }, statusVersion: 1 }, page: [], historyNext: null, liveFrom: null, hasMore: false }));
+    expect(r.port.getSnapshot().detail.status?.turn.state).toBe('idle'); expect(r.footer.canAbort).toBe(false);
+    let version = 1;
+    for (const state of ['dispatching', 'in-flight', 'settling', 'idle', 'closed']) {
+      const turn = state === 'idle' ? { state } : state === 'closed' ? { state, reason: 'manual' } : { state, intentId: 'fixture-intent' };
+      act(() => detail.receive({ t: 'status', subscriptionId: 'fixture-sub', status: { ...status, statusVersion: ++version, turn } }));
+      expect(r.port.getSnapshot().detail.status?.turn.state).toBe(state); const busy = ['dispatching', 'in-flight', 'settling'].includes(state);
+      expect(r.footer.canAbort).toBe(busy); expect(r.footer.canSend).toBe(!busy); expect(r.frames()).toHaveLength(1);
+    }
   });
   it('model scope is actual owner-bound and custom invalid model remains visible without write', async () => {
     const r = rig(); r.edit('keep'); act(() => { expect(r.models?.actions.chooseModel('fixture', 'low')).toBe(true); expect(r.models?.actions.chooseThinking('low')).toBe(true); });
     expect(r.models?.selection).toMatchObject({ model: { providerId: 'fixture', modelId: 'low' }, variant: 'low' });
-    act(() => r.models!.actions.setCustomModel('bad model!')); r.send(); await act(async () => {}); expect(r.frames()).toHaveLength(0); expect(r.editor.value).toBe('keep'); expect(r.container.textContent).toContain('模型标识无效');
+    const custom = r.container.querySelector<HTMLInputElement>('input[aria-label="自定义模型标识"]')!;
+    act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(custom, 'bad model!'); custom.dispatchEvent(new Event('input', { bubbles: true })); });
+    expect(r.port.getSnapshot().conversation.drafts.get(r.id)?.freeText).toBe('bad model!'); r.send(); await act(async () => {}); expect(r.frames()).toHaveLength(0); expect(r.editor.value).toBe('keep'); expect(r.container.textContent).toContain('模型标识无效');
   });
   it('real owner upload pending disables send and sanitized failure keeps draft, never raw error', async () => {
     let fail!: (error: Error) => void; const r = rig({ uploader: () => new Promise((_, reject) => { fail = reject; }) }); r.edit('keep');
