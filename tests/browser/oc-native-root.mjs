@@ -31,7 +31,7 @@ const token = randomBytes(32).toString('hex');
 const tokenFile = join(home, 'fixture-token.json');
 await writeFile(tokenFile, JSON.stringify({ version: 1, tokens: [token] }), { mode: 0o600, flag: 'wx' });
 const transcripts = join(home, 'transcripts'), journals = join(home, 'journal');
-const frames = [], sends = [], errors = [], blocked = [], requests = [], surfaces = [];
+const frames = [], sends = [], errors = [], errorStacks = [], blocked = [], requests = [], surfaces = [];
 const assert = (value, message) => { if (!value) throw new Error(message); };
 let browser, server, failure, lastPage;
 try {
@@ -48,7 +48,12 @@ try {
       blocked.push({ origin: url.origin, pathname: url.pathname }); return route.abort();
     });
     const page = await context.newPage(); lastPage = page;
-    page.on('pageerror', error => errors.push(error.message));
+    page.on('pageerror', error => {
+      errors.push(error.message);
+      // Diagnostic only. Keep existing error/visibility gates; never persist
+      // the owned login token even if a future transport embeds it in a stack.
+      errorStacks.push((error.stack ?? error.message).split(token).join('[redacted-fixture-token]'));
+    });
     page.on('request', request => { const url = new URL(request.url()); requests.push({ method: request.method(), pathname: url.pathname }); });
     page.on('websocket', socket => {
       assert(new URL(socket.url()).origin === origin.replace('http:', 'ws:'), 'Non-owned browser socket');
@@ -79,7 +84,7 @@ try {
 finally {
   if (failure && lastPage && !lastPage.isClosed()) await lastPage.screenshot({ path: join(out, 'last-page.png'), fullPage: false }).catch(() => {});
   if (browser) await browser.close(); if (server) await server.dispose(); await compiler.close();
-  await writeFile(join(out, 'result.json'), JSON.stringify({ passed: !failure, error: failure?.message, proofScope: 'Actual original App/MobileApp plus unchanged gateway/native clients with owned history and local model configuration. Readonly Root only; not chat/composer/paid-provider/physical phone/IME acceptance.', compilation, surfaces, requests, frameTypes: frames.map(f => f.t), sentTypes: sends, errors, blocked, productionAuthUsed: false }, null, 2) + '\n');
+  await writeFile(join(out, 'result.json'), JSON.stringify({ passed: !failure, error: failure?.message, proofScope: 'Actual original App/MobileApp plus unchanged gateway/native clients with owned history and local model configuration. Readonly Root only; not chat/composer/paid-provider/physical phone/IME acceptance.', compilation, surfaces, requests, frameTypes: frames.map(f => f.t), sentTypes: sends, errors, errorStacks, blocked, productionAuthUsed: false }, null, 2) + '\n');
 }
 if (failure) throw failure;
 console.log('Original desktop/mobile native read-only Root browser passed; chat still unbound.');
