@@ -1,0 +1,61 @@
+{
+  "task": "bd2cbe3b8",
+  "exitCode": 1,
+  "files": [
+    {
+      "name": "result.json",
+      "bytes": 15476,
+      "sha256": "f5ee3000025efe1ecf6a3db6c1307886ff68b83952be7f7c4e983778252f2622",
+      "gzipSha256": "26e843ba9974eda4a3f3d393cdec29010f35067a0c71dd5167058a236638be76",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "provider-result.json",
+      "bytes": 426,
+      "sha256": "32101f905c70d092fb5a590cb5fe3886b3f0166554625c6b246173dce265863e",
+      "gzipSha256": "91e84eb2397ccd8aa86a2686b2c2ab3e57184f648b6747650b4e68692a5af9b3",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "run.log",
+      "bytes": 311,
+      "sha256": "425cf0266e0976e3ac8db0a867fdb812cdd9ca0762186dec83aa24b5099a280f",
+      "gzipSha256": "af5d1e330200a5ded67e8159d37950ff5864a44eb3e123fed6b6d09274d29122",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "harness-copy.json",
+      "bytes": 194,
+      "sha256": "501e14b5d930bc50f3b60ea1f0d55d62e184eb9fcc242721e09bb3e27e9a1563",
+      "gzipSha256": "91d477171b8a21cd6bfdc31c68030ce5482bd255041d264ca244e3bf98e33284",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "last-page.png",
+      "bytes": 5853,
+      "sha256": "1dc0c385c65bf2baa27010517c98e89d395058d99055d7628b0c39ac65b17648",
+      "gzipSha256": "8f37099c0be5560b72019634a572d005c144dda357c8cf46f1b0688a5733cd40",
+      "roundtripIdentical": true
+    }
+  ],
+  "failure": "page.waitForFunction: Timeout 30000ms exceeded.",
+  "pageError": "旧后台事件连接未接入。",
+  "actualNativeFrameTypes": [
+    "welcome",
+    "roots-list",
+    "sessions",
+    "welcome",
+    "welcome",
+    "models-list"
+  ],
+  "actualSentTypes": [
+    "hello",
+    "list-sessions",
+    "get-roots",
+    "get-models",
+    "hello",
+    "hello"
+  ],
+  "providerRequests": 0,
+  "proofScope": "First copied launcher run against prior original-root-build-1 baseline, actual gateway and pi version, wrong-login then correct auth, Source render white screenshot, not Root acceptance or current early globals or chat. Live source frontend not modified."
+}
