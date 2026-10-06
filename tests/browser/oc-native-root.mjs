@@ -17,9 +17,13 @@ if (!home || !basename(home).startsWith('pi-oc-root-') || process.env.HOME !== h
 const ignored = join(repo, '.pi/oc-bridge-checks') + '/';
 if (!out?.startsWith(ignored) || !dist?.startsWith(ignored) || !dist.endsWith('/dist')) throw new Error('Invalid original Root proof paths');
 const navigation = process.env.PI_OC_ROOT_NAVIGATION === '1';
+const composerEnabled = process.env.PI_OC_ROOT_COMPOSER_ENABLED === '1';
 const compilation = JSON.parse(await readFile(join(dist, 'native-overlays.json'), 'utf8'));
 if (navigation && !compilation.nativeSourceNavigationCompiled) throw new Error('Navigation probe needs audited Source navigation overlay');
-if (!compilation.nativeOriginalEntryCompiled || !compilation.nativeSourceComposerReadOnly || compilation.originalSourceModified || compilation.backendStarted) throw new Error('Need audited original native-entry dist');
+if (!compilation.nativeOriginalEntryCompiled || compilation.originalSourceModified || compilation.backendStarted) throw new Error('Need audited original native-entry dist');
+if (composerEnabled) {
+  if (!navigation || compilation.nativeSourceComposerReadOnly !== false || compilation.nativeSourceComposerBoundCompiled !== true || compilation.overlayTargets?.length !== 24 || new Set(compilation.overlayTargets).size !== 24 || compilation.reactPackageRootCount !== 1 || compilation.reactDomPackageRootCount !== 1) throw new Error('Bound composer replay needs explicit navigation mode and audited 24-target/one-React build');
+} else if (!compilation.nativeSourceComposerReadOnly) throw new Error('Old readonly replay needs readonly composer dist; opt into bound mode explicitly');
 const piBin = join(repo, 'node_modules/.bin/pi');
 if (execFileSync(piBin, ['--version'], { encoding: 'utf8' }).trim() !== '0.99.2') throw new Error('Candidate runtime drift');
 const compiler = await createViteServer({ root: repo, configFile: false, cacheDir: join(out, 'vite-cache'), server: { middlewareMode: true, hmr: false, watch: null }, ssr: { noExternal: ['@pi-agent-ui/protocol'] }, logLevel: 'error' });
@@ -33,7 +37,7 @@ const token = randomBytes(32).toString('hex');
 const tokenFile = join(home, 'fixture-token.json');
 await writeFile(tokenFile, JSON.stringify({ version: 1, tokens: [token] }), { mode: 0o600, flag: 'wx' });
 const transcripts = join(home, 'transcripts'), journals = join(home, 'journal');
-const frames = [], sends = [], errors = [], errorStacks = [], blocked = [], requests = [], surfaces = [], navigationFacts = [], historyFacts = [];
+const frames = [], sends = [], errors = [], errorStacks = [], blocked = [], requests = [], surfaces = [], navigationFacts = [], historyFacts = [], composerFacts = [];
 const mobileSessionsLabel = 'Open sessions and projects';
 const mobileDialogLabel = 'Sessions';
 const assert = (value, message) => { if (!value) throw new Error(message); };
@@ -159,6 +163,25 @@ try {
       const paint = await page.evaluate(paintRead);
       assert(paint.length === 2 && paint.every(f => f.settled), 'Native persisted history text/ancestor paint still unsettled');
       assert(!await page.getByRole('status').filter({ hasText: 'OpenCode did not start a reply to this message.' }).isVisible(), 'Native history falsely claims old OpenCode accepted send but no reply');
+      if (composerEnabled) {
+        // Read the REAL original CodeMirror/footer after the same real row
+        // gesture. No edits/sends, Source/owner injection or CSS fixes. All
+        // pre-existing history/paint/no-auto-write/provider0 gates stay intact.
+        const composer = page.locator('form[data-native-composer="true"]');
+        assert(await composer.count() === 1, 'Missing/duplicated actual bound native composer');
+        await composer.locator('.cm-content[contenteditable="true"]').waitFor({ state: 'visible', timeout: 30000 });
+        const read = await composer.evaluate(el => {
+          const editor = el.querySelector('.cm-content[contenteditable="true"]');
+          const footer = el.querySelector('[data-chat-input-footer="true"]');
+          const send = footer?.querySelector('button[aria-label="Send message"]');
+          const r = el.getBoundingClientRect(), e = editor?.getBoundingClientRect();
+          const controls = [...el.querySelectorAll('button')].map(n => ({ text: n.textContent, aria: n.getAttribute('aria-label'), disabled: n.disabled }));
+          return { bounds: r.toJSON(), editorBounds: e?.toJSON(), sourceCodeMirror: !!editor, sourceFooter: !!footer, sendPresent: !!send, sendDisabled: send?.disabled, controls, opacity: Number(getComputedStyle(el).opacity), overflow: document.documentElement.scrollWidth - innerWidth };
+        });
+        assert(read.sourceCodeMirror && read.sourceFooter && read.sendPresent && read.sendDisabled === true, 'Original editor/footer empty-native-owner send guard missing');
+        assert(read.overflow <= 1 && read.opacity >= .99 && read.bounds.left >= -1 && read.bounds.right <= viewport.width + 1 && read.bounds.top >= -1 && read.bounds.bottom <= viewport.height + 1 && read.editorBounds?.width > 0 && read.editorBounds?.height > 0, 'Actual original native composer not fully readable/in viewport');
+        composerFacts.push({ surface: mobile ? 'mobile' : 'desktop', ...read });
+      }
       await page.screenshot({ path: join(out, mobile ? 'phone-history.png' : 'desktop-history.png'), fullPage: false });
       historyFacts.push({ ...history, paint });
     }
@@ -177,7 +200,7 @@ finally {
     await lastPage.screenshot({ path: join(out, 'last-page.png'), fullPage: false }).catch(() => {});
   }
   if (browser) await browser.close(); if (server) await server.dispose(); await compiler.close();
-  await writeFile(join(out, 'result.json'), JSON.stringify({ passed: !failure, error: failure?.message, proofScope: navigation ? 'Actual original desktop+fresh phone UI row click/tap, native persisted JSONL snapshots and two distinct Source message cards. Readonly navigation/history only, not new/send/stream/stop/composer/paid provider/physical phone/IME acceptance.' : 'Actual original App/MobileApp plus unchanged gateway/native clients with owned history and local model configuration. Readonly Root only; not chat/composer/paid-provider/physical phone/IME acceptance.', compilation, surfaces, navigationFacts, historyFacts, historySnapshots: navigation ? frames.filter(f => f.t === 'snapshot' && JSON.stringify(f).includes('NATIVE-HISTORY-ASSISTANT-OWNED')) : [], requests, frameTypes: frames.map(f => f.t), sentTypes: sends, errors, errorStacks, consoleErrors, failureFacts, blocked, productionAuthUsed: false }, null, 2) + '\n');
+  await writeFile(join(out, 'result.json'), JSON.stringify({ passed: !failure, error: failure?.message, proofScope: composerEnabled ? 'Actual original desktop+fresh phone UI/history plus REAL bound CodeMirror/Footer mount. Read-only replay: ZERO edits/prompts/provider requests; NOT send, attachments, model effects, actual composition continuity, paid-provider, physical phone or independent acceptance.' : navigation ? 'Actual original desktop+fresh phone UI row click/tap, native persisted JSONL snapshots and two distinct Source message cards. Readonly navigation/history only, not new/send/stream/stop/composer/paid provider/physical phone/IME acceptance.' : 'Actual original App/MobileApp plus unchanged gateway/native clients with owned history and local model configuration. Readonly Root only; not chat/composer/paid-provider/physical phone/IME acceptance.', compilation, surfaces, navigationFacts, historyFacts, composerEnabledMode: composerEnabled, composerFacts, historySnapshots: navigation ? frames.filter(f => f.t === 'snapshot' && JSON.stringify(f).includes('NATIVE-HISTORY-ASSISTANT-OWNED')) : [], requests, frameTypes: frames.map(f => f.t), sentTypes: sends, errors, errorStacks, consoleErrors, failureFacts, blocked, productionAuthUsed: false }, null, 2) + '\n');
 }
 if (failure) throw failure;
-console.log(navigation ? 'Original desktop/mobile explicit native row selection and persisted history passed; composer still readonly.' : 'Original desktop/mobile native read-only Root browser passed; chat still unbound.');
+console.log(composerEnabled ? 'Original desktop/mobile real CodeMirror/Footer bound mount and unchanged readonly history gates passed; ZERO native sends, no send/IME acceptance.' : navigation ? 'Original desktop/mobile explicit native row selection and persisted history passed; composer still readonly.' : 'Original desktop/mobile native read-only Root browser passed; chat still unbound.');
