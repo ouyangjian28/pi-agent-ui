@@ -1,0 +1,41 @@
+{
+  "task": "b2b9afa3d",
+  "files": [
+    {
+      "name": "result.json",
+      "bytes": 16466,
+      "sha256": "e2a9ea07ecde5053bdf6a308833a9973131f481a05813086024fd76cc89e2eba",
+      "gzipSha256": "789e4e9c750ca2bd9ffd57befc70c6fef36b59fd5df975ac07264ab0e65e7f9e",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "provider-result.json",
+      "bytes": 426,
+      "sha256": "32101f905c70d092fb5a590cb5fe3886b3f0166554625c6b246173dce265863e",
+      "gzipSha256": "91e84eb2397ccd8aa86a2686b2c2ab3e57184f648b6747650b4e68692a5af9b3",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "run.log",
+      "bytes": 308,
+      "sha256": "b2f3e5272b1507ff98e93bd17584809c728e58c226ff1be9e8a7959aed16fd75",
+      "gzipSha256": "c99f4938963b8febd436e998e1dd8fc02ec4245346c9c249dbd77beed438d0ac",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "harness-copy.json",
+      "bytes": 194,
+      "sha256": "7f2ae2cba3f5eae224b679bde38ba0af9e87adecba4a0fb7c53d050024f17976",
+      "gzipSha256": "66f76e57b7e3ab08fc3ff1ca7dcbbfbfb882f26582e69614c34226743574e0e4",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "last-page.png",
+      "bytes": 5853,
+      "sha256": "1dc0c385c65bf2baa27010517c98e89d395058d99055d7628b0c39ac65b17648",
+      "gzipSha256": "8f37099c0be5560b72019634a572d005c144dda357c8cf46f1b0688a5733cd40",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "Stack-only instrumentation retained unchanged failing browser gates. Generated frame9669:105329 maps to useWebNotificationStream effect new EventSource(/api/notifications/stream), NOT companion openchamberEvents subscribe. Actual Root still fails; not Source map/paid-provider/chat proof."
+}
