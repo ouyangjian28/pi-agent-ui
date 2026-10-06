@@ -1,0 +1,55 @@
+{
+  "task": "bb47502e3",
+  "files": [
+    {
+      "name": "result.json",
+      "bytes": 36483,
+      "sha256": "ecb80a88cf04e4b14d37b51c1174b09fcad87a2da1a19858d22d8b194399cc58",
+      "gzipSha256": "ec5a379ad6ea94ce660ed75fc36edfa83032f1b1d2c646ddf293ee4a91ceca9d",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "run.log",
+      "bytes": 480,
+      "sha256": "6b5547a82fade701e85ee1f4c382ac65e602b1e3ee72a5f5436397a888a31254",
+      "gzipSha256": "0bc5e0f96cdb57248824ce3b10313e6b073096738dae3403d2d10d1303686362",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "provider-result.json",
+      "bytes": 426,
+      "sha256": "32101f905c70d092fb5a590cb5fe3886b3f0166554625c6b246173dce265863e",
+      "gzipSha256": "91e84eb2397ccd8aa86a2686b2c2ab3e57184f648b6747650b4e68692a5af9b3",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "harness-copy.json",
+      "bytes": 194,
+      "sha256": "7cc6ac45cc1500b57fac3310a171321016da39cf8e1306d90caed7ace39d2d70",
+      "gzipSha256": "3d7effea2b021957dd73416e32f0e8a15513958c094a943fa7a56ae6009b827f",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "desktop.png",
+      "bytes": 42928,
+      "sha256": "b200909afa86094af409c6cdc3e54f21624cf428c93cbcf888205ca796e13dfb",
+      "gzipSha256": "5e1acb900d27db2e89ba8620044af842ad9a9bfd5546e235233f64380dbe261b",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "last-page.png",
+      "bytes": 45732,
+      "sha256": "60c7aab37c2893407d0cd0597abb3aaa20a257f6f9e81ce4746a3c0216533cb6",
+      "gzipSha256": "957e5efcf589ddf0e38de0e4cf102103a042ef629797cce17bdf89931bc86e9f",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "failed-harness.mjs",
+      "bytes": 9218,
+      "sha256": "7ff88ce09bb64d61f9fb90cb8ed6fd58d1d1ab17f679eee1783fd550f4176a06",
+      "gzipSha256": "4f4e4abe040a4f2815d2ef21cfdd93468d6fb76da61b23618f16ada3ddea04dd",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "Sixth actual Root run bb47502e3 failed: mobile locator exact Open sessions timeout30000ms; Source MobileHeader t(mobile.sessions.openSheetAria) uses en.ts:218 Open sessions and projects. Desktop actual owned-session button visible/no automatic directory modal/overflow0/no legacy token; both contexts native list/model frames; page errors/stacks/external/provider/native-write attempts0. Mobile screenshot renders normal home, NOT phone-list pass. Preserve seven originals incl failing copied harness before fixture-only exact-label repair, no timeout/assertion/Source/runtime change. Readonly Root not chat/provider/physical phone proof."
+}
