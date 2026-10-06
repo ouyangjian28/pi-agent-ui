@@ -1,0 +1,36 @@
+{
+  "taskId": "b9818c4ff",
+  "exitCode": 1,
+  "producerFailure": "Incorrect nonexistent attachment-upload.test.ts CLI selection; 101/101/0 failures/0pending in nine actual files, coverage correctly required 110 and failed. composer-attachments-owner.test.ts nine omitted. No expectation/assertion/config weakening. Types/source/backend not executed. Not Source App/browser/provider/send proof.",
+  "missingStages": [
+    "web-types",
+    "source-check",
+    "backend-protocol"
+  ],
+  "entries": [
+    {
+      "file": "commit.txt.gz",
+      "originalBytes": 41,
+      "originalSHA256": "7b8c8961a70b89fd9abf792720d2212ea2927b4c89368c4cca24e0cfb43a0cdc",
+      "gzipSHA256": "4e94f712e9060013929faedc51c4ea86d32c298ab7b3f1e63943856fc7366864"
+    },
+    {
+      "file": "tests.log.gz",
+      "originalBytes": 117,
+      "originalSHA256": "1fe2924dc2b0cb9926fded1e355e65aa0f0019ae7e1f74772b60c8e49e300dab",
+      "gzipSHA256": "e80db485c2c0d94b9380a8593fa68fcdfa52e134faf149f2bd1969411bea87a6"
+    },
+    {
+      "file": "results.json.gz",
+      "originalBytes": 49686,
+      "originalSHA256": "48622aa786c187e4e6a45fe36b2ddd8211ce05f4b5f55d6d0ca27bc8183c4bb8",
+      "gzipSHA256": "74924d28fb64e69d72a839b6756c52e7fd5ef22fdfc37152c309d366f2bd8bab"
+    },
+    {
+      "file": "coverage-check.log.gz",
+      "originalBytes": 746,
+      "originalSHA256": "a08eda9af7b386057c1191c36d61d103619e97b9e016bda9a4ffa5db153b60c5",
+      "gzipSHA256": "193fe7564c4be2ea00823308e193395b82b1a20a4575ec1beecd03129430a880"
+    }
+  ]
+}
