@@ -73,8 +73,14 @@ function responseTimeoutNoticeOf(snap: SessionDetailSnapshot): string | null {
   const timeout = snap.events.findLast((event) => event.kind === "response-timeout" &&
     event.intentId === turn.intentId && event.generation === snap.status?.process.generation);
   if (!timeout) return null;
-  // 终局历史可能先于状态帧抵达；保留原终局事实，不继续贴旧超时。
-  const terminal = snap.events.some((event) => event.seq > timeout.seq && event.intentId === turn.intentId &&
+  // 新轮历史可先于状态帧到达；旧轮提示不能贴给新轮（含同 id 的重建）。
+  const enqueue = snap.events.findLast((event) => event.kind === "turn-enqueued");
+  if (enqueue && enqueue.seq > timeout.seq) return null;
+  const startSeq = enqueue?.intentId === turn.intentId && enqueue.generation === timeout.generation
+    ? enqueue.seq : timeout.seq;
+  // 结算先于超时观测行落盘也不推翻终局；无轮首锚时只采超时后的同意图事实。
+  const terminal = snap.events.some((event) => event.seq >= startSeq && event.intentId === turn.intentId &&
+    (event.generation === null || event.generation === timeout.generation) &&
     ["verdict-settled", "verdict-delivered", "turn-cancelled", "verdict-unknown"].includes(event.kind));
   return terminal ? null : "响应超时，本次结果尚未确认。请查看活动详情核对；不会自动重发。";
 }
