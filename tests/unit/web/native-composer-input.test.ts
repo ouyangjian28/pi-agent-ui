@@ -73,18 +73,31 @@ describe('NativeComposerInput sole-owner event adapter (not UI acceptance)', () 
     const r = rig(); r.input.beginComposition(); const raw = '  已提交\n第二行😀\n'; expect(r.input.endComposition(raw)).toBe(true);
     expect(r.input.composing).toBe(false); expect(r.input.slot?.text).toBe(raw); expect(r.input.keyAction(enter)).toBe('send'); expect(r.frames()).toHaveLength(0);
   });
-  it('composition version touch protects not-yet-flushed bytes from a late launched ACK', async () => {
-    const r = rig(); r.input.change('first'); const pending = r.input.send(); r.input.beginComposition(); r.ack();
-    expect((await pending).status).toBe('launched'); expect(r.input.slot?.text).toBe('first'); expect(r.input.composing).toBe(true);
-    expect(r.input.endComposition('first中文')).toBe(true); expect(r.input.slot?.text).toBe('first中文'); expect(r.frames()).toHaveLength(1);
+  it('composition touch protects owner bytes through launched transfer, without redirecting stale IME callbacks', async () => {
+    const r = rig(); r.input.change('first'); const pending = r.input.send(); r.input.beginComposition(); const version = r.input.slot!.version; r.ack();
+    expect((await pending).status).toBe('launched'); expect(r.input.slot).toBeNull(); expect(r.input.composing).toBe(true);
+    const state = r.port.getSnapshot().conversation; expect(state.view).toEqual({ kind: 'session', file: 'input.jsonl' });
+    expect(state.drafts.get(r.id)).toMatchObject({ text: 'first', version, transferred: true });
+    const warm = new NativeComposerInput(r.port, 'session:input.jsonl'); expect(warm.slot).toBe(state.sessions.get('session:input.jsonl'));
+    expect(warm.slot).toMatchObject({ text: 'first', version, isNew: false });
+    expect(r.input.endComposition('stale中文')).toBe(false); expect(warm.slot?.text).toBe('first');
+    // Explicit fresh active-control callback only. Actual CodeMirror mount/IME
+    // continuity across the transfer remains a separate real-UI gate.
+    expect(warm.change('first中文')).toBe(true); expect(warm.slot?.text).toBe('first中文'); expect(r.frames()).toHaveLength(1);
   });
-  it('matching normal launched ACK clears through the native owner, never optimistically', async () => {
+  it('matching normal launched ACK clears via owner transfer and retires the old target, never optimistically', async () => {
     const r = rig(); r.input.change('normal'); const pending = r.input.send(); expect(r.input.slot?.text).toBe('normal'); expect(r.frames()[0]).toMatchObject({ file: 'input.jsonl', text: 'normal' });
-    r.ack(); expect(await pending).toMatchObject({ status: 'launched', outcome: { kind: 'launched' } }); expect(r.input.slot?.text).toBe('');
+    r.ack(); expect(await pending).toMatchObject({ status: 'launched', outcome: { kind: 'launched' } }); expect(r.input.slot).toBeNull();
+    const state = r.port.getSnapshot().conversation; expect(state.drafts.get(r.id)).toMatchObject({ text: '', transferred: true });
+    const warm = new NativeComposerInput(r.port, 'session:input.jsonl'); expect(warm.slot).toBe(state.sessions.get('session:input.jsonl')); expect(warm.slot?.text).toBe('');
+    expect(r.input.change('late old callback')).toBe(false); expect(warm.slot?.text).toBe('');
   });
-  it('pending requests refuse duplicate sends while later owner edits survive receipt', async () => {
+  it('pending requests refuse duplicates and later edits transfer once, without stale callbacks or reopen overwrite', async () => {
     const r = rig(); r.input.change('first'); const pending = r.input.send(); expect(await r.input.send()).toMatchObject({ status: 'local', kind: 'in-flight' }); r.input.change('next'); r.ack();
-    expect((await pending).status).toBe('launched'); expect(r.input.slot?.text).toBe('next'); expect(r.frames()).toHaveLength(1);
+    expect((await pending).status).toBe('launched'); expect(r.input.slot).toBeNull();
+    expect(r.port.getSnapshot().conversation.drafts.get(r.id)).toMatchObject({ text: 'next', transferred: true });
+    const warm = new NativeComposerInput(r.port, 'session:input.jsonl'); expect(warm.slot?.text).toBe('next');
+    expect(r.input.change('stale')).toBe(false); expect(warm.change('warm edit')).toBe(true); r.port.openSession('input.jsonl'); expect(warm.slot?.text).toBe('warm edit'); expect(r.frames()).toHaveLength(1);
   });
   it('unknown after explicit reconnect never auto-retries or loses draft bytes', async () => {
     const r = rig(); r.input.change('keep'); const pending = r.input.send(); r.port.reconnect(); r.sockets.forEach(s => { if (s.readyState === 0) s.welcome(); });
@@ -95,7 +108,9 @@ describe('NativeComposerInput sole-owner event adapter (not UI acceptance)', () 
     const r = rig({ upload: () => new Promise((_resolve, reject) => { fail = reject; }) }); r.input.change('keep');
     const pending = r.input.actions.upload([new File(['code'], 'fixture.ts', { type: 'text/plain' })]); expect(r.input.slot?.uploading).toBe(true);
     expect(await r.input.send()).toMatchObject({ status: 'local' }); expect(r.frames()).toHaveLength(0);
-    fail(new Error('fixture upload failure')); await pending; expect(r.input.slot).toMatchObject({ text: 'keep', uploading: false, uploadError: 'fixture upload failure' });
+    fail(new Error('fixture upload failure')); await pending;
+    expect(r.input.slot).toMatchObject({ text: 'keep', uploading: false, attachments: [], uploadError: '附件上传未完成；已成功的附件保留，未成功的不会发送。仅支持PNG/JPEG与UTF-8文本/代码，图片≤10MiB、文本≤48KiB。' });
+    expect(r.input.slot?.uploadError).not.toContain('fixture upload failure'); expect(r.frames()).toHaveLength(0);
   });
   it('unsupported model/effort remains a draft fact and actual rejected outcomes are not swallowed', async () => {
     const r = rig(); r.input.change('keep'); r.input.actions.chooseModelAndThinking('fixture', 'low', 'low'); r.input.actions.chooseModel('fixture', 'high');
