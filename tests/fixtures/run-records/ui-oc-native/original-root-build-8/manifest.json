@@ -1,0 +1,48 @@
+{
+  "task": "b9f3ae0a8",
+  "files": [
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "59cc3b6c8087790f6798f7dfc51d7948c3064c54d413846b4fa05c8feb5b9302",
+      "gzipSha256": "8bb2bd2e59caa74f672b89dfa5a95019405fa3873bc4b6c070d150c055c213b0",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "build.log",
+      "bytes": 232619,
+      "sha256": "448157ad8c3ae7a01d23b283a4f61414cacf779a76fe1a06ec4e8e54532fb522",
+      "gzipSha256": "038bfd45575644d6a9a0bece1bdb57be80b99f802a246f612de204fefe9a6165",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-before.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-after.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "audit-check.log",
+      "bytes": 136,
+      "sha256": "6604e8123e17f94aab7aa2f642c6e3593fe54c41706e824e66cf0fada8df8926",
+      "gzipSha256": "d73d53f1e27cc616610134772a7d24576785b6e4550a49d03e6fd84348bd5c5d",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "native-overlays.json",
+      "bytes": 2111,
+      "sha256": "cc997a767d24c69eb2bd7bd64f3f6ab766fe4237cbc763888b71e26ecd7b5cf3",
+      "gzipSha256": "755ac61e520364eac271bd43e4371fddfa39332aa1f11d9d0352b59ad7477854",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "Parent exact21 vs old17 overlay target SHA/oneReactDOM/threeHTML, source2952 same26893497B before-after/no apps-web-tools drift vs frozenHEAD/backend0. Compile metadata mountedfalse is NOT runtime fact. Not Source tsc/browser/history/new/send/paid-provider/physical phone acceptance; both prior actual history failures retained."
+}
