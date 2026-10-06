@@ -1,0 +1,55 @@
+{
+  "task": "bfcb18001",
+  "files": [
+    {
+      "name": "result.json",
+      "bytes": 40210,
+      "sha256": "8adfc7bddacc452957243336bfdb039db8bc7eae19cac69dfa06f2f1d920909b",
+      "gzipSha256": "8cfc32eb0217dcd14a657274d53f47a7c2318408003445b23275c78a394a16fc",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "run.log",
+      "bytes": 82,
+      "sha256": "2387250a8c42c8828be4a6ee7dcb362c6ed04fb7381a35990a6fb5138222ee28",
+      "gzipSha256": "e1671bc0b591eb72680153394108c30f5e72bc68d2e9e83b6a058c6f7e5e2975",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "provider-result.json",
+      "bytes": 426,
+      "sha256": "7526f327417f7900bac7e73910809b1566fd9762c3f18c461d8bf6505159fec2",
+      "gzipSha256": "392bc02111ebe86fac59557f1bf26fe4d5c9dceeab6a3441bf2a5e9013a0d2be",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "harness-copy.json",
+      "bytes": 194,
+      "sha256": "6ce6b7377baa322d9fbcd6b048b21fcc1320565f500f6e3c0b6d133d476f4ada",
+      "gzipSha256": "be1df717c200d22e6321c32ad42cea49e1a3dbb3b29f5dce41626c1141d87b58",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "desktop.png",
+      "bytes": 43050,
+      "sha256": "ff967827d1dca2aa10ee5808e329f7fcfc40da614df8cb4afedee7e2a7c437a0",
+      "gzipSha256": "b072adec04fcece1bc875e13e75f8d525b2e21c7bc5330182ee6779b49435e92",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "phone.png",
+      "bytes": 35750,
+      "sha256": "0e70080d24807af05a98237a955920124195b53447a8f3cc2fa41ac78d65c93f",
+      "gzipSha256": "46d233f92a7b425464c6810d76d59df6d19d2642eec5e263ceb2e5cd48257967",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "passed-unsettled-harness.mjs",
+      "bytes": 10326,
+      "sha256": "4758cf06f51e4c801788f37b136ce7df14de9e13e90896baafba06ad21f20a6b",
+      "gzipSha256": "b40561a65e9573cbe91ac8f3fc7c2f8761dd896fb5d7f747935ea904137ce2b0",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "Seventh actual Root bfcb18001 producer exit0: original readonly gates passed for desktop/mobile surface/owned title and button/overflow/no old auth/no automatic directory popup/no page errors/no external/provider/native write. Parent checks pass, but parent visual inspection finds phone.png drawer captured mid-transform/clipped owned title; NOT settled phone visual acceptance or full Root/chat/physical phone. Source MobileSessionsSheet.tsx:2181-2286 actual drawer enter delay16ms/duration320ms/settled transform none, stays mounted while closed: Playwright visible alone insufficient. Preserve seven originals and passed producer status; next fixture only strengthens settled-drawer/viewport assertions without product changes or animation disabling."
+}
