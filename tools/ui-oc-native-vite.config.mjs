@@ -9,9 +9,10 @@ import { nativeModelControlsTransform } from './ui-oc-native-model-transform.mjs
 import { nativeSourceNavigationTransform } from './ui-oc-native-navigation-transform.mjs';
 import { nativeHistorySurfaceTransform } from './ui-oc-native-history-transform.mjs';
 import { nativeLegacySessionNoticeTransform } from './ui-oc-native-session-error-transform.mjs';
+import { nativeBoundComposerTransform } from './ui-oc-native-composer-transform.mjs';
 import { nativeMessageOrderTransform } from './ui-oc-native-order-transform.mjs';
 import { nativeRuntimeFetchTransform } from './ui-oc-native-fetch-transform.mjs';
-import { nativeOriginalEntryTransform, nativeReadOnlyComposerTransform, nativeCompanionEventsTransform, nativeWebNotificationTransform, nativeInitialProjectPromptTransform, nativeProviderLogoTransform } from './ui-oc-native-startup-transform.mjs';
+import { nativeOriginalEntryTransform, nativeCompanionEventsTransform, nativeWebNotificationTransform, nativeInitialProjectPromptTransform, nativeProviderLogoTransform } from './ui-oc-native-startup-transform.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const snapshot = path.join(root, 'vendor/openchamber-frontend');
@@ -41,7 +42,9 @@ const targets = new Map([
   [path.join(snapshot, 'packages/ui/src/hooks/useWebNotificationStream.ts'), nativeWebNotificationTransform],
   [path.join(snapshot, 'packages/ui/src/hooks/useProviderLogo.ts'), nativeProviderLogoTransform],
   [path.join(snapshot, 'packages/ui/src/components/session/SessionDialogs.tsx'), nativeInitialProjectPromptTransform],
-  [path.join(snapshot, 'packages/ui/src/components/chat/ChatInput.tsx'), nativeReadOnlyComposerTransform],
+  [path.join(snapshot, 'packages/ui/src/components/chat/ChatInput.tsx'), source => nativeBoundComposerTransform(source, 'input')],
+  [path.join(snapshot, 'packages/ui/src/components/chat/composer/ui/ComposerFooter.tsx'), source => nativeBoundComposerTransform(source, 'footer')],
+  [path.join(snapshot, 'packages/ui/src/components/chat/composer/ui/ComposerActionButtons.tsx'), source => nativeBoundComposerTransform(source, 'actions')],
   [path.join(snapshot, 'packages/ui/src/components/chat/lib/turns/windowTurns.ts'), source => nativeHistorySurfaceTransform(source, 'window')],
   [path.join(snapshot, 'packages/ui/src/components/chat/lib/turns/projectTurnRecords.ts'), source => nativeHistorySurfaceTransform(source, 'projection')],
   [path.join(snapshot, 'packages/ui/src/components/chat/MessageList.tsx'), source => nativeHistorySurfaceTransform(source, 'messages')],
@@ -89,7 +92,9 @@ const nativeOverlay = {
       nativeSdkFetchOverlayCompiled: true,
       nativeSdkFetchInstalled: false,
       nativeOriginalEntryCompiled: true,
-      nativeSourceComposerReadOnly: true,
+      nativeSourceComposerReadOnly: false,
+      nativeSourceComposerBoundCompiled: true,
+      nativeSourceComposerMounted: false,
       nativeSourceNavigationCompiled: true,
       nativeChronologyReadSurfaceCompiled: true,
       nativeLegacySessionNoticeInactiveCompiled: true,
@@ -118,6 +123,7 @@ export default {
     alias: [
       ...reactAliases,
       { find: '@pi-native/model-controls', replacement: path.join(root, 'apps/web/src/oc-bridge/native-model-controls.tsx') },
+      { find: '@pi-native/source-composer', replacement: path.join(root, 'apps/web/src/oc-bridge/native-source-composer.tsx') },
       { find: '@pi-native/message-ordering', replacement: path.join(root, 'apps/web/src/oc-bridge/native-message-ordering.ts') },
       { find: '@pi-native/sdk-fetch', replacement: path.join(root, 'apps/web/src/oc-bridge/native-sdk-fetch.ts') },
       { find: '@pi-native/surface-host', replacement: path.join(root, 'apps/web/src/oc-bridge/native-surface-host.ts') },
