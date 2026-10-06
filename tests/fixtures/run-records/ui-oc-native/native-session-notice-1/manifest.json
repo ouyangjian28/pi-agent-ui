@@ -1,0 +1,76 @@
+{
+  "task": "b1a354bee",
+  "files": [
+    {
+      "name": "results.json",
+      "bytes": 85987,
+      "sha256": "89233372790fc61ce41eadc1ada4afd7b99155b54ac042f9730b363557016e7e",
+      "gzipSha256": "1a1dccf6782f04c3a71adab8c1ae5ec5b7ed1bc1cc7903de316f4d9fe6675fcc",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "expected.json",
+      "bytes": 629,
+      "sha256": "0dadf20c901c203ae9ba50dc2110d4eb1be7fdcfe0173d435855ddb566b6c631",
+      "gzipSha256": "b8c016b7d5770be504ac684d38004e5d78be4f6ac3ea1f29e1a33395b3eba16e",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "targets.txt",
+      "bytes": 728,
+      "sha256": "9b3d42224dbd2c76e5c29f4701240c7a63c4f48990bf0a831d9627359e1d49ae",
+      "gzipSha256": "146dd7022979bade3ff23c972aa4a81c939f5d9fc94204ae481241263e9a84cc",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "baseline-expected.sha256",
+      "bytes": 65,
+      "sha256": "cdf03ca0cca7e81cfed2781851e284e78347624c0b1b41fad88f247ed6089005",
+      "gzipSha256": "0335c84600893fb10d935ea4d46356ce64ef227c0dff57e555f728007e8e3e2d",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "94d0d9af8b8e7edca68ed32acc9d760cce15499abd42c14d29937a9f1d57ed3e",
+      "gzipSha256": "ec268584e837474c0d78b322048a0a10c97e6a9973dcd7daeb5eef206e4c41f9",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "tests.log",
+      "bytes": 2885,
+      "sha256": "5342135a70b3dfb5d820c307d0e66d4f2e1f8d5d284591a04db6e9a366359017",
+      "gzipSha256": "77edf348f9ee67c6e33cbd1e4ad391e97732bca5722262146075ffa2cf546cc5",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "coverage-check.log",
+      "bytes": 149,
+      "sha256": "7630bf44f8e9f46288ecc96c630adf1978ac48740bfac4b1408d04fccee270f7",
+      "gzipSha256": "266220ac56cd06dfada0682b4b138a177969621c4b61cfe0b3a9a53034bd47bc",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "web-types.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-check.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "backend-protocol.diff",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "Parent independently verifies EXACT176/16 cases and targets, every assertion/file passed, zero pending/skips/failures/missing, old172 expectations SHA unchanged+only4 notice Source AST/VM cases. Webtypes empty0/source2952files26893497B identical/backend-protocol empty0/frozen8842da5 apps-web/tools/tests-unit unchanged. Native-only legacy SessionErrorNotice guard after allhooks/unbound byte-identical/owner error immutability test NOT native error display proof. NOT Source tsc, actual UI paint/no-alert, new/send, paid provider/physical phone or whole repository gate. Build9 still pending; real stronger oldbuild negative control remains failed."
+}
