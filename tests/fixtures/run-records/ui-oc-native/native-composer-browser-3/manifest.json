@@ -1,0 +1,94 @@
+{
+  "task": "b5c578d37",
+  "recordedAtCommit": "0e9a579271e397cae6fbef3ad6609393a546c710",
+  "buildSourceCommit": "3206a87f2ebc706584e4861b62ea35bc8a2f5ee8",
+  "files": [
+    {
+      "name": "result.json",
+      "bytes": 65513,
+      "sha256": "b0f471501632be6fbd1463e9468098e5f31d4c64ca91c3316fc945a84e67271b",
+      "gzipSha256": "899b486c8e3cc1784b1d43178241405e1a9dfb91a34f05c21ca72e63659dc054",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "provider-result.json",
+      "bytes": 589,
+      "sha256": "073ccfacbded31798ddd1e47ad85135765614b07d6c8dd27b9afac9b7397ed94",
+      "gzipSha256": "46cc04dc217a982e49bbdbbde4edb61e03781c0728ca217121bef24376bb42a6",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "run.log",
+      "bytes": 147,
+      "sha256": "4699fa966c87a6c4615927608709783e29df3571f8dab9f3184fb13a59c857e4",
+      "gzipSha256": "1b2471b487b9dbd768995d2f8a96bc576817a1ca19e0c4840d882ba15027532b",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "harness-copy.json",
+      "bytes": 194,
+      "sha256": "78f6bf554bf37e393f7a3bd67ed9b32e54761f05411716bdb7c1e9d513b8b76f",
+      "gzipSha256": "58d4b7de7ddf1407ca31bdd650f716883b16832bfb4ce7258f160f556b282014",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "desktop.png",
+      "bytes": 29780,
+      "sha256": "300399a5c994f383d41b9379d07aa4be778db0d6e60007b57d51085bb6ed4cd9",
+      "gzipSha256": "a24228235e1004ff8486a3fb2a2c633d83ad5310fbbfde11ae127e1b9244087d",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "phone.png",
+      "bytes": 24858,
+      "sha256": "a865ba216e5bb3ec69d44b1b1dc40aab778b015e12fd7885916d284cb096d44b",
+      "gzipSha256": "0329f5cb337c405da321b557abdcfb0c05090a8ab569368651f9a0fa7fd255a3",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "desktop-history.png",
+      "bytes": 55689,
+      "sha256": "9a54f6a5d3d5e47fefce7cc93a9db954288f31a3c2d50d07fe5092aa65943885",
+      "gzipSha256": "091d593c3463e7ffc5af96c6eaa888db415104dae41b2f1758f673abb34abc3f",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "phone-history.png",
+      "bytes": 28834,
+      "sha256": "2581b553d36e40c45b21210e44a354cb4f702684665d0df36b14bd1dc8b844af",
+      "gzipSha256": "84c47b915876a4bde7b3b61b7f809ba9d02bc7f1b8ef0e8bc96e017ebd57e32f",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "rehearsal/oc-native-root.mjs",
+      "bytes": 24589,
+      "sha256": "2fbccaf2fea8da359eb77bda545ba899ba31979f7cae227cccc27a54f0b106f0",
+      "gzipSha256": "e3ea86ab4270aa6da5f13cfa6ec3b35525575c9381ede3fa1bfadf5006473cb3",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/oc-native-root.py",
+      "bytes": 7768,
+      "sha256": "8ec457bb60858c21d27f7869c9444d5a3d8b6b601a13f23a7c4c63292ff70904",
+      "gzipSha256": "df7dd1a7266199f3dc3a35371f65254e4a02184ea353e16eeba1005a64b50030",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/native-source-composer.tsx",
+      "bytes": 10671,
+      "sha256": "ddcf2175deb9316708f65556911878e5123969b222b47521be702239abfd30b3",
+      "gzipSha256": "02db3ba67703223429ed4aae94fcbda16da03abab9ae3a1c3936546997fa6094",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source/ui-oc-native-composer-transform.mjs",
+      "bytes": 3773,
+      "sha256": "cdd1577d3c346b007b3f04f94972f4812d8de1716a25ca388b887bc4da1397e4",
+      "gzipSha256": "a889f932152af7133f5ecd104dd08453b7fe574eee3ec3a3e4e1829b4d6865f6",
+      "roundtripIdentical": true
+    }
+  ],
+  "producerPassed": true,
+  "authorBoundedComposerVisualSelfcheckPassed": true,
+  "proofScope": "Actual original desktop+fresh390touchphone root/list/explicit selection/raw persisted two history markers/single cards/opacity>=.99/noanimations/twoRAF/no old Source alert/30s unchanged. Actual one editable original CodeMirror+Footer, empty send disabled, original form parent full width/capped column/editor>=.8, exact neutral placeholder bounds and real original desktopDIV/mobileBUTTON model text range readable, overflow0. Parent checked raw facts and reviewed PNG. Original layout-defect1 and real failure2 retained; copied byteidentical harness/tempHOME/0600 fixtureauth/allowlistedenv/loopback guard+browser external abort/provider0/productionauth0/no native writes. ZERO text edits/sends/uploads/model execution/IME continuity; NOT real composer functional acceptance/paid/independent/user/physicalphone. Node guard not OS sandbox. Only bounded mounted composer visual selfcheck passed; no broad REQ done or v6 UX acceptance."
+}
