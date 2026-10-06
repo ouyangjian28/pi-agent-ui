@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import original from '../vendor/openchamber-frontend/packages/web/vite.config.ts';
 import { nativeModelControlsTransform } from './ui-oc-native-model-transform.mjs';
 import { nativeSourceNavigationTransform } from './ui-oc-native-navigation-transform.mjs';
+import { nativeHistorySurfaceTransform } from './ui-oc-native-history-transform.mjs';
 import { nativeMessageOrderTransform } from './ui-oc-native-order-transform.mjs';
 import { nativeRuntimeFetchTransform } from './ui-oc-native-fetch-transform.mjs';
 import { nativeOriginalEntryTransform, nativeReadOnlyComposerTransform, nativeCompanionEventsTransform, nativeWebNotificationTransform, nativeInitialProjectPromptTransform, nativeProviderLogoTransform } from './ui-oc-native-startup-transform.mjs';
@@ -40,6 +41,10 @@ const targets = new Map([
   [path.join(snapshot, 'packages/ui/src/hooks/useProviderLogo.ts'), nativeProviderLogoTransform],
   [path.join(snapshot, 'packages/ui/src/components/session/SessionDialogs.tsx'), nativeInitialProjectPromptTransform],
   [path.join(snapshot, 'packages/ui/src/components/chat/ChatInput.tsx'), nativeReadOnlyComposerTransform],
+  [path.join(snapshot, 'packages/ui/src/components/chat/lib/turns/windowTurns.ts'), source => nativeHistorySurfaceTransform(source, 'window')],
+  [path.join(snapshot, 'packages/ui/src/components/chat/lib/turns/projectTurnRecords.ts'), source => nativeHistorySurfaceTransform(source, 'projection')],
+  [path.join(snapshot, 'packages/ui/src/components/chat/MessageList.tsx'), source => nativeHistorySurfaceTransform(source, 'messages')],
+  [path.join(snapshot, 'packages/ui/src/sync/bootstrap.ts'), source => nativeHistorySurfaceTransform(source, 'bootstrap')],
   [path.join(snapshot, 'packages/ui/src/sync/session-ui-store.ts'), source => nativeSourceNavigationTransform(source, 'store')],
   [path.join(snapshot, 'packages/ui/src/components/session/sidebar/list/SessionProjectCollection.tsx'), source => nativeSourceNavigationTransform(source, 'collection')],
   [path.join(snapshot, 'packages/ui/src/components/session/sidebar/sessions/useSessionActions.ts'), source => nativeSourceNavigationTransform(source, 'actions')],
@@ -84,6 +89,7 @@ const nativeOverlay = {
       nativeOriginalEntryCompiled: true,
       nativeSourceComposerReadOnly: true,
       nativeSourceNavigationCompiled: true,
+      nativeChronologyReadSurfaceCompiled: true,
       nativeCompanionEventsInactiveCompiled: true,
       nativeWebNotificationsInactiveCompiled: true,
       nativeInitialProjectPromptInactiveCompiled: true,
@@ -113,6 +119,7 @@ export default {
       { find: '@pi-native/sdk-fetch', replacement: path.join(root, 'apps/web/src/oc-bridge/native-sdk-fetch.ts') },
       { find: '@pi-native/surface-host', replacement: path.join(root, 'apps/web/src/oc-bridge/native-surface-host.ts') },
       { find: '@pi-native/navigation-actions', replacement: path.join(root, 'apps/web/src/oc-bridge/native-navigation-actions.ts') },
+      { find: '@pi-native/history-surface', replacement: path.join(root, 'apps/web/src/oc-bridge/native-history-surface.ts') },
       { find: '@pi-native/original-startup', replacement: path.join(root, 'apps/web/src/oc-bridge/native-original-startup.ts') },
       { find: '@pi-native/original-renderer', replacement: path.join(root, 'tools/ui-oc-native-renderer.tsx') },
       ...original.resolve.alias,
