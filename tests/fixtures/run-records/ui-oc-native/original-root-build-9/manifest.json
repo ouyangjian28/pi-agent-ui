@@ -1,0 +1,55 @@
+{
+  "task": "b2a412788",
+  "files": [
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "94d0d9af8b8e7edca68ed32acc9d760cce15499abd42c14d29937a9f1d57ed3e",
+      "gzipSha256": "ec268584e837474c0d78b322048a0a10c97e6a9973dcd7daeb5eef206e4c41f9",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "build.log",
+      "bytes": 232619,
+      "sha256": "5d1754d653b9a6483e694bda47355bde6001f0b7542c25eb344b24bbd148d9c2",
+      "gzipSha256": "d895e740f41d125a8a6290a025803a77e2e52b96cb53fb7d332ed05e737a5d70",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-before.json",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-after.json",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "metadata-check.log",
+      "bytes": 150,
+      "sha256": "2664db77960c12d47af6ba8f6013fee5e76bdd50887559c7a0a1325d4f04283a",
+      "gzipSha256": "7efbd60c9b7e4686c5b78e6c2ff6d1435ea6b8a94c23b56a51e77f9d9f5a93d0",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "backend-protocol.diff",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "dist/native-overlays.json",
+      "bytes": 2226,
+      "sha256": "6ba40baa7ea4e71934a254b757814eb2828b29e2b5da83e30d6c7a7a73b42e4d",
+      "gzipSha256": "9c25123a939d42049940bd7d9d5b00bb86477b7fa9cf17c60eb0dba98cd510e5",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "Parent independently exact22=old21+SessionErrorNotice, oneReact/DOM,3originalHTML, readonly composer, immutable2952files26893497B before/after, frozen8842da5 apps-web/tools unchanged, backend/protocol0. Build-only no-legacy-notice guard after all original hooks. Compiler fields mountedfalse are not runtime facts; actual stronger paint/no-alert desktop/freshphone gate still pending. NOT Source tsc, native new/send/IME/physicalphone/paidprovider/allrepo acceptance."
+}
