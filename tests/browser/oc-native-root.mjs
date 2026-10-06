@@ -154,7 +154,7 @@ try {
         });
       };
       lastPaintRead = paintRead;
-      await page.waitForFunction(`() => (${paintRead.toString()})().every(f => f.settled)`, undefined, { timeout: 30000 });
+      await page.waitForFunction(`(${paintRead.toString()})().every(f => f.settled)`, undefined, { timeout: 30000 });
       await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
       const paint = await page.evaluate(paintRead);
       assert(paint.length === 2 && paint.every(f => f.settled), 'Native persisted history text/ancestor paint still unsettled');
