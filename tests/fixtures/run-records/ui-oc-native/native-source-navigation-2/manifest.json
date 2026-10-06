@@ -1,0 +1,76 @@
+{
+  "task": "b1fc82daa",
+  "files": [
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "a31588562814574173c26717bb3735ac62005b243f0e0320efb42645743a4313",
+      "gzipSha256": "fb91915e39120679c322a40d2d62e7d3bc1d8a11fd497aaddfe236d9b176c6cf",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "expected.json",
+      "bytes": 514,
+      "sha256": "0f6b37076a72709b0dd7774e0d3be4f625cb89fd0813df2164457c5ade5d6476",
+      "gzipSha256": "8ab044b33d718d9c955306557dc2f9f30ff502d4c3a377fff65067f3828d2313",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "targets.txt",
+      "bytes": 631,
+      "sha256": "0a1524df5239d745af0c04d8cf324aa15d8cf1c981bb728881364f2c07dd680b",
+      "gzipSha256": "995c323c993ddb83028ae6b177f692e2dcb2b835bb8b5b659572ba3ea72ea222",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "preflight.log",
+      "bytes": 98,
+      "sha256": "2b8e7eb41b30cd1d6633f134d5c24cb781b73f0056d735e58f52777f1648baf9",
+      "gzipSha256": "813a753348ea05797c939b6162031225cbf8bcdaaa0b100a19be5b10b909d922",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "results.json",
+      "bytes": 76038,
+      "sha256": "515e4085b2f6978ef8c935eea83009fc9ff6c5059dcfa8c620fe9b510b24a2b1",
+      "gzipSha256": "0b2e6ff448e33073d9116432de09d83f076bab0962845d3d6084c43a0bef26b7",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "tests.log",
+      "bytes": 125,
+      "sha256": "053dbf8b8796f2351c707d8cc86237b5b27ff59f351a47f25e1d26ce82523437",
+      "gzipSha256": "f4ea4d2b331bb2d4ff8739a2aaaea1d1f7341b6bdf01efc67f6bc41482066032",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "coverage-check.log",
+      "bytes": 112,
+      "sha256": "b5c1773a459fe570fc2436b12bce62466847b706c8e437c2e765a26e5c172703",
+      "gzipSha256": "8d464d2332f4ab8422923094534cb90ccbdb8deb4d7f3ce5100396e4f7b41a1e",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "web-types.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-check.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "backend-protocol.diff",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "Parent exact156/14 all assertions passed/no missing or pending/original expectation SHA and old14 Source cases retained (one six-overlay title update)/webtypes0/source2952+26893497B/backend0. Source actual callbacks AST/VM only, not Source tsc/runtime row/history/new/send/provider/physical-phone acceptance. Failed actual browser1 remains failed."
+}
