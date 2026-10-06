@@ -1,0 +1,49 @@
+{
+  "task": "b20d69d84",
+  "producerCommit": "929a697c3ae01600aed2d6d9094e480d8356c5a4",
+  "files": [
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "6ee3e969dfeef46e46aede7f9985cfdfba8b09d77fd9225552540d5b0c7a389a",
+      "gzipSha256": "a78e71d991fd5a0e40098b8ed835ed319262a8c7f60f14f4ef34da60b4c3b807",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "build.log",
+      "bytes": 232619,
+      "sha256": "dcdc1ad17468f0060a7fb844ddef9be45327bb2e51760e93a18165533d21e3e9",
+      "gzipSha256": "c8638a236190299fabaf13b5e7c0eb85c5b1dcc12dbf69ea9390dd545ec4397f",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-before.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-after.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "audit-check.log",
+      "bytes": 214,
+      "sha256": "49b886875fbab59fd799abc3a14dbba3430db91147f1a65bfb12e3d854b18be9",
+      "gzipSha256": "f9a65d7d942b19447c1f002fe754ed7d7d0d6b44c6194cefc1513429f430dfcc",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "native-overlays.json",
+      "bytes": 1078,
+      "sha256": "cc87b462df1337cb6596c0c2de3868c3548659ecdd5a825bf0e4a6ef22e3104c",
+      "gzipSha256": "32dc0fdb5220985e187adc66cdeb2cb3dd7dc638365fcd821029e2086ab4e522",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "Actual literal Source App/MobileApp/3HTML with eight exact build-only overlays/one React/DOM/source identical. Compiler scope only; not actual browser Root/chat/provider/phone proof."
+}
