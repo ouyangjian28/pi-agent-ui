@@ -102,7 +102,20 @@ describe('actual original entry/composer overlays and runtime facade (syntax-onl
     expect(output).not.toContain('createConfiguredWebAPIs'); expect(output).not.toContain('runtimeConfig'); expect(output).not.toContain('registerSW'); expect(output).not.toContain('watchHostedSurfaceViewport');
     expect(() => nativeOriginalEntryTransform(output, kind)).toThrow('already applied');
     expect(() => nativeOriginalEntryTransform(source.replace('import { createConfiguredWebAPIs', 'import { driftedWebAPIs'), kind)).toThrow('anchor');
-    if (kind !== 'mini') { expect(output).toContain('window.fetch.bind(window)'); expect(output).toContain('loadRenderer: () => import'); } else expect(output).not.toContain('import');
+    if (kind !== 'mini') {
+      expect(output).toContain('window.fetch.bind(window)'); expect(output).toContain('loadRenderer: () => import');
+      const window: Record<string, any> = { fetch: vi.fn(), matchMedia: () => ({ matches: true }), location: { origin: 'http://127.0.0.1:7777' }, addEventListener: vi.fn(), __OPENCHAMBER_API_BASE_URL__: 'https://old.invalid', __OPENCHAMBER_CLIENT_TOKEN__: 'fixture-leftover', __OPENCHAMBER_RUNTIME_HEADERS__: { 'x-old': 'fixture-leftover' }, __OPENCHAMBER_RELAY_HOST_ID__: 'old' };
+      const start = vi.fn(options => {
+        expect(options.surface).toBe('mobile'); expect(window.__OPENCHAMBER_SURFACE__).toBe('mobile');
+        expect(window.__OPENCHAMBER_API_BASE_URL__).toBe(window.location.origin); expect(window.__OPENCHAMBER_LOCAL_ORIGIN__).toBe(window.location.origin);
+        for (const key of ['__OPENCHAMBER_CLIENT_TOKEN__','__OPENCHAMBER_RUNTIME_HEADERS__','__OPENCHAMBER_RELAY_HOST_ID__']) expect(window[key]).toBeUndefined();
+        return { dispose: vi.fn() };
+      });
+      const requireModule = vi.fn(name => { if (name === '@pi-native/original-startup') return { startOriginalNativeSurface: start }; throw new Error('Original modules may not import before native startup'); });
+      const code = ts.transpileModule(output, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+      runInNewContext(code, { exports: {}, window, document: { getElementById: () => ({}) }, require: requireModule });
+      expect(start).toHaveBeenCalledTimes(1); expect(requireModule).toHaveBeenCalledTimes(1);
+    } else expect(output).not.toContain('import');
   });
   it('native composer wrapper never executes original destructive hooks; null host preserves literal original component', () => {
     const original = readFileSync(resolve(ROOT, 'vendor/openchamber-frontend/packages/ui/src/components/chat/ChatInput.tsx'), 'utf8');

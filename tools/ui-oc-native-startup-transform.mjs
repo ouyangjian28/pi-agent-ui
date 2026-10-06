@@ -19,6 +19,13 @@ const capturedNetworkFetch = window.fetch.bind(window);
 const root = document.getElementById('root');
 if (!root) throw new Error('Root element not found');
 const surface = ${kind === 'mobile' ? "'mobile'" : "window.matchMedia('(max-width: 767px)').matches ? 'mobile' : 'desktop'"};
+// Original modules read/cache these facts while importing, not only on render.
+window.__OPENCHAMBER_SURFACE__ = surface;
+window.__OPENCHAMBER_API_BASE_URL__ = window.location.origin;
+window.__OPENCHAMBER_LOCAL_ORIGIN__ = window.location.origin;
+window.__OPENCHAMBER_CLIENT_TOKEN__ = undefined;
+window.__OPENCHAMBER_RUNTIME_HEADERS__ = undefined;
+window.__OPENCHAMBER_RELAY_HOST_ID__ = undefined;
 const startup = startOriginalNativeSurface({ target: window, root, surface, capturedNetworkFetch,
   loadRenderer: () => import('@pi-native/original-renderer') });
 window.addEventListener('pagehide', () => startup.dispose(), { once: true });
