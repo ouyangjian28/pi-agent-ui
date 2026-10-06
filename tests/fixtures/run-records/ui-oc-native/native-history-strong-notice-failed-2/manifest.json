@@ -1,0 +1,76 @@
+{
+  "task": "bc70b6944",
+  "files": [
+    {
+      "name": "result.json",
+      "bytes": 59272,
+      "sha256": "8a4ccc8aea609296df84b0855b22010f64bc8ec7153698665e810f2ddc25d28f",
+      "gzipSha256": "b4e0abedcd99f89eefce1d51353eca8adc9dfb9f12928f7528420e76e8e39d37",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "run.log",
+      "bytes": 692,
+      "sha256": "b4cf9207ad051a519d5282f2faef726e535ba1c56dd39b841817490ac0b9b9a4",
+      "gzipSha256": "5c0da4778d0000ece4d49bfa20b0dd536721076139148d0ce079c4f48e4a6b91",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "provider-result.json",
+      "bytes": 505,
+      "sha256": "14a1cee92ecdbe7786d220306235479ff04d24d3eb06c052646456efc5c104d5",
+      "gzipSha256": "cf1e148655e2654a72204bdfd653b0d16b7815a50f71177c35e94dbf37235bec",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "harness-copy.json",
+      "bytes": 194,
+      "sha256": "101a5f85ff61eb5b571ed6dce26d5e1610b6a0fb4a8a61ca72a655ac158edf8f",
+      "gzipSha256": "977458ea46cff35fc841d4d265c08d95791040b16483756e91cc52cbfdfa78ef",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "desktop.png",
+      "bytes": 29780,
+      "sha256": "300399a5c994f383d41b9379d07aa4be778db0d6e60007b57d51085bb6ed4cd9",
+      "gzipSha256": "a24228235e1004ff8486a3fb2a2c633d83ad5310fbbfde11ae127e1b9244087d",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "phone.png",
+      "bytes": 24858,
+      "sha256": "a865ba216e5bb3ec69d44b1b1dc40aab778b015e12fd7885916d284cb096d44b",
+      "gzipSha256": "0329f5cb337c405da321b557abdcfb0c05090a8ab569368651f9a0fa7fd255a3",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "desktop-history.png",
+      "bytes": 53696,
+      "sha256": "fd4a80f823723f68f17c8152dbf65dbd9b9d54069f5b41b3d270e6ffb7054b58",
+      "gzipSha256": "f44b405738fefc06c157f470c2cd72bd427f87636b45c9c0df5c7873150464b5",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "last-page.png",
+      "bytes": 39694,
+      "sha256": "9a296ba8059ca8773cde44eae73541a507bd71715d993a5817a783d2694d5a13",
+      "gzipSha256": "fcace08d4f81d46e2c885e26303fb38f2d0730ba91ff4926d2cdefdcd676ea2c",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "rehearsal/oc-native-root.mjs",
+      "bytes": 18884,
+      "sha256": "610565a09e30d95cb01277881606d106fd364f75e5bdcf3888cc34f8c58d6144",
+      "gzipSha256": "b23406d1937ffd13f7c6b8b316dc38c883ee9d96d215c2bf33706cb2f6d11d01",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "producer/oc-native-root.py",
+      "bytes": 7076,
+      "sha256": "d6dd8cf9e2aab97ba628ae76efd9adda1ead0fde9139ae2bcad566e6d7b197ff",
+      "gzipSha256": "5e5404ba244f4dee4812ae424a2672b780464b1fd4e8d41c058913f5d3d4d5a0",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "FAILED1 valid old-build8 negative control: corrected exact boolean poller, desktop complete dual marker/snapshot/paint/no-notice gate passed; fresh mobile two marker ancestors opacity1/animations0/settledtrue, but REAL old OpenCode no-reply notice visible. Same30s/row/rawsnapshot/dualcard/noCSS-noAnimationOverride maintained. Freeze10 raw SHA/gz BEFORE native-only SessionErrorNotice repair; Source/hooks/unbound/actual owner errors must be preserved. Python producer launchfcd2ed4 unchanged/not copy; provider/external/production0 is bounded safety, not UI visual pass."
+}
