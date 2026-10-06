@@ -86,7 +86,7 @@ with tempfile.TemporaryDirectory(prefix='pi-oc-root-') as home:
         (out / 'provider-result.json').write_text(json.dumps({'exitCode': run.returncode, 'providerRequests': provider_requests,
             'blockedNonLoopbackAttempts': attempts, 'networkGuardSelfcheck': 'passed', 'productionAuthUsed': False,
             'isolation': 'temporary HOME/agentDir/workspace; allowlisted env; fresh browsers; owned loopback gateway and provider; copied harness',
-            'limitation': 'Node loopback guard is not an OS sandbox. Original Root/list and optionally explicit selection/persisted history only, not composer/send/chat/paid provider/physical phone.', 'navigationMode': args.navigation, 'composerEnabledMode': args.composer_enabled}, indent=2) + '\n')
+            'limitation': ('Node loopback guard is not an OS sandbox. Explicit bound mode proves original CodeMirror/Footer mount and geometry ONLY; zero text edits/sends/uploads/model execution/IME continuity. Not paid/independent/user/physical phone.' if args.composer_enabled else 'Node loopback guard is not an OS sandbox. Original Root/list and optionally explicit selection/persisted history only, not composer/send/chat/paid provider/physical phone.'), 'navigationMode': args.navigation, 'composerEnabledMode': args.composer_enabled}, indent=2) + '\n')
         print('Artifacts:', out)
         assert run.returncode == 0, f'original Root browser failed; inspect {out / "run.log"}'
         assert not provider_requests and not attempts, 'readonly Root emitted provider or external network request'
