@@ -31,17 +31,23 @@ const token = randomBytes(32).toString('hex');
 const tokenFile = join(home, 'fixture-token.json');
 await writeFile(tokenFile, JSON.stringify({ version: 1, tokens: [token] }), { mode: 0o600, flag: 'wx' });
 const transcripts = join(home, 'transcripts'), journals = join(home, 'journal');
-const frames = [], sends = [], errors = [], errorStacks = [], blocked = [], requests = [], surfaces = [];
+const frames = [], sends = [], errors = [], errorStacks = [], blocked = [], requests = [], surfaces = [], navigationFacts = [];
+const mobileSessionsLabel = 'Open sessions and projects';
 const assert = (value, message) => { if (!value) throw new Error(message); };
 let browser, server, failure, lastPage;
 try {
+  // Bind the exact phone role/name to its actual Source consumer and English
+  // locale. Do not borrow the desktop button's different accessible name.
+  const sourceUi = join(repo, 'vendor/openchamber-frontend/packages/ui/src');
+  assert((await readFile(join(sourceUi, 'apps/MobileHeader.tsx'), 'utf8')).includes("aria-label={t('mobile.sessions.openSheetAria')}"), 'Source mobile sessions consumer drift');
+  assert((await readFile(join(sourceUi, 'lib/i18n/messages/en.ts'), 'utf8')).includes("'mobile.sessions.openSheetAria': '" + mobileSessionsLabel + "'"), 'Source mobile English accessible name drift');
   server = await startServer({ tokenFile, allowedOrigins: [origin], roots: [transcripts, journals, join(home, 'workspace')], scanDir: transcripts, tokenPollMs: 0, port, host: '127.0.0.1', staticDir: dist,
     journalLayout: { transcriptsRoot: transcripts, journalRoot: journals }, sessionFor: file => resolve(transcripts, file),
     write: { sessionFor: file => resolve(transcripts, relative(journals, file)), piBin, extraPiArgs: ['--offline', '--no-approve', '--no-extensions', '--no-context-files', '--no-skills', '--no-themes', '--no-prompt-templates', '--tools', 'read'], readinessTimeoutMs: 20000, responseTimeoutMs: 15000, turnTimeoutMs: 45000 }, audit: () => {} });
   const executablePath = chromium.executablePath(); await access(executablePath, constants.X_OK);
   browser = await chromium.launch({ headless: true, executablePath });
   for (const mobile of [false, true]) {
-    const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 }, serviceWorkers: 'block', ...(mobile ? { isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1' } : {}) });
+    const context = await browser.newContext({ locale: 'en-US', viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 }, serviceWorkers: 'block', ...(mobile ? { isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1' } : {}) });
     await context.route('**/*', route => {
       const url = new URL(route.request().url());
       if (url.origin === origin || ['blob:', 'data:'].includes(url.protocol)) return route.continue();
@@ -71,7 +77,10 @@ try {
     await page.getByLabel('pi 登录令牌', { exact: true }).waitFor({ state: 'hidden', timeout: 30000 });
     // The actual Source phone list is a closed drawer on first render.
     // Enter it through its real UI gesture, not DOM/state/Source DTO injection.
-    if (mobile) await page.getByRole('button', { name: 'Open sessions', exact: true }).tap();
+    // Diagnostic only, after login input is gone: capture the actual entry
+    // and accessible controls even if navigation later fails. No state writes.
+    navigationFacts.push(await page.evaluate(() => ({ surface: window.__OPENCHAMBER_SURFACE__, controls: [...document.querySelectorAll('button')].map(n => ({ text: n.textContent, aria: n.getAttribute('aria-label') })) })));
+    if (mobile) await page.getByRole('button', { name: mobileSessionsLabel, exact: true }).tap();
     await page.waitForFunction(() => document.body.innerText.includes('NATIVE-ROOT-OWNED'), undefined, { timeout: 30000 });
     await page.locator('button').filter({ hasText: 'NATIVE-ROOT-OWNED' }).first().waitFor({ state: 'visible', timeout: 30000 });
     assert(!await page.getByRole('dialog', { name: 'Add project directory', exact: true }).isVisible(), 'Native startup auto-opened unsupported project directory dialog');
@@ -89,7 +98,7 @@ try {
 finally {
   if (failure && lastPage && !lastPage.isClosed()) await lastPage.screenshot({ path: join(out, 'last-page.png'), fullPage: false }).catch(() => {});
   if (browser) await browser.close(); if (server) await server.dispose(); await compiler.close();
-  await writeFile(join(out, 'result.json'), JSON.stringify({ passed: !failure, error: failure?.message, proofScope: 'Actual original App/MobileApp plus unchanged gateway/native clients with owned history and local model configuration. Readonly Root only; not chat/composer/paid-provider/physical phone/IME acceptance.', compilation, surfaces, requests, frameTypes: frames.map(f => f.t), sentTypes: sends, errors, errorStacks, blocked, productionAuthUsed: false }, null, 2) + '\n');
+  await writeFile(join(out, 'result.json'), JSON.stringify({ passed: !failure, error: failure?.message, proofScope: 'Actual original App/MobileApp plus unchanged gateway/native clients with owned history and local model configuration. Readonly Root only; not chat/composer/paid-provider/physical phone/IME acceptance.', compilation, surfaces, navigationFacts, requests, frameTypes: frames.map(f => f.t), sentTypes: sends, errors, errorStacks, blocked, productionAuthUsed: false }, null, 2) + '\n');
 }
 if (failure) throw failure;
 console.log('Original desktop/mobile native read-only Root browser passed; chat still unbound.');
