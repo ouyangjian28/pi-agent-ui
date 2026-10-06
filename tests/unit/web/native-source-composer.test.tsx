@@ -75,7 +75,9 @@ describe('Original composer native binding (bounded replacement-editor proof)', 
     const begin = source.indexOf('const ChatInputComponent:'); const end = source.indexOf('export const ChatInput = React.memo(ChatInputComponent);'); expect(begin).toBeGreaterThanOrEqual(0); expect(end).toBeGreaterThan(begin);
     expect(code).toContain(source.slice(begin, end));
     expect(code).toContain('if (!host) return <ChatInputComponent {...props} />'); expect(code).toContain('props.active === false'); expect(code).toContain('<ComposerEditor'); expect(code).toContain('<ComposerFooter'); expect(code).toContain('preserveDeferredEnterShift');
-    expect(code.slice(code.indexOf('const PiBoundChatInput'))).toContain("placeholder={t('chat.chatInput.placeholder.chat')}");
+    const bound = code.slice(code.indexOf('const PiBoundChatInput'));
+    expect(bound).toContain('placeholder="输入消息…"');
+    expect(bound).not.toContain("placeholder={t('chat.chatInput.placeholder.chat')}");
   });
   it('actual Source footer parses and native SSR never mounts goals/dictation/old attachment menu, unbound still does', () => {
     for (const native of [false, true]) for (const mobile of [false, true]) {

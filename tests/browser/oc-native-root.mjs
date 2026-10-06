@@ -178,21 +178,25 @@ try {
           const parent = el.parentElement?.getBoundingClientRect();
           const column = el.querySelector('[data-native-composer-column="true"]'); const c = column?.getBoundingClientRect();
           const placeholder = editor?.querySelector('.cm-placeholder'); const p = placeholder?.getBoundingClientRect();
-          const model = [...el.querySelectorAll('button')].find(n => n.textContent.includes('pi 配置'));
-          const m = model?.getBoundingClientRect(); const range = document.createRange(); if (model) range.selectNodeContents(model); const text = model ? range.getBoundingClientRect() : null;
+          // Literal original desktop dropdown uses div asChild; mobile uses
+          // button. Inspect the actual label, not an invented button contract.
+          const model = el.querySelector('.model-controls__model-trigger') ?? [...el.querySelectorAll('button')].find(n => n.textContent.includes('pi 配置'));
+          const label = model?.querySelector('.model-controls__model-label .marquee-text') ?? model;
+          const m = model?.getBoundingClientRect(); const range = document.createRange(); if (label) range.selectNodeContents(label); const text = label ? range.getBoundingClientRect() : null;
           const expectedColumnWidth = parent ? Math.min(parent.width, parseFloat(getComputedStyle(document.documentElement).fontSize) * (el.closest('.wide-chat-layout') ? 64 : 48)) : null;
           const controls = [...el.querySelectorAll('button')].map(n => ({ text: n.textContent, aria: n.getAttribute('aria-label'), disabled: n.disabled }));
-          return { bounds: r.toJSON(), parentBounds: parent?.toJSON(), columnBounds: c?.toJSON(), expectedColumnWidth, placeholderText: placeholder?.textContent, placeholderBounds: p?.toJSON(), modelText: model?.textContent, modelBounds: m?.toJSON(), modelTextBounds: text?.toJSON(), modelReadable: !!m && !!text && m.width > 44 && m.height >= 24 && text.width > 0 && text.left >= m.left - 1 && text.right <= m.right + 1, editorBounds: e?.toJSON(), sourceCodeMirror: !!editor, sourceFooter: !!footer, sendPresent: !!send, sendDisabled: send?.disabled, controls, opacity: Number(getComputedStyle(el).opacity), overflow: document.documentElement.scrollWidth - innerWidth };
+          return { bounds: r.toJSON(), parentBounds: parent?.toJSON(), columnBounds: c?.toJSON(), expectedColumnWidth, placeholderText: placeholder?.textContent, placeholderBounds: p?.toJSON(), modelTag: model?.tagName, modelText: label?.textContent, modelBounds: m?.toJSON(), modelTextBounds: text?.toJSON(), modelReadable: !!m && !!text && m.width > 44 && m.height >= 24 && text.width > 0 && text.left >= m.left - 1 && text.right <= m.right + 1, editorBounds: e?.toJSON(), sourceCodeMirror: !!editor, sourceFooter: !!footer, sendPresent: !!send, sendDisabled: send?.disabled, controls, opacity: Number(getComputedStyle(el).opacity), overflow: document.documentElement.scrollWidth - innerWidth };
         });
         assert(read.sourceCodeMirror && read.sourceFooter && read.sendPresent && read.sendDisabled === true, 'Original editor/footer empty-native-owner send guard missing');
         assert(read.overflow <= 1 && read.opacity >= .99 && read.bounds.left >= -1 && read.bounds.right <= viewport.width + 1 && read.bounds.top >= -1 && read.bounds.bottom <= viewport.height + 1 && read.editorBounds?.width > 0 && read.editorBounds?.height > 0, 'Actual original native composer not fully readable/in viewport');
+        // Keep read facts even on FAIL; this does not alter passed status.
+        composerFacts.push({ surface: mobile ? 'mobile' : 'desktop', ...read });
         // First mounted pass had desktop190/mobile128 shrink-to-content and
         // clipped/missing model text. Preserve it; tighten only explicit-bound
         // geometry/affordance gate, never relax old history/safety/timeouts.
         assert(read.parentBounds && Math.abs(read.bounds.width - read.parentBounds.width) <= 2 && read.columnBounds && Math.abs(read.columnBounds.width - read.expectedColumnWidth) <= 2 && read.editorBounds.width >= read.columnBounds.width * .8, 'Bound form/editor did not reuse original full-width capped chat column');
-        assert(read.placeholderText?.trim() && read.placeholderBounds?.height > 0 && read.placeholderBounds.left >= read.columnBounds.left - 1 && read.placeholderBounds.right <= read.columnBounds.right + 1, 'Actual original placeholder missing/clipped');
-        assert(read.modelReadable, 'Actual original native model selector missing/clipped/unreadable');
-        composerFacts.push({ surface: mobile ? 'mobile' : 'desktop', ...read });
+        assert(read.placeholderText === '输入消息…' && read.placeholderBounds?.height > 0 && read.placeholderBounds.left >= read.columnBounds.left - 1 && read.placeholderBounds.right <= read.columnBounds.right + 1, 'Actual original placeholder missing/clipped');
+        assert(read.modelText?.trim() && read.modelReadable, 'Actual original native model selector missing/clipped/unreadable');
       }
       await page.screenshot({ path: join(out, mobile ? 'phone-history.png' : 'desktop-history.png'), fullPage: false });
       historyFacts.push({ ...history, paint });
