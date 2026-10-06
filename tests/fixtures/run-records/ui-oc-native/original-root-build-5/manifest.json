@@ -1,0 +1,48 @@
+{
+  "task": "bdd0b17cd",
+  "files": [
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "4840544ee2e7210c39f0d8334ffdb7d260fc6c08e4ec3546b1a411fcc8ce640e",
+      "gzipSha256": "3156d44db80cc2d588333848bbcfbc5ae920752e372f3bba353b7ad0fe340c41",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "build.log",
+      "bytes": 232619,
+      "sha256": "6a72fbcbac3feba2d83e18e25b04e1567f932f80c975ae4ea5e179d0e2d02ed9",
+      "gzipSha256": "fa51d6b77b5fd56a11249c3a9fd9c04638d01b2f07a4c41e718c4f72922a70bd",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-before.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-after.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "audit-check.log",
+      "bytes": 178,
+      "sha256": "cdedfd087f76c364ace90e176a159fc9f1d673fb72b97e09d4231257d9e84bec",
+      "gzipSha256": "f74e2fdeaa6ce31b17be0aaff85f4e47195f37ccd7f902b5aa3dd44f381c02a5",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "native-overlays.json",
+      "bytes": 1396,
+      "sha256": "3d29d2db77bd565aa583d28f36bac6527cc078f71f8012eeb02ec2693a702ef0",
+      "gzipSha256": "9593d6e2bf6493bececb3e0d72a355a84acf1cb560d85e483682f3a3980f9ada",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "Parent independently verified eleven exact overlays/one React and ReactDOM/three HTML entries/Source2952files26893497B identical pre-post-current/native web and all tools unchanged from compiled7e85e5c. Six raw SHA/gzip roundtrips retained. All mounted false flags are compiler scope only, NOT actual original Root/chat/Source tsc/provider/IME/physical-phone acceptance. Five previous failed Root runs retained; next actual browser still required."
+}
