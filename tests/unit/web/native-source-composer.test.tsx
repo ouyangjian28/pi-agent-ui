@@ -75,6 +75,7 @@ describe('Original composer native binding (bounded replacement-editor proof)', 
     const begin = source.indexOf('const ChatInputComponent:'); const end = source.indexOf('export const ChatInput = React.memo(ChatInputComponent);'); expect(begin).toBeGreaterThanOrEqual(0); expect(end).toBeGreaterThan(begin);
     expect(code).toContain(source.slice(begin, end));
     expect(code).toContain('if (!host) return <ChatInputComponent {...props} />'); expect(code).toContain('props.active === false'); expect(code).toContain('<ComposerEditor'); expect(code).toContain('<ComposerFooter'); expect(code).toContain('preserveDeferredEnterShift');
+    expect(code.slice(code.indexOf('const PiBoundChatInput'))).toContain("placeholder={t('chat.chatInput.placeholder.chat')}");
   });
   it('actual Source footer parses and native SSR never mounts goals/dictation/old attachment menu, unbound still does', () => {
     for (const native of [false, true]) for (const mobile of [false, true]) {
@@ -107,6 +108,8 @@ describe('Original composer native binding (bounded replacement-editor proof)', 
   });
   it('real React binding renders solely native raw bytes and reports edits without auto-send or model restore', () => {
     const r = rig(); const raw = '  中文 e\u0301 😀\n@literal /plain\n'; r.edit(raw);
+    expect(r.container.querySelector('form')?.classList.contains('w-full')).toBe(true);
+    expect(r.container.querySelector('[data-native-composer-column]')?.classList.contains('chat-input-column')).toBe(true);
     expect(r.editor.value).toBe(raw); expect(r.port.getSnapshot().conversation.drafts.get(r.id)?.text).toBe(raw); expect(r.frames()).toHaveLength(0);
     act(() => r.port.owner.edit(r.id, 'owner update')); expect(r.editor.value).toBe('owner update');
   });

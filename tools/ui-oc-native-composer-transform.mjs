@@ -9,11 +9,12 @@ export function nativeBoundComposerTransform(source, kind) {
 const PiBoundChatInput = (props: ChatInputProps) => {
     const host = piGetComposerHost();
     const isMobile = useUIStore(state => state.isMobile);
+    const { t } = useI18n();
     if (!host) return <ChatInputComponent {...props} />;
     if (props.active === false) return <div role="status">输入绑定当前原生会话，非活动列只读。</div>;
     return <PiNativeComposer host={host} isMobile={isMobile}
         renderEditor={({ bindEditor, editorKey, expanded, ...editorProps }) => <ComposerEditor {...editorProps} ref={bindEditor} key={editorKey}
-            data-testid="chat-input" aria-label="原生消息输入"
+            data-testid="chat-input" aria-label="原生消息输入" placeholder={t('chat.chatInput.placeholder.chat')}
             languageContext={{ inputMode: 'normal', knownAgentNames: new Set(), confirmedMentions: new Set(), knownSlashNames: new Set(), knownSnippetTriggers: new Set(), attachmentFilenames: [] }}
             preserveDeferredEnterShift spellCheck={isMobile} autoCapitalize={isMobile ? 'sentences' : 'none'} maxLines={expanded ? (isMobile ? 12 : 20) : (isMobile ? 5 : 8)}
             className={'min-h-[52px] px-3 relative z-10 pt-4 ' + (isMobile ? 'pb-2.5 typography-markdown' : 'pb-2 typography-markdown md:typography-ui-label')} />}

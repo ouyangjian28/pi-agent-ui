@@ -93,7 +93,7 @@ export function NativeSourceComposer({ host, isMobile, renderEditor, renderFoote
     isBtw: false, btwSelection: { model: null, agent: null, variant: null },
   };
   return <NativeModelControlsScope port={port} targetId={targetId}>
-    <form data-native-composer="true" onSubmit={event => { event.preventDefault(); send(); }}
+    <form data-native-composer="true" className={`relative w-full min-w-0 pt-0 pb-4${isMobile ? ' bottom-safe-area oc-mobile-composer' : ''}`} onSubmit={event => { event.preventDefault(); send(); }}
       onCompositionStartCapture={() => {
         if (finishTimer.current !== null) clearTimeout(finishTimer.current);
         finishTimer.current = null;
@@ -112,6 +112,7 @@ export function NativeSourceComposer({ host, isMobile, renderEditor, renderFoote
           composing.current = false; setIme(false);
         }, 50);
       }}>
+      <div data-native-composer-column="true" className="chat-input-column relative overflow-visible">
       <input ref={fileInput} hidden type="file" multiple accept="image/png,image/jpeg,text/*,.ts,.tsx,.js,.py,.json,.md,.yaml,.yml,.csv,.c,.cpp,.rs,.go,.java" onChange={event => {
         const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = '';
         if (files.length) void input.actions.upload(files);
@@ -130,6 +131,7 @@ export function NativeSourceComposer({ host, isMobile, renderEditor, renderFoote
       {unknown && <label className="block px-3 py-1 text-xs"><input type="checkbox" checked={riskConfirmed} onChange={event => setRiskWitness(event.currentTarget.checked && slot ? { id: slot.id, version: slot.version, operation: slot.operation } : null)} /> 已核对上次请求，接受可能重复执行的风险后再发送</label>}
       {!ready && <div role="status" className="px-3 py-1 text-xs">原生通道未就绪，草稿已保留。<button type="button" onClick={() => port.reconnect()}>重新连接</button></div>}
       {(slot?.uploading || slot?.uploadError || feedback || (slot?.result && slot.result.status !== 'launched')) && <div role="status" className="px-3 py-1 text-xs">{slot?.uploading ? '附件上传中，暂不发送。' : slot?.uploadError || feedback || '原生请求尚未确认成功；草稿保留，不自动重发。'}</div>}
+      </div>
     </form>
   </NativeModelControlsScope>;
 }
