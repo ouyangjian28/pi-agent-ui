@@ -12,6 +12,14 @@ A self-hosted web workspace that drives pi from your browser:
 
 > **Status: developing.** M1 (session core: list / resume / streaming / steer / interrupt / extension dialogs / mobile) is specced and under construction. See [ROADMAP.md](ROADMAP.md) and [docs/m1-design.md](docs/m1-design.md).
 
+## UI provenance
+
+The current UI-rework candidate directly reuses **OpenChamber's frontend source, layout, styles, and components**. It is not an independently designed UI. The original source is copyright (c) 2025 Bohdan Triapitsyn and is reused under the MIT license; the complete original [license](vendor/openchamber-frontend/LICENSE) is retained.
+
+Our work on this candidate is the adaptation to the existing pi runtime and its conversation-state, delivery, and recovery contracts. Native end-to-end UI integration is still in progress; a working visual preview is not a functional release. Gradual visual changes will follow integration, without removing upstream attribution. This project is not affiliated with or endorsed by OpenChamber.
+
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for provenance and publication boundaries. The desktop/mobile descriptions above describe project goals; the new frontend candidate uses OpenChamber's original desktop and mobile shells rather than claiming a new Telegram-style design.
+
 ## Install (when released)
 
 Published on npm: [pi-agent-ui](https://www.npmjs.com/package/pi-agent-ui)
