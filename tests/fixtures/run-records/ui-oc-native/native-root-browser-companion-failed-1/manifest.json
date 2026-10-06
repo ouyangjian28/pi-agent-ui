@@ -1,0 +1,45 @@
+{
+  "task": "bc235a4e3",
+  "files": [
+    {
+      "name": "result.json",
+      "bytes": 15577,
+      "sha256": "90b968b598b9a57437bdeee5b39acd320754dd461755ca6ef1e2ff16504498c5",
+      "gzipSha256": "efe6f5c036f86744f15c8499530185d961ef0385259140f92b82c7202d651461",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "provider-result.json",
+      "bytes": 426,
+      "sha256": "32101f905c70d092fb5a590cb5fe3886b3f0166554625c6b246173dce265863e",
+      "gzipSha256": "91e84eb2397ccd8aa86a2686b2c2ab3e57184f648b6747650b4e68692a5af9b3",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "run.log",
+      "bytes": 312,
+      "sha256": "9fc7c412aa95b1e8be7423397a1dc4fa5b6f847fac4529337e1d6930310eddbf",
+      "gzipSha256": "90bdb8005fd6bce01ba8c31161a1175640fd18b6d475e9b82b290b84513d43b1",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "harness-copy.json",
+      "bytes": 194,
+      "sha256": "501e14b5d930bc50f3b60ea1f0d55d62e184eb9fcc242721e09bb3e27e9a1563",
+      "gzipSha256": "91d477171b8a21cd6bfdc31c68030ce5482bd255041d264ca244e3bf98e33284",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "last-page.png",
+      "bytes": 5853,
+      "sha256": "1dc0c385c65bf2baa27010517c98e89d395058d99055d7628b0c39ac65b17648",
+      "gzipSha256": "8f37099c0be5560b72019634a572d005c144dda357c8cf46f1b0688a5733cd40",
+      "roundtripIdentical": true
+    }
+  ],
+  "error": "page.waitForFunction: Timeout 30000ms exceeded.",
+  "pageErrors": [
+    "旧后台事件连接未接入。"
+  ],
+  "proofScope": "Third real Source Root browser failed despite compile/115 VM passing. Companion guard hypothesis not verified in actual browser. Keep all three failures; diagnose stack without loosening timeout/assertions/global network gate."
+}
