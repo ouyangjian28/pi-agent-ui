@@ -1,0 +1,48 @@
+{
+  "task": "b596d1da9",
+  "files": [
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "dc2311060dbcd4b8c364adb4c1dd4417885c03670bc7db78bd6d5192290da577",
+      "gzipSha256": "83f615b7d4a2c56ea2ed5cbeec5e7622240c4cb03ae72f22e6ebe786e5362f49",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-before.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-after.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "build.log",
+      "bytes": 232619,
+      "sha256": "14fadefe7f93c0ab35a330b1e4001b7597797862bea3d470af8420f33acc579b",
+      "gzipSha256": "7e8bf6d4c3a4a06f96eff53997e2a745f84ec0ddbf475b7f64c62c31c36c6c67",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "audit-check.log",
+      "bytes": 148,
+      "sha256": "5166c74fe1980f8b360a16a8afb27cb001c009bbf195905ed351373497139cef",
+      "gzipSha256": "1290c05468c112de6d01efbde0a7b47ae4627b2d6b3cb356495b0d3f22ce1f6d",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "native-overlays.json",
+      "bytes": 1753,
+      "sha256": "de01cccd066beab23519e66d4015cd1e1f972fb61d462ceb4960576cb66ed768",
+      "gzipSha256": "bb10a606a0fefc52f94664875ea657da2313100bec753284bf959dd750d71427",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "Parent16 exact original overlays/one React+DOM/three HTML/2952 source26893497B unchanged before-after/native code matches compile snapshot. COMPILER ONLY, false mounted fields not runtime facts. Not Source tsc/buttons/history/composer/provider/phone proof."
+}
