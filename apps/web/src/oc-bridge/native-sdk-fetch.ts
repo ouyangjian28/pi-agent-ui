@@ -86,7 +86,11 @@ export function installNativeSdkFetch(target: NativeFetchTarget, port: ReadPort,
       // it may have captured our closed function. No owner disposal/recreation.
     },
   };
+  try { target.fetch = fetchNative; }
+  catch {
+    binding.dispose();
+    throw new Error("pi SDK 读取接缝无法安装；没有启用旧后台回退。");
+  }
   bindings.set(target, binding);
-  target.fetch = fetchNative;
   return binding;
 }

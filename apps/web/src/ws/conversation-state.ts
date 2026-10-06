@@ -3,8 +3,8 @@
 import { isUploadedAttachment, ATTACHMENT_MAX_COUNT, ATTACHMENT_TOTAL_MAX_BYTES, type ThinkingLevel, type UploadedAttachmentDTO } from "@pi-agent-ui/protocol/src/composer-input";
 
 class AttachmentUploadError extends Error { constructor(readonly status: number) { super("附件上传失败；请检查类型、大小和登录状态后重试。"); } }
-async function uploadAttachment(file: File, signal: AbortSignal): Promise<UploadedAttachmentDTO> {
-  const response = await fetch("/api/attachments", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/octet-stream", "X-Attachment-Name": encodeURIComponent(file.name) }, body: file, signal });
+async function uploadAttachment(file: File, signal: AbortSignal, networkFetch: typeof fetch = fetch): Promise<UploadedAttachmentDTO> {
+  const response = await networkFetch("/api/attachments", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/octet-stream", "X-Attachment-Name": encodeURIComponent(file.name) }, body: file, signal });
   if (!response.ok) throw new AttachmentUploadError(response.status);
   const value: unknown = await response.json();
   if (value === null || typeof value !== "object" || !("attachment" in value) || !("ok" in value) || value.ok !== true || !isUploadedAttachment(value.attachment)) throw new Error("附件上传回执无效；未加入消息。");
@@ -13,13 +13,13 @@ async function uploadAttachment(file: File, signal: AbortSignal): Promise<Upload
 import type { WriteSendOutcomeDTO } from "@pi-agent-ui/protocol/src/contracts";
 import { WriteSendError, type WriteClientSurface } from "./write-client";
 
-export function authenticatedAttachmentUploader(getToken: () => string | null): typeof uploadAttachment {
+export function authenticatedAttachmentUploader(getToken: () => string | null, capturedNetworkFetch?: typeof fetch): typeof uploadAttachment {
   let session: { token: string; ready: Promise<void> } | null = null;
   return async (file, signal) => {
     const token = getToken(); if (!token) throw new Error("登录已失效。");
     const authorize = async (): Promise<void> => {
       if (session?.token !== token) {
-        const ready = fetch("/login", { method: "POST", credentials: "same-origin", redirect: "error", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }), signal }).then((reply) => { if (!reply.ok) throw new Error("附件会话认证失败。"); });
+        const ready = (capturedNetworkFetch ?? fetch)("/login", { method: "POST", credentials: "same-origin", redirect: "error", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }), signal }).then((reply) => { if (!reply.ok) throw new Error("附件会话认证失败。"); });
         session = { token, ready };
       }
       const current = session;
@@ -27,11 +27,11 @@ export function authenticatedAttachmentUploader(getToken: () => string | null): 
       if (getToken() !== token || signal.aborted) throw new Error("登录已变更。");
     };
     await authorize();
-    try { const item = await uploadAttachment(file, signal); if (getToken() !== token) throw new Error("登录已变更。"); return item; }
+    try { const item = await uploadAttachment(file, signal, capturedNetworkFetch); if (getToken() !== token) throw new Error("登录已变更。"); return item; }
     catch (error) {
       if (!(error instanceof AttachmentUploadError) || error.status !== 401 || signal.aborted || getToken() !== token) throw error;
       session = null; await authorize();
-      const item = await uploadAttachment(file, signal); if (getToken() !== token) throw new Error("登录已变更。"); return item;
+      const item = await uploadAttachment(file, signal, capturedNetworkFetch); if (getToken() !== token) throw new Error("登录已变更。"); return item;
     }
   };
 }
