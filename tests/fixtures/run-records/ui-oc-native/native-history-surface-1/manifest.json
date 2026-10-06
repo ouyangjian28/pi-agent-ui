@@ -1,0 +1,76 @@
+{
+  "task": "b07862177",
+  "files": [
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "2cb071147d57db11f47d58f897ae86a81221808ff83479996150bfce15c0bb99",
+      "gzipSha256": "49ab3f019dda77164396f384c55ee9150b675f6601d0dc8927627d2f7ed7f288",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "expected.json",
+      "bytes": 585,
+      "sha256": "f586402c8bfe5b063e4d84fda99a3b76a89bba8133717d83e16c1388d34ae731",
+      "gzipSha256": "8bd8c4ec042e932e5fc85c60fa825f45580220e0184c0e677bee9d4b1c5a471d",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "targets.txt",
+      "bytes": 677,
+      "sha256": "61659cb35f55cfc48577f725e1ed2f3d13360f62adf12510d4175d0d50de2b15",
+      "gzipSha256": "905344a8793199585c20133b696526c3e382b315cfe9e174b90a50ed555b38ae",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "results.json",
+      "bytes": 83857,
+      "sha256": "e2819bb1ac67ee1c58d4016b755dd7116974d4fab329129e70b687b5a7244d28",
+      "gzipSha256": "86e8affb02bd2546f10fdc9ee59191772a4f09938f903d53d8cb2e150699b468",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "tests.log",
+      "bytes": 123,
+      "sha256": "995cb17d08973a052fd11d2a8c0c0fb1c03d5230b445cee809c2928df5293414",
+      "gzipSha256": "323bef1c4cb07403f683dd7915c63ba0e0f055c50fb1fe3e53dd1ee9ff879977",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "coverage-check.log",
+      "bytes": 69,
+      "sha256": "c6d220ccbcabb7aee0738070b028d25554f2eb90eadde0afb6c03134e9228cf2",
+      "gzipSha256": "b0272c618f61b2ebf5b99c46bae4de65899e70c7bd70bc4a3c2ef723c15e39c2",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "web-types.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-check.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "backend-protocol.diff",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "prior-mode-failure.json",
+      "bytes": 7592,
+      "sha256": "54d979d18181aa32a72de170874b05edf888cbcddacb13f9e8606bcd36a23d71",
+      "gzipSha256": "b2ebdce44e16fed914d35a6cf9fffe3a5559deabcc221b5873ef6b30696f1987",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "Parent exact172/15 and old156 expectation SHA, no skipped/pending/missing/failed, exact targets, webtypes0/source2952 same26893497B/backend0. 16 actual Source AST/VM/controlled DTO helpers for flat native chronology/orphans/temp/no invented parents/no duplicate tail/native READ-only bootstrap/unbound old body retention. First diagnostic default TSX generic-arrow parse failure preserved; actual filename syntax corrected, no assertions/expectations/timeouts/skips changed. NOT actual UI history/Source tsc/new/send/paid-provider/physical phone acceptance. Both prior actual history failures retained."
+}
