@@ -37,7 +37,7 @@ const frames = [], sends = [], errors = [], errorStacks = [], blocked = [], requ
 const mobileSessionsLabel = 'Open sessions and projects';
 const mobileDialogLabel = 'Sessions';
 const assert = (value, message) => { if (!value) throw new Error(message); };
-let browser, server, failure, lastPage, failureFacts;
+let browser, server, failure, lastPage, failureFacts, lastPaintRead;
 const consoleErrors = [];
 try {
   // Bind the exact phone role/name to its actual Source consumer and English
@@ -133,8 +133,34 @@ try {
         await card.waitFor({ state: 'visible', timeout: 30000 });
         const bounds = await card.boundingBox(); assert(bounds && bounds.width > 0 && bounds.height > 0 && bounds.x >= -1 && bounds.x + bounds.width <= viewport.width + 1 && bounds.y < viewport.height && bounds.y + bounds.height > 0, 'Persisted history card outside viewport');
       }
+      // Stronger visual gate after the preserved history3 DOM pass exposed a
+      // false old-backend alert and a still-fading desktop screenshot. Read
+      // actual marker text+ancestors; never alter CSS/animations/Source state.
+      const paintRead = () => {
+        const texts = ['NATIVE-HISTORY-ASSISTANT-OWNED', 'NATIVE-HISTORY-USER-OWNED'];
+        return texts.map(text => {
+          const cards = [...document.querySelectorAll('[data-message-id]')].filter(el => el.textContent.includes(text));
+          if (cards.length !== 1) return { text, settled: false };
+          const walker = document.createTreeWalker(cards[0], NodeFilter.SHOW_TEXT);
+          let target = null; for (let node = walker.nextNode(); node; node = walker.nextNode()) if (node.textContent.includes(text)) { target = node.parentElement; break; }
+          if (!target) return { text, settled: false };
+          const r = target.getBoundingClientRect(); let opacity = 1, visible = true, animations = 0;
+          for (let el = target; el; el = el.parentElement) {
+            const style = getComputedStyle(el); opacity *= Number(style.opacity);
+            visible &&= style.visibility === 'visible' && style.display !== 'none';
+            animations += el.getAnimations().filter(a => a.playState === 'running' || a.pending).length;
+          }
+          return { text, opacity, visible, animations, bounds: r.toJSON(), settled: opacity >= .99 && visible && animations === 0 && r.width > 0 && r.height > 0 && r.left >= -1 && r.right <= innerWidth + 1 && r.top >= -1 && r.bottom <= innerHeight + 1 };
+        });
+      };
+      lastPaintRead = paintRead;
+      await page.waitForFunction(`() => (${paintRead.toString()})().every(f => f.settled)`, undefined, { timeout: 30000 });
+      await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
+      const paint = await page.evaluate(paintRead);
+      assert(paint.length === 2 && paint.every(f => f.settled), 'Native persisted history text/ancestor paint still unsettled');
+      assert(!await page.getByRole('status').filter({ hasText: 'OpenCode did not start a reply to this message.' }).isVisible(), 'Native history falsely claims old OpenCode accepted send but no reply');
       await page.screenshot({ path: join(out, mobile ? 'phone-history.png' : 'desktop-history.png'), fullPage: false });
-      historyFacts.push(history);
+      historyFacts.push({ ...history, paint });
     }
     await context.close();
   }
@@ -147,6 +173,7 @@ finally {
   if (failure && lastPage && !lastPage.isClosed()) {
     // Diagnostic reads only; never alter owner/Source state or existing gates.
     failureFacts = await lastPage.evaluate(() => ({ surface: window.__OPENCHAMBER_SURFACE__, body: document.body.innerText, cards: [...document.querySelectorAll('[data-message-id]')].map(el => ({ id: el.getAttribute('data-message-id'), text: el.textContent })), controls: [...document.querySelectorAll('button')].map(el => ({ text: el.textContent, aria: el.getAttribute('aria-label') })) })).catch(() => null);
+    if (failureFacts && lastPaintRead) failureFacts.paint = await lastPage.evaluate(lastPaintRead).catch(() => null);
     await lastPage.screenshot({ path: join(out, 'last-page.png'), fullPage: false }).catch(() => {});
   }
   if (browser) await browser.close(); if (server) await server.dispose(); await compiler.close();
