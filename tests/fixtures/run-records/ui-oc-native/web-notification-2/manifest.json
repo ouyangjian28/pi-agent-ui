@@ -1,0 +1,82 @@
+{
+  "task": "b41b3e578",
+  "files": [
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "685293b79a85d15d4d7a399447390b6101d61b26a6419ca9361e19f6b518bc12",
+      "gzipSha256": "7668864e9e45d77d5a9790360456d946ea31f1afe42b3ce071f4d5d0b5b2a046",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "expected.json",
+      "bytes": 375,
+      "sha256": "0b8d9b452672e458b03efe9e111e6859b006d95976d578e5b8848bb55a2e961b",
+      "gzipSha256": "6a3cd94a1088c2b9024ba93b7a1b374d72b729d5bcbd5a5e95efd701a10054b0",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "preflight.log",
+      "bytes": 94,
+      "sha256": "a75412302ffaed7cff26d477f75c62df40928ec12e36169f6f13b0dde51ac3a7",
+      "gzipSha256": "d1bd57b53183498d2db6384646f03fae73bcda0c9bf7a0d8216c79b562520cb5",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "results.json",
+      "bytes": 58095,
+      "sha256": "a7f5a5d71b79aaf4995d7c2e4d34cb3818412a66250171b6c4d00f64abf2f145",
+      "gzipSha256": "e4a938793d94ba482ed97611db1e1747c581e2a25165a4b5438b57dc16812b12",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "tests.log",
+      "bytes": 117,
+      "sha256": "de9a24635750fca0653fb73526cfce5ad418b468a32bf0f9cd1f361363aec7a8",
+      "gzipSha256": "d16af3113c560e58588ff96899bedb2752969a78b11d23bb41f0ee33701c3059",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "coverage-check.log",
+      "bytes": 79,
+      "sha256": "131e4ef4fc7906b3b7173eff7f1e17f3111298f4840eddcc6958d4bea4d79658",
+      "gzipSha256": "893ec135c7b1e8a988377d5802d4a6de3938ed886922438794fa51010a0e354a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "web-types.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-check.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "backend-protocol.diff",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    }
+  ],
+  "exactCaseCounts": {
+    "native-pi-port.test.ts": 8,
+    "oc-read-projection.test.ts": 12,
+    "native-composer-actions.test.tsx": 10,
+    "oc-event-projection.test.ts": 10,
+    "oc-read-transport.test.ts": 8,
+    "native-message-ordering.test.ts": 3,
+    "native-sdk-fetch.test.ts": 19,
+    "native-surface-host.test.ts": 17,
+    "composer-attachments-owner.test.ts": 9,
+    "native-original-startup.test.ts": 19,
+    "native-notification-stream.test.ts": 5
+  },
+  "proofScope": "Parent independently verified original120 expectations unchanged by SHA from failed archive; all11 named files/all120 assertions passed/zero skips or failures. Candidate web types passed,2952 Source files26893497B unchanged, backend+protocol diff empty. New5 actual Source notification hook CommonJS VM/React effect capture tests, NOT full Source tsc or actual Original Root/chat/send/provider/IME/physical phone; b7bc10981 actual Root pending. Failed fixture setup115+uncollected5 remains in separate baseline archive; no timeout/assertion/skip/config relaxation."
+}
