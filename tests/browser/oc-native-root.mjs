@@ -69,7 +69,12 @@ try {
     await page.getByLabel('pi 登录令牌', { exact: true }).fill(token);
     await page.getByRole('button', { name: '连接', exact: true }).click();
     await page.getByLabel('pi 登录令牌', { exact: true }).waitFor({ state: 'hidden', timeout: 30000 });
+    // The actual Source phone list is a closed drawer on first render.
+    // Enter it through its real UI gesture, not DOM/state/Source DTO injection.
+    if (mobile) await page.getByRole('button', { name: 'Open sessions', exact: true }).tap();
     await page.waitForFunction(() => document.body.innerText.includes('NATIVE-ROOT-OWNED'), undefined, { timeout: 30000 });
+    await page.locator('button').filter({ hasText: 'NATIVE-ROOT-OWNED' }).first().waitFor({ state: 'visible', timeout: 30000 });
+    assert(!await page.getByRole('dialog', { name: 'Add project directory', exact: true }).isVisible(), 'Native startup auto-opened unsupported project directory dialog');
     const facts = await page.evaluate(() => ({ surface: window.__OPENCHAMBER_SURFACE__, body: document.body.innerText, controls: [...document.querySelectorAll('button')].map(n => ({ text: n.textContent, title: n.title, aria: n.getAttribute('aria-label') })), overflow: document.documentElement.scrollWidth - innerWidth, tokenInjected: window.__OPENCHAMBER_CLIENT_TOKEN__ != null || window.__OPENCHAMBER_RUNTIME_HEADERS__ != null }));
     assert(facts.surface === (mobile ? 'mobile' : 'desktop') && !facts.tokenInjected, 'Surface/token bootstrap mismatch');
     assert(facts.overflow <= 1, 'Original surface horizontal overflow');

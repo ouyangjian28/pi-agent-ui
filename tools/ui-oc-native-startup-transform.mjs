@@ -55,6 +55,26 @@ export function nativeWebNotificationTransform(source) {
   return "// pi-native-web-notification-overlay\nimport { getNativeSurfaceHost as piGetNativeHost } from '@pi-native/surface-host';\n" + source.replace(anchor,
     anchor + '    // No notification backend in native mode, including a closed host.\n    if (piGetNativeHost()) return;\n');
 }
+/** Skip only Source's automatic first-empty-project prompt, not user events. */
+export function nativeInitialProjectPromptTransform(source) {
+  if (source.includes('pi-native-project-prompt-overlay')) throw new Error('Original native project prompt already applied');
+  const anchor = '    React.useEffect(() => {\n        if (hasShownInitialDirectoryPrompt || !isHomeReady || projects.length > 0) {';
+  once(source, anchor);
+  return "// pi-native-project-prompt-overlay\nimport { getNativeSurfaceHost as piGetNativeHost } from '@pi-native/surface-host';\n" + source.replace(anchor,
+    '    React.useEffect(() => {\n        if (piGetNativeHost()) return;\n        if (hasShownInitialDirectoryPrompt || !isHomeReady || projects.length > 0) {');
+}
+/** Native never fetches external provider images, including preload/error fallback.
+ * Keep bundled Source SVGs, React hook order and original unbound web behavior.
+ */
+export function nativeProviderLogoTransform(source) {
+  if (source.includes('pi-native-local-provider-logo-overlay')) throw new Error('Original native provider logo already applied');
+  const resolver = '    return remoteResolvedId ? `https://models.dev/logos/${remoteResolvedId}.svg` : null;';
+  const hook = "    if (source === 'remote' && remoteResolvedId) {";
+  once(source, resolver); once(source, hook);
+  return "// pi-native-local-provider-logo-overlay\nimport { getNativeSurfaceHost as piGetNativeHost } from '@pi-native/surface-host';\n" + source.replace(resolver,
+    '    if (piGetNativeHost()) return null;\n' + resolver).replace(hook,
+    "    if (source === 'remote' && remoteResolvedId && !piGetNativeHost()) {");
+}
 export function nativeReadOnlyComposerTransform(source) {
   if (source.includes('pi-native-readonly-composer-overlay')) throw new Error('Original native composer overlay already applied');
   once(source, 'export const ChatInput = React.memo(ChatInputComponent);');
