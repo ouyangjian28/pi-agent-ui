@@ -1,0 +1,43 @@
+{
+  "producerCommit": "4dd56c493ed6c3e3f563c97d2cb083b366a6493c",
+  "checks": "parent exact seven overlays/one React+DOM/three entries/source before-after 2952files 26893497B",
+  "proofScope": "Compilation/collection only; NOT actual browser/native owner mounted, SDK installed, UI sends/provider/physical phone/Source tsc acceptance. Build warnings retained.",
+  "files": [
+    {
+      "file": "commit.txt.gz",
+      "source": "/home/yyj/ai/repos/pi-agent-ui-oc-bridge/.pi/oc-bridge-checks/original-root-build-2/commit.txt",
+      "bytes": 41,
+      "sha256": "27191ac27c1a8dae1161e630247bf992bac194a97948373b7d41010cd5b65fc3"
+    },
+    {
+      "file": "build.log.gz",
+      "source": "/home/yyj/ai/repos/pi-agent-ui-oc-bridge/.pi/oc-bridge-checks/original-root-build-2/build.log",
+      "bytes": 232619,
+      "sha256": "7dd637eee995c342db79317747ac911a4fcd0916360edea8606ddf24e6cb574f"
+    },
+    {
+      "file": "source-before.log.gz",
+      "source": "/home/yyj/ai/repos/pi-agent-ui-oc-bridge/.pi/oc-bridge-checks/original-root-build-2/source-before.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217"
+    },
+    {
+      "file": "source-after.log.gz",
+      "source": "/home/yyj/ai/repos/pi-agent-ui-oc-bridge/.pi/oc-bridge-checks/original-root-build-2/source-after.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217"
+    },
+    {
+      "file": "audit-check.log.gz",
+      "source": "/home/yyj/ai/repos/pi-agent-ui-oc-bridge/.pi/oc-bridge-checks/original-root-build-2/audit-check.log",
+      "bytes": 158,
+      "sha256": "e3a78efb27e02cbe69fcbb0d4e3a139d7a28132f87f29d2d8d49be490bc95398"
+    },
+    {
+      "file": "native-overlays.json.gz",
+      "source": "/home/yyj/ai/repos/pi-agent-ui-oc-bridge/.pi/oc-bridge-checks/original-root-build-2/dist/native-overlays.json",
+      "bytes": 981,
+      "sha256": "c8a15b24c50970603db2d80255a79a9cdb86a27988ce5a2b12ed2b004343f02e"
+    }
+  ]
+}
