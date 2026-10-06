@@ -3,6 +3,10 @@
 标注口径：✅=可执行断言已绿（文件@用例）；🟡=部分覆盖（断言在但口径不全）；🔴=缺测（无对应断言——不得算通过）。
 语义权威=TECH §9.1；本表只做映射，不改语义。
 
+## 原版UI导航服务（尚未装主UI）
+
+1d9bc3b：native-navigation-actions显式NativePort动作；10新例使用实际三clients/owner/wire，验证惰性/ready-roots/成员与重开/非法未列文件/外-journal-null目录/local-default-draft非durable/切换保文本模型thinking附件/碰撞与非法factory/closed/reconnect未知晚ACK，不自动prompt/resume/stop。b2f81471d固定140/13期待（原130/12 SHA不改），完整计数/文件/types/source/backend复验在跑；typed transpile/active LSP0不能代runner。Source快照/store/renderer/后端零新改，服务没有装实际Source导航或输入，不能叫UI点击/历史/new/send验收。
+
 ## N 行（通知/恢复对账）
 
 | 编号                                                           | 断言落点                                                                                | 状态                                      |
