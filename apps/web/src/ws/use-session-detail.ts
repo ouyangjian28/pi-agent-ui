@@ -41,6 +41,8 @@ export interface SessionDetailView {
   readonly statusSummary: StatusSummary | null;
   /** 当前会话/进程代次/在途意图的保守超时提示；不修改协议状态或传输健康。 */
   readonly responseTimeoutNotice: string | null;
+  /** 同一超时轮已有终局事实，避免状态帧迟到时仍显示执行中/等待。 */
+  readonly responseTerminalNotice: string | null;
   /** 错误态受控文案（status=error/auth-failed 时）。 */
   readonly errorMessage: string | null;
   /** 流上方横幅受控文案（4431 终局保留内容/4409 需续读等；与错误态文案分立）。 */
@@ -66,23 +68,33 @@ function processSummaryText(phase: "idle" | "running" | "stopping", ready: boole
   return ready ? `${label}·就绪` : label;
 }
 
-/** F1：只消费当前在途意图的已有超时事实，不把超时解释为执行失败。 */
-function responseTimeoutNoticeOf(snap: SessionDetailSnapshot): string | null {
+const NO_RESPONSE_NOTICE = { responseTimeoutNotice: null, responseTerminalNotice: null };
+const TERMINAL_TEXT: Partial<Record<HistoryEvent["kind"], string>> = {
+  "verdict-settled": "本次回合已结算。",
+  "verdict-delivered": "本次结果已入档。",
+  "turn-cancelled": "本次意图已取消（不代表从未执行）。",
+  "verdict-unknown": "本次结果未知，请查看活动详情核对。",
+};
+
+/** F1：纯呈现投影，不把超时解释为执行失败，也不改协议状态/发送/草稿。 */
+function responseNoticeOf(snap: SessionDetailSnapshot): {
+  responseTimeoutNotice: string | null; responseTerminalNotice: string | null;
+} {
   const turn = snap.status?.turn;
-  if (!turn || !("intentId" in turn)) return null;
+  if (!turn || !("intentId" in turn)) return NO_RESPONSE_NOTICE;
   const timeout = snap.events.findLast((event) => event.kind === "response-timeout" &&
     event.intentId === turn.intentId && event.generation === snap.status?.process.generation);
-  if (!timeout) return null;
+  if (!timeout) return NO_RESPONSE_NOTICE;
   // 新轮历史可先于状态帧到达；旧轮提示不能贴给新轮（含同 id 的重建）。
   const enqueue = snap.events.findLast((event) => event.kind === "turn-enqueued");
-  if (enqueue && enqueue.seq > timeout.seq) return null;
+  if (enqueue && enqueue.seq > timeout.seq) return NO_RESPONSE_NOTICE;
   const startSeq = enqueue?.intentId === turn.intentId && enqueue.generation === timeout.generation
     ? enqueue.seq : timeout.seq;
   // 结算先于超时观测行落盘也不推翻终局；无轮首锚时只采超时后的同意图事实。
-  const terminal = snap.events.some((event) => event.seq >= startSeq && event.intentId === turn.intentId &&
-    (event.generation === null || event.generation === timeout.generation) &&
-    ["verdict-settled", "verdict-delivered", "turn-cancelled", "verdict-unknown"].includes(event.kind));
-  return terminal ? null : "响应超时，本次结果尚未确认。请查看活动详情核对；不会自动重发。";
+  const terminal = snap.events.findLast((event) => event.seq >= startSeq && event.intentId === turn.intentId &&
+    (event.generation === null || event.generation === timeout.generation) && TERMINAL_TEXT[event.kind] !== undefined);
+  return terminal ? { responseTimeoutNotice: null, responseTerminalNotice: TERMINAL_TEXT[terminal.kind] ?? null }
+    : { responseTimeoutNotice: "响应超时，本次结果尚未确认。请查看活动详情核对；不会自动重发。", responseTerminalNotice: null };
 }
 
 /** 连接级状态→视图态（身份门内外共用；error 按 errorKind 细分 auth-failed）。 */
@@ -107,6 +119,7 @@ export function sessionDetailViewOf(snap: SessionDetailSnapshot, targetFile?: st
       paging: false,
       statusSummary: null,
       responseTimeoutNotice: null,
+      responseTerminalNotice: null,
       errorMessage: snap.connState === "error" ? snap.errorMessage : null,
       banner: null,
       canResync: false,
@@ -135,7 +148,7 @@ export function sessionDetailViewOf(snap: SessionDetailSnapshot, targetFile?: st
   } else if (snap.phase === "closed" && snap.connState === "ready" && (snap.events.length > 0 || snap.liveEvents.length > 0)) {
     banner = snap.streamNote ?? snap.errorMessage ?? "订阅已停止"; // C4：终局有内容→已停止/被替换受控横幅（4431/替换终局）
   }
-  const responseTimeoutNotice = responseTimeoutNoticeOf(snap);
+  const { responseTimeoutNotice, responseTerminalNotice } = responseNoticeOf(snap);
   return {
     status,
     file: snap.file,
@@ -145,9 +158,10 @@ export function sessionDetailViewOf(snap: SessionDetailSnapshot, targetFile?: st
     paging: snap.connState === "ready" && snap.phase === "paging",
     statusSummary: snap.status === null ? null : {
       process: processSummaryText(snap.status.process.phase, snap.status.process.ready),
-      turn: responseTimeoutNotice ? "响应超时 · 结果待核对" : turnText(snap.status.turn),
+      turn: responseTerminalNotice ?? (responseTimeoutNotice ? "响应超时 · 结果待核对" : turnText(snap.status.turn)),
     },
     responseTimeoutNotice,
+    responseTerminalNotice,
     // 空内容终局且无错误文案时（如被替换前无任何内容）：streamNote 受控提示走错误文案，不静默
     errorMessage: status === "error" && snap.phase === "closed" && snap.errorMessage === null ? snap.streamNote : snap.errorMessage,
     banner,
