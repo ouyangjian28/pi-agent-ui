@@ -1,0 +1,69 @@
+{
+  "task": "b2f81471d",
+  "files": [
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "eccef89241ff0fbcc0dc55016b65650db3e50f16ee17422d055308240a60797f",
+      "gzipSha256": "a1f1ddea1d484cc8767a75c24bddefd296b0ca454cd30bc1cc512396839e4367",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "expected.json",
+      "bytes": 474,
+      "sha256": "0818376d05c1377890fd1659d0a5a2fe8d3697ea30ff378f38b9536f1740c701",
+      "gzipSha256": "aa0ca19aec3a955df0f7479b1ce72a1ae6eaf612576262520af932f89f7c9955",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "preflight.log",
+      "bytes": 95,
+      "sha256": "d038934a5aef2f1d8f5acb02ec9aa05c1755284d3bc2f4969f6d630c5ab9bc66",
+      "gzipSha256": "a90189444b0d03faf16d5f0b988f609f2bedfc9f98d83b7d1a2f00922953c62d",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "results.json",
+      "bytes": 68106,
+      "sha256": "a77f159121757a74ca973860c6765e48416f870b8bb72d0db00fb03b5d9567e9",
+      "gzipSha256": "d10269d1ec475c4a98fb7653525832b2c94760cbe700f7d1be3f135a8cf22fa3",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "tests.log",
+      "bytes": 118,
+      "sha256": "aa9463a5f09b7329534cb096353bf708e11c7960f9744daecb73e2444fc02694",
+      "gzipSha256": "0ab5eb2622b3f9911e02613597ac1c94381a8c3e8aba7d7ff5eb1d15bb289f6f",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "coverage-check.log",
+      "bytes": 134,
+      "sha256": "42d3e783215fc7ba9b1ed108f782b22353a908e1b30391e0f6e5e9f8a98f6173",
+      "gzipSha256": "d205d940cec6f3d502a845856f530346997cef2659e97060ca31b454e8a69215",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "web-types.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-check.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "backend-protocol.diff",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "140/13 exact files/counts with unchanged original130 SHA; real NativePort/three clients/owner controlled-wire ten navigation cases, web types0/backend-protocol0/Source snapshot verify. Service only; original UI buttons, history/new/send/phone not accepted here."
+}
