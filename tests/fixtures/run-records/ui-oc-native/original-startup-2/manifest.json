@@ -1,0 +1,61 @@
+{
+  "taskId": "b7a75560d",
+  "exitCode": 0,
+  "parentChecked": "110/110/0fail/0pending, all ten exact file/count identities, zero web type diagnostics/backend protocol diff. Source hash check producer completed. New startup fake DOM/host + actual Source syntax-only; not real Source App browser/provider/IME/chat/phone proof. Failed omitted-target original retained separately.",
+  "entries": [
+    {
+      "file": "commit.txt.gz",
+      "originalBytes": 41,
+      "originalSHA256": "30b21d4d332643abd93dcf1814637b41b4042c567dc38033dedc879ec5ba9f96",
+      "gzipSHA256": "521d7cef8e7f0560ee81275f44cd3517e6ac99c1d25f6ba8d25ac35f7b3946c3"
+    },
+    {
+      "file": "preflight.log.gz",
+      "originalBytes": 127,
+      "originalSHA256": "dea1f6d20a9c0ddc01898c09e92849d6d77bcf755f78472777236bcb3cdd6a5a",
+      "gzipSHA256": "41f205a206447412474217f3613a48afb92ab10413dca09c2af9f7171a7bb01c"
+    },
+    {
+      "file": "expected.json.gz",
+      "originalBytes": 336,
+      "originalSHA256": "2e316ac7871b6c729525e17762ab09b284b4c31757d1214c5f892cd73a1da2c3",
+      "gzipSHA256": "593d6997cd9745298878bcf1cd9cc4a42de373ff0e920c9bd8fd4a8c3144eecc"
+    },
+    {
+      "file": "tests.log.gz",
+      "originalBytes": 117,
+      "originalSHA256": "a00993e480d31f9e555a3eeb986bcff88a647dd0f519558e739447509a7a7c0d",
+      "gzipSHA256": "7d3367781b8951a093cb46e34a6a3312e4f320d0db69e0f9e7d5064e44997d5d"
+    },
+    {
+      "file": "results.json.gz",
+      "originalBytes": 53056,
+      "originalSHA256": "6750c951d7538f54ddfa46ce22531c4b40b5f7ca551e5d8f3fd9e76d5c7df1e7",
+      "gzipSHA256": "44dace392b7b66ddc28d047f6aa3b599702f956dc445655ec742ebcf37313e6e"
+    },
+    {
+      "file": "coverage-check.log.gz",
+      "originalBytes": 202,
+      "originalSHA256": "96843451754d36b766c6da5874c7a0d4be498bbb7c2991bbb4e9a373c97f9aeb",
+      "gzipSHA256": "556fd22353d1e8cf3a8ebb5bee52e4f9055f8fb4f62cc6fd6104694ba54fea61"
+    },
+    {
+      "file": "web-types.log.gz",
+      "originalBytes": 0,
+      "originalSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSHA256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+    },
+    {
+      "file": "source-check.log.gz",
+      "originalBytes": 98,
+      "originalSHA256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSHA256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a"
+    },
+    {
+      "file": "backend-protocol.diff.gz",
+      "originalBytes": 0,
+      "originalSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSHA256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+    }
+  ]
+}
