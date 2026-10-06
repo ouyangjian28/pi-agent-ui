@@ -1,0 +1,48 @@
+{
+  "task": "b7bc10981",
+  "files": [
+    {
+      "name": "result.json",
+      "bytes": 38702,
+      "sha256": "8cca0030fd6ee2692c4206817d7acb8135e76fa7315007346dc691f2a5f7db13",
+      "gzipSha256": "cb10249abbcbc91d45605eac239c6af0f64a83dc9143db59b043460ad49968c5",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "run.log",
+      "bytes": 315,
+      "sha256": "bf29e2ac7c8f155c202b83c62e44bf9cc9c8b661b28a1d7286ab008acb2b31ce",
+      "gzipSha256": "be0829bee926b8f2d43b7beca977f78800c8138211d452a19d5f8f947d2ba9b2",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "provider-result.json",
+      "bytes": 426,
+      "sha256": "32101f905c70d092fb5a590cb5fe3886b3f0166554625c6b246173dce265863e",
+      "gzipSha256": "91e84eb2397ccd8aa86a2686b2c2ab3e57184f648b6747650b4e68692a5af9b3",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "harness-copy.json",
+      "bytes": 194,
+      "sha256": "7f2ae2cba3f5eae224b679bde38ba0af9e87adecba4a0fb7c53d050024f17976",
+      "gzipSha256": "66f76e57b7e3ab08fc3ff1ca7dcbbfbfb882f26582e69614c34226743574e0e4",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "desktop.png",
+      "bytes": 87976,
+      "sha256": "f73c672cd2fbf1639339225d3918ab2232005388a8ef73fc0c1c36b33784ba4c",
+      "gzipSha256": "3a679af6aea9d5e262f468ab76868e4a1df4a2f6bc1ad758feb858287c7bbb1c",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "last-page.png",
+      "bytes": 45732,
+      "sha256": "60c7aab37c2893407d0cd0597abb3aaa20a257f6f9e81ce4746a3c0216533cb6",
+      "gzipSha256": "957e5efcf589ddf0e38de0e4cf102103a042ef629797cce17bdf89931bc86e9f",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "Fifth real Root run failed. Ninth overlay eliminated earlier pageerrors: errors/stacks empty; desktop native owned session visible/overflow0/tokenInjectedfalse, but automatic Add project directory dialog covers UI. Fresh mobile picture renders new-session home, yet original strict30000ms owned-title condition timed out before mobile facts/final gates. Also10 Source models.dev logo requests correctly blocked. No native writes, provider0, productionAuthfalse. Keep original timeout/visible-session/network-error gates; not full Root or chat/phone acceptance. Need diagnose phone menu navigation, unwanted automatic project modal and external asset fetch; no relaxing EventSource/network guards."
+}
