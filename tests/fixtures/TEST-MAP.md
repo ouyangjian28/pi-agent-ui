@@ -5,7 +5,7 @@
 
 ## 原版UI导航服务（尚未装主UI）
 
-1d9bc3b：native-navigation-actions显式NativePort动作；10新例使用实际三clients/owner/wire，验证惰性/ready-roots/成员与重开/非法未列文件/外-journal-null目录/local-default-draft非durable/切换保文本模型thinking附件/碰撞与非法factory/closed/reconnect未知晚ACK，不自动prompt/resume/stop。b2f81471d exit0、父验140/13原130 SHA不变/types0/2952源/backend0，728f3fe归九raw至native-navigation-1。6fa82fc随后增5只读导航build覆盖与14实际SourceAST/VM，b43d60b06固定154/14复验与b596d1da9 build6/16targets在跑；旧Source自动store口封闭，明确用户callback→Native服务→Source仅视图，旧SDK写501/输入仍锁。copied once-anchor/TSparser0与LSP0不代runner。468c305 optional --navigation fixture要求实际rowclick/tap/两独立原生JSONL卡片+rawsnapshot/30s/error0/provider0稳态图门，未跑实页，不报history/new/send验收。
+1d9bc3b：native-navigation-actions显式NativePort动作；10新例使用实际三clients/owner/wire，验证惰性/ready-roots/成员与重开/非法未列文件/外-journal-null目录/local-default-draft非durable/切换保文本模型thinking附件/碰撞与非法factory/closed/reconnect未知晚ACK，不自动prompt/resume/stop。b2f81471d exit0、父验140/13原130 SHA不变/types0/2952源/backend0，728f3fe归九raw至native-navigation-1。6fa82fc随后增5只读导航build覆盖与14实际SourceAST/VM，b43d60b06 exit0、父验154/14所有精确assertion/原140 SHA/types0/source2952+26893497B/backend0，ba723ee归10raw SHA/gz到native-source-navigation-1；b596d1da9 build6/16targets待完成；旧Source自动store口封闭，明确用户callback→Native服务→Source仅视图，旧SDK写501/输入仍锁。copied once-anchor/TSparser0与LSP0不代runner。468c305 optional --navigation fixture要求实际rowclick/tap/两独立原生JSONL卡片+rawsnapshot/30s/error0/provider0稳态图门，未跑实页，不报history/new/send验收。
 
 ## N 行（通知/恢复对账）
 
