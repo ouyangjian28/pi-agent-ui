@@ -81,20 +81,23 @@ function responseNoticeOf(snap: SessionDetailSnapshot): {
   responseTimeoutNotice: string | null; responseTerminalNotice: string | null;
 } {
   const turn = snap.status?.turn;
-  if (!turn || !("intentId" in turn)) return NO_RESPONSE_NOTICE;
+  if (!turn) return NO_RESPONSE_NOTICE;
+  const intentId = "intentId" in turn ? turn.intentId : null;
   const timeout = snap.events.findLast((event) => event.kind === "response-timeout" &&
-    event.intentId === turn.intentId && event.generation === snap.status?.process.generation);
+    (intentId === null || event.intentId === intentId) && event.generation === snap.status?.process.generation);
   if (!timeout) return NO_RESPONSE_NOTICE;
   // 新轮历史可先于状态帧到达；旧轮提示不能贴给新轮（含同 id 的重建）。
   const enqueue = snap.events.findLast((event) => event.kind === "turn-enqueued");
   if (enqueue && enqueue.seq > timeout.seq) return NO_RESPONSE_NOTICE;
-  const startSeq = enqueue?.intentId === turn.intentId && enqueue.generation === timeout.generation
+  const startSeq = enqueue?.intentId === timeout.intentId && enqueue.generation === timeout.generation
     ? enqueue.seq : timeout.seq;
   // 结算先于超时观测行落盘也不推翻终局；无轮首锚时只采超时后的同意图事实。
-  const terminal = snap.events.findLast((event) => event.seq >= startSeq && event.intentId === turn.intentId &&
+  const terminal = snap.events.findLast((event) => event.seq >= startSeq && event.intentId === timeout.intentId &&
     (event.generation === null || event.generation === timeout.generation) && TERMINAL_TEXT[event.kind] !== undefined);
-  return terminal ? { responseTimeoutNotice: null, responseTerminalNotice: TERMINAL_TEXT[terminal.kind] ?? null }
-    : { responseTimeoutNotice: "响应超时，本次结果尚未确认。请查看活动详情核对；不会自动重发。", responseTerminalNotice: null };
+  if (terminal) return { responseTimeoutNotice: null, responseTerminalNotice: TERMINAL_TEXT[terminal.kind] ?? null };
+  // idle/closed 不把历史超时贴成当前在途；也不凭 idle 推断模型成功。
+  if (intentId === null) return NO_RESPONSE_NOTICE;
+  return { responseTimeoutNotice: "响应超时，本次结果尚未确认。请查看活动详情核对；不会自动重发。", responseTerminalNotice: null };
 }
 
 /** 连接级状态→视图态（身份门内外共用；error 按 errorKind 细分 auth-failed）。 */
