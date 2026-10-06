@@ -1,0 +1,69 @@
+{
+  "task": "b2af75472",
+  "files": [
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "4840544ee2e7210c39f0d8334ffdb7d260fc6c08e4ec3546b1a411fcc8ce640e",
+      "gzipSha256": "3156d44db80cc2d588333848bbcfbc5ae920752e372f3bba353b7ad0fe340c41",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "expected.json",
+      "bytes": 433,
+      "sha256": "bdb3caab3b2ca1d7ee946a85e92f2f4973f6f6a4aa3d0c1a4c7d2d09e4c16da8",
+      "gzipSha256": "3b1ba418fc21323c4deec15604056c95ef7f8400585b57e7b9359c354d9d7eb8",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "preflight.log",
+      "bytes": 92,
+      "sha256": "669c3142818591710150ab8e758826d16a89f205263ee393964f6106fbb590d1",
+      "gzipSha256": "fe9d384327e451d7bad1b735efae1087f6dbe8a2d51ed708bf5cfee8b6d37659",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "results.json",
+      "bytes": 62777,
+      "sha256": "92c7e915b3e407a06e0e8ee114dc4dbdb21d3856f4dde9e2a17e7b2c0e75c28a",
+      "gzipSha256": "6bc970ff03ec914f746ed565a6f5b8bffb3ffbb1db1beead22ce4b11a6f1ffa3",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "tests.log",
+      "bytes": 115,
+      "sha256": "7e8caaad66f04955d54e99119b3e7849c0ccfc3aa581c11c978eafced73b25dc",
+      "gzipSha256": "67cfc74727af030e13e7daa65d3f0d078363743c5c13e762c120e000e99f2294",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "coverage-check.log",
+      "bytes": 106,
+      "sha256": "7da8e6881eb96020054c72f3692405425429d1fcb191e85c07d93c4321021a7f",
+      "gzipSha256": "82d0d580b20753f88b5dcbb14e375a543f9b3f9901c9e06a2353fda6ee2f84d9",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "web-types.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-check.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "backend-protocol.diff",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    }
+  ],
+  "proofScope": "Parent independently verified fixed130/12 assertions all passed/no pending-fail-skip; original120 expectation table unchanged from SHA-verified archived bytes. Web types empty; Source2952files26893497B identical/backend not started; backend/protocol diff empty. New10 are actual Source AST-extracted effect/Logo VM tests only, NOT actual React component/Root/browser/Source tsc/chat/provider/IME/physical phone proof. First120 fixture parse failure and five failed real Root runs retained. Build5 still pending; compiler scope not inferred."
+}
