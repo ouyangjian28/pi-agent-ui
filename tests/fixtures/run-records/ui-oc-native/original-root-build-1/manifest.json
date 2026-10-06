@@ -1,0 +1,43 @@
+{
+  "taskId": "b48a2967b",
+  "exitCode": 0,
+  "parentChecked": "Literal App/MobileApp/7 overlays/three HTML entries built. Source 2952/26893497 exact bytes, one React/DOM. Compile and collection ONLY, not browser/login/Source Root mounted/chat/provider/physical phone proof.",
+  "entries": [
+    {
+      "file": "commit.txt.gz",
+      "originalBytes": 41,
+      "originalSHA256": "30b21d4d332643abd93dcf1814637b41b4042c567dc38033dedc879ec5ba9f96",
+      "gzipSHA256": "521d7cef8e7f0560ee81275f44cd3517e6ac99c1d25f6ba8d25ac35f7b3946c3"
+    },
+    {
+      "file": "build.log.gz",
+      "originalBytes": 232619,
+      "originalSHA256": "0e3723348a5efff87af32435206a4c638c296d54d6454a7abdc9c79561194e5b",
+      "gzipSHA256": "4e2e85de6e1ad81b694719a5861b2f0862e50ccb4c4fbab1cc0ab18cf269b56a"
+    },
+    {
+      "file": "source-before.log.gz",
+      "originalBytes": 98,
+      "originalSHA256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSHA256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a"
+    },
+    {
+      "file": "source-after.log.gz",
+      "originalBytes": 98,
+      "originalSHA256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSHA256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a"
+    },
+    {
+      "file": "audit-check.log.gz",
+      "originalBytes": 199,
+      "originalSHA256": "cf4d16343abaa73e13499babe8d1992819485a427bd45010fee89e89963771dc",
+      "gzipSHA256": "bea9743858830ed27cd6abb3141faf75c60c00a782bd9a649989e1f2b25e4bca"
+    },
+    {
+      "file": "dist__native-overlays.json.gz",
+      "originalBytes": 981,
+      "originalSHA256": "bd3904890f43eb9c2eaed41488580063a8f95b0213e07a5163ebe107fa1d0ee1",
+      "gzipSHA256": "d748a62d21f4a70a1d7032b2ecdf188b1ae848c66e027ec47d53a0375c7422ae"
+    }
+  ]
+}
