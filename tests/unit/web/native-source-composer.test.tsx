@@ -138,7 +138,7 @@ describe('Original composer native binding (bounded replacement-editor proof)', 
     await r.ack(); r.edit('next');
     const detail = r.sockets[2]!; const request = detail.sent.filter(x => x.t === 'subscribe').at(-1)!;
     const status = { session: { sessionId: 'fixture-session', file: 'warm.jsonl', adapterSessionId: null }, process: { phase: 'running', generation: 1, lastStartResult: null, lastStopResult: null, ready: true }, backgroundTasks: { availability: 'known', activeCount: null }, reap: { eligible: false, idleElapsedMs: null, idleRemainingMs: null, idleMs: 0 }, recovery: { availability: 'available', resumeBlocked: null, diskBlocked: null, unknownEffectCount: null, unattributableFragments: null, intentsCount: null, settledCount: null, evidenceHash: null }, serverTimeMs: 1730000000000 };
-    act(() => detail.receive({ t: 'snapshot', requestId: request.requestId, subscriptionId: 'fixture-sub', streamId: 'fixture-stream', snapshotId: 'fixture-snapshot', barrier: 0, status: { ...status, turn: { state: 'idle' }, statusVersion: 1 }, page: [], historyNext: null, liveFrom: null, hasMore: false }));
+    act(() => detail.receive({ t: 'snapshot', requestId: request.requestId, subscriptionId: 'fixture-sub', streamId: 'fixture-stream', snapshotId: 'fixture-snapshot', barrier: 0, status: { ...status, turn: { state: 'idle' }, statusVersion: 1 }, page: [], historyNext: null, liveFrom: { streamId: 'fixture-stream', seq: 1 }, hasMore: false }));
     expect(r.port.getSnapshot().detail.status?.turn.state).toBe('idle'); expect(r.footer.canAbort).toBe(false);
     let version = 1;
     for (const state of ['dispatching', 'in-flight', 'settling', 'idle', 'closed']) {
@@ -156,7 +156,7 @@ describe('Original composer native binding (bounded replacement-editor proof)', 
     expect(r.port.getSnapshot().conversation.drafts.get(r.id)?.freeText).toBe('bad model!'); r.send(); await act(async () => {}); expect(r.frames()).toHaveLength(0); expect(r.editor.value).toBe('keep'); expect(r.container.textContent).toContain('模型标识无效');
   });
   it('real owner upload pending disables send and sanitized failure keeps draft, never raw error', async () => {
-    let fail!: (error: Error) => void; const r = rig({ uploader: () => new Promise((_, reject) => { fail = reject; }) }); r.edit('keep');
+    let fail!: (error: Error) => void; const r = rig({ upload: () => new Promise((_, reject) => { fail = reject; }) }); r.edit('keep');
     const file = r.container.querySelector('input[type=file]')!; Object.defineProperty(file, 'files', { configurable: true, value: [new File(['x'], 'a.ts', { type: 'text/plain' })] });
     act(() => file.dispatchEvent(new Event('change', { bubbles: true }))); expect(r.footer.canSend).toBe(false); r.send(); expect(r.frames()).toHaveLength(0);
     await act(async () => fail(new Error('private fixture raw error'))); expect(r.editor.value).toBe('keep'); expect(r.container.textContent).toContain('附件上传未完成'); expect(r.container.textContent).not.toContain('private fixture raw error');
