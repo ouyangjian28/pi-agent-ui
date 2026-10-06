@@ -1,0 +1,85 @@
+{
+  "task": "b770e0211",
+  "producerCommit": "929a697c3ae01600aed2d6d9094e480d8356c5a4",
+  "files": [
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "6ee3e969dfeef46e46aede7f9985cfdfba8b09d77fd9225552540d5b0c7a389a",
+      "gzipSha256": "a78e71d991fd5a0e40098b8ed835ed319262a8c7f60f14f4ef34da60b4c3b807",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "expected.json",
+      "bytes": 336,
+      "sha256": "7f310e9556b40070cc062438a3a272265096e8d7b5fe1bdb0fa447af00251901",
+      "gzipSha256": "b8eaf617e43eecb6734f366b1bb87c207e01c183aaab7598df6b2bf63f072464",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "preflight.log",
+      "bytes": 117,
+      "sha256": "a56e69c90eef1b091a4828d17e9596375a91dd7acc93dd77a1e5c1cc5d02fde9",
+      "gzipSha256": "9922a54b2d44a9b2c3543ceeba5015616da39712c0882315f6bb55d7f3f1244c",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "results.json",
+      "bytes": 55527,
+      "sha256": "b8950424797eed97732fb8193d17b5eb7333621001901e15dcbe90357b91d929",
+      "gzipSha256": "b14870be1f8deeb159b752455b2aa1a9ec1d674aee92c2abc22f35fafb976e1b",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "tests.log",
+      "bytes": 117,
+      "sha256": "07a94ee34c03f1c002b19564208229e4645ecad4338bfbb8d2cb74bbbd89193e",
+      "gzipSha256": "e00690260cc1d6afda78345e56b4c52f3a3c8e5b444e7da0b1e60aa71e166f64",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "coverage-check.log",
+      "bytes": 116,
+      "sha256": "81c462ed38dba1ff786c9517572be437bba852e141f4f6d9d5b81bdefd1da728",
+      "gzipSha256": "83f2014fe388d363ffb87452481b3f6c281ce972daa8e002f3b058e4be043bac",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "web-types.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "source-check.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a",
+      "roundtripIdentical": true
+    },
+    {
+      "name": "backend-protocol.diff",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "roundtripIdentical": true
+    }
+  ],
+  "passed": 115,
+  "failed": 0,
+  "skipped": 0,
+  "expected": {
+    "native-pi-port.test.ts": 8,
+    "oc-read-projection.test.ts": 12,
+    "native-composer-actions.test.tsx": 10,
+    "oc-event-projection.test.ts": 10,
+    "oc-read-transport.test.ts": 8,
+    "native-message-ordering.test.ts": 3,
+    "native-sdk-fetch.test.ts": 19,
+    "native-surface-host.test.ts": 17,
+    "composer-attachments-owner.test.ts": 9,
+    "native-original-startup.test.ts": 19
+  },
+  "proofScope": "Predetermined 110 plus five actual Source companion-module VM behavior/drift tests. Web types/source bytes/backend diff verified. NOT actual Source Root/browser white-screen/IME/send/provider/phone acceptance."
+}
