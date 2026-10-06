@@ -1,0 +1,65 @@
+{
+  "taskId": "b4869afed",
+  "producerExitCode": 0,
+  "status": "passed",
+  "parentStrictRecheck": true,
+  "assertions": 96,
+  "skipped": 0,
+  "exactFileCounts": {
+    "native-pi-port.test.ts": 8,
+    "oc-read-projection.test.ts": 12,
+    "native-composer-actions.test.tsx": 10,
+    "oc-event-projection.test.ts": 10,
+    "oc-read-transport.test.ts": 8,
+    "native-message-ordering.test.ts": 3,
+    "native-sdk-fetch.test.ts": 19,
+    "native-surface-host.test.ts": 17,
+    "composer-attachments-owner.test.ts": 9
+  },
+  "sourceRootMounted": false,
+  "proofScope": "Standalone host, SDK, actual clients, owned loopback HTTP/DOM-style Socket events. Not Source App/bootstrap/editor/send/real native gateway/provider/physical phone. Old types failure retained separately.",
+  "files": [
+    {
+      "name": "commit.txt",
+      "bytes": 41,
+      "sha256": "5e527ebf1452725c2ae96a94da12ca652b3e426b0a134d58b4b52251ec742a9d",
+      "gzipSha256": "6a25caf5d843c2ccfb5ac1e1f6068003eb79d364cb2c8b433d034191af07848d"
+    },
+    {
+      "name": "tests.log",
+      "bytes": 112,
+      "sha256": "7d3c145363a69c79ecc3fe5dd2bacabbc7a2e01c9d0d562130a48e014ac2dcba",
+      "gzipSha256": "791827a52327d8cdb8f86edceaf74d96ef1fe656608cde8538feff3609ac1875"
+    },
+    {
+      "name": "results.json",
+      "bytes": 45951,
+      "sha256": "9aaf773c9f92be81a983dbb3a4c515fd7f5c9ff005df06fa7fedc66f9b6a7d78",
+      "gzipSha256": "fc1276ff285c3d944fb220e67a7fed43f7f44b06f971deb080aef0ca3697359e"
+    },
+    {
+      "name": "coverage-check.log",
+      "bytes": 187,
+      "sha256": "911b4772f27640823bf5b7ba3d6814a014a7518593dc0018bacf27242b900603",
+      "gzipSha256": "376af05bb62e8c87df15526ba68f9f08a2d86ad9cf10b33f75bfefd39dc70175"
+    },
+    {
+      "name": "web-types.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+    },
+    {
+      "name": "source-check.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a"
+    },
+    {
+      "name": "backend-protocol.diff",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+    }
+  ]
+}
