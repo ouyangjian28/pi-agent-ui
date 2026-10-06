@@ -1,0 +1,62 @@
+{
+  "producer": "b6aeaad6f",
+  "sourceCommit": "4dd56c493ed6c3e3f563c97d2cb083b366a6493c",
+  "outcome": "110/110, exact10 targets, zero failures/skips; web typecheck/source bytes/backend diff passed",
+  "scope": "Native host/startup controlled/fake DOM and actual Source transform VM assertions; NOT original Root browser/chat/provider/phone proof",
+  "rawFiles": [
+    {
+      "file": "commit.txt",
+      "bytes": 41,
+      "sha256": "27191ac27c1a8dae1161e630247bf992bac194a97948373b7d41010cd5b65fc3",
+      "gzipSha256": "345d6b9bf9a00443f4488c078b576c718fcabd2e2a86632a1723017752b70eac"
+    },
+    {
+      "file": "preflight.log",
+      "bytes": 96,
+      "sha256": "370f95f8f5190890fa181cde9852d05d41a75ea5a7d9c2247dda2a4277f30a4f",
+      "gzipSha256": "7877269e3fbddeefdd1fb76d997d60877cb63ffbe6a39c02277ca5fcb81f1841"
+    },
+    {
+      "file": "expected.json",
+      "bytes": 336,
+      "sha256": "2e316ac7871b6c729525e17762ab09b284b4c31757d1214c5f892cd73a1da2c3",
+      "gzipSha256": "593d6997cd9745298878bcf1cd9cc4a42de373ff0e920c9bd8fd4a8c3144eecc"
+    },
+    {
+      "file": "tests.log",
+      "bytes": 117,
+      "sha256": "d1b5d2f9b670aaea71d4ef34c47224a36e3b6be2a3f83d7247ea172d3e750489",
+      "gzipSha256": "65e785d0ea6e07a2808081a42b8ba12f589e10dfcf61b8ae08d5c09881aae2d9"
+    },
+    {
+      "file": "results.json",
+      "bytes": 53092,
+      "sha256": "46e85fb73f103c5f8eebdfe520a71a2aa794d95ccd11286fb2340de344d96aae",
+      "gzipSha256": "add568df9863b64f0ac1e6b1b3fce05c3c580cdc92581440dd86e05b320e77ed"
+    },
+    {
+      "file": "coverage-check.log",
+      "bytes": 127,
+      "sha256": "b2e95e9c5fd53d8247f25cd4d7e1953946650f1b7e8e429940ea107a02a790bd",
+      "gzipSha256": "43c5d383be226245e9ea061d207dd9b822ef48a477f012b75358a7ab5c821059"
+    },
+    {
+      "file": "web-types.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+    },
+    {
+      "file": "source-check.log",
+      "bytes": 98,
+      "sha256": "6091447b6112db79082e67fd8f25ea5096cf7cf7e1b977238fbc48e693a3b217",
+      "gzipSha256": "c7cdefeb286d6cad7998d71ab1d723b6027f83ddfcec043d87397a70cf1a886a"
+    },
+    {
+      "file": "backend-protocol.diff",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzipSha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+    }
+  ]
+}
