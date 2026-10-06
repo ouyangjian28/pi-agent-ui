@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import original from '../vendor/openchamber-frontend/packages/web/vite.config.ts';
 import { nativeModelControlsTransform } from './ui-oc-native-model-transform.mjs';
+import { nativeSourceNavigationTransform } from './ui-oc-native-navigation-transform.mjs';
 import { nativeMessageOrderTransform } from './ui-oc-native-order-transform.mjs';
 import { nativeRuntimeFetchTransform } from './ui-oc-native-fetch-transform.mjs';
 import { nativeOriginalEntryTransform, nativeReadOnlyComposerTransform, nativeCompanionEventsTransform, nativeWebNotificationTransform, nativeInitialProjectPromptTransform, nativeProviderLogoTransform } from './ui-oc-native-startup-transform.mjs';
@@ -39,6 +40,11 @@ const targets = new Map([
   [path.join(snapshot, 'packages/ui/src/hooks/useProviderLogo.ts'), nativeProviderLogoTransform],
   [path.join(snapshot, 'packages/ui/src/components/session/SessionDialogs.tsx'), nativeInitialProjectPromptTransform],
   [path.join(snapshot, 'packages/ui/src/components/chat/ChatInput.tsx'), nativeReadOnlyComposerTransform],
+  [path.join(snapshot, 'packages/ui/src/sync/session-ui-store.ts'), source => nativeSourceNavigationTransform(source, 'store')],
+  [path.join(snapshot, 'packages/ui/src/components/session/sidebar/list/SessionProjectCollection.tsx'), source => nativeSourceNavigationTransform(source, 'collection')],
+  [path.join(snapshot, 'packages/ui/src/apps/MobileSessionsSheet.tsx'), source => nativeSourceNavigationTransform(source, 'mobile')],
+  [path.join(snapshot, 'packages/ui/src/components/session/SessionSidebar.tsx'), source => nativeSourceNavigationTransform(source, 'sidebar')],
+  [path.join(snapshot, 'packages/ui/src/components/session/SessionSwitcherDropdown.tsx'), source => nativeSourceNavigationTransform(source, 'switcher')],
   [path.join(snapshot, 'packages/web/src/main.tsx'), source => nativeOriginalEntryTransform(source, 'desktop')],
   [path.join(snapshot, 'packages/web/src/mobile-main.tsx'), source => nativeOriginalEntryTransform(source, 'mobile')],
   [path.join(snapshot, 'packages/web/src/mini-chat-main.tsx'), source => nativeOriginalEntryTransform(source, 'mini')],
@@ -76,6 +82,7 @@ const nativeOverlay = {
       nativeSdkFetchInstalled: false,
       nativeOriginalEntryCompiled: true,
       nativeSourceComposerReadOnly: true,
+      nativeSourceNavigationCompiled: true,
       nativeCompanionEventsInactiveCompiled: true,
       nativeWebNotificationsInactiveCompiled: true,
       nativeInitialProjectPromptInactiveCompiled: true,
@@ -104,6 +111,7 @@ export default {
       { find: '@pi-native/message-ordering', replacement: path.join(root, 'apps/web/src/oc-bridge/native-message-ordering.ts') },
       { find: '@pi-native/sdk-fetch', replacement: path.join(root, 'apps/web/src/oc-bridge/native-sdk-fetch.ts') },
       { find: '@pi-native/surface-host', replacement: path.join(root, 'apps/web/src/oc-bridge/native-surface-host.ts') },
+      { find: '@pi-native/navigation-actions', replacement: path.join(root, 'apps/web/src/oc-bridge/native-navigation-actions.ts') },
       { find: '@pi-native/original-startup', replacement: path.join(root, 'apps/web/src/oc-bridge/native-original-startup.ts') },
       { find: '@pi-native/original-renderer', replacement: path.join(root, 'tools/ui-oc-native-renderer.tsx') },
       ...original.resolve.alias,
