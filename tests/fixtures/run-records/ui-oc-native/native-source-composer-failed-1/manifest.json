@@ -77,7 +77,15 @@
       "sha256": "a665e2146fcd0df6ee035f20bbf4202e9b8256a78aef1769d9003151ea7fa923",
       "gzipSha256": "87804dfd8f06e89c2d4f14f5d41cd63eb709b05ebd7ae0b28a982d5dd352b73e",
       "roundtripIdentical": true
+    },
+    {
+      "name": "web-types-post-failure.log",
+      "bytes": 619,
+      "sha256": "e46e02a1246befeedd54daf4c6d7f888813fd13c94232a4165be68df33c49a38",
+      "gzipSha256": "c84ad10708babece073cf306810d09c3dce3b84134837774afa2b6e07c25e71d",
+      "roundtripIdentical": true
     }
   ],
-  "proofScope": "FAILED1 200pass6fail of pre-fixed206/18/no pending. Five actualSource/parser/SSR/config cases never reach actualSource because fixture new URL/import.meta.url path is not file scheme. Upload canSend pending case failed true-v-false; NativeComposerInput public API has actions.upload/removeAttachment/setCustomModel, not direct methods used by renderer: actual binding API mismatch suspected (first TS gate not reached). No exclusions/skip/relaxed expectations/count corrections; native Source/body behavior not passed. Frozen b8bccc6 source/transform/config/fixture archived BEFORE repairs. Build10 concurrent unchanged inputs; no actual original UI/send/IME/provider/independent acceptance."
+  "proofScope": "FAILED1 200pass6fail of pre-fixed206/18/no pending. Five actualSource/parser/SSR/config cases never reach actualSource because fixture new URL/import.meta.url path is not file scheme. Upload canSend pending case failed true-v-false; NativeComposerInput public API has actions.upload/removeAttachment/setCustomModel, not direct methods used by renderer: actual binding API mismatch suspected (first TS gate not reached). No exclusions/skip/relaxed expectations/count corrections; native Source/body behavior not passed. Frozen b8bccc6 source/transform/config/fixture archived BEFORE repairs. Build10 concurrent unchanged inputs; no actual original UI/send/IME/provider/independent acceptance.",
+  "postFailureActualTsc": "Separate genuine web tsc2 after failed unittest (original chain did NOT reach tsc), frozen runtime unchanged b8bccc6: TS2339 renderer calls upload/removeAttachment/setCustomModel directly on NativeComposerInput, whose real public methods exist under .actions; TS2367 treats actual discriminated TurnState object as string busy. Current active LSP error0 missed all4; never use it as typecheck substitute. Five URL-only fixture failures corrected via explicit filesystem resolve, original failed expectations/counts intact. Build10 still receives original b8bccc6 runtime; defer runtime repair until terminal notification to avoid mixed-input evidence."
 }

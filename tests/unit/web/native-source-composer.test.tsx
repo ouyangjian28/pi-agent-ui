@@ -5,6 +5,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import vm from 'node:vm';
 import ts from 'typescript';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -15,8 +16,10 @@ import { useNativeModelControls } from '../../../apps/web/src/oc-bridge/native-m
 import type { NativeSurfaceHost } from '../../../apps/web/src/oc-bridge/native-surface-host';
 import type { WebSocketLike } from '../../../apps/web/src/ws/ws-client';
 import * as jsxRuntime from 'react/jsx-runtime';
-const sourceRoot = new URL('../../../vendor/openchamber-frontend/packages/ui/src/components/chat/', import.meta.url);
-const original = (path: string) => readFileSync(new URL(path, sourceRoot), 'utf8');
+// Vite rewrites new URL/import.meta.url as browser asset URLs under jsdom.
+// These tests must read the literal on-disk Source, never that asset URL.
+const sourceRoot = resolve('vendor/openchamber-frontend/packages/ui/src/components/chat');
+const original = (path: string) => readFileSync(resolve(sourceRoot, path), 'utf8');
 function compile(code: string) {
   const output = ts.transpileModule(code, { fileName: 'Source.tsx', reportDiagnostics: true, compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } });
   expect(output.diagnostics?.filter(x => x.category === ts.DiagnosticCategory.Error)).toEqual([]); return output.outputText;
@@ -98,7 +101,7 @@ describe('Original composer native binding (bounded replacement-editor proof)', 
     }
   });
   it('build installs bound input and exactly two new Source targets, with compiler-only metadata', () => {
-    const config = readFileSync(new URL('../../../tools/ui-oc-native-vite.config.mjs', import.meta.url), 'utf8');
+    const config = readFileSync(resolve('tools/ui-oc-native-vite.config.mjs'), 'utf8');
     expect(config).not.toContain('nativeReadOnlyComposerTransform'); expect(config.match(/\[path.join\(snapshot,/g)).toHaveLength(24);
     expect(config).toContain("nativeBoundComposerTransform(source, 'input')"); expect(config).toContain("nativeBoundComposerTransform(source, 'footer')"); expect(config).toContain("nativeBoundComposerTransform(source, 'actions')"); expect(config).toContain('nativeSourceComposerMounted: false'); expect(config).toContain('nativeSourceComposerReadOnly: false');
   });
