@@ -10,7 +10,9 @@ import WebSocket from "ws";
 import { startServer, type PiAgentUiServer } from "../../apps/server/src/composition.ts";
 
 const RUN = process.env.PI_E2E === "1";
-const PI_BIN = "/home/yyj/.nvm/versions/node/v24.18.0/bin/pi";
+// pi-noext（~/.local/bin/pi-noext=pi --no-extensions 包装）：裸 pi 在本机会加载 feishu 扩展，
+// 扩展的 daemon owner 检测发现已服役实例（3001 端口 owner）即秒退——E2E 子进程永远拿不到事件流。
+const PI_BIN = "/home/yyj/.local/bin/pi-noext";
 const PI_VERSION = "0.0.0"; // 不锁版本（本探针面只验事件流管道）
 const ORIGIN = "http://localhost:5173";
 const TOKEN = "tok-d1";
