@@ -238,6 +238,11 @@ function ConnectedApp({
   };
   const select = (target: string): void => { if (target === file || allowLeave()) owner.open(target); };
   const restore = (id: string): void => { if (allowLeave()) owner.restore(id); };
+  // 呈现与恢复入口共用同一集合；不删除已受理草稿或它的发送身份。
+  const recoverableDrafts = [...ui.drafts.values()].filter((draft) =>
+    draft.operation !== null &&
+    (draft.phase !== "settled-launched" || !wsSnap.sessions?.some((session) => session.file === draft.file)),
+  );
   const ensureDraft = (): string | null => slot?.id ?? newDraft();
   const [narrow, setNarrow] = useState(() => window.matchMedia?.("(max-width: 767px)").matches ?? false);
   useEffect(() => {
@@ -332,7 +337,7 @@ function ConnectedApp({
           </div>
           <SessionList client={clients.wsClient} selectedFile={file} onSelect={select} />
           {pendingQuestions && file && <div className="pending-answer-inline" role="status"><p>当前对话有待回答的问题。</p><button type="button" onClick={() => owner.open(file)}>回到待答对话</button></div>}
-          {ui.drafts.size > 0 && <section className="unfinished-drafts" aria-label="未完成草稿"><h3>未完成草稿</h3>{[...ui.drafts.values()].filter((draft) => draft.operation !== null && (draft.phase !== "settled-launched" || !wsSnap.sessions?.some((session) => session.file === draft.file))).map((draft) => <button key={draft.id} type="button" onClick={() => restore(draft.id)}>{draft.phase === "settled-launched" ? "打开已受理对话" : draft.phase === "settled-unknown" ? "找回结果未知的草稿" : draft.operation?.pending ? "找回发送中的草稿" : "找回未发送成功的草稿"}<small>{draft.operation?.text.slice(0, 40)}</small></button>)}</section>}
+          {recoverableDrafts.length > 0 && <section className="unfinished-drafts" aria-label="未完成草稿"><h3>未完成草稿</h3>{recoverableDrafts.map((draft) => <button key={draft.id} type="button" onClick={() => restore(draft.id)}>{draft.phase === "settled-launched" ? "打开已受理对话" : draft.phase === "settled-unknown" ? "找回结果未知的草稿" : draft.operation?.pending ? "找回发送中的草稿" : "找回未发送成功的草稿"}<small>{draft.operation?.text.slice(0, 40)}</small></button>)}</section>}
         </nav>
         <main ref={mainRef} className={`conversation ${isNew ? "conversation-new" : ""}`} aria-label="当前会话" inert={narrow && ui.view.kind === "list"}>
           <ConversationHeader title={title} isNew={isNew} onBack={() => owner.back()} onNew={() => { newDraft(); }} canCreate={owner.canCreate} status={!isNew ? detail.statusSummary?.turn : undefined} />

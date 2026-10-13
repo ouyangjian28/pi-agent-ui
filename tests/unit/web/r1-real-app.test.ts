@@ -84,6 +84,86 @@ describe("R1 真 AppRoot+三客户端首链", () => {
     expect(Socket.all[2]!.sent.filter((frame) => frame.t === "prompt")).toHaveLength(0);
     fireEvent.keyDown(textarea, { key: "Enter" }); expect(Socket.all[2]!.sent.filter((frame) => frame.t === "prompt")).toHaveLength(1);
   });
+  it.each([false, true])("VIS-01：已受理入列表后无空草稿区，残稿仍能从列表恢复（手机=%s）", async (narrow) => {
+    vi.stubGlobal("matchMedia", () => ({ matches: narrow, addEventListener: () => {}, removeEventListener: () => {} }));
+    start(); const { textarea, frame } = firstSend("已受理首发");
+    fireEvent.change(textarea, { target: { value: "在途后续残稿" } });
+    await ack(frame, { kind: "launched", intentId: "i-vis-1", commandId: 1 });
+    list([dto(String(frame.file), "已受理首发"), dto("b.jsonl", "已有对话 B")]);
+    snapshot(String(frame.file), "合成回复已显示");
+    fireEvent.click(screen.getByRole("button", { name: "会话列表", exact: true }));
+    expect(document.querySelector('.real-app')?.getAttribute("data-view")).toBe("list");
+    expect(document.querySelector("section.unfinished-drafts")).toBeNull();
+    expect(screen.queryByRole("region", { name: "未完成草稿" })).toBeNull();
+    const before = Socket.all[1]!.sent.length;
+    fireEvent.click(screen.getByRole("button", { name: /已受理首发/ }));
+    expect(screen.getByLabelText("写入消息内容")).toBe(textarea);
+    expect(textarea.value).toBe("在途后续残稿");
+    expect(Socket.all[1]!.sent).toHaveLength(before); // 返回和重开不退订/重订
+    // 后续列表暂时不含该 file 时，原恢复身份应重新可见，而不是已被删除。
+    fireEvent.click(screen.getByRole("button", { name: "刷新", exact: true }));
+    list([dto("b.jsonl", "已有对话 B")]);
+    fireEvent.click(screen.getByRole("button", { name: "会话列表", exact: true }));
+    expect(screen.getByRole("button", { name: /打开已受理对话/ })).toBeTruthy();
+    expect(Socket.all[2]!.sent.filter((f) => f.t === "prompt")).toHaveLength(1);
+  });
+  it.each([false, true])("VIS-01：已受理未入列仍能打开同一 file（手机=%s）", async (narrow) => {
+    vi.stubGlobal("matchMedia", () => ({ matches: narrow, addEventListener: () => {}, removeEventListener: () => {} }));
+    start(); const { frame } = firstSend("尚未入列的首发");
+    fireEvent.click(screen.getByRole("button", { name: "返回列表" }));
+    await ack(frame, { kind: "launched", intentId: "i-vis-2", commandId: 1 });
+    const section = screen.getByRole("region", { name: "未完成草稿" });
+    const recover = within(section).getByRole("button", { name: /打开已受理对话/ });
+    expect(recover.textContent).toContain("尚未入列的首发");
+    fireEvent.click(recover);
+    expect(Socket.all[1]!.sent.filter((f) => f.t === "subscribe").at(-1)).toMatchObject({ file: frame.file });
+    expect(Socket.all[2]!.sent.filter((f) => f.t === "prompt")).toHaveLength(1);
+  });
+  it.each([false, true])("VIS-01：busy 拒收条目含原稿并可全文找回（手机=%s）", async (narrow) => {
+    vi.stubGlobal("matchMedia", () => ({ matches: narrow, addEventListener: () => {}, removeEventListener: () => {} }));
+    const text = "拒收草稿：不要吞掉任何输入";
+    start(); const { textarea, frame } = firstSend(text);
+    await ack(frame, { kind: "busy" });
+    fireEvent.click(screen.getByRole("button", { name: "返回列表" }));
+    const recover = within(screen.getByRole("region", { name: "未完成草稿" })).getByRole("button", { name: /找回未发送成功的草稿/ });
+    expect(recover.textContent).toContain(text);
+    fireEvent.click(recover);
+    expect(screen.getByLabelText("首条消息")).toBe(textarea); expect(textarea.value).toBe(text);
+    expect(Socket.all[1]!.sent.filter((f) => f.t === "subscribe")).toHaveLength(0);
+    expect(Socket.all[2]!.sent.filter((f) => f.t === "prompt")).toHaveLength(1);
+  });
+  it("VIS-01：在途与未知恢复入口不因同 file 已入列而隐藏，未知二发仍须确认", async () => {
+    start(); const { frame } = firstSend("保护在途与未知原稿");
+    fireEvent.click(screen.getByRole("button", { name: "返回列表" }));
+    list([dto(String(frame.file), "已发现目标 file"), dto("b.jsonl", "已有对话 B")]);
+    expect(screen.getByRole("button", { name: /找回发送中的草稿/ }).textContent).toContain("保护在途与未知原稿");
+    await act(async () => { Socket.all[2]!.receive({ t: "error", requestId: frame.requestId, code: 4402, retryable: true, message: "never display" }); await Promise.resolve(); });
+    fireEvent.click(screen.getByRole("button", { name: /找回结果未知的草稿/ }));
+    expect((screen.getByLabelText("首条消息") as HTMLTextAreaElement).value).toBe("保护在途与未知原稿");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" }));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("重复执行"));
+    expect(Socket.all[2]!.sent.filter((f) => f.t === "prompt")).toHaveLength(1);
+    expect(document.body.textContent).not.toContain("never display");
+  });
+  it("VIS-02：受理行只陈述写事实，message-final 不伪造整轮 idle 或归档", async () => {
+    start(); const { frame } = firstSend("核验中性受理文案");
+    await ack(frame, { kind: "launched", intentId: "i-vis-3", commandId: 1 });
+    snapshot(String(frame.file));
+    act(() => Socket.all[1]!.receive({ t: "status", subscriptionId: "sub-1", status: { ...status(String(frame.file)), turn: { state: "in-flight", intentId: "i-vis-3" }, statusVersion: 2 } }));
+    const heading = document.querySelector(".conversation-heading small")!;
+    const turnBeforeFinal = heading.textContent;
+    expect(turnBeforeFinal).not.toContain("空闲");
+    expect(screen.getByText("消息已受理。", { exact: true })).toBeTruthy();
+    act(() => Socket.all[1]!.receive({ t: "events", subscriptionId: "sub-1", origin: "live", refSeq: null, liveSeq: 1, events: [{ kind: "message-final", role: "assistant", text: "合成 final 正文，不代表整轮结束" }] }));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 25)); });
+    expect(screen.getByText("合成 final 正文，不代表整轮结束")).toBeTruthy();
+    expect(screen.getByText("消息已受理。", { exact: true })).toBeTruthy();
+    expect(document.body.textContent).not.toContain("等待回复");
+    expect(heading.textContent).toBe(turnBeforeFinal);
+    expect(screen.getByText(/未确认入档/)).toBeTruthy();
+    expect(Socket.all[2]!.sent.filter((f) => f.t === "prompt")).toHaveLength(1);
+  });
   it("在途编辑→返回→选 B→A launched，保 B 三域；恢复 A 残稿仅一次", async () => {
     start(); const { textarea, frame } = firstSend(); fireEvent.change(textarea, { target: { value: "v2" } });
     expect((screen.getByRole("button", { name: "＋新对话" }) as HTMLButtonElement).disabled).toBe(true);

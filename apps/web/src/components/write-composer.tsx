@@ -212,7 +212,7 @@ export function WriteComposer({ client, file, editor }: { client: WriteClientSur
           {editor?.isNew ? (pending ? "发送中…" : "发送并开始对话") : "发送"}
         </button>
         {editor?.isNew ? <button type="button" onClick={editor.onCancel}>返回列表</button> : null}
-        <button type="button" onClick={() => void stop()} disabled={!canStop || editor?.isNew === true} hidden={editor?.isNew === true}>
+        <button type="button" className="stop-secondary" onClick={() => void stop()} disabled={!canStop || editor?.isNew === true} hidden={editor?.isNew === true}>
           停止
         </button>
         <span role="status" aria-live="polite">
@@ -227,8 +227,9 @@ export function WriteComposer({ client, file, editor }: { client: WriteClientSur
       {!editor && view.notReady !== null ? (
         <NotReadyBanner info={view.notReady} onRetry={canSend ? onSend : undefined} />
       ) : null}
+      {/* 写通道只证明受理，不跟踪回复或整轮结束；message-final 不清除此结果。 */}
       {view.lastResult !== null && (!editor || (view.lastResult.ok && (view.lastResult.kind === "stop" || view.lastResult.outcome.kind === "launched"))) ? (
-        <p role="status">{editor && view.lastResult.kind === "prompt" ? "消息已受理，等待回复。" : lastResultText(view.lastResult)}</p>
+        <p role="status">{editor && view.lastResult.kind === "prompt" ? "消息已受理。" : lastResultText(view.lastResult)}</p>
       ) : null}
       <details className="resume-demo" hidden={editor?.isNew === true}>
         <summary>高级诊断</summary>
