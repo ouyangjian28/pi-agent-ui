@@ -38,7 +38,7 @@ function assistantMsg(seq: number, text = `助手消息 ${seq}`): HistoryEvent {
 }
 
 function liveText(): string {
-  return Array.from(screen.getByLabelText("直播正文").querySelectorAll("p.live-stream-text"), (node) => node.textContent ?? "").join("\n");
+  return Array.from(screen.getByLabelText("直播正文").querySelectorAll(".live-stream-text"), (node) => node.textContent ?? "").join("\n");
 }
 function mount(liveEvents: readonly LiveEvent[], historyEvents: readonly HistoryEvent[] = []) {
   return render(React.createElement(LiveStreamView, { liveEvents, historyEvents }));
