@@ -11,6 +11,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SubscribeClient, type WebSocketLike } from "../../../apps/web/src/ws/subscribe-client";
 import type { EventCursor, HistoryEvent, LiveEvent } from "@pi-agent-ui/protocol/src/contracts";
+import { journalToScanRows } from "../../../packages/protocol/src/history-projection";
 
 class FakeWebSocket implements WebSocketLike {
   static instances: FakeWebSocket[] = [];
@@ -565,6 +566,103 @@ describe("订阅终局语义（三分支之 error 帧路径）", () => {
     expect(snap.phase).toBe("live"); // 新 snapshot 落地
     expect(snap.subscriptionId).toBe("sub-2");
     expect(snap.events.map((e) => e.seq)).toEqual([9]);
+  });
+});
+
+describe("journal-writer：公开订阅入口回归", () => {
+  // 真实四行 journal 的结构副本（consumer-p1 探针同源）；仅用户正文替换为测试文案。
+  // 走共享投影器，不手工构造合法事件；seq 按读索引口径从 1 编入。
+  const journal = [
+    { t: "writer", epoch: 1, bootId: "71c7da80-140c-42ea-a9dc-b66983bc0349", at: "2026-10-14T04:31:57.722Z" },
+    {
+      t: "enqueue", intentId: "i-1", sessionId: "sess-a8e91a65b3c0", leafId: "leaf-1",
+      matchKey: { textHash: "97eebfea", attachmentIdentity: "", ordinal: 0 },
+      payload: { kind: "prompt", rawText: "订阅客户端回归测试", attachments: [], sentAt: "2026-10-14T04:31:57.916Z" },
+      generation: 1,
+    },
+    { t: "sending", intentId: "i-1" },
+    { t: "settled", intentId: "i-1" },
+  ].map((line) => JSON.stringify(line)).join("\n") + "\n";
+  const page = journalToScanRows(journal).map((row, i) => ({ ...row.event, seq: i + 1 }));
+
+  function pendingSnapshot(): { client: SubscribeClient; ws: FakeWebSocket; frame: Record<string, unknown> } {
+    const { client, ws } = setup();
+    handshake(ws);
+    client.subscribeSession("a.jsonl");
+    const requestId = (ws.sentFrames()[1] as { requestId: string }).requestId;
+    const frame = pageFrame({ requestId, barrier: 4, page, liveFrom: { streamId: "stream-1", seq: 5 } }) as Record<string, unknown>;
+    return { client, ws, frame };
+  }
+
+  it("真实四行投影含 writer 首事件：snapshot 整页接收，phase=live 且收到 4 条", () => {
+    expect(page.map((event) => event.kind)).toEqual(["journal-writer", "turn-enqueued", "sending", "verdict-settled"]);
+    const { client, ws, frame } = pendingSnapshot();
+    ws.receive(frame);
+    const snapshot = client.getSnapshot();
+    expect(snapshot.phase).toBe("live");
+    expect(snapshot.events).toHaveLength(4);
+    expect(snapshot.events).toEqual(page);
+    expect(snapshot.cursor).toEqual({ streamId: "stream-1", seq: 5 });
+    client.close();
+  });
+
+  it("同一四行投影经 events(origin=history) 全部接收", () => {
+    const { client, ws, subscriptionId } = livePhase();
+    const events = page.map((event) => ({ ...event, seq: event.seq + 3 }));
+    ws.receive(historyEvents(subscriptionId, 7, events));
+    expect(client.getSnapshot().phase).toBe("live");
+    expect(client.getSnapshot().events.slice(3)).toEqual(events);
+    expect(client.getSnapshot().events).toHaveLength(7);
+    client.close();
+  });
+
+  it("epoch 允许最大安全整数，bootId 只验非空字符串、不强制 UUID 或传输 ID 长度", () => {
+    const { client, ws, frame } = pendingSnapshot();
+    const events = [{ ...page[0]!, writerEpoch: Number.MAX_SAFE_INTEGER, writerBootId: "x".repeat(129) }, ...page.slice(1)];
+    ws.receive({ ...frame, page: events });
+    expect(client.getSnapshot().phase).toBe("live");
+    expect(client.getSnapshot().events).toEqual(events);
+    client.close();
+  });
+
+  const invalidFields = [
+    { name: "epoch=0", writerEpoch: 0, writerBootId: "boot" },
+    { name: "epoch=1.5", writerEpoch: 1.5, writerBootId: "boot" },
+    { name: "epoch=-1", writerEpoch: -1, writerBootId: "boot" },
+    { name: "epoch 超安全整数", writerEpoch: Number.MAX_SAFE_INTEGER + 1, writerBootId: "boot" },
+    { name: "epoch 为字符串", writerEpoch: "1", writerBootId: "boot" },
+    { name: "epoch 缺失", writerBootId: "boot" },
+    { name: "bootId=123", writerEpoch: 1, writerBootId: 123 },
+    { name: "bootId 为空", writerEpoch: 1, writerBootId: "" },
+    { name: "bootId 缺失", writerEpoch: 1 },
+  ];
+
+  it.each(invalidFields)("$name：snapshot 整帧拒收、在途保留，后续合法帧可恢复", (fields) => {
+    const { client, ws, frame } = pendingSnapshot();
+    const before = client.getSnapshot();
+    const { name: _name, ...writerFields } = fields;
+    const { writerEpoch: _epoch, writerBootId: _bootId, ...base } = page[0]! as Extract<HistoryEvent, { kind: "journal-writer" }>;
+    ws.receive({ ...frame, page: [{ ...base, ...writerFields }, ...page.slice(1)] });
+    expect(client.getSnapshot()).toBe(before);
+    expect(client.getSnapshot().phase).toBe("subscribing");
+    expect(client.getSnapshot().events).toHaveLength(0);
+    ws.receive(frame);
+    expect(client.getSnapshot().phase).toBe("live");
+    expect(client.getSnapshot().events).toEqual(page);
+    client.close();
+  });
+
+  it.each(invalidFields)("$name：history 整帧拒收、快照不变，后续合法帧可恢复", (fields) => {
+    const { client, ws, subscriptionId } = livePhase();
+    const before = client.getSnapshot();
+    const { name: _name, ...writerFields } = fields;
+    const { writerEpoch: _epoch, writerBootId: _bootId, ...base } = page[0]! as Extract<HistoryEvent, { kind: "journal-writer" }>;
+    const events = page.map((event) => ({ ...event, seq: event.seq + 3 }));
+    ws.receive({ t: "events", subscriptionId, origin: "history", refSeq: 7, events: [{ ...base, seq: 4, ...writerFields }, ...events.slice(1)] });
+    expect(client.getSnapshot()).toBe(before);
+    ws.receive(historyEvents(subscriptionId, 7, events));
+    expect(client.getSnapshot().events.slice(3)).toEqual(events);
+    client.close();
   });
 });
 

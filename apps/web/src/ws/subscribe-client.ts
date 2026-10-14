@@ -316,6 +316,8 @@ function historyEventOk(v: unknown): v is HistoryEvent {
     case "unknown-line":
     case "journal-corrupt":
       return true;
+    case "journal-writer":
+      return typeof v.writerEpoch === "number" && Number.isSafeInteger(v.writerEpoch) && v.writerEpoch >= 1 && str(v.writerBootId) && v.writerBootId.length > 0;
     case "journal-repair":
       return v.repairReason === "torn-tail" && nonNegNum(v.repairByteStart) && nonNegNum(v.repairByteEnd) && v.repairByteEnd > v.repairByteStart;
     case "response-timeout":
