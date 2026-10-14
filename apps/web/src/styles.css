@@ -838,6 +838,12 @@ hr {
 .markdown-view pre { margin: 0; padding: var(--sp-3); max-width: 100%; overflow-x: auto; white-space: pre; overflow-wrap: normal; word-break: normal; background: var(--c-neutral-bg); border: 1px solid var(--c-border); border-radius: var(--r-md); font-family: var(--font-mono); line-height: 1.6; }
 .markdown-view pre code { padding: 0; border-radius: 0; background: transparent; white-space: inherit; }
 .markdown-view .markdown-limit { color: var(--c-muted); font-size: 12px; }
+/* TB-MD: intrinsic wide tables scroll here, never enlarge the chat/page. */
+.markdown-view .markdown-table-wrap { min-width: 0; max-width: 100%; overflow-x: auto; border: 1px solid var(--c-border); border-radius: var(--r-md); }
+.markdown-view table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: inherit; }
+.markdown-view th, .markdown-view td { padding: var(--sp-2) var(--sp-3); border: 1px solid var(--c-border); white-space: pre-wrap; overflow-wrap: normal; word-break: normal; vertical-align: top; }
+.markdown-view th { background: var(--c-neutral-bg); font-weight: 600; }
+.markdown-view .markdown-table-wrap:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
 .chat-user { background: var(--c-bg); border: 1px solid var(--c-border); border-radius: var(--r-lg); padding: var(--sp-4); margin-left: 12%; }
 .chat-assistant { padding-right: var(--sp-4); }
 .session-detail .live-stream { border: 0; background: transparent; padding: 0; margin: 0; }

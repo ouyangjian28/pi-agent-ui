@@ -98,7 +98,7 @@ describe("I3-MD zero-trust and literal fallback", () => {
   });
 
   it.each([
-    "![image](https://example.test/a.png)", "> quote", "| a | b |\n|---|---|\n| 1 | 2 |",
+    "![image](https://example.test/a.png)", "> quote", "| a | b |\n| 1 | 2 |", // Missing table separator stays literal.
     "~~strike~~", "foo_bar_baz", "[broken](", "**open", "****unknown****",
     "``**literal**``", "``**half**", "`not closed by double``",
   ])("preserves unsupported or partial spelling: %s", (text) => {

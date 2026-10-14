@@ -1,6 +1,6 @@
 import React from "react";
 
-// Deliberately not CommonMark: only the I3-MD core set, never HTML or remote embeds.
+// Deliberately not CommonMark: I3-MD core + bounded GFM pipe tables, never HTML or remote embeds.
 // Bounds apply BEFORE parsing: 100 Ki UTF-16 units/message block, 2,000 lines,
 // 4,096 units/inline line (longer lines stay literal), 4,000 elements, depth 8,
 // and 2M scanned units. This also bounds adversarial delimiter/streaming frames.
@@ -8,6 +8,10 @@ const MAX_CHARS = 100 * 1024;
 const MAX_LINES = 2_000;
 const MAX_INLINE = 4_096;
 const MAX_DEPTH = 8;
+// TB-MD: <=32 columns / <=500 data rows; the existing global budgets still win.
+// Physical table lines also obey MAX_INLINE (not a fresh allowance per cell).
+const MAX_TABLE_COLUMNS = 32;
+const MAX_TABLE_ROWS = 500;
 
 type Budget = { elements: number; scans: number; literal: boolean };
 type Line = { raw: string; text: string };
@@ -183,14 +187,119 @@ function inline(text: string, budget: Budget, depth = 0, links = true): React.Re
 const fenceOpen = (text: string) => /^ {0,3}(`{3,})[ \t]*(?:([\w+#.-]+)[ \t]*)?$/.exec(text);
 const heading = (text: string) => /^ {0,3}(#{1,3})[ \t]+(.+)$/.exec(text);
 
+type TableRow = { cells: string[]; complete: boolean; limited: boolean };
+type Alignment = "left" | "center" | "right" | undefined;
+
+function tableRow(text: string, budget: Budget): TableRow {
+  // Charge four full passes: candidate lookup, splitting, trim, validation.
+  budget.scans -= text.length * 4;
+  if (budget.scans < 0) budget.literal = true;
+  if (text.length > MAX_INLINE || budget.literal) return { cells: [], complete: false, limited: true };
+  const source = text.trim();
+  const cells: string[] = [];
+  let cell = "";
+  let ticks = 0;
+  let lastPipe = -1;
+  for (let i = 0; i < source.length; i++) {
+    const char = source[i]!;
+    if (char === "\\" && i + 1 < source.length) {
+      const next = source[++i]!;
+      // Only table-specific escaped pipes are decoded. Other spelling is intact.
+      cell += next === "|" ? "|" : "\\" + next;
+    } else if (char === "|") {
+      cells.push(cell.trim());
+      cell = "";
+      lastPipe = i;
+      if (cells.length > MAX_TABLE_COLUMNS + 1) return { cells: [], complete: false, limited: true };
+    } else if (char === "`") {
+      let end = i + 1;
+      while (source[end] === "`") end++;
+      const width = end - i;
+      if (ticks === 0) ticks = width;
+      else if (ticks === width) ticks = 0;
+      cell += source.slice(i, end);
+      i = end - 1;
+    } else {
+      cell += char;
+    }
+  }
+  cells.push(cell.trim());
+  const leading = source.startsWith("|");
+  const trailing = lastPipe === source.length - 1;
+  if (leading) cells.shift();
+  if (trailing) cells.pop();
+  // Conservative streaming subset: framed rows beginning with | require a
+  // closing |, and every row must match the header exactly. No padding/dropping.
+  // Unframed A | B rows are supported; a same-width unfinished last cell without
+  // outer pipes is indistinguishable from valid GFM, so its available text stays.
+  return { cells, complete: (!leading || trailing) && ticks === 0, limited: cells.length > MAX_TABLE_COLUMNS };
+}
+
 function blocks(lines: Line[], budget: Budget): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
   const raw = (start: number, end = lines.length) => lines.slice(start, end).map((line) => line.raw).join("");
+  const isTableStart = (index: number) => {
+    const text = lines[index]!.text;
+    // A leading outer pipe is an explicit (possibly half-open) candidate.
+    // Unframed prose/code/links containing | retain the old inline semantics
+    // unless a separator-shaped following line establishes table intent.
+    const next = lines[index + 1]?.text ?? "";
+    return text.trimStart().startsWith("|") || (text.includes("|") && next.includes("|") && (next.length > MAX_INLINE || /^[ \t:|\-]+$/.test(next)));
+  };
   const isBlock = (index: number) => {
     const text = lines[index]!.text;
     const marker = listMarker(text);
-    return fenceOpen(text) !== null || heading(text) !== null || (marker !== null && marker.indent <= 3);
+    return fenceOpen(text) !== null || heading(text) !== null || (marker !== null && marker.indent <= 3) || isTableStart(index);
   };
+  function table(start: number): { node: React.ReactNode; next: number } {
+    let end = start + 1;
+    // Scan the entire contiguous candidate even after a local limit so fallback
+    // preserves original whitespace/escapes/extra columns and doesn't parse tails.
+    while (end < lines.length && lines[end]!.text.includes("|") && !fenceOpen(lines[end]!.text) && !heading(lines[end]!.text) && !listMarker(lines[end]!.text)) end++;
+    const literal = (limited = false) => ({
+      node: <React.Fragment key={`table-${start}`}>
+        <p className="markdown-literal">{raw(start, end)}</p>
+        {limited && !budget.literal ? <p className="markdown-limit" role="note">表格过大，按纯文本显示（最多 32 列 / 500 数据行 / 每行 4,096 字符）。</p> : null}
+      </React.Fragment>, next: end,
+    });
+    if (end - start - 2 > MAX_TABLE_ROWS) {
+      budget.elements -= 2;
+      return literal(true);
+    }
+    const rows = lines.slice(start, end).map((line) => tableRow(line.text, budget));
+    const header = rows[0]!;
+    if (rows.some((row) => row.limited)) {
+      budget.elements -= 2;
+      return literal(true);
+    }
+    if (rows.length < 2 || header.cells.length === 0 || rows.some((row) => !row.complete || row.cells.length !== header.cells.length)) {
+      budget.elements--;
+      return literal();
+    }
+    const separator = rows[1]!.cells;
+    if (separator.some((cell) => !/^:?-+:?$/.test(cell))) {
+      budget.elements--;
+      return literal();
+    }
+    const align: Alignment[] = separator.map((cell) => cell.startsWith(":") ? (cell.endsWith(":") ? "center" : "left") : cell.endsWith(":") ? "right" : undefined);
+    const data = [header, ...rows.slice(2)];
+    // Reserve all wrapper/section/row/cell elements, plus fallback headroom,
+    // BEFORE inline rendering. Partial tables are never committed to the tree.
+    const elements = 4 + data.length * (1 + header.cells.length);
+    if (elements + 2 > budget.elements) {
+      budget.literal = true;
+      return literal();
+    }
+    budget.elements -= elements;
+    const rendered = data.map((row, rowIndex) => <tr key={rowIndex}>{row.cells.map((cell, column) => rowIndex === 0
+      ? <th key={column} scope="col" style={{ textAlign: align[column] }}>{inline(cell, budget)}</th>
+      : <td key={column} style={{ textAlign: align[column] }}>{inline(cell, budget)}</td>)}</tr>);
+    if (budget.literal || budget.elements <= 0) {
+      budget.literal = true;
+      return literal();
+    }
+    return { node: <div className="markdown-table-wrap" role="region" aria-label="Markdown 表格" tabIndex={0} key={`table-${start}`}><table><thead>{rendered[0]}</thead><tbody>{rendered.slice(1)}</tbody></table></div>, next: end };
+  }
   // Exactly one nested list level; deeper marker lines remain literal inside li.
   function list(start: number, marker: ListMarker, depth: number): { node: React.ReactNode; next: number } {
     const items: React.ReactNode[] = [];
@@ -261,6 +370,12 @@ function blocks(lines: Line[], budget: Budget): React.ReactNode[] {
     const marker = listMarker(line.text);
     if (marker && marker.indent <= 3) {
       const result = list(i, marker, 0);
+      nodes.push(result.node);
+      i = result.next;
+      continue;
+    }
+    if (isTableStart(i)) {
+      const result = table(i);
       nodes.push(result.node);
       i = result.next;
       continue;
