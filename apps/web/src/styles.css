@@ -820,6 +820,24 @@ hr {
 .chat-message { margin: var(--sp-2) 0 var(--sp-6); padding: var(--sp-2) 0; overflow-wrap: anywhere; font-size: 14px; line-height: 1.85; }
 .message-author { display: block; font-family: system-ui, sans-serif; margin-bottom: var(--sp-2); font-size: 11px; color: var(--c-muted); }
 .chat-message p, .chat-preview, .entry-text { white-space: pre-wrap; line-height: 1.85; }
+/* I3-MD: scoped to full text only; theme colors/spacing share the existing tokens.
+   The largest Markdown heading is 15px, no larger than .conversation-heading h2. */
+.markdown-view.entry-text { white-space: normal; min-width: 0; max-width: 100%; }
+.markdown-view p, .markdown-view .markdown-literal { white-space: pre-wrap; }
+.markdown-view > * + * { margin-top: var(--sp-3); }
+.markdown-view h1, .markdown-view h2, .markdown-view h3 { line-height: 1.5; font-weight: 600; }
+.markdown-view h1 { font-size: 15px; }
+.markdown-view h2 { font-size: 14px; }
+.markdown-view h3 { font-size: 13px; }
+.markdown-view ul, .markdown-view ol { margin-bottom: 0; padding-left: var(--sp-5); }
+.markdown-view li > ul, .markdown-view li > ol { margin-top: var(--sp-1); }
+.markdown-view a { color: var(--c-accent); text-decoration: underline; }
+.markdown-view code { font-family: var(--font-mono); background: var(--c-neutral-bg); border-radius: var(--r-sm); padding: 0 var(--sp-1); }
+.markdown-view .markdown-codeblock { min-width: 0; max-width: 100%; }
+.markdown-view .markdown-language { display: block; color: var(--c-muted); font-size: 11px; margin-bottom: var(--sp-1); }
+.markdown-view pre { margin: 0; padding: var(--sp-3); max-width: 100%; overflow-x: auto; white-space: pre; overflow-wrap: normal; word-break: normal; background: var(--c-neutral-bg); border: 1px solid var(--c-border); border-radius: var(--r-md); font-family: var(--font-mono); line-height: 1.6; }
+.markdown-view pre code { padding: 0; border-radius: 0; background: transparent; white-space: inherit; }
+.markdown-view .markdown-limit { color: var(--c-muted); font-size: 12px; }
 .chat-user { background: var(--c-bg); border: 1px solid var(--c-border); border-radius: var(--r-lg); padding: var(--sp-4); margin-left: 12%; }
 .chat-assistant { padding-right: var(--sp-4); }
 .session-detail .live-stream { border: 0; background: transparent; padding: 0; margin: 0; }

@@ -1,8 +1,8 @@
 // A1b 会话详情组件（归属整改重写：Kimi 亲手重写，DOM 结构/视觉令牌类名/文案与视觉基建批 475e071
 // 之后的状态逐项保真——重写非返工）。
 // 只读渲染面：历史分页加载+直播追加+空态族（loading/empty/error/auth-failed/closed/unsubscribed）
-// +流终局态（resync-needed/stopped）。纯文本渲染：textPreview.text 只作 React 文本节点，
-// 无 innerHTML/dangerouslySetInnerHTML。
+// +流终局态（resync-needed/stopped）。textPreview.text 保持纯文本；展开 text 块走
+// I3-MD 受限 MarkdownView（仅 React 元素与文本节点，不解析原始 HTML）。
 // 结构保真（K5-B2 稳定挂载）：根元素恒为 section.session-detail（根类型不随视图切换变化）；
 // 根下槽位 0=视图体（空态族=div.empty，内容族=Fragment 包裹的 header/banner/history/paging/live），
 // 槽位 1 恒为 composer（WriteComposer key=file）——空态↔内容态切换不卸载重建编辑器（草稿/在途保留）；
@@ -21,6 +21,7 @@ import type { SubscribeClientSurface } from "../ws/subscribe-client";
 import { WriteComposer } from "./write-composer";
 import { LiveStreamView } from "./live-stream";
 import { UiDialog } from "./ui-dialog";
+import { MarkdownView } from "./markdown-view";
 import type { WriteClientSurface } from "../ws/write-client";
 import type { EntryBlock, EntryFrame, HistoryEvent, LiveEvent } from "@pi-agent-ui/protocol/src/contracts";
 
@@ -87,12 +88,7 @@ function visibleBytesOf(blocks: readonly EntryBlock[]): number {
 function EntryBlockView({ block }: { block: EntryBlock }) {
   switch (block.kind) {
     case "text":
-      return (
-        <p className="entry-text">
-          {block.text}
-          {block.truncatedAt !== undefined ? "…" : ""}
-        </p>
-      );
+      return <MarkdownView text={block.text} truncated={block.truncatedAt !== undefined} />;
     case "thinking":
       return (
         <details className="entry-thinking">

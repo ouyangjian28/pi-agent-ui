@@ -98,6 +98,45 @@ const EXPANDABLE_EVENTS: HistoryEvent[] = [
   msgEvent(3, { hasThinking: true, textPreview: { text: "完", truncated: false } }), // 条件①：门开含思考
 ];
 
+describe("I3-MD 主读面接线与预览隔离", () => {
+  it.each(["assistant", "user"])("%s 消息展开后渲染 Markdown，展开前截断预览仍是纯文本", async (role) => {
+    const text = "# Heading\n**bold** and `code`\n```ts\nconst x = 1;\n```";
+    const client = new ExpandStubClient(detailSnap({ events: [msgEvent(1, {
+      role, blockCount: 1, textPreview: { text, truncated: true },
+    })] }));
+    const { container } = render(React.createElement(SessionDetail, { client, file: "a.jsonl" }));
+    const preview = container.querySelector(".chat-preview")!;
+    expect(preview.textContent).toBe(text + "…");
+    expect(preview.children).toHaveLength(0);
+    expect(container.querySelector(".markdown-view")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "展开" }));
+    await client.settleLast({ ok: true, frame: entryFrame({ blocks: [{ kind: "text", text }] }) });
+    expect(container.querySelector(".chat-preview")).toBeNull();
+    expect(container.querySelector(`.chat-${role} .entry-text.markdown-view`)).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Heading");
+    expect(container.querySelector(".markdown-view strong")?.textContent).toBe("bold");
+    expect(container.querySelector(".markdown-view pre > code")?.textContent).toBe("const x = 1;\n");
+  });
+
+  it("保留服务端截断提示，思考/工具/附件仍用原渲染面", async () => {
+    const client = new ExpandStubClient(detailSnap({ events: [msgEvent(1, { blockCount: 4 })] }));
+    const { container } = render(React.createElement(SessionDetail, { client, file: "a.jsonl" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开" }));
+    await client.settleLast({ ok: true, frame: entryFrame({ state: "truncated", blocks: [
+      { kind: "text", text: "**bold**", truncatedAt: 8 },
+      { kind: "thinking", text: "**thought**" },
+      { kind: "toolCall", toolCallId: "tc-1", toolName: "bash", argsPreview: "**args**" },
+      { kind: "attachment", attachmentId: "att-1" },
+    ] }) });
+    expect(screen.getByLabelText("原文已截断").textContent).toBe("…");
+    expect(screen.getByRole("note").textContent).toContain("已截断·可见");
+    expect(container.querySelector(".entry-thinking strong, .entry-toolcall strong")).toBeNull();
+    expect(screen.getByText("**thought**")).toBeTruthy();
+    expect(container.querySelectorAll(".markdown-view")).toHaveLength(1);
+    expect(container.querySelector(".entry-attachment")?.textContent).toContain("att-1");
+  });
+});
+
 describe("D4 批③ 展开按钮触发口径（三条件其一）", () => {
   it("hasThinking/blockCount>0/textPreview.truncated 各挂按钮；三条件皆无与非 message 事件不挂", () => {
     const events: HistoryEvent[] = [
