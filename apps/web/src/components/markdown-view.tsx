@@ -1,6 +1,7 @@
 import React from "react";
+import { mermaidBlock } from "./mermaid-view";
 
-// Deliberately not CommonMark: I3-MD core + bounded GFM pipe tables, never HTML or remote embeds.
+// Deliberately not CommonMark: I3-MD core + bounded tables/flowcharts, never HTML or remote embeds.
 // Bounds apply BEFORE parsing: 100 Ki UTF-16 units/message block, 2,000 lines,
 // 4,096 units/inline line (longer lines stay literal), 4,000 elements, depth 8,
 // and 2M scanned units. This also bounds adversarial delimiter/streaming frames.
@@ -349,7 +350,16 @@ function blocks(lines: Line[], budget: Budget): React.ReactNode[] {
       }
       if (end === lines.length) {
         nodes.push(<p className="markdown-literal" key={i}>{raw(i)}</p>);
+        if (fence[2] === "mermaid") {
+          budget.elements -= 2;
+          nodes.push(<p className="markdown-limit" role="note" key={`mermaid-note-${i}`}>Mermaid 围栏未闭合，保留原文，等待完整内容。</p>);
+        }
         break;
+      }
+      if (fence[2] === "mermaid") {
+        nodes.push(<React.Fragment key={i}>{mermaidBlock(raw(i + 1, end), raw(i, end + 1), budget)}</React.Fragment>);
+        i = end + 1;
+        continue;
       }
       budget.elements -= 4;
       nodes.push(<div className="markdown-codeblock" key={i}>

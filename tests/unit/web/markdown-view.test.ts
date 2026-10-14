@@ -107,9 +107,11 @@ describe("I3-MD zero-trust and literal fallback", () => {
     expect(container.querySelector("img, table, blockquote, del, a")).toBeNull();
   });
 
-  it("treats mermaid as literal fenced code, not a diagram or embed", () => {
-    const { container } = mount("```mermaid\ngraph TD; A-->B\n```");
-    expect(container.querySelector("pre > code")?.textContent).toBe("graph TD; A-->B\n");
+  it("keeps unsupported Mermaid as original text, never an embed", () => {
+    const text = "```mermaid\nsequenceDiagram\nA->>B: hi\n```";
+    const { container } = mount(text);
+    expect(container.querySelector(".markdown-literal")?.textContent).toBe(text);
+    expect(screen.getByRole("note").textContent).toContain("暂不支持");
     expect(container.querySelector("svg, iframe, img")).toBeNull();
   });
 
