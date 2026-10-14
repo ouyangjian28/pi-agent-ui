@@ -22,6 +22,7 @@ import { WriteComposer } from "./write-composer";
 import { LiveStreamView } from "./live-stream";
 import { UiDialog } from "./ui-dialog";
 import { MarkdownView } from "./markdown-view";
+import { CopyReply } from "./copy-reply";
 import type { WriteClientSurface } from "../ws/write-client";
 import type { EntryBlock, EntryFrame, HistoryEvent, LiveEvent } from "@pi-agent-ui/protocol/src/contracts";
 
@@ -68,6 +69,16 @@ type ExpansionState =
   | { readonly status: "loading" }
   | { readonly status: "ok"; readonly frame: EntryFrame }
   | { readonly status: "error"; readonly message: string };
+
+/** Ordered public text blocks, byte-for-byte: do not invent separators or use
+ * the sanitized preview. A partial frame is never a complete-copy source. */
+function publicReplyText(frame: EntryFrame): string {
+  const blocks = frame.blocks.filter((block) => block.kind === "text");
+  if (frame.state !== "ok" || blocks.length === 0 || blocks.some((block) => block.truncatedAt !== undefined)) {
+    throw new Error("Complete public text unavailable");
+  }
+  return blocks.map((block) => block.text).join("");
+}
 
 function kbOf(bytes: number): string {
   return (bytes / 1024).toFixed(1);
@@ -147,7 +158,7 @@ function HistoryRow({
   event: HistoryEvent;
   /** D4 批③：本条目的展开态（null=未展开）。 */
   expansion?: ExpansionState | null;
-  onExpand?: ((event: MessageHistoryEvent) => void) | null;
+  onExpand?: ((event: MessageHistoryEvent) => Promise<EntryFrame | null>) | null;
 }) {
   const detail =
     event.kind === "message"
@@ -180,6 +191,13 @@ function HistoryRow({
         </span>
       ) : null}
       {expansion?.status === "ok" ? <ExpandedEntry frame={expansion.frame} /> : null}
+      {event.kind === "message" && event.role === "assistant" && event.final === true ? (
+        <CopyReply text={null} loadText={async () => {
+          const frame = expansion?.status === "ok" ? expansion.frame : await onExpand?.(event);
+          if (!frame) throw new Error("Full entry unavailable");
+          return publicReplyText(frame);
+        }} />
+      ) : null}
     </li>
   );
 }
@@ -251,20 +269,27 @@ export function SessionDetail({
     if (view.status === "stopped" || view.status === "resync-needed") setExpansions(new Map());
   }, [view.status]);
   const onExpand = React.useCallback(
-    (event: MessageHistoryEvent) => {
-      if (file === null) return;
+    async (event: MessageHistoryEvent): Promise<EntryFrame | null> => {
+      if (file === null) return null;
       const entryId = event.entryId;
       setExpansions((prev) => new Map(prev).set(entryId, { status: "loading" }));
-      void client.expandEntry(file, entryId).then((result) => {
+      try {
+        const result = await client.expandEntry(file, entryId);
         // GLM 审批③ P3-2 修复：换 file 后旧 promise 迟到回包不写入新 file 的缓存（旧 entryId 跨文件可重合，
         // 错位写入会把 A 文件的错误/全文显示在 B 文件同 id 条目上）。fileRef 随 [file] effect 同步换代。
-        if (fileRef.current !== file || generationRef.current !== generationKey) return;
+        if (fileRef.current !== file || generationRef.current !== generationKey) return null;
         setExpansions((prev) => {
           const next = new Map(prev);
           next.set(entryId, result.ok ? { status: "ok", frame: result.frame } : { status: "error", message: result.message });
           return next;
         });
-      });
+        return result.ok ? result.frame : null;
+      } catch {
+        if (fileRef.current === file && generationRef.current === generationKey) {
+          setExpansions((prev) => new Map(prev).set(entryId, { status: "error", message: "全文获取失败，请重试" }));
+        }
+        return null;
+      }
     },
     [client, file, generationKey],
   );
@@ -361,7 +386,7 @@ export function SessionDetail({
         <ol className="history-list" aria-label="历史事件">
           {view.events.filter((event) => event.kind === "message" && (event.role === "user" || event.role === "assistant")).map((event) => (
             <HistoryRow
-              key={event.seq}
+              key={`${file}:${view.subscriptionId}:${event.seq}`}
               event={event}
               expansion={event.kind === "message" ? (expansions.get(event.entryId) ?? null) : null}
               onExpand={onExpand}

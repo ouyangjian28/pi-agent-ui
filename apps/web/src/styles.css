@@ -865,6 +865,12 @@ hr {
 .activity-row { margin-bottom: var(--sp-2); }
 .activity-row .row-title { font-size: 12px; }
 .entry-expand { font-size: 11px; min-height: 32px; padding: var(--sp-1) var(--sp-2); background: transparent; margin-top: var(--sp-2); }
+.reply-copy { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); min-width: 0; }
+.reply-copy-button { min-width: 44px; min-height: 44px; font-size: 12px; flex-shrink: 0; }
+.reply-copy-status, .reply-copy-error { font-size: 12px; overflow-wrap: anywhere; }
+.reply-copy-status { color: var(--c-muted); }
+.reply-copy-error { color: var(--c-err); }
+.reply-copy .reply-copy-source { flex-basis: 100%; width: 100%; min-width: 0; height: 160px; resize: vertical; white-space: pre; overflow: auto; color: var(--c-fg); background: var(--c-panel); border: 1px solid var(--c-border); border-radius: var(--r-sm); padding: var(--sp-2); font-family: var(--font-mono); }
 @media (max-width: 767px) { .chat-message { font-size: 14px; } .chat-user { margin-left: var(--sp-5); } }
 
 /* R1 真聊天壳：订阅生命周期不由这些可见性规则控制。演示壳不受影响。 */

@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { HistoryEvent, LiveEvent } from "@pi-agent-ui/protocol/src/contracts";
 import { MarkdownView } from "./markdown-view";
+import { CopyReply } from "./copy-reply";
 // LS-MD-3：沿用 rAF 合帧；MarkdownView 在解析前限字符/行数，另限扫描/元素预算。
 // 它已有 React.memo，定格条目的 text 不变时不重复解析；重新展开只做一次有界解析。
 // 不另建全文缓存或逐 token 解析路径，避免扩大生命周期与清理语义。
@@ -48,7 +49,7 @@ export function LiveStreamView({ liveEvents, historyEvents: _historyEvents, gene
       return <article className="live-final chat-message chat-assistant" key={reply.id}>
         <small className="message-author">pi · 已生成（未确认入档）</small>
         {reply.collapsed && <button type="button" className="frozen-summary" aria-expanded={expanded} onClick={() => setOpened((old) => { const next = new Set(old); if (next.has(reply.id)) next.delete(reply.id); else next.add(reply.id); return next; })}>已生成 · {reply.text.slice(0, 40) || "空正文"}{reply.text.length > 40 ? "…" : ""}</button>}
-        {expanded && <div className="frozen-content"><div className="live-stream-text"><MarkdownView text={reply.text || "（空正文）"} /></div>{reply.thinking && <details><summary>思考过程</summary><p>{reply.thinking}</p></details>}</div>}
+        {expanded && <div className="frozen-content"><div className="live-stream-text"><MarkdownView text={reply.text || "（空正文）"} /></div>{reply.thinking && <details><summary>思考过程</summary><p>{reply.thinking}</p></details>}<CopyReply text={reply.text} /></div>}
       </article>;
     })}
     {display.text !== "" && <article className="chat-message chat-assistant"><small className="message-author">pi · 生成中</small><div className="live-stream-text"><MarkdownView text={display.text} /></div></article>}
