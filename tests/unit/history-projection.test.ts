@@ -23,6 +23,22 @@ function clearLine(): string {
 }
 
 describe("journalToScanRows（3b-2a 投影；R5 严格 schema）", () => {
+  // v1.7-fix 回归：writer 行（契约合法控制行，writer-oath 每次 boot 必写）不得误归 journal-corrupt——
+  // 生产事故：客户正常新会话首轮快照必带 journal-corrupt → UI「历史损坏」误报（复现=客户会话 auto-20261014-123136）。
+  it("writer→journal-writer 控制事件（不判坏、不触发告警词表）", () => {
+    const oath = JSON.stringify({ t: "writer", epoch: 1, bootId: "71c7da80-140c-42ea-a9dc-b66983bc0349", at: "2026-10-14T04:31:57.722Z" });
+    const rows = journalToScanRows(`${oath}\n${enqueueLine(1, "hello", 7)}\n${simple("sending", { intentId: "i-1" })}\n${simple("settled", { intentId: "i-1" })}\n`);
+    expect(rows.map((r) => r.event.kind)).toEqual(["journal-writer", "turn-enqueued", "sending", "verdict-settled"]);
+    const w = rows[0].event as Extract<import("@pi-agent-ui/protocol").HistoryEvent, { kind: "journal-writer" }>;
+    expect(w.writerEpoch).toBe(1);
+    expect(w.writerBootId).toBe("71c7da80-140c-42ea-a9dc-b66983bc0349");
+    expect(rows.some((r) => r.event.kind === "journal-corrupt")).toBe(false);
+  });
+  it("真坏行仍判 journal-corrupt（负例保护：writer 修复不得殃及坏行判坏）", () => {
+    const rows = journalToScanRows(`{"t":"writer-bogus","x":1}\n`);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].event.kind).toBe("journal-corrupt");
+  });
   it("enqueue→turn-enqueued（preview/ordinal/generation/intentId/locator 全链）", () => {
     const rows = journalToScanRows(`${enqueueLine(1, "hello", 7)}\n`);
     expect(rows).toHaveLength(1);

@@ -102,7 +102,7 @@ describe("SessionList 四空态与列表渲染", () => {
     expect(screen.getByRole("alert").textContent).toContain("认证失败");
   });
 
-  it("closed：连接关闭终态提示，且不声称自动重连", () => {
+  it("closed：连接关闭事实仍可见，恢复归顶部明细", () => {
     mount(new StubClient(snapOf({ state: "closed" })));
     expect(screen.getByRole("alert").textContent).toContain("连接已关闭");
   });
@@ -120,7 +120,9 @@ describe("SessionList 四空态与列表渲染", () => {
     };
     mount(new StubClient(snapOf({ state: "ready", sessions: [dto], total: 1, listVersion: 3 })));
     expect(screen.getByText("搭建会话工作台…")).toBeTruthy();
-    expect(screen.getByText(/a\.jsonl · 12 条/)).toBeTruthy();
+    expect(screen.getByText("12 条消息")).toBeTruthy();
+    expect(screen.getByText("已载 1 / 共 1")).toBeTruthy();
+    expect(screen.queryByText(/a\.jsonl/)).toBeNull(); // 原始定位键不占用户列表副标题
   });
 
   it("快照推进驱动重渲染（loading→ready 空列表）", () => {

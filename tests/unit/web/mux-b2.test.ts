@@ -10,6 +10,7 @@ import { act, cleanup, render } from "@testing-library/react";
 afterEach(cleanup);
 import { fireEvent } from "@testing-library/react";
 import { WsClient } from "../../../apps/web/src/ws/ws-client";
+import { READY_WRITE_SNAPSHOT } from "./r1-write-fixture";
 
 const WELCOME = { t: "welcome", serverBootId: "boot-1", serverBuildId: "b", protocolVersion: 1 } as const;
 const ROOTS = ["/journal", "/home/yyj/ai"];
@@ -115,7 +116,7 @@ describe("M-UX 批2 D05 数据域：M1 卸载后迟到回包照常入缓存（R2
       sendPrompt: () => Promise.resolve({ kind: "launched" }),
       getNotReady: () => null,
       subscribe: client.subscribe as never,
-      getSnapshot: () => ({ connState: "ready" }),
+      getSnapshot: () => READY_WRITE_SNAPSHOT,
     };
     const mk = () => React.createElement(NewSession, {
       wsClient: client, // 真 WsClient：挂载 effect 真发 get-roots（写连接 ready 即发）
@@ -157,7 +158,7 @@ describe("批3 D05 页面等待域退役：目录减法（B4 改造）", () => {
       sendPrompt: () => Promise.resolve({ kind: "launched" }),
       getNotReady: () => null,
       subscribe: snap.subscribe as never,
-      getSnapshot: () => ({ connState: "ready" }),
+      getSnapshot: () => READY_WRITE_SNAPSHOT,
     };
     const el = React.createElement(NewSession, {
       wsClient: { requestModels: () => {}, requestRoots: () => {}, subscribe: snap.subscribe as never, getSnapshot: snap.getSnapshot as never },
@@ -173,7 +174,7 @@ describe("批3 D05 页面等待域退役：目录减法（B4 改造）", () => {
     expect(screen.queryByText(/拉取超时/)).toBeNull();
     // 直接可创建：填首条消息→钮可点（roots 状态完全不阻塞）
     fireEvent.change(screen.getByRole("textbox", { name: "首条消息" }), { target: { value: "hi" } });
-    const btn = screen.getByRole("button", { name: "创建会话" });
+    const btn = screen.getByRole("button", { name: "发送并开始对话" });
     expect((btn as HTMLButtonElement).disabled).toBe(false);
   });
 
@@ -196,7 +197,7 @@ describe("批3 D05 页面等待域退役：目录减法（B4 改造）", () => {
       sendPrompt: () => Promise.resolve({ kind: "launched" }),
       getNotReady: () => null,
       subscribe: snap.subscribe as never,
-      getSnapshot: () => ({ connState: "ready" }),
+      getSnapshot: () => READY_WRITE_SNAPSHOT,
     };
     const el = React.createElement(NewSession, {
       wsClient: { requestModels: () => {}, requestRoots: () => { rootsCalls++; }, subscribe: snap.subscribe as never, getSnapshot: snap.getSnapshot as never },
@@ -233,7 +234,7 @@ async function renderNewSession(
     sendPrompt: sendPromptImpl,
     getNotReady: () => null,
     subscribe: (cb: () => void) => { listeners.add(cb); return () => { listeners.delete(cb); }; },
-    getSnapshot: () => ({ connState: "ready" }),
+    getSnapshot: () => READY_WRITE_SNAPSHOT,
   };
   const wsStub = {
     requestModels: () => {},
@@ -258,7 +259,7 @@ describe("M-UX 批2b D04 模型选择域守卫（B3）", () => {
     let snapNow: Record<string, unknown> = { state: "ready", models: modelsNow, roots: { status: "ok", items: ["/r", "/home/yyj/ai"], journalRoot: null, cause: null } };
     const { fireEvent, screen, act } = await renderNewSession(listeners, () => snapNow);
     fireEvent.change(screen.getByRole("textbox", { name: "模型 id 直达" }), { target: { value: "!!!非法!!!" } });
-    expect(screen.getByText("模型标识非法")).toBeTruthy(); // 非法即时提示
+    expect(screen.getByText(/模型标识非法/)).toBeTruthy(); // 非法即时提示
     expect(screen.getByText(/自定义：!!!非法!!!/)).toBeTruthy(); // 意图冻结：草稿不被冲掉
     // 清单到达（ok）：用户草稿仍保留（意图门）
     modelsNow = { status: "ok", items: [{ provider: "p", id: "m1", context: "8k" }], cause: null };
@@ -273,7 +274,7 @@ describe("M-UX 批2b D04 模型选择域守卫（B3）", () => {
     expect(screen.getByText(/自定义：!!!非法!!!/)).toBeTruthy();
     // 清空草稿：回已确认选择（默认），非 custom 态清空不动 activeSelection
     fireEvent.change(screen.getByRole("textbox", { name: "模型 id 直达" }), { target: { value: "" } });
-    expect(screen.queryByText(/自定义/)).toBeNull();
+    expect(screen.queryByText(/自定义：/)).toBeNull();
     expect((screen.getByRole("combobox", { name: "模型选择" }) as HTMLSelectElement).value).toBe("__default__");
   });
 
@@ -334,7 +335,7 @@ describe("M-UX 批2b D04 模型选择域守卫（B3）", () => {
     });
     // 默认态（不选模型）填首条消息→创建→not-ready
     fireEvent.change(screen.getByRole("textbox", { name: "首条消息" }), { target: { value: "hi" } });
-    fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
+    fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" }));
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(sentModel).toBeUndefined(); // 发送未指定模型
     const note = screen.getByRole("note");

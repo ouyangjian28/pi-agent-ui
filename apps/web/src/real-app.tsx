@@ -4,7 +4,13 @@
 //（1s/2s/4s…≤0s 封顶，永续）；重连后 welcome→自动拉清单/订阅/写面全自恢复。认证失败（4401）不重连。
 // 认证失败（任一客户端 errorKind=auth-failed）→受控错误面+「清除 token 重输」（清 localStorage 回输入面）。
 import React, { useEffect, useState, useSyncExternalStore } from "react";
-import { NewSession } from "./components/new-session";
+import { WriteComposer } from "./components/write-composer";
+import { HealthDot } from "./components/health-dot";
+import { ConversationHeader } from "./components/conversation-header";
+import { ConversationState } from "./ws/conversation-state";
+import { autoFile, readLastModel, writeLastModel, MODEL_DEFAULT, effectiveModel, isPersistableModel } from "./ws/draft-model";
+import { useSessionDetail } from "./ws/use-session-detail";
+import { useConversationLifetime } from "./ws/use-conversation-lifetime";
 import { SessionDetail } from "./components/session-detail";
 import { SessionList } from "./components/session-list";
 import { ThemeToggle } from "./components/theme-toggle";
@@ -22,14 +28,6 @@ import type { AppClients } from "./ws/app-clients";
 import type { WebSocketFactory } from "./ws/ws-client";
 
 type ConnState = "connecting" | "authenticating" | "ready" | "closed" | "error";
-
-const CONN_LABEL: Record<ConnState, string> = {
-  connecting: "连接中",
-  authenticating: "认证中",
-  ready: "已连接",
-  closed: "已断开",
-  error: "连接错误",
-};
 
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
@@ -50,8 +48,9 @@ export function RealApp({ createSocket }: RealAppProps) {
     nextDelayMs: null,
   });
   const [reconnectUi, setReconnectUi] = useState<{ attempts: number; nextInMs: number } | null>(null);
-  // 选中会话留在 RealApp：重连（重建三件套）后选择不丢
-  const [file, setFile] = useState<string | null>(null);
+  const clientsRef = React.useRef<AppClients | null>(null);
+  const [owner] = useState(() => new ConversationState(() => clientsRef.current?.wsClient.requestSessions()));
+  useConversationLifetime(owner);
   // B1：当前连接目标为跨源（dev 覆盖）时为真——拒绝面接管（不拨线+明白提示）
   const [untrustedTarget, setUntrustedTarget] = useState(false);
   const [untrustedUrl, setUntrustedUrl] = useState<string | null>(null);
@@ -85,12 +84,14 @@ export function RealApp({ createSocket }: RealAppProps) {
     }
     setUntrustedUrl(null);
     const created = createAppClients({ url, token, createSocket });
+    clientsRef.current = created;
+    owner.setClient(created.writeClient);
     setClients(created);
     return () => {
-      setClients(null);
+      // 保持呈现 owner 挂载到新 client 替换；不以 clients=null 闪断整棵编辑器。
       created.dispose();
     };
-  }, [token, retryNonce, createSocket]);
+  }, [token, retryNonce, createSocket, owner]);
 
   // 选项 A：「改连本站默认」= 清 ?server=（保留 pathname/其余参数/hash/state）后重试拨线。
   // B3（GPT r2）：目标 URL 必须显式含 pathname——空串/纯 hash 是相对引用，会原样保留原 query，
@@ -193,8 +194,7 @@ export function RealApp({ createSocket }: RealAppProps) {
   return (
     <ConnectedApp
       clients={clients}
-      file={file}
-      onSelectFile={setFile}
+      owner={owner}
       onRetry={reconnectNow}
       onConnDown={handleConnDown}
       reconnectUi={reconnectUi}
@@ -208,16 +208,14 @@ export function RealApp({ createSocket }: RealAppProps) {
 
 function ConnectedApp({
   clients,
-  file,
-  onSelectFile,
+  owner,
   onRetry,
   onConnDown,
   reconnectUi,
   onClearToken,
 }: {
   clients: AppClients;
-  file: string | null;
-  onSelectFile: (file: string) => void;
+  owner: ConversationState;
   onRetry: () => void;
   onConnDown: (down: boolean) => void;
   reconnectUi: { attempts: number; nextInMs: number } | null;
@@ -226,9 +224,69 @@ function ConnectedApp({
   const wsSnap = useSyncExternalStore(clients.wsClient.subscribe, clients.wsClient.getSnapshot);
   const subSnap = useSyncExternalStore(clients.subscribeClient.subscribe, clients.subscribeClient.getSnapshot);
   const writeSnap = useSyncExternalStore(clients.writeClient.subscribe, clients.writeClient.getSnapshot);
-  // M-OPS（v1.4）新建态：newSession=true 时右栏切 NewSession（不挂 SessionDetail——未建 file 不
-  // subscribe，避免 4402 门；首 prompt launched 后切回正常详情）。
-  const [newSession, setNewSession] = React.useState(false);
+  const ui = useSyncExternalStore(owner.subscribe, owner.getSnapshot);
+  const file = ui.activeFile;
+  // 唯一订阅 owner：隐藏/返回不改变 file，本钩子只在真换目标或 client 时清旧。
+  const detail = useSessionDetail(clients.subscribeClient, file);
+  const isNew = ui.view.kind === "draft" || file === null;
+  const slot = ui.view.kind === "draft" ? ui.drafts.get(ui.view.id) ?? null : file ? ui.sessions.get(`session:${file}`) ?? null : null;
+  const pendingQuestions = detail.uiRequests.length > 0;
+  const allowLeave = (): boolean => !pendingQuestions || window.confirm("当前对话仍有待回答的问题。切换会话将退订，并可能取消待答。确定离开吗？");
+  const newDraft = (): string | null => {
+    if (!owner.canCreate || !allowLeave()) return null;
+    return owner.create(autoFile(), readLastModel() ?? MODEL_DEFAULT);
+  };
+  const select = (target: string): void => { if (target === file || allowLeave()) owner.open(target); };
+  const restore = (id: string): void => { if (allowLeave()) owner.restore(id); };
+  // 呈现与恢复入口共用同一集合；不删除已受理草稿或它的发送身份。
+  const recoverableDrafts = [...ui.drafts.values()].filter((draft) =>
+    draft.operation !== null &&
+    (draft.phase !== "settled-launched" || !wsSnap.sessions?.some((session) => session.file === draft.file)),
+  );
+  const ensureDraft = (): string | null => slot?.id ?? newDraft();
+  const [narrow, setNarrow] = useState(() => window.matchMedia?.("(max-width: 767px)").matches ?? false);
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(max-width: 767px)");
+    const change = () => setNarrow(media.matches);
+    media.addEventListener("change", change); change();
+    return () => media.removeEventListener("change", change);
+  }, []);
+  const mainRef = React.useRef<HTMLElement>(null);
+  const navRef = React.useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (narrow && ui.view.kind === "list") {
+      navRef.current?.querySelector<HTMLButtonElement>('[aria-current="page"]')?.focus();
+    } else if (!mainRef.current?.contains(document.activeElement) && ui.view.kind !== "list") {
+      mainRef.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+    }
+  }, [narrow, ui.view.kind]);
+  const messageScroll = React.useRef<HTMLDivElement>(null);
+  const nearBottom = React.useRef(true);
+  const scrollPositions = React.useRef(new Map<string, { top: number; follow: boolean }>());
+  React.useLayoutEffect(() => {
+    const element = messageScroll.current;
+    if (!element || !file) return;
+    const saved = scrollPositions.current.get(file);
+    nearBottom.current = saved?.follow ?? true;
+    if (saved && !saved.follow) element.scrollTop = saved.top;
+    else element.scrollTop = element.scrollHeight;
+  }, [file, narrow, ui.view.kind]);
+  React.useLayoutEffect(() => {
+    const element = messageScroll.current;
+    if (element && nearBottom.current) element.scrollTop = element.scrollHeight;
+  }, [detail.events, detail.liveEvents, detail.uiRequests]);
+  useEffect(() => {
+    const element = messageScroll.current;
+    if (!element) return;
+    // rAF 直播提交发生在父 layout effect 之后；观察真实 DOM 尺寸内容变更才跟随。
+    const observer = new MutationObserver(() => {
+      if (nearBottom.current) element.scrollTop = element.scrollHeight;
+    });
+    observer.observe(element, { childList: true, characterData: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
+  const title = isNew ? "新对话" : resolveTitle(wsSnap.sessions?.find((session) => session.file === file) ?? { file: file!, title: { text: "", truncated: false } });
 
   const authFailed =
     wsSnap.errorKind === "auth-failed" ||
@@ -259,75 +317,50 @@ function ConnectedApp({
   }
 
   return (
-    <div className="app">
+    <div className="app real-app" data-view={ui.view.kind}>
       <header className="topbar">
-        <strong>
-          <span className="brand">π</span> pi 工作台
-        </strong>
-        <ThemeToggle />
+        <strong><span className="brand">π</span> <span>pi agent</span></strong>
+        <div className="topbar-actions"><HealthDot states={states} onReconnect={onRetry} reconnect={reconnectUi} /><ThemeToggle /></div>
       </header>
-      <div className="connbar" role="status" aria-live="polite">
-        <span>列表：{CONN_LABEL[wsSnap.state]}</span>
-        <span>订阅：{CONN_LABEL[subSnap.connState]}</span>
-        <span>写：{CONN_LABEL[writeSnap.connState]}</span>
-        {reconnectUi !== null && (
-          <span className="reconnect-note">
-            自动重连中…（第 {reconnectUi.attempts} 次，约 {Math.round(reconnectUi.nextInMs / 1000)} 秒后）
-          </span>
-        )}
-        {anyDown && (
-          <button type="button" onClick={onRetry}>
-            立即重连
-          </button>
-        )}
-      </div>
       <div className="workspace two-col">
-        <nav className="session-panel" aria-label="会话列表">
+        <nav ref={navRef} className="session-panel" aria-label="会话列表" inert={narrow && ui.view.kind !== "list"}>
           <div className="panel-heading">
             <h1>会话</h1>
             <div className="panel-actions">
               <button type="button" className="refresh" onClick={() => clients.wsClient.requestSessions()}>
                 刷新
               </button>
-              <button type="button" className="new-session-btn" onClick={() => setNewSession(true)}>
-                ＋新建
+              <button type="button" className="new-session-btn" disabled={!owner.canCreate} onClick={() => { newDraft(); }}>
+                ＋新对话
               </button>
             </div>
           </div>
-          <SessionList client={clients.wsClient} selectedFile={file} onSelect={onSelectFile} />
+          <SessionList client={clients.wsClient} selectedFile={file} onSelect={select} />
+          {pendingQuestions && file && <div className="pending-answer-inline" role="status"><p>当前对话有待回答的问题。</p><button type="button" onClick={() => owner.open(file)}>回到待答对话</button></div>}
+          {recoverableDrafts.length > 0 && <section className="unfinished-drafts" aria-label="未完成草稿"><h3>未完成草稿</h3>{recoverableDrafts.map((draft) => <button key={draft.id} type="button" onClick={() => restore(draft.id)}>{draft.phase === "settled-launched" ? "打开已受理对话" : draft.phase === "settled-unknown" ? "找回结果未知的草稿" : draft.operation?.pending ? "找回发送中的草稿" : "找回未发送成功的草稿"}<small>{draft.operation?.text.slice(0, 40)}</small></button>)}</section>}
         </nav>
-        <main className="conversation" aria-label="当前会话">
-          {newSession ? (
-            <NewSession
-              wsClient={clients.wsClient}
-              writeClient={clients.writeClient}
-              onLaunched={(f) => {
-                setNewSession(false);
-                onSelectFile(f);
-                clients.wsClient.requestSessions(); // M-UX D02：launched 后自动补拉列表（首 user 可能晚落盘；dirty 合并在途不丢）
-              }}
-              onCancel={() => setNewSession(false)}
-            />
-          ) : file === null ? (
-            <div className="welcome">
-              <span className="welcome-mark">π</span>
-              <h1>选择会话开始</h1>
-              <p>从左侧列表选择一个会话文件，或点「＋新建」创建新会话。</p>
-            </div>
-          ) : (
-            <SessionDetail
-              client={clients.subscribeClient}
-              file={file}
-              writeClient={clients.writeClient}
-              title={(() => {
-                // M-UX 批1修复 P1-02：详情标题与列表同源（resolveTitle 唯一真值源）；
-                // DTO 缺席（列表未含/新建后未拉到）用同一解析器对 file 派生回退，不另算一份。
-                const sessions = wsSnap.sessions ?? [];
-                const dto = sessions.find((s) => s.file === file);
-                return resolveTitle(dto ?? { file, title: { text: "", truncated: false } });
-              })()}
-            />
-          )}
+        <main ref={mainRef} className={`conversation ${isNew ? "conversation-new" : ""}`} aria-label="当前会话" inert={narrow && ui.view.kind === "list"}>
+          <ConversationHeader title={title} isNew={isNew} onBack={() => owner.back()} onNew={() => { newDraft(); }} canCreate={owner.canCreate} status={!isNew ? detail.statusSummary?.turn : undefined} />
+          <div ref={messageScroll} className="conversation-body" onScroll={(event) => {
+            const element = event.currentTarget;
+            nearBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight <= 64;
+            if (file) scrollPositions.current.set(file, { top: element.scrollTop, follow: nearBottom.current });
+          }}>
+            {isNew ? <div className="welcome"><span className="welcome-mark">π</span><h1>从一个想法开始</h1><p>从左侧继续或直接开始新对话</p></div> : <SessionDetail managed client={clients.subscribeClient} file={file} title={title} />}
+          </div>
+          <WriteComposer client={clients.writeClient} file={slot?.file ?? null} editor={{
+            slot, source: clients.wsClient, isNew, defaultChoice: readLastModel() ?? MODEL_DEFAULT,
+            onEdit: (text) => { const id = ensureDraft(); if (id) owner.edit(id, text); },
+            onConfigure: (choice, text) => { if (!isPersistableModel(choice)) return; const id = ensureDraft(); if (id) owner.configure(id, choice, text); },
+            onCancel: () => owner.back(),
+            onViewTarget: () => { if (slot && allowLeave()) owner.open(slot.file); },
+            onSend: (confirmed) => {
+              if (!slot) return Promise.resolve({ status: "local", kind: "local-invalid", message: "请输入消息。" });
+              const model = isNew ? effectiveModel(slot.modelChoice, slot.freeText) : undefined;
+              if (isNew) writeLastModel(model ?? MODEL_DEFAULT);
+              return owner.send(slot.id, model, confirmed);
+            },
+          }} />
         </main>
       </div>
     </div>

@@ -1,0 +1,11 @@
+--- a/apps/web/src/ws/ws-client.ts
++++ b/apps/web/src/ws/ws-client.ts
+@@ -474,7 +474,7 @@
+         const sessions = [...accumulated.values()].sort((a, b) => (b.lastActiveMs ?? -Infinity) - (a.lastActiveMs ?? -Infinity) || a.file.localeCompare(b.file));
+         const noProgress = frame.hasMore && frame.sessions.length === 0;
+         this.transition({ sessions, total: frame.total, listVersion: frame.listVersion, hasMore: frame.hasMore,
+-          nextOffset: frame.offset + frame.sessions.length,
++          nextOffset: sessions.length,
+           listReliability: frame.listReliability === "partial" || (this.listOffset > 0 && this.snapshot.listReliability === "partial") ? "partial" : "full",
+           pageState: noProgress ? "error" : "idle", pageError: noProgress ? "列表分页暂未前进，可重试或刷新。" : null });
+         return;

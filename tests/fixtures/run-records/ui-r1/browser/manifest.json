@@ -1,0 +1,1431 @@
+{
+  "sourceCommit": "496b1430716502af2a45ac04005095c932f64fef",
+  "createdAt": "2026-09-30T19:15:32.662Z",
+  "build": "assets/index-B8u0pu9k.js",
+  "policy": {
+    "entry": "AppRoot→RealApp",
+    "demo": false,
+    "fakeSocket": true,
+    "productionTokenUsed": false
+  },
+  "evidence": [
+    {
+      "width": 390,
+      "theme": "light",
+      "scene": "welcome",
+      "path": "/tmp/ui-r1-evidence/release/browser/390-light-welcome.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "首条消息",
+          "top": 550.3125,
+          "bottom": 655.875
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "scene": "conversation",
+      "path": "/tmp/ui-r1-evidence/release/browser/390-light-conversation.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 593.4375,
+          "bottom": 699
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "scene": "live",
+      "path": "/tmp/ui-r1-evidence/release/browser/390-light-live.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 593.4375,
+          "bottom": 699
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "scene": "question",
+      "path": "/tmp/ui-r1-evidence/release/browser/390-light-question.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 593.4375,
+          "bottom": 699
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "scene": "refused",
+      "path": "/tmp/ui-r1-evidence/release/browser/390-light-refused.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 593.4375,
+          "bottom": 699
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "scene": "unknown",
+      "path": "/tmp/ui-r1-evidence/release/browser/390-light-unknown.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 593.4375,
+          "bottom": 699
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "scene": "health",
+      "path": "/tmp/ui-r1-evidence/release/browser/390-light-health.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 593.4375,
+          "bottom": 699
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "scene": "disconnected",
+      "path": "/tmp/ui-r1-evidence/release/browser/390-light-disconnected.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 593.4375,
+          "bottom": 699
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "theme": "dark",
+      "scene": "welcome",
+      "path": "/tmp/ui-r1-evidence/release/browser/390-dark-welcome.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "首条消息",
+          "top": 550.3125,
+          "bottom": 655.875
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "theme": "dark",
+      "scene": "conversation",
+      "path": "/tmp/ui-r1-evidence/release/browser/390-dark-conversation.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 593.4375,
+          "bottom": 699
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "theme": "dark",
+      "scene": "live",
+      "path": "/tmp/ui-r1-evidence/release/browser/390-dark-live.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 593.4375,
+          "bottom": 699
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "theme": "dark",
+      "scene": "question",
+      "path": "/tmp/ui-r1-evidence/release/browser/390-dark-question.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 593.4375,
+          "bottom": 699
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "theme": "dark",
+      "scene": "refused",
+      "path": "/tmp/ui-r1-evidence/release/browser/390-dark-refused.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 593.4375,
+          "bottom": 699
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "theme": "dark",
+      "scene": "unknown",
+      "path": "/tmp/ui-r1-evidence/release/browser/390-dark-unknown.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 593.4375,
+          "bottom": 699
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "theme": "dark",
+      "scene": "health",
+      "path": "/tmp/ui-r1-evidence/release/browser/390-dark-health.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 593.4375,
+          "bottom": 699
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "theme": "dark",
+      "scene": "disconnected",
+      "path": "/tmp/ui-r1-evidence/release/browser/390-dark-disconnected.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 593.4375,
+          "bottom": 699
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "theme": "light",
+      "scene": "welcome",
+      "path": "/tmp/ui-r1-evidence/release/browser/1280-light-welcome.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "首条消息",
+          "top": 563.65625,
+          "bottom": 664.15625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "theme": "light",
+      "scene": "conversation",
+      "path": "/tmp/ui-r1-evidence/release/browser/1280-light-conversation.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 582.5,
+          "bottom": 683
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "theme": "light",
+      "scene": "live",
+      "path": "/tmp/ui-r1-evidence/release/browser/1280-light-live.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 582.5,
+          "bottom": 683
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "theme": "light",
+      "scene": "question",
+      "path": "/tmp/ui-r1-evidence/release/browser/1280-light-question.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 582.5,
+          "bottom": 683
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "theme": "light",
+      "scene": "refused",
+      "path": "/tmp/ui-r1-evidence/release/browser/1280-light-refused.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 582.5,
+          "bottom": 683
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "theme": "light",
+      "scene": "unknown",
+      "path": "/tmp/ui-r1-evidence/release/browser/1280-light-unknown.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 582.5,
+          "bottom": 683
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "theme": "light",
+      "scene": "health",
+      "path": "/tmp/ui-r1-evidence/release/browser/1280-light-health.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 582.5,
+          "bottom": 683
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "theme": "light",
+      "scene": "disconnected",
+      "path": "/tmp/ui-r1-evidence/release/browser/1280-light-disconnected.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 582.5,
+          "bottom": 683
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "scene": "browser-behaviors",
+      "readerTop": 0,
+      "viewport": "390×420（缩短视口模拟，不冒充真手机软键盘）",
+      "composerPreserved": true,
+      "businessFrameDelta": 0,
+      "sendHit": true,
+      "imePromptCount": 0,
+      "errors": []
+    },
+    {
+      "width": 1280,
+      "theme": "dark",
+      "scene": "welcome",
+      "path": "/tmp/ui-r1-evidence/release/browser/1280-dark-welcome.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "首条消息",
+          "top": 563.65625,
+          "bottom": 664.15625
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "theme": "dark",
+      "scene": "conversation",
+      "path": "/tmp/ui-r1-evidence/release/browser/1280-dark-conversation.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 582.5,
+          "bottom": 683
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "theme": "dark",
+      "scene": "live",
+      "path": "/tmp/ui-r1-evidence/release/browser/1280-dark-live.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 582.5,
+          "bottom": 683
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "theme": "dark",
+      "scene": "question",
+      "path": "/tmp/ui-r1-evidence/release/browser/1280-dark-question.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 582.5,
+          "bottom": 683
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "theme": "dark",
+      "scene": "refused",
+      "path": "/tmp/ui-r1-evidence/release/browser/1280-dark-refused.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 582.5,
+          "bottom": 683
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "theme": "dark",
+      "scene": "unknown",
+      "path": "/tmp/ui-r1-evidence/release/browser/1280-dark-unknown.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 582.5,
+          "bottom": 683
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "theme": "dark",
+      "scene": "health",
+      "path": "/tmp/ui-r1-evidence/release/browser/1280-dark-health.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 582.5,
+          "bottom": 683
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    },
+    {
+      "width": 1280,
+      "theme": "dark",
+      "scene": "disconnected",
+      "path": "/tmp/ui-r1-evidence/release/browser/1280-dark-disconnected.png",
+      "entry": "AppRoot→RealApp（无 demo）",
+      "url": "http://127.0.0.1:32871/",
+      "errors": [],
+      "overflowPx": 0,
+      "textareas": [
+        {
+          "label": "写入消息内容",
+          "top": 582.5,
+          "bottom": 683
+        }
+      ],
+      "frames": [
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "hello"
+        },
+        {
+          "t": "list-sessions"
+        },
+        {
+          "t": "get-models"
+        },
+        {
+          "t": "get-roots"
+        },
+        {
+          "t": "subscribe",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        },
+        {
+          "t": "prompt",
+          "file": "design.jsonl"
+        }
+      ]
+    }
+  ]
+}

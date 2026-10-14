@@ -37,6 +37,11 @@ export interface SessionsSnapshot {
   readonly sessions: readonly SessionSummaryDTO[] | null;
   readonly total: number;
   readonly listVersion: number | null;
+  readonly hasMore?: boolean;
+  readonly nextOffset?: number;
+  readonly listReliability?: "full" | "partial";
+  readonly pageState?: "idle" | "loading" | "error";
+  readonly pageError?: string | null;
   /** M-OPS（v1.4）模型清单面：idle=未请求/loading=在途/ok=清单/failed=空表+cause（服务端降级口径）。 */
   readonly models: ModelsState;
   /** v1.5（批A）授权根面：目录选择器数据源（get-roots 挂本 list 连接；首项=会话记录树非 cwd 候选）。 */
@@ -81,7 +86,7 @@ const defaultFactory: WebSocketFactory = (url) => {
 };
 
 /** list-sessions 请求 ID（§5.7 requestIdPattern=/^[\w-]{1,64}$/）。 */
-const LIST_REQUEST_ID = "list-sessions-1";
+const LIST_REQUEST_BASE = "list-sessions";
 /** M-OPS（v1.4）get-models 请求 ID（同 §5.7 pattern；清单面单请求，固定 id 即可）。 */
 const MODELS_REQUEST_ID = "get-models-1";
 /** v1.5（批A）get-roots 请求 ID 基座（M-UX 批2 D05：每次请求递增——身份核验用）。 */
@@ -96,6 +101,7 @@ const INITIAL: SessionsSnapshot = {
   sessions: null,
   total: 0,
   listVersion: null,
+  hasMore: false, nextOffset: 0, listReliability: "full", pageState: "idle", pageError: null,
   models: { status: "idle", items: [], cause: null },
   roots: { status: "idle", items: [], journalRoot: null, cause: null },
 };
@@ -253,6 +259,11 @@ export class WsClient {
   private snapshot: SessionsSnapshot = INITIAL;
   private readonly listeners = new Set<() => void>();
   private listRequestPending = false;
+  private listSeq = 0;
+  private listRequestId = "";
+  private listOffset = 0;
+  private listGeneration = 0;
+  private pendingListGeneration = 0;
   /** M-UX D02：刷新合并位——在途中再 requestSessions 记 dirty，结算后自动补拉（不静默丢刷新）。 */
   private listDirty = false;
   /** M-OPS（v1.4）：get-models 在途位（同 listRequestPending 语义；回帧/迟到零副作用）。 */
@@ -318,6 +329,7 @@ export class WsClient {
   requestSessions(): void {
     if (this.stopped) return;
     if (this.snapshot.state !== "ready") return;
+    this.listGeneration += 1; // 刷新=新请求世代；旧页可结算但不得并入
     if (this.listRequestPending) {
       this.listDirty = true;
       return;
@@ -325,17 +337,29 @@ export class WsClient {
     this.requestSessionsInternal();
   }
 
-  private requestSessionsInternal(): void {
+  /** 续页坐标按回帧 raw 页长，不按累计去重后条数。 */
+  requestMoreSessions(): void {
+    if (this.stopped || this.snapshot.state !== "ready" || this.listRequestPending || !this.snapshot.hasMore) return;
+    this.requestSessionsInternal(this.snapshot.nextOffset ?? 0);
+  }
+
+  private requestSessionsInternal(offset = 0): void {
     this.listRequestPending = true;
+    this.listOffset = offset;
+    this.pendingListGeneration = this.listGeneration;
+    this.listRequestId = `${LIST_REQUEST_BASE}-${++this.listSeq}`;
     // P2-01（GPT 审）：发帧失败（同步 throw/readyState 非 OPEN 静默丢弃）不得悬挂在途位。
     // R2：静默未发同回滚——sendFrame 返回 false（非 OPEN）与 throw 同口径。
     try {
-      if (!this.sendFrame({ t: "list-sessions", requestId: LIST_REQUEST_ID })) {
-        this.listRequestPending = false; // 未发出的请求不算在途；下一 refresh 重试
+      if (!this.sendFrame({ t: "list-sessions", requestId: this.listRequestId, ...(offset === 0 ? {} : { offset }) })) {
+        this.listRequestPending = false;
       }
     } catch {
       this.listRequestPending = false;
     }
+    // 首握手不多造 ready 前的通知；分页资源占位先于通知，同步重入安全。
+    if (this.snapshot.state === "ready" && this.listRequestPending) this.transition({ pageState: "loading", pageError: null });
+    else if (this.snapshot.state === "ready" && offset > 0) this.transition({ pageState: "error", pageError: "请求未发出，可重试加载更多。" });
   }
 
   /** M-OPS（v1.4）：请求模型清单（幂等：在途/已 ok 不重发；failed 可重发=用户新显式动作）。
@@ -429,17 +453,30 @@ export class WsClient {
         if (!this.listRequestPending) return;
         const frame = asSessionsFrame(parsed);
         // R1：形状/条目校验失败=未知帧零副作用——不消耗唯一在途请求；requestId 不符同忽略。
-        if (frame === null || frame.requestId !== LIST_REQUEST_ID) return;
+        if (frame === null || frame.requestId !== this.listRequestId) return;
         // P2-01（GPT 审）：先落地全部本地状态（清位+快照）再通知——同步回调重入时要么看到
         // pending=false 可发新请求，要么被在途位合并，不会双发；补拉在通知后按快照决策。
         const needRepull = this.listDirty;
         this.listDirty = false;
         this.listRequestPending = false;
-        this.transition({ sessions: frame.sessions, total: frame.total, listVersion: frame.listVersion });
-        // M-UX D02 dirty 合并：在途期间的刷新请求不丢——结算后自动补拉一次（回调已发新请求则让位）
-        if (needRepull && !this.listRequestPending) {
-          this.requestSessionsInternal();
+        if (needRepull || this.pendingListGeneration !== this.listGeneration) {
+          this.requestSessionsInternal(); // 丢旧请求世代，offset=0
+          return;
         }
+        if (this.listOffset > 0 && frame.listVersion !== this.snapshot.listVersion) {
+          this.listGeneration += 1;
+          this.requestSessionsInternal();
+          this.transition({ sessions: null, total: 0, listVersion: null, hasMore: false, nextOffset: 0, pageState: "loading", pageError: null });
+          return;
+        }
+        const accumulated = new Map((this.listOffset > 0 ? this.snapshot.sessions ?? [] : []).map((row) => [row.file, row]));
+        for (const row of frame.sessions) accumulated.set(row.file, row);
+        const sessions = [...accumulated.values()].sort((a, b) => (b.lastActiveMs ?? -Infinity) - (a.lastActiveMs ?? -Infinity) || a.file.localeCompare(b.file));
+        const noProgress = frame.hasMore && frame.sessions.length === 0;
+        this.transition({ sessions, total: frame.total, listVersion: frame.listVersion, hasMore: frame.hasMore,
+          nextOffset: frame.offset + frame.sessions.length,
+          listReliability: frame.listReliability === "partial" || (this.listOffset > 0 && this.snapshot.listReliability === "partial") ? "partial" : "full",
+          pageState: noProgress ? "error" : "idle", pageError: noProgress ? "列表分页暂未前进，可重试或刷新。" : null });
         return;
       }
       case "models-list": {
@@ -480,8 +517,11 @@ export class WsClient {
           this.fail("handshake-failed", controlledErrorText(frame.code));
           return;
         }
-        if (this.listRequestPending && frame.requestId === LIST_REQUEST_ID) {
-          this.fail("list-failed", controlledErrorText(frame.code));
+        if (this.listRequestPending && frame.requestId === this.listRequestId) {
+          if (this.listOffset > 0) {
+            this.listRequestPending = false;
+            this.transition({ pageState: "error", pageError: controlledErrorText(frame.code) });
+          } else this.fail("list-failed", controlledErrorText(frame.code));
           return;
         }
         if (this.rootsRequestPending && frame.requestId === `${ROOTS_REQUEST_BASE}-${this.rootsSeq}`) {

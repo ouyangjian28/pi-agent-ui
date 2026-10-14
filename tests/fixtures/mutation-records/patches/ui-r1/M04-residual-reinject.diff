@@ -1,0 +1,14 @@
+--- a/apps/web/src/ws/conversation-state.ts
++++ b/apps/web/src/ws/conversation-state.ts
+@@ -125,9 +125,9 @@
+     if (!this.snapshot.sessions.has(id)) this.put(this.blank(id, file, false));
+     // 成功首发残稿只转移一次；再开不覆盖 A 后来编辑的文本。
+     for (const draft of this.snapshot.drafts.values()) {
+-      if (draft.file !== file || draft.phase !== "settled-launched" || draft.transferred) continue;
++      if (draft.file !== file || draft.phase !== "settled-launched") continue;
+       const session = this.snapshot.sessions.get(id)!;
+-      if (session.version === 0 && session.text === "") this.put({ ...session, text: draft.text, version: draft.version });
++      if (true) this.put({ ...session, text: draft.text, version: draft.version });
+       this.put({ ...draft, transferred: true });
+     }
+     this.publish({ view: { kind: "session", file }, activeFile: file });

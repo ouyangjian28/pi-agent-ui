@@ -85,7 +85,7 @@ describe("M-OPS NewSession", () => {
   it("批3：无文件名输入框；首条消息空→创建钮禁用；创建→file=auto- 格式（model 不携带）", async () => {
     const { write, onLaunched } = setup();
     expect(screen.queryByLabelText("会话文件名")).toBeNull(); // 用户拍板：文件名不显示给用户
-    const btn = screen.getByRole("button", { name: "创建会话" }) as HTMLButtonElement;
+    const btn = screen.getByRole("button", { name: "发送并开始对话" }) as HTMLButtonElement;
     expect(btn.disabled).toBe(true); // 首条消息空→禁用
     fill("首条消息", "hi");
     expect(btn.disabled).toBe(false);
@@ -100,10 +100,10 @@ describe("M-OPS NewSession", () => {
     const { write, onLaunched } = setup();
     fill("首条消息", "hi");
     fill("模型 id 直达", "openai-codex/gpt-5.3");
-    fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
+    fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" }));
     await waitFor(() => expect(onLaunched).toHaveBeenCalled());
     expect(write.sent[0]!.model).toBe("openai-codex/gpt-5.3");
-    const btn = screen.getByRole("button", { name: "创建会话" }) as HTMLButtonElement;
+    const btn = screen.getByRole("button", { name: "发送并开始对话" }) as HTMLButtonElement;
     fill("模型 id 直达", "bad model!!");
     expect(btn.disabled).toBe(true); // modelPattern 非法→钮禁用（本地预校验零帧）
     fireEvent.click(btn);
@@ -124,7 +124,7 @@ describe("M-OPS NewSession", () => {
     );
     fill("首条消息", "hi");
     fill("模型 id 直达", "nope/bad");
-    fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
+    fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" }));
     await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
     expect(screen.getByRole("alert").textContent).toContain("模型 id 有误");
     expect(onLaunched).not.toHaveBeenCalled();
@@ -147,7 +147,7 @@ describe("M-OPS NewSession", () => {
     );
     fill("首条消息", "hi");
     fill("模型 id 直达", "nope/bad");
-    fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
+    fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" }));
     await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
     const sentBefore = write.sent.length;
     fireEvent.click(screen.getByRole("button", { name: "换模型" })); // 换模型=清直达（用户改输入后重试）
@@ -157,10 +157,10 @@ describe("M-OPS NewSession", () => {
 
   it("清单 failed→降级提示含 cause；free-text 仍可用", async () => {
     const { write, onLaunched } = setup(modelsSnap("failed", [], "pi 退出码 1"));
-    expect(screen.getByRole("status").textContent).toContain("pi 退出码 1");
+    expect(screen.getByText(/pi 退出码 1/).textContent).toContain("pi 退出码 1");
     fill("首条消息", "hi");
     fill("模型 id 直达", "kimi-coding/k3");
-    fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
+    fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" }));
     await waitFor(() => expect(onLaunched).toHaveBeenCalled());
     expect(write.sent[0]!.model).toBe("kimi-coding/k3");
   });
@@ -179,10 +179,10 @@ describe("M-OPS NewSession", () => {
       }),
     );
     fill("首条消息", "hi");
-    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    fireEvent.click(screen.getByRole("button", { name: "返回列表" }));
     expect(onCancel).toHaveBeenCalledTimes(1); // P2-2 补真断言（原版零断言空转）
-    fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("busy"));
+    fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("未入队：写宿主忙"));
     expect(onLaunched).not.toHaveBeenCalled();
   });
 
@@ -232,7 +232,7 @@ describe("批3 NewSession 目录减法", () => {
 
   function fillAndCreate(): void {
     fill("首条消息", "hi");
-    fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
+    fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" }));
   }
 
   it("requestRoots 数据域保留（挂载即拉；与 requestModels 同补拉口径）", () => {
@@ -281,7 +281,7 @@ describe("批3 模型记住上次（localStorage）", () => {
     const { write } = setup(modelsSnap("ok", [{ provider: "kimi-coding", id: "k3", context: "256k" }]));
     fireEvent.change(screen.getByLabelText("模型选择"), { target: { value: "kimi-coding/k3" } });
     fill("首条消息", "hi");
-    fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
+    fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" }));
     await waitFor(() => expect(write.sent).toHaveLength(1));
     expect(lastModel()).toBe("kimi-coding/k3");
   });
@@ -290,7 +290,7 @@ describe("批3 模型记住上次（localStorage）", () => {
     window.localStorage.clear();
     const { write } = setup(modelsSnap("ok", [{ provider: "kimi-coding", id: "k3" }]));
     fill("首条消息", "hi");
-    fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
+    fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" }));
     await waitFor(() => expect(write.sent).toHaveLength(1));
     expect(lastModel()).toBe("__default__");
     // 卸载再挂载：恢复默认（select 显默认项）
@@ -304,7 +304,7 @@ describe("批3 模型记住上次（localStorage）", () => {
     const { write } = setup(modelsSnap("ok", []));
     fill("模型 id 直达", "openai-codex/gpt-5.3");
     fill("首条消息", "hi");
-    fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
+    fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" }));
     await waitFor(() => expect(write.sent).toHaveLength(1));
     expect(write.sent[0]!.model).toBe("openai-codex/gpt-5.3");
     expect(lastModel()).toBe("openai-codex/gpt-5.3");
@@ -322,7 +322,7 @@ describe("批3 模型记住上次（localStorage）", () => {
     fireEvent.change(sel, { target: { value: "__default__" } }); // 回默认（此前被 loading 禁用不可达）
     expect(sel.value).toBe("__default__");
     fill("首条消息", "hi");
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "创建会话" })); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" })); });
     expect(write.sent).toHaveLength(1);
     expect(write.sent[0].model).toBeUndefined(); // 实际帧无 model 键=真回默认（非发 __default__ 字符串）
   });
@@ -333,7 +333,7 @@ describe("批3 模型记住上次（localStorage）", () => {
     const sel = screen.getByLabelText("模型选择") as HTMLSelectElement;
     expect(sel.value).toBe("gone/old");
     fill("首条消息", "hi");
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "创建会话" })); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" })); });
     expect(write.sent).toHaveLength(1);
     expect(write.sent[0].model).toBe("gone/old"); // 发送用恢复值（哨兵未漏入）
     // modelValid 层独立证：手打 __default__ 草稿不作 id 发送（__ 前缀保留样式禁创建）
@@ -342,7 +342,7 @@ describe("批3 模型记住上次（localStorage）", () => {
     const w2 = setup(modelsSnap("loading"));
     fireEvent.change(screen.getByLabelText("模型 id 直达"), { target: { value: "__default__" } });
     fill("首条消息", "hi");
-    const btn = screen.getByRole("button", { name: "创建会话" }) as HTMLButtonElement;
+    const btn = screen.getByRole("button", { name: "发送并开始对话" }) as HTMLButtonElement;
     expect(btn.disabled).toBe(true); // modelValid=false 禁创建
     expect(w2.write.sent).toHaveLength(0);
     cleanup();
@@ -351,7 +351,7 @@ describe("批3 模型记住上次（localStorage）", () => {
     const w3 = setup(modelsSnap("loading"));
     fireEvent.change(screen.getByLabelText("模型 id 直达"), { target: { value: "__custom__" } });
     fill("首条消息", "hi");
-    expect((screen.getByRole("button", { name: "创建会话" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "发送并开始对话" }) as HTMLButtonElement).disabled).toBe(true);
     expect(w3.write.sent).toHaveLength(0);
   });
 
@@ -364,12 +364,12 @@ describe("批3 模型记住上次（localStorage）", () => {
     fill("首条消息", "hi");
     const input = screen.getByLabelText("模型 id 直达") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "__custom__" } }); // 草稿哨兵：modelValid 禁创建
-    expect((screen.getByRole("button", { name: "创建会话" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "发送并开始对话" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(sel, { target: { value: "__custom__" } }); // 受控 handler 输入（同值 option 路径入口）
     expect(input.value).toBe("__custom__"); // 杀点：拒收未清草稿（旧守卫此处得空串）
     fireEvent.change(input, { target: { value: "" } }); // 手动清空草稿→回退锚
     expect(sel.value).toBe("gone/old"); // 锚未被哨兵覆盖（旧守卫此处得 __custom__）
-    expect((screen.getByRole("button", { name: "创建会话" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "发送并开始对话" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("杀点B+R3-P3-01（GPT 三审）：__ 前缀清单项渲染同步拒绝（disabled+标不可用）；handler 拒收值不变", () => {
@@ -394,7 +394,7 @@ describe("批3 模型记住上次（localStorage）", () => {
     const spy = vi.spyOn(crypto, "getRandomValues");
     const { write } = setup(modelsSnap("ok", []));
     fill("首条消息", "hi");
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "创建会话" })); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" })); });
     await waitFor(() => expect(write.sent).toHaveLength(1));
     expect(spy).toHaveBeenCalledTimes(1); // 全生命周期恰一次（退回 useRef(autoFile()) 每次 render 求值则 >1）
   });

@@ -1,0 +1,11 @@
+--- a/apps/web/src/real-app.tsx
++++ b/apps/web/src/real-app.tsx
+@@ -276,7 +276,7 @@
+     if (!element) return;
+     // rAF 直播提交发生在父 layout effect 之后；观察真实 DOM 尺寸内容变更才跟随。
+     const observer = new MutationObserver(() => {
+-      if (nearBottom.current) element.scrollTop = element.scrollHeight;
++      if (true) element.scrollTop = element.scrollHeight;
+     });
+     observer.observe(element, { childList: true, characterData: true, subtree: true });
+     return () => observer.disconnect();

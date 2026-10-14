@@ -1,0 +1,14 @@
+
+> @pi-agent-ui/web@0.0.1 build
+> tsc --noEmit && vite build
+
+vite v8.3.1 building client environment for production...
+transforming...
+✓ 49 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.48 kB │ gzip:   0.32 kB
+dist/assets/index-Ct9rL1zO.css   23.06 kB │ gzip:   4.96 kB
+dist/assets/index-DHQgtLUq.js   350.71 kB │ gzip: 106.59 kB
+
+✓ built in 244ms

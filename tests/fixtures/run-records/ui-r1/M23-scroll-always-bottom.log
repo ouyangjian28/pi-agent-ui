@@ -1,0 +1,12 @@
+file:///tmp/ui-r1-mutation-ldwdymty/tests/browser/ui-r1-capture.mjs:112
+      if (readerTop > 1) throw new Error(`向上阅读被直播抢回底部：${readerTop}`);
+                               ^
+
+Error: 向上阅读被直播抢回底部：21411
+    at file:///tmp/ui-r1-mutation-ldwdymty/tests/browser/ui-r1-capture.mjs:112:32
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at process.processImmediate (node:internal/timers:472:9)
+
+Node.js v24.18.0
+
+EXIT=1

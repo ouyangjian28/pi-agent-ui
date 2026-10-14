@@ -1,0 +1,11 @@
+--- a/apps/web/src/ws/conversation-state.ts
++++ b/apps/web/src/ws/conversation-state.ts
+@@ -99,7 +99,7 @@
+     if (!this.canCreate) return null;
+     const id = `draft-${++this.draftSeq}`;
+     this.put(this.blank(id, file, true, modelChoice));
+-    this.publish({ view: { kind: "draft", id }, activeFile: null });
++    this.publish({ view: { kind: "draft", id }, activeFile: file });
+     return id;
+   }
+   edit(id: string, text: string): void {

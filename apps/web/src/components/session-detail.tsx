@@ -35,6 +35,7 @@ const KIND_LABELS: Readonly<Record<HistoryEvent["kind"], string>> = {
   "corrupt-entry": "损坏条目",
   "journal-corrupt": "日志损坏",
   "journal-repair": "日志修复",
+  "journal-writer": "写权宣誓",
   "verdict-delivered": "判定已投递",
   "verdict-settled": "判定已落定",
   "verdict-unknown": "判定未知",
@@ -158,12 +159,10 @@ function HistoryRow({
       : event.kind === "turn-enqueued"
         ? event.preview.text + (event.preview.truncated ? "…" : "")
         : "";
+  const chat = event.kind === "message" && (event.role === "user" || event.role === "assistant");
   return (
-    <li>
-      <span className="row-title">
-        #{event.seq} {KIND_LABELS[event.kind]}
-      </span>
-      {detail ? <small> {detail}</small> : null}
+    <li className={chat ? `chat-message chat-${event.role}` : "activity-row"}>
+      {chat ? <><small className="message-author">{event.role === "user" ? "你" : "pi"}</small>{expansion?.status !== "ok" && <p className="chat-preview">{event.textPreview?.text ?? "（附件或非文本内容）"}{event.textPreview?.truncated ? "…" : ""}</p>}</> : <><span className="row-title">#{event.seq} {KIND_LABELS[event.kind]}</span>{detail ? <small> {detail}</small> : null}</>}
       {expandable(event) && expansion === null && onExpand !== null ? (
         <button type="button" className="entry-expand" onClick={() => onExpand(event)}>
           展开
@@ -226,6 +225,7 @@ export function SessionDetail({
   file,
   writeClient = null,
   title = null,
+  managed = false,
 }: {
   client: SubscribeClientSurface;
   file: string | null;
@@ -233,8 +233,15 @@ export function SessionDetail({
   writeClient?: WriteClientSurface | null;
   /** M-UX 批1修复 P1-02：壳传入的同源标题（resolveTitle 唯一真值源；null=回退 file 显示，壳层未算出时）。 */
   title?: string | null;
+  /** RealApp 单 owner 持有订阅与 composer，本组件只呈现。 */
+  managed?: boolean;
 }) {
-  const view = useSessionDetail(client, file);
+  const view = useSessionDetail(client, file, !managed);
+  const generationRef = React.useRef({ client, file, subscriptionId: view.subscriptionId });
+  if (generationRef.current.client !== client || generationRef.current.file !== file || generationRef.current.subscriptionId !== view.subscriptionId) {
+    generationRef.current = { client, file, subscriptionId: view.subscriptionId };
+  }
+  const generationKey = generationRef.current;
   // D4 批③：展开缓存（组件本地 state，key=entryId；§4.4 P3-N7——换 file/流终局一并清，
   // 与 subscribe-client entryRequests 清理同址精神：session 文件改写后不残留旧全文）。
   const [expansions, setExpansions] = React.useState<ReadonlyMap<string, ExpansionState>>(new Map());
@@ -243,7 +250,7 @@ export function SessionDetail({
   fileRef.current = file;
   React.useEffect(() => {
     setExpansions(new Map());
-  }, [file]);
+  }, [generationKey]);
   React.useEffect(() => {
     if (view.status === "stopped" || view.status === "resync-needed") setExpansions(new Map());
   }, [view.status]);
@@ -255,7 +262,7 @@ export function SessionDetail({
       void client.expandEntry(file, entryId).then((result) => {
         // GLM 审批③ P3-2 修复：换 file 后旧 promise 迟到回包不写入新 file 的缓存（旧 entryId 跨文件可重合，
         // 错位写入会把 A 文件的错误/全文显示在 B 文件同 id 条目上）。fileRef 随 [file] effect 同步换代。
-        if (fileRef.current !== file) return;
+        if (fileRef.current !== file || generationRef.current !== generationKey) return;
         setExpansions((prev) => {
           const next = new Map(prev);
           next.set(entryId, result.ok ? { status: "ok", frame: result.frame } : { status: "error", message: result.message });
@@ -263,14 +270,14 @@ export function SessionDetail({
         });
       });
     },
-    [client, file],
+    [client, file, generationKey],
   );
   // 槽位 1（A1c 写面稳定挂载）：仅注入 writeClient 且已选会话且视图∈{empty, streaming,
   // resync-needed, stopped} 时展示；loading/auth-failed/error/closed/unsubscribed 不展示（既有行为）。
   // key=file——同一槽位换会话强制新 composer 实例（旧草稿不泄入新会话）；同一会话内视图切换实例保留
   //（草稿/在途/结果态不丢）。
   const composerVisible =
-    writeClient !== null && file !== null &&
+    !managed && writeClient !== null && file !== null &&
     (view.status === "empty" || view.status === "streaming" || view.status === "resync-needed" || view.status === "stopped");
   const composer = composerVisible ? <WriteComposer key={file} client={writeClient} file={file} /> : null;
 
@@ -308,7 +315,7 @@ export function SessionDetail({
     body = (
       <div className="empty" role="alert">
         <h2>连接已关闭</h2>
-        <p>与服务的连接已断开，且当前版本不自动重连。刷新页面可重新连接。</p>
+        <p>正在尝试重新连接，也可从顶部连接明细立即重连。未决消息不会自动补发。</p>
       </div>
     );
   } else if (view.status === "unsubscribed") {
@@ -356,7 +363,7 @@ export function SessionDetail({
           </p>
         ) : null}
         <ol className="history-list" aria-label="历史事件">
-          {view.events.map((event) => (
+          {view.events.filter((event) => event.kind === "message" && (event.role === "user" || event.role === "assistant")).map((event) => (
             <HistoryRow
               key={event.seq}
               event={event}
@@ -370,14 +377,13 @@ export function SessionDetail({
             正在加载更多历史…
           </p>
         ) : null}
-        <LiveStreamView liveEvents={view.liveEvents} historyEvents={view.events} />
-        {view.liveEvents.some(isSideLiveEvent) ? (
-          <ul className="live-list" aria-live="polite" aria-label="直播事件">
-            {view.liveEvents.filter(isSideLiveEvent).map((event, index) => (
-              <li key={index} className={liveEventClass(event)}>{liveEventText(event)}</li>
-            ))}
-          </ul>
-        ) : null}
+        <LiveStreamView liveEvents={view.liveEvents} historyEvents={view.events} generationKey={generationKey} />
+        {view.events.some((event) => ["verdict-unknown", "journal-corrupt", "corrupt-entry"].includes(event.kind)) && <p className="banner" role="alert">历史存在结果未知或损坏记录，请查看活动详情核对；不要据此重复发送。</p>}
+        {view.liveEvents.some((event) => event.kind === "ui-note" && event.notifyType !== "info") && <p className="banner" role="alert">有新的警告或错误通知，请查看活动详情。</p>}
+        {(view.events.some((event) => event.kind !== "message" || (event.role !== "user" && event.role !== "assistant")) || view.liveEvents.some(isSideLiveEvent)) && <details className="activity-details"><summary>活动详情</summary>
+          <ol className="activity-list" aria-label="活动事件">{view.events.filter((event) => event.kind !== "message" || (event.role !== "user" && event.role !== "assistant")).map((event) => <HistoryRow key={event.seq} event={event} expansion={event.kind === "message" ? expansions.get(event.entryId) ?? null : null} onExpand={onExpand} />)}</ol>
+          {view.liveEvents.some(isSideLiveEvent) && <ul className="live-list" aria-live="polite" aria-label="直播事件">{view.liveEvents.filter(isSideLiveEvent).map((event, index) => <li key={index} className={liveEventClass(event)}>{liveEventText(event)}</li>)}</ul>}
+        </details>}
       </>
     );
   }

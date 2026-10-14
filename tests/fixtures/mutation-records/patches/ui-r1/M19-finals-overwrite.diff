@@ -1,0 +1,11 @@
+--- a/apps/web/src/components/live-stream.tsx
++++ b/apps/web/src/components/live-stream.tsx
+@@ -28,7 +28,7 @@
+       }
+       applyLiveEvent(state.current, event);
+       if (event.kind === "message-final") {
+-        frozen.current.push({ id: ++serial.current, text: event.text, thinking: thinkingTextOf(state.current), collapsed: false });
++        frozen.current = [{ id: ++serial.current, text: event.text, thinking: thinkingTextOf(state.current), collapsed: false }];
+       }
+     }
+     count.current = liveEvents.length; prior.current = liveEvents;

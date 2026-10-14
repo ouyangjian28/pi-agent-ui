@@ -1,0 +1,11 @@
+--- a/apps/web/src/ws/conversation-state.ts
++++ b/apps/web/src/ws/conversation-state.ts
+@@ -179,7 +179,7 @@
+       this.put({ ...current, text: clear ? "" : current.text, phase, result, operation: { ...op, pending: false } });
+       const view = this.snapshot.view;
+       // 导航门独立：B/list 不抢页；恢复中的 D 正常进 A。
+-      if (slot.isNew && result.status === "launched" && view.kind === "draft" && view.id === id) this.open(slot.file);
++      if (slot.isNew && result.status === "launched") this.open(slot.file);
+       return result;
+     });
+   }

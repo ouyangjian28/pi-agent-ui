@@ -1,0 +1,11 @@
+--- a/apps/web/src/components/session-detail.tsx
++++ b/apps/web/src/components/session-detail.tsx
+@@ -362,7 +362,7 @@
+           </p>
+         ) : null}
+         <ol className="history-list" aria-label="历史事件">
+-          {view.events.filter((event) => event.kind === "message" && (event.role === "user" || event.role === "assistant")).map((event) => (
++          {view.events.filter(() => true).map((event) => (
+             <HistoryRow
+               key={event.seq}
+               event={event}

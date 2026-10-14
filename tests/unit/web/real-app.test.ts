@@ -147,10 +147,13 @@ describe("真模式 smoke：token 门→列表→详情→写面", () => {
     expect(window.location.search).not.toContain("smoke-token");
 
     handshakeAll();
-    // 状态条：三客户端均「已连接」（aria-live 受控文案）
+    // R1：三域退入可点开的明细，断言仍观察真实三个传输态。
+    fireEvent.click(screen.getByRole("button", { name: /连接状态：/ }));
+    // 三客户端均「已连接」（受控文案）
     expect(document.body.textContent).toContain("列表：已连接");
     expect(document.body.textContent).toContain("订阅：已连接");
     expect(document.body.textContent).toContain("写：已连接");
+    fireEvent.click(screen.getByRole("button", { name: "关闭明细" }));
 
     // 列表面：回 list-sessions
     const listReq = FakeWebSocket.instances[0]!.sentFrames().find((f) => f.t === "list-sessions");
@@ -213,7 +216,8 @@ describe("真模式 smoke：token 门→列表→详情→写面", () => {
         outcome: { kind: "launched", intentId: "i-1", commandId: 7 },
       });
     });
-    expect(document.body.textContent).toContain("已入队（intentId=i-1）");
+    expect(FakeWebSocket.instances[2]!.sentFrames().filter((f) => f.t === "prompt")).toHaveLength(1);
+    expect(document.querySelector('section.write-composer textarea')?.getAttribute("aria-label")).toBe("写入消息内容");
   });
 
   it("M-UX 批1 D02：新建 launched→onLaunched 自动补拉列表（接线杀点：摘除 real-app 补拉行此例必红）", async () => {
@@ -228,10 +232,10 @@ describe("真模式 smoke：token 门→列表→详情→写面", () => {
       });
     });
     // 打开新建表单（批3：无文件名输入框）→填首条消息→创建（file=auto- 自动生成）
-    fireEvent.click(screen.getByRole("button", { name: "＋新建" }));
+    fireEvent.click(screen.getByRole("button", { name: "＋新对话" }));
     expect(screen.queryByLabelText("会话文件名")).toBeNull();
     fireEvent.change(screen.getByLabelText("首条消息"), { target: { value: "新会话第一条" } });
-    fireEvent.click(screen.getByRole("button", { name: "创建会话" }));
+    fireEvent.click(screen.getByRole("button", { name: "发送并开始对话" }));
     const promptFrame = FakeWebSocket.instances[2]!.sentFrames().find((f) => f.t === "prompt");
     expect(promptFrame).toBeDefined();
     const listBefore = FakeWebSocket.instances[0]!.sentFrames().filter((f) => f.t === "list-sessions").length;
@@ -280,6 +284,7 @@ describe("连接状态条：断开可见+自动重连", () => {
       expect(screen.queryByRole("button", { name: "重新连接" })).toBeNull();
 
       act(() => FakeWebSocket.instances[1]!.serverClose(1006));
+      fireEvent.click(screen.getByRole("button", { name: /连接状态：/ }));
       expect(document.body.textContent).toContain("订阅：已断开");
       // 自动重连提示出现（第 1 次，约 1 秒后）
       expect(document.body.textContent).toContain("自动重连中");
@@ -297,7 +302,8 @@ describe("连接状态条：断开可见+自动重连", () => {
       // 新三件套握手成功（全部 ready）→恢复：提示消失+按钮消失
       handshakeAll();
       expect(document.body.textContent).not.toContain("自动重连中");
-      expect(screen.queryByRole("button", { name: "立即重连" })).toBeNull();
+      expect(screen.getByRole("button", { name: "连接状态：全部已连接" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "立即重连" })).toBeTruthy(); // 绿态明细仍保留显式恢复入口
       // 恢复归零杀点：二次断线→退避从「第 1 次/约 1 秒」重新起算（attempts 恢复归零）
       act(() => FakeWebSocket.instances[5]!.serverClose(1006));
       expect(document.body.textContent).toContain("第 1 次");
@@ -336,6 +342,7 @@ describe("连接状态条：断开可见+自动重连", () => {
     render(React.createElement(AppRoot, { createSocket: factory }));
     handshakeAll();
     act(() => FakeWebSocket.instances[2]!.serverClose(1006)); // 写面断
+    fireEvent.click(screen.getByRole("button", { name: /连接状态：/ }));
     const retry = screen.getByRole("button", { name: "立即重连" });
     fireEvent.click(retry);
     expect(FakeWebSocket.instances).toHaveLength(6); // 同 tick 重建

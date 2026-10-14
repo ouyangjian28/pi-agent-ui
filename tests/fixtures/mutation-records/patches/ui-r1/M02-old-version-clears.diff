@@ -1,0 +1,11 @@
+--- a/apps/web/src/ws/conversation-state.ts
++++ b/apps/web/src/ws/conversation-state.ts
+@@ -175,7 +175,7 @@
+       if (!current || current.operation?.id !== op.id) return result;
+       const phase = result.status === "launched" ? "settled-launched" : result.status === "unknown" ? "settled-unknown" : "settled-rejected";
+       // 清稿门（三元）：版本不是文本相等；重连后旧 client 不清稿。
+-      const clear = result.status === "launched" && op.client === this.currentClient && current.version === op.version;
++      const clear = result.status === "launched" && op.client === this.currentClient;
+       this.put({ ...current, text: clear ? "" : current.text, phase, result, operation: { ...op, pending: false } });
+       const view = this.snapshot.view;
+       // 导航门独立：B/list 不抢页；恢复中的 D 正常进 A。

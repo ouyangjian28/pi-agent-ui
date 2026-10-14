@@ -22,6 +22,7 @@ import type {
   WriteSnapshot,
 } from "./write-client";
 import { WriteSendError } from "./write-client";
+import { classifySend, classifySendError, type SendResult } from "./conversation-state";
 
 /** 写视图态机：idle=可发送；sending=prompt 在途；stopping=stop 在途（可叠加 sending）；
  * resuming=resume 在途（独立账）；error=硬/瞬态错误。 */
@@ -114,12 +115,12 @@ interface TransientNotReady {
   readonly detail: string | null;
 }
 
-/** 写动作返回契约（锚点⑤）：true=收到合法 ack；false=被拒（受控文案已进 errorMessage 视图）。 */
+/** prompt 返回五域结构化事实；stop/resume 保留独立旧接口，不作为清稿判据。 */
 export interface UseWrite {
   readonly view: WriteView;
   /** M-OPS（v1.4）：可选 model——新建态/换模型路径携带；正常会话传 undefined（不改会话模型）。
    * v1.5（批A）：可选 cwd——仅新建会话首 prompt 携带（会话寿命内 cwd 固定）；正常会话传 undefined。 */
-  readonly send: (text: string, model?: string, cwd?: string) => Promise<boolean>;
+  readonly send: (text: string, model?: string, cwd?: string) => Promise<SendResult>;
   readonly stop: () => Promise<boolean>;
   /** 恢复重发（v1.1）：intentId+generation 由调用方提供（演示位手输；默认 generation=1）。 */
   readonly resume: (intentId: string, generation: number) => Promise<boolean>;
@@ -150,8 +151,9 @@ export function useWrite(client: WriteClientSurface, file: string | null): UseWr
   };
 
   const send = useCallback(
-    (text: string, model?: string, cwd?: string): Promise<boolean> => {
-      if (file === null) return Promise.resolve(false);
+    (text: string, model?: string, cwd?: string): Promise<SendResult> => {
+      if (file === null) return Promise.resolve({ status: "local", kind: "local-invalid", message: "尚未选择会话，未发送。" });
+      const wasReady = client.getSnapshot().connState === "ready";
       const seq = beginAttempt();
       return client.sendPrompt(file, text, model, cwd).then(
         (outcome) => {
@@ -160,9 +162,12 @@ export function useWrite(client: WriteClientSurface, file: string | null): UseWr
           if (outcome.kind === "not-ready" && seq === attemptSeq.current) {
             setNotReady({ client, file, seq, cause: outcome.cause ?? null, detail: outcome.detail ?? null });
           }
-          return true;
+          return classifySend(outcome);
         },
-        (error: unknown) => recordFailure(seq, file, error),
+        (error: unknown) => {
+          recordFailure(seq, file, error);
+          return classifySendError(error, wasReady);
+        },
       );
     },
     [client, file],

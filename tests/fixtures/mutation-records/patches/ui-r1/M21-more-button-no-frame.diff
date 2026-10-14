@@ -1,0 +1,11 @@
+--- a/apps/web/src/components/session-list.tsx
++++ b/apps/web/src/components/session-list.tsx
+@@ -28,7 +28,7 @@
+         })}</ul></li>
+       )}</ul>}
+     <div className="list-pagination"><small>已载 {view.sessions.length} / 共 {view.total}</small>{view.partial && <p role="note">列表信息不完整，可能还有未列出的会话。</p>}{view.pageError && <p role="alert">{view.pageError}</p>}
+-      {view.hasMore && <button type="button" disabled={view.paging} onClick={() => client.requestMoreSessions?.()}>{view.paging ? "加载中…" : view.pageError ? "重试加载更多" : "加载更多"}</button>}
++      {view.hasMore && <button type="button" disabled={view.paging} onClick={() => {}}>{view.paging ? "加载中…" : view.pageError ? "重试加载更多" : "加载更多"}</button>}
+     </div>
+   </section>;
+   if (view.status === "loading") return <div className="empty" role="status" aria-busy="true"><h2>正在加载会话…</h2><p>正在连接服务并拉取会话列表。</p></div>;

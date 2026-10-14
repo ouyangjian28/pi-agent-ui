@@ -1,0 +1,22 @@
+{
+  "previousBuild": "assets/index-D5bbIUQM.js",
+  "candidateBuild": "assets/index-B8u0pu9k.js",
+  "oldAssetRetained": true,
+  "candidateSha256": "60f69b1c3269fd807e2e426be3fcf9fa39225a2f2b762ba9e79ec2ef4cfa38b6",
+  "oldAssetSha256": "16fa0ce4848888685774471369fa856036e17a819ffbdf96b3ae6d57ab96f384",
+  "atomicHtmlRollbackVerified": true,
+  "backup": "/tmp/ui-r1-dist-backup-9tgs_mzw/dist",
+  "sourceCommit": "496b1430716502af2a45ac04005095c932f64fef",
+  "selftest": {
+    "previousBuild": "assets/index-old.js",
+    "candidateBuild": "assets/index-new.js",
+    "oldAssetRetained": true,
+    "candidateSha256": "38af4574a988a5eb8ba8895eb2c8ff81c99ee8d9d218e11ec1be70b8d0d3373c",
+    "oldAssetSha256": "cba06b5736faf67e54b07b561eae94395e774c517a7d910a54369e1263ccfbd4",
+    "atomicHtmlRollbackVerified": true
+  },
+  "serviceRestarted": false,
+  "productionTokenUsed": false,
+  "businessSessionFilesTouched": false,
+  "scope": "frontend dist only; original sessions continuity needs independent owner check"
+}

@@ -1,0 +1,12 @@
+--- a/apps/web/src/ws/conversation-state.ts
++++ b/apps/web/src/ws/conversation-state.ts
+@@ -17,7 +17,8 @@
+ }
+ export function classifySendError(error: unknown, wasReady: boolean): SendResult {
+   if (error instanceof WriteSendError) {
+-    if (error.kind === "server" || error.kind === "transport" || (error.kind === "closed" && wasReady)) {
++    if (error.kind === "server") return { status: "rejected", outcome: { kind: "busy" } };
++    if (false || error.kind === "transport" || (error.kind === "closed" && wasReady)) {
+       return { status: "unknown", message: "可能已受理，结果尚未确认。请先查看目标会话，再次发送可能重复执行。" };
+     }
+     return { status: "local", kind: error.kind, message: error.message };

@@ -1,0 +1,11 @@
+--- a/apps/web/src/ws/use-conversation-lifetime.ts
++++ b/apps/web/src/ws/use-conversation-lifetime.ts
+@@ -7,7 +7,7 @@
+   useEffect(() => {
+     const lease = ++epoch.current;
+     return () => queueMicrotask(() => {
+-      if (epoch.current === lease) owner.dispose();
++      if (epoch.current === lease) { /* no cleanup */ }
+     });
+   }, [owner]);
+ }

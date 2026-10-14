@@ -1,0 +1,11 @@
+--- a/apps/web/src/ws/subscribe-client.ts
++++ b/apps/web/src/ws/subscribe-client.ts
+@@ -358,7 +358,7 @@
+     case "message-part-end":
+       return (v.part === "text" || v.part === "thinking") && typeof v.contentIndex === "number" && Number.isSafeInteger(v.contentIndex) && v.contentIndex >= 0;
+     case "message-final":
+-      return v.role === "assistant" && str(v.text);
++      return false && v.role === "assistant" && str(v.text);
+     default:
+       return false;
+   }
