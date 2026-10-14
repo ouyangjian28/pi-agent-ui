@@ -42,6 +42,12 @@ function projectLine(raw: string, lineNo: number): ScanRow {
   }
   const j = parsed as JournalLine;
   switch (j.t) {
+    // 写权宣誓行（writer-oath 每次 boot 必写、契约合法行型）：投影为 journal-writer 控制事件。
+    // v1.7-fix：此前 switch 无 writer case → default 误归 journal-corrupt → 正常新会话首轮快照
+    // 必带触发词，UI 侧 session-detail 整段 role=alert 误报「历史损坏」——契约内合法控制行
+    // 不得判坏（与 journal-schema case "writer" 对齐）；epoch/bootId 只声明经验证字段。
+    case "writer":
+      return { source: "journal", locator, raw, event: { ...evBase(null, null), kind: "journal-writer", writerEpoch: j.epoch, writerBootId: j.bootId } };
     case "enqueue":
       return { source: "journal", locator, raw, event: { ...evBase(j.generation, j.intentId), kind: "turn-enqueued", preview: sanitizeText(j.payload?.rawText ?? "", HISTORY_PREVIEW_LIMIT), ordinal: j.matchKey?.ordinal ?? 0 } };
     case "sending":
